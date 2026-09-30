@@ -6,7 +6,7 @@ import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
 import type { ToolContext } from '../../src/main/tools/types';
 
-export const RG_PATH = findRipgrep(path.resolve(__dirname, '..', '..'));
+export const RG_PATH = findRipgrep();
 
 export function makeShellManager(logDir: string): ShellManager {
   return new ShellManager(detectShell(process.platform, process.env), logDir);

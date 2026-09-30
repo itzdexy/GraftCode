@@ -1,10 +1,17 @@
+import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeTheme, safeStorage } from 'electron';
 import type { AppInfo } from '@shared/ipc/contracts';
+import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
+import { IPC_EVENT } from '@shared/ipc/result';
+import { SessionManager } from './agent/sessionManager';
 import { buildPaths } from './app/paths';
 import { configureLogFile, log } from './app/log';
 import { createMainWindow, type MainWindowHandle } from './app/mainWindow';
+import { showSessionNotification } from './app/notifications';
 import { installSecurityPolicy } from './app/security';
+import { initServices, type Services } from './app/services';
+import { buildHandlers } from './ipc/handlers';
 import { installRouter, missingHandlers, registerHandlers } from './ipc/router';
 
 // Test and E2E runs isolate all state before anything touches userData.
@@ -14,13 +21,85 @@ if (process.env.GRAFT_USER_DATA_DIR) {
 
 const paths = buildPaths(app.getPath('userData'));
 configureLogFile(paths.logs);
+const isFirstLaunch = !fs.existsSync(paths.database);
 
 let mainWindow: MainWindowHandle | null = null;
+let servicesPromise: Promise<Services> | null = null;
+let sessionManager: SessionManager | null = null;
+let quitting = false;
 
 function platform(): AppInfo['platform'] {
   const p = process.platform;
   if (p === 'win32' || p === 'darwin' || p === 'linux') return p;
   throw new Error(`Unsupported platform: ${p}`);
+}
+
+function emit(event: GraftEvent): void {
+  const win = mainWindow?.window;
+  if (!win || win.isDestroyed()) return;
+  if (!app.isPackaged) {
+    const parsed = GraftEventSchema.safeParse(event);
+    if (!parsed.success) {
+      log.error('ipc', 'Dropped an invalid event', { type: event.type, issue: parsed.error.issues[0]?.message ?? '' });
+      return;
+    }
+  }
+  win.webContents.send(IPC_EVENT, event);
+}
+
+function focusSession(sessionId: string): void {
+  const win = mainWindow?.window;
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  emit({ type: 'app:navigate', sessionId });
+}
+
+/** Starts initialization once; the boot screen shows its progress. */
+function services(): Promise<Services> {
+  servicesPromise ??= initServices({
+    paths,
+    encryptor: {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encryptString: (text) => safeStorage.encryptString(text),
+      decryptString: (buffer) => safeStorage.decryptString(buffer)
+    },
+    onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total })
+  }).catch((error: unknown) => {
+    log.error('app', 'Initialization failed', { message: (error as Error).message });
+    servicesPromise = null;
+    throw error;
+  });
+  return servicesPromise;
+}
+
+async function sessions(): Promise<SessionManager> {
+  if (sessionManager) return sessionManager;
+  const s = await services();
+  sessionManager ??= new SessionManager({
+    repo: s.sessionsRepo,
+    projects: s.projects,
+    registry: s.registry,
+    settings: s.settings,
+    settingsFiles: s.settingsFiles,
+    tools: s.tools,
+    shells: s.shells,
+    shell: s.shell,
+    checkpoints: s.checkpoints,
+    paths: s.paths,
+    rgPath: s.rgPath,
+    mcp: null,
+    emitEvent: (sessionId, event) => emit({ type: 'session:event', sessionId, event }),
+    emitSummary: (summary) => emit({ type: 'session:summary', summary }),
+    emitRemoved: (sessionId) => emit({ type: 'session:removed', sessionId }),
+    notify: (summary, kind, text, visible) =>
+      showSessionNotification({ settings: s.settings.get(), summary, kind, text, visible, onClick: focusSession }),
+    log: (level, message, fields) => log[level]('session', message, fields)
+  });
+  sessionManager.recoverStaleStatuses();
+  sessionManager.setWindowFocused(mainWindow?.window.isFocused() ?? true);
+  return sessionManager;
 }
 
 function openMainWindow(): void {
@@ -31,9 +110,25 @@ function openMainWindow(): void {
     rendererDir: path.join(__dirname, '../renderer'),
     devServerUrl: app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
   });
-  mainWindow.window.on('closed', () => {
+  const win = mainWindow.window;
+  win.on('focus', () => sessionManager?.setWindowFocused(true));
+  win.on('blur', () => sessionManager?.setWindowFocused(false));
+  win.on('closed', () => {
     mainWindow = null;
   });
+}
+
+async function shutdown(): Promise<void> {
+  try {
+    await sessionManager?.disposeAll();
+    if (servicesPromise) {
+      const s = await servicesPromise;
+      await s.shells.disposeAll();
+      s.db.close();
+    }
+  } catch (error) {
+    log.error('app', 'Error during shutdown', { message: (error as Error).message });
+  }
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -56,15 +151,19 @@ if (!gotLock) {
       version: app.getVersion(),
       platform: platform(),
       isPackaged: app.isPackaged,
-      versions: {
-        electron: process.versions.electron,
-        chrome: process.versions.chrome,
-        node: process.versions.node
-      }
+      versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node }
     }),
     'window:setTitlebarTheme': ({ theme }) => {
       mainWindow?.setTheme(theme);
-    }
+    },
+    ...buildHandlers({
+      services,
+      sessions,
+      window: () => mainWindow?.window ?? null,
+      emit,
+      isFirstLaunch,
+      version: app.getVersion()
+    })
   });
 
   void app.whenReady().then(() => {
@@ -75,13 +174,18 @@ if (!gotLock) {
     });
     const missing = missingHandlers();
     if (missing.length > 0) log.warn('ipc', 'Channels without handlers', { channels: missing.join(',') });
-
     openMainWindow();
-    log.info('app', 'Ready', { version: app.getVersion(), packaged: app.isPackaged });
-
+    log.info('app', 'Ready', { version: app.getVersion(), packaged: app.isPackaged, firstLaunch: isFirstLaunch });
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
     });
+  });
+
+  app.on('before-quit', (event) => {
+    if (quitting) return;
+    quitting = true;
+    event.preventDefault();
+    void shutdown().finally(() => app.exit(0));
   });
 
   app.on('window-all-closed', () => {

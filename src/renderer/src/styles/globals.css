@@ -118,6 +118,10 @@
   --text-xl--line-height: 1.25;
   --text-greeting: var(--g-text-greeting);
   --text-greeting--line-height: 1.15;
+  --text-title: var(--g-text-title);
+  --text-title--line-height: 1.2;
+  --text-code: var(--g-code-font-size);
+  --text-code--line-height: 1.5;
 
   --leading-ui: var(--g-leading-ui);
   --leading-code: var(--g-leading-code-prose);
@@ -208,7 +212,8 @@
   .app-drag {
     -webkit-app-region: drag;
   }
-  .app-no-drag {
+  .app-no-drag,
+  .app-drag :is(button, input, textarea, select, a, [role='button'], [role='radio'], [role='menuitem'], [tabindex]) {
     -webkit-app-region: no-drag;
   }
   .transition-ui {

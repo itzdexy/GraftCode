@@ -23,5 +23,5 @@
     },
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.web.tsbuildinfo"
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/api.d.ts"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/api.d.ts", "tests/unit/renderer/**/*"]
 }

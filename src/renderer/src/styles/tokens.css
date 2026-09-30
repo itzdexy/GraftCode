@@ -14,19 +14,24 @@
   --g-font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
   --g-font-mono: 'JetBrains Mono Variable', 'Cascadia Mono', Consolas, monospace;
 
+  /* Settings → Appearance → UI font size scales every text size (13px = 1). */
+  --g-font-scale: 1;
+
   /*
    * Type scale, calibrated by scripts/calibrate-type.mjs: each size is the one
    * whose rendered cap height and full-line width best match the reference.
    */
-  --g-text-2xs: 10px;
-  --g-text-xs: 11px; /* "Chats and tasks": cap 8, 81px vs 82px */
-  --g-text-sm: 12px; /* menu description: 158px vs 158px */
-  --g-text-base: 12.5px; /* sidebar/nav: cap 9, "Projects" 46px vs 46px */
-  --g-text-md: 13px; /* code prose + composer: 420px vs 422px; placeholder 196 vs 193 */
-  --g-text-prompt: 13.5px; /* chat-home composer placeholder: 161px vs 162px */
-  --g-text-lg: 16px; /* assistant serif prose: cap 11, 619px vs 616px */
-  --g-text-xl: 19px; /* "Welcome back": 176px vs 173px */
-  --g-text-greeting: 37px; /* serif greeting: 339px vs 339px, optical sizing on */
+  --g-text-2xs: calc(10px * var(--g-font-scale));
+  --g-text-xs: calc(11px * var(--g-font-scale)); /* "Chats and tasks": cap 8, 81px vs 82px */
+  --g-text-sm: calc(12px * var(--g-font-scale)); /* menu description: 158px vs 158px */
+  --g-text-base: calc(12.5px * var(--g-font-scale)); /* sidebar/nav: cap 9, "Projects" 46px vs 46px */
+  --g-text-md: calc(13px * var(--g-font-scale)); /* code prose + composer: 420px vs 422px; placeholder 196 vs 193 */
+  --g-text-prompt: calc(13.5px * var(--g-font-scale)); /* chat-home composer placeholder: 161px vs 162px */
+  --g-text-lg: calc(16px * var(--g-font-scale)); /* assistant serif prose: cap 11, 619px vs 616px */
+  --g-text-xl: calc(19px * var(--g-font-scale)); /* "Welcome back": 176px vs 173px */
+  --g-text-greeting: calc(37px * var(--g-font-scale)); /* serif greeting: 339px vs 339px, optical sizing on */
+  --g-text-title: calc(28px * var(--g-font-scale)); /* derived: serif step and page titles between xl and greeting */
+  --g-code-font-size: 13px; /* Settings → Appearance → code font size */
   --g-leading-ui: 1.3;
   --g-leading-code-prose: 1.4; /* codeProseLinePitch 18.25px at 13px */
   --g-leading-chat-prose: 1.375; /* assistantLinePitch 22px at 16px */
@@ -85,6 +90,14 @@
   --g-window-min-width: 900px;
   --g-window-min-height: 600px;
 
+  /*
+   * Space the native window controls occupy. Windows/Linux use the Window
+   * Controls Overlay area (138px fallback = 3 x 46px caption buttons); macOS
+   * keeps the traffic lights on the left.
+   */
+  --g-controls-left: 0px;
+  --g-controls-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
+
   /* Motion (120–250ms). Zeroed when reduced motion is requested. */
   --g-duration-fast: 120ms;
   --g-duration-base: 180ms;
@@ -98,6 +111,11 @@
   --g-z-popover: 50;
   --g-z-dialog: 60;
   --g-z-toast: 70;
+}
+
+:root[data-platform='darwin'] {
+  --g-controls-left: 76px;
+  --g-controls-right: 0px;
 }
 
 /* ---------- Dark (measured) ---------- */
