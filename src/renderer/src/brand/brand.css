@@ -1,0 +1,82 @@
+/* Mark animations. All motion collapses under reduced-motion (globals.css). */
+
+.graft-mark__leaf {
+  transform-box: view-box;
+  transform-origin: 22.07px 9.93px;
+}
+
+/* Boot: the stroke draws itself, then the leaf sprouts from the terminal. */
+.graft-mark--draw .graft-mark__arc {
+  stroke-dashoffset: 63;
+  animation: graft-draw 760ms var(--g-ease-out) 80ms forwards;
+}
+.graft-mark--draw .graft-mark__leaf {
+  transform: scale(0);
+  animation: graft-sprout 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 720ms forwards;
+}
+
+@keyframes graft-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes graft-sprout {
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Thinking: the leaf sways on its stem while the stroke breathes. */
+.graft-mark--thinking .graft-mark__leaf {
+  animation: graft-sway 1400ms ease-in-out infinite alternate;
+}
+.graft-mark--thinking .graft-mark__arc {
+  animation: graft-breathe 1400ms ease-in-out infinite alternate;
+}
+
+@keyframes graft-sway {
+  from {
+    transform: rotate(-16deg);
+  }
+  to {
+    transform: rotate(12deg);
+  }
+}
+@keyframes graft-breathe {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 14;
+  }
+}
+
+.graft-fade-in {
+  opacity: 0;
+  animation: graft-fade 300ms var(--g-ease) forwards;
+}
+
+.graft-verb {
+  animation: graft-fade 220ms var(--g-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graft-mark--draw .graft-mark__arc {
+    stroke-dashoffset: 0;
+  }
+  .graft-mark--draw .graft-mark__leaf {
+    transform: none;
+  }
+  .graft-fade-in {
+    opacity: 1;
+  }
+}
+:root[data-reduced-motion='true'] .graft-mark--draw .graft-mark__arc {
+  stroke-dashoffset: 0;
+}
+:root[data-reduced-motion='true'] .graft-mark--draw .graft-mark__leaf {
+  transform: none;
+}
+:root[data-reduced-motion='true'] .graft-fade-in {
+  opacity: 1;
+}

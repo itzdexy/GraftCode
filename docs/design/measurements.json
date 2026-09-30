@@ -1,0 +1,490 @@
+{
+  "source": "reference/01.png … reference/12.png (Windows, 100% scale, dark theme)",
+  "generatedBy": "scripts/measure-reference.mjs",
+  "surfaces": {
+    "sidebar": "#111111",
+    "main": "#151515",
+    "sidebarDivider": "#292929",
+    "navSelected": "#343434",
+    "composer": "#20201f",
+    "composerBorderFocused": "#494948",
+    "composerBorderRest": "#353534",
+    "composerShadow": "#141414",
+    "menu": "#20201f",
+    "menuBorder": "#353534",
+    "menuDivider": "#373736",
+    "menuItemHover": "#313130",
+    "modelLabelHover": "#313130",
+    "titlebarToggleTrack": "#1d1d1d",
+    "titlebarToggleSelected": "#343434",
+    "titlebarToggleSelectedBorder": "#474747",
+    "composerToggleTrack": "#2b2b2a",
+    "composerToggleSelected": "#414140",
+    "composerToggleSelectedBorder": "#535352",
+    "badgeNeutral": "#2b2b2a",
+    "badgeWarning": "#341d08",
+    "userBubble": "#212121",
+    "sessionRow": "#212121",
+    "chip": "#2d2d2d",
+    "chipEdge": "#242424",
+    "banner": "#212121",
+    "bannerIconTile": "#383838",
+    "askCard": "#1a1a19",
+    "askCardBorder": "#30302f",
+    "askOption": "#262625",
+    "askCounterBadge": "#311a00",
+    "askNumberKeyBorder": "#41413f",
+    "askInput": "#303030",
+    "askInputBorder": "#444443",
+    "buttonSecondary": "#313130",
+    "buttonPrimaryDisabled": "#767675",
+    "statusBar": "#212121",
+    "diffPill": "#383838",
+    "createPrButton": "#292929",
+    "panel": "#1a1a19",
+    "panelBorder": "#2b2b2b",
+    "inlineCode": "#212121",
+    "inlineCodeBorder": "#383838",
+    "scrollbarThumb": "#5a5957",
+    "contextRingTrack": "#2d2d2d"
+  },
+  "text": {
+    "selected": "#f0efec",
+    "navLabel": "#bebdb2",
+    "sidebarItem": "#c3bfb2",
+    "sidebarHeader": "#81847e",
+    "viewAll": "#898781",
+    "footerName": "#b8b8ad",
+    "footerPlan": "#74736e",
+    "greeting": "#f0efec",
+    "placeholder": "#83817b",
+    "modelLabel": "#b9b9ae",
+    "effortLabel": "#817f79",
+    "menuTitle": "#e8e8e5",
+    "menuDescription": "#817f7a",
+    "assistantProse": "#e8e8e5",
+    "messageActions": "#807e78",
+    "disclaimer": "#807e79",
+    "headerIcons": "#c3c2b7",
+    "windowControls": "#c2c0b6",
+    "toolSummary": "#84827c",
+    "panelTitle": "#b9b9ad",
+    "chipLabel": "#bebdb2",
+    "askQuestion": "#edece9",
+    "askOptionTitle": "#e6e5e2",
+    "askOptionDescription": "#817f7a",
+    "askNumberKey": "#84837a",
+    "statusBarText": "#817f7a",
+    "timelineTick": "#444444",
+    "timelineTickCurrent": "#dcdcdc"
+  },
+  "accents": {
+    "notificationDotCode": "#fab219",
+    "notificationDotSidebarToggle": "#2a78d6",
+    "selectionCheck": "#2a76d2",
+    "link": "#689fe0",
+    "statusNeedsInputDot": "#fab219",
+    "statusNeedsInputText": "#ce8b02",
+    "statusError": "#db7761",
+    "warningBadgeText": "#d18c01",
+    "counterBadgeText": "#d28d00",
+    "diffAdded": "#32d74b",
+    "diffRemoved": "#f92c55",
+    "inlineCodeText": "#e67c7c",
+    "contextRingActive": "#2a78d5"
+  },
+  "geometry": {
+    "windowWidth": 1077,
+    "sidebarWidth": 262,
+    "sidebarDividerX": 262,
+    "navSelectedRow": {
+      "x": {
+        "from": 7,
+        "to": 251,
+        "length": 245,
+        "fill": "#343434"
+      },
+      "y": {
+        "from": 40,
+        "to": 63,
+        "length": 24,
+        "fill": "#343434"
+      }
+    },
+    "navRowPitch": 24.2,
+    "chatListPitch": 25.11,
+    "hollowBullet": {
+      "cols": [
+        17,
+        22
+      ],
+      "rows": [
+        261,
+        266
+      ]
+    },
+    "listTextX": 35,
+    "titlebarIcons": [
+      [
+        18,
+        29
+      ],
+      [
+        47,
+        58
+      ],
+      [
+        76,
+        87
+      ],
+      [
+        103,
+        115
+      ]
+    ],
+    "titlebarToggle": {
+      "x": [
+        192,
+        255
+      ],
+      "y": {
+        "from": 4,
+        "to": 28,
+        "length": 25,
+        "fill": "#1d1d1d"
+      }
+    },
+    "windowControlGlyphs": [
+      [
+        960,
+        969
+      ],
+      [
+        1006,
+        1015
+      ],
+      [
+        1052,
+        1061
+      ]
+    ],
+    "footerDividerY": 991,
+    "footerAvatar": {
+      "cols": [
+        11,
+        28
+      ],
+      "rows": [
+        1003,
+        1020
+      ]
+    },
+    "homeComposer": {
+      "x": [
+        379,
+        962
+      ],
+      "y": [
+        422,
+        515
+      ],
+      "width": 584,
+      "height": 94
+    },
+    "composerToggle": {
+      "x": [
+        425,
+        529
+      ],
+      "y": {
+        "from": 481,
+        "to": 506,
+        "length": 26,
+        "fill": "#2b2b2a"
+      }
+    },
+    "composerToggleSelected": {
+      "y": [
+        482,
+        505
+      ]
+    },
+    "chatColumnComposer": {
+      "x": {
+        "from": 191,
+        "to": 885,
+        "length": 695,
+        "fill": "#20201f"
+      }
+    },
+    "userBubbleSingleLine": {
+      "y": {
+        "from": 111,
+        "to": 148,
+        "length": 38,
+        "fill": "#212121"
+      }
+    },
+    "assistantLinePitch": 22,
+    "messageActionIcons": [
+      [
+        206,
+        217
+      ],
+      [
+        228,
+        239
+      ],
+      [
+        250,
+        259
+      ],
+      [
+        272,
+        281
+      ],
+      [
+        293,
+        304
+      ]
+    ],
+    "menuModelRowPitch": 45.67,
+    "menuPlainRowPitch": 29.14,
+    "effortMenuRowPitch": 29.25,
+    "menuDividerInsetX": 12,
+    "effortSlider": {
+      "track": {
+        "from": 47,
+        "to": 209,
+        "length": 163,
+        "fill": "#373736"
+      },
+      "trackY": {
+        "from": 101,
+        "to": 119,
+        "length": 19,
+        "fill": "#373736"
+      },
+      "knobY": {
+        "from": 101,
+        "to": 118,
+        "length": 18,
+        "fill": "#ffffff"
+      },
+      "tickCols": [
+        [
+          74,
+          75
+        ],
+        [
+          105,
+          107
+        ],
+        [
+          137,
+          139
+        ],
+        [
+          168,
+          170
+        ],
+        [
+          200,
+          202
+        ]
+      ]
+    },
+    "sessionRow": {
+      "x": {
+        "from": 331,
+        "to": 1011,
+        "length": 681,
+        "fill": "#212121"
+      },
+      "y": {
+        "from": 140,
+        "to": 175,
+        "length": 36,
+        "fill": "#212121"
+      },
+      "nextTop": 180
+    },
+    "chip": {
+      "x": {
+        "from": 322,
+        "to": 379,
+        "length": 58,
+        "fill": "#2d2d2d"
+      },
+      "y": {
+        "from": 892,
+        "to": 911,
+        "length": 20,
+        "fill": "#2d2d2d"
+      }
+    },
+    "banner": {
+      "y": {
+        "from": 922,
+        "to": 957,
+        "length": 36,
+        "fill": "#212121"
+      }
+    },
+    "codeComposer": {
+      "y": [
+        965,
+        998
+      ]
+    },
+    "askCard": {
+      "x": [
+        321,
+        1021
+      ],
+      "y": [
+        643,
+        915
+      ]
+    },
+    "askOption": {
+      "y": {
+        "from": 687,
+        "to": 734,
+        "length": 48,
+        "fill": "#262625"
+      }
+    },
+    "askNumberKey": {
+      "x": [
+        988,
+        1003
+      ],
+      "y": [
+        703,
+        718
+      ]
+    },
+    "askInput": {
+      "y": {
+        "from": 838,
+        "to": 863,
+        "length": 26,
+        "fill": "#303030"
+      }
+    },
+    "statusBar": {
+      "y": {
+        "from": 922,
+        "to": 957,
+        "length": 36,
+        "fill": "#212121"
+      }
+    },
+    "diffPill": {
+      "x": {
+        "from": 776,
+        "to": 888,
+        "length": 113,
+        "fill": "#383838"
+      },
+      "y": {
+        "from": 930,
+        "to": 949,
+        "length": 20,
+        "fill": "#383838"
+      }
+    },
+    "backgroundPanel": {
+      "x": [
+        808,
+        1070
+      ],
+      "y": [
+        37,
+        1024
+      ]
+    },
+    "timelineTicks": [
+      [
+        63,
+        64
+      ],
+      [
+        70,
+        71
+      ],
+      [
+        78,
+        79
+      ],
+      [
+        85,
+        86
+      ],
+      [
+        92,
+        93
+      ],
+      [
+        100,
+        100
+      ],
+      [
+        107,
+        108
+      ],
+      [
+        114,
+        115
+      ],
+      [
+        122,
+        122
+      ],
+      [
+        129,
+        130
+      ]
+    ],
+    "mascotBox": {
+      "cols": [
+        985,
+        1017
+      ],
+      "rows": [
+        900,
+        921
+      ]
+    },
+    "scrollbarThumbX": {
+      "from": 254,
+      "to": 259,
+      "length": 6,
+      "fill": "#5a5957"
+    }
+  },
+  "radii": {
+    "homeComposer": 11.5,
+    "navSelected": 4,
+    "titlebarToggle": 5.5,
+    "menu": 10,
+    "modelLabelHover": 7,
+    "sessionRow": 7,
+    "userBubble": 8.5,
+    "askOption": 4
+  },
+  "typography": {
+    "note": "capHeight = rows of ink for a flat-topped capital; linePitch = distance between line tops.",
+    "sidebarItemCap": 9,
+    "sidebarHeaderCap": 8,
+    "greetingCapG": 28,
+    "greetingXHeight": 19,
+    "greetingWidth": 339,
+    "assistantSerifCapH": 11,
+    "codeProseCapT": 10,
+    "codeProseLinePitch": 18.25,
+    "welcomeCapW": 15,
+    "sessionsLabelCap": 10
+  }
+}

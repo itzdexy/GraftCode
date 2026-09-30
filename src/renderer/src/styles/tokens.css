@@ -1,0 +1,328 @@
+/*
+ * Graft design tokens — the only source of color, radius, size and type values.
+ *
+ * Dark values are measured from the reference screenshots by
+ * scripts/measure-reference.mjs (see docs/design/measurements.json); the
+ * comment after a value names the measurement it comes from. The light theme
+ * is derived to keep the same hierarchy with WCAG AA text contrast.
+ * "System" is resolved in JS (matchMedia) to one of the two data-theme values.
+ */
+
+:root {
+  /* Type families (bundled locally via @fontsource-variable). */
+  --g-font-sans: 'Geist Variable', 'Segoe UI', system-ui, sans-serif;
+  --g-font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
+  --g-font-mono: 'JetBrains Mono Variable', 'Cascadia Mono', Consolas, monospace;
+
+  /*
+   * Type scale, calibrated by scripts/calibrate-type.mjs: each size is the one
+   * whose rendered cap height and full-line width best match the reference.
+   */
+  --g-text-2xs: 10px;
+  --g-text-xs: 11px; /* "Chats and tasks": cap 8, 81px vs 82px */
+  --g-text-sm: 12px; /* menu description: 158px vs 158px */
+  --g-text-base: 12.5px; /* sidebar/nav: cap 9, "Projects" 46px vs 46px */
+  --g-text-md: 13px; /* code prose + composer: 420px vs 422px; placeholder 196 vs 193 */
+  --g-text-prompt: 13.5px; /* chat-home composer placeholder: 161px vs 162px */
+  --g-text-lg: 16px; /* assistant serif prose: cap 11, 619px vs 616px */
+  --g-text-xl: 19px; /* "Welcome back": 176px vs 173px */
+  --g-text-greeting: 37px; /* serif greeting: 339px vs 339px, optical sizing on */
+  --g-leading-ui: 1.3;
+  --g-leading-code-prose: 1.4; /* codeProseLinePitch 18.25px at 13px */
+  --g-leading-chat-prose: 1.375; /* assistantLinePitch 22px at 16px */
+  --g-weight-regular: 400;
+  --g-weight-medium: 500;
+  --g-weight-semibold: 600;
+
+  /* Radii */
+  --g-radius-xs: 4px; /* radii.navSelected, radii.askOption */
+  --g-radius-sm: 6px; /* radii.titlebarToggle */
+  --g-radius-md: 8px; /* radii.sessionRow, radii.modelLabelHover, radii.userBubble */
+  --g-radius-lg: 10px; /* radii.menu */
+  --g-radius-xl: 12px; /* radii.homeComposer */
+  --g-radius-full: 9999px;
+
+  /* Layout */
+  --g-titlebar-height: 32px; /* titlebarToggle y 4..28 centered at 16 */
+  --g-sidebar-width: 262px; /* geometry.sidebarWidth */
+  --g-sidebar-min-width: 220px;
+  --g-sidebar-max-width: 420px;
+  --g-nav-row-height: 24px; /* navSelectedRow.y.length, navRowPitch 24.2 */
+  --g-list-row-height: 25px; /* chatListPitch 25.1 */
+  --g-sidebar-inset: 7px; /* navSelectedRow.x.from */
+  --g-list-text-x: 35px; /* listTextX */
+  --g-bullet-size: 6px; /* hollowBullet */
+  --g-content-width: 700px; /* chatColumnComposer (695 + border), code home column */
+  --g-home-composer-width: 584px; /* homeComposer.width */
+  --g-home-composer-height: 94px; /* homeComposer.height */
+  --g-code-composer-height: 34px; /* codeComposer y 965..998 */
+  --g-session-row-height: 36px; /* sessionRow.y.length */
+  --g-session-row-gap: 4px; /* sessionRow.nextTop - to */
+  --g-chip-height: 22px; /* chip.y (20) + 1px edges */
+  --g-banner-height: 36px; /* banner.y.length */
+  --g-status-bar-height: 36px; /* statusBar.y.length */
+  --g-menu-row-height: 29px; /* menuPlainRowPitch 29.1 */
+  --g-menu-row-2line-height: 46px; /* menuModelRowPitch 45.7 */
+  --g-menu-padding: 4px; /* menuItemHover x from 4 */
+  --g-menu-divider-inset: 12px; /* menuDividerInsetX */
+  --g-segment-height: 25px; /* titlebarToggle.y.length */
+  --g-composer-toggle-height: 26px; /* composerToggle.y.length */
+  --g-ask-number-key: 16px; /* askNumberKey */
+  --g-ask-input-height: 26px; /* askInput.y.length */
+  --g-effort-track-height: 19px; /* effortSlider.trackY.length */
+  --g-effort-knob-width: 16px;
+  --g-effort-knob-height: 18px; /* effortSlider.knobY.length */
+  --g-timeline-tick-width: 13px; /* timelineTicks cols 277..289 */
+  --g-timeline-tick-height: 2px;
+  --g-timeline-tick-gap: 5px; /* tick pitch ~7.4px */
+  --g-panel-width: 263px; /* backgroundPanel.x 808..1070 */
+  --g-scrollbar-size: 6px; /* scrollbarThumbX.length */
+  --g-icon-size: 16px;
+  --g-icon-size-sm: 14px;
+  --g-icon-size-xs: 12px; /* messageActionIcons are 12px wide */
+  --g-icon-stroke: 1.75;
+  --g-mascot-pixel: 3px; /* mascotBox 33x22 → 11x8 grid at 3px (last row overlaps edge) */
+  --g-window-min-width: 900px;
+  --g-window-min-height: 600px;
+
+  /* Motion (120–250ms). Zeroed when reduced motion is requested. */
+  --g-duration-fast: 120ms;
+  --g-duration-base: 180ms;
+  --g-duration-slow: 250ms;
+  --g-ease: cubic-bezier(0.2, 0, 0, 1);
+  --g-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Stacking */
+  --g-z-sticky: 10;
+  --g-z-panel: 20;
+  --g-z-popover: 50;
+  --g-z-dialog: 60;
+  --g-z-toast: 70;
+}
+
+/* ---------- Dark (measured) ---------- */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --g-bg: #151515; /* surfaces.main */
+  --g-bg-sidebar: #111111; /* surfaces.sidebar */
+  --g-surface: #20201f; /* surfaces.composer, surfaces.menu */
+  --g-surface-raised: #212121; /* surfaces.sessionRow, userBubble, banner, statusBar */
+  --g-surface-sunken: #1a1a19; /* surfaces.askCard, surfaces.panel */
+  --g-surface-inset: #262625; /* surfaces.askOption */
+  --g-surface-control: #2d2d2d; /* surfaces.chip */
+  --g-surface-strong: #383838; /* surfaces.diffPill, bannerIconTile */
+  --g-hover: #313130; /* surfaces.menuItemHover, modelLabelHover */
+  --g-sidebar-hover: #1d1d1d; /* surfaces.titlebarToggleTrack tone */
+  --g-selected: #343434; /* surfaces.navSelected */
+  --g-segment-track: #1d1d1d; /* surfaces.titlebarToggleTrack */
+  --g-segment-thumb: #343434; /* surfaces.titlebarToggleSelected */
+  --g-segment-thumb-border: #474747; /* surfaces.titlebarToggleSelectedBorder */
+  --g-toggle-track: #2b2b2a; /* surfaces.composerToggleTrack */
+  --g-toggle-thumb: #414140; /* surfaces.composerToggleSelected */
+  --g-toggle-thumb-border: #535352; /* surfaces.composerToggleSelectedBorder */
+  --g-badge: #2b2b2a; /* surfaces.badgeNeutral */
+  --g-input: #303030; /* surfaces.askInput */
+  --g-input-border: #444443; /* surfaces.askInputBorder */
+  --g-button-primary: #e8e8e5; /* primary uses text tone; disabled measured below */
+  --g-button-primary-text: #151515;
+  --g-button-primary-hover: #f0efec;
+  --g-button-primary-disabled: #767675; /* surfaces.buttonPrimaryDisabled */
+  --g-button-primary-disabled-text: #595958;
+  --g-button-secondary: #313130; /* surfaces.buttonSecondary */
+  --g-button-secondary-hover: #3a3a39;
+  --g-button-ghost: #292929; /* surfaces.createPrButton */
+  --g-scrollbar-thumb: #5a5957; /* surfaces.scrollbarThumb */
+  --g-scrollbar-thumb-hover: #6c6b68;
+
+  --g-border-subtle: #292929; /* surfaces.sidebarDivider */
+  --g-border: #353534; /* surfaces.menuBorder, composerBorderRest */
+  --g-border-strong: #494948; /* surfaces.composerBorderFocused */
+  --g-border-card: #30302f; /* surfaces.askCardBorder */
+  --g-border-panel: #2b2b2b; /* surfaces.panelBorder */
+  --g-divider: #373736; /* surfaces.menuDivider */
+  --g-key-border: #41413f; /* surfaces.askNumberKeyBorder */
+  --g-chip-edge: #242424; /* surfaces.chipEdge */
+
+  --g-text-strong: #f0efec; /* text.selected, text.greeting */
+  --g-text: #e8e8e5; /* text.menuTitle, text.assistantProse */
+  --g-text-secondary: #bebdb2; /* text.navLabel, text.chipLabel */
+  --g-text-tertiary: #b9b9ae; /* text.modelLabel, text.panelTitle */
+  --g-text-muted: #817f7a; /* text.menuDescription, text.statusBarText */
+  --g-text-faint: #74736e; /* text.footerPlan */
+  --g-text-placeholder: #83817b; /* text.placeholder */
+  --g-icon: #c3c2b7; /* text.headerIcons, text.windowControls */
+  --g-icon-strong: #eae9e6;
+  --g-icon-muted: #807e78; /* text.messageActions */
+  --g-timeline-tick: #444444; /* text.timelineTick */
+  --g-timeline-tick-current: #dcdcdc; /* text.timelineTickCurrent */
+
+  --g-accent: #7fbf6a; /* Graft leaf green (original; replaces third-party brand color) */
+  --g-accent-strong: #97d183;
+  --g-accent-dim: #3f5f36;
+  --g-blue: #2a78d6; /* accents.notificationDotSidebarToggle, selectionCheck, contextRingActive */
+  --g-link: #689fe0; /* accents.link */
+  --g-focus-ring: #689fe0;
+  --g-amber: #fab219; /* accents.statusNeedsInputDot, notificationDotCode */
+  --g-amber-text: #e7a314; /* needs-input label (brightest ink) */
+  --g-warning-bg: #341d08; /* surfaces.badgeWarning */
+  --g-warning-text: #d18c01; /* accents.warningBadgeText */
+  --g-counter-bg: #311a00; /* surfaces.askCounterBadge */
+  --g-counter-text: #d28d00; /* accents.counterBadgeText */
+  --g-danger: #e5604e; /* accents.statusError, shifted toward red */
+  --g-danger-bg: #3a1d19;
+  --g-success: #32d74b; /* accents.diffAdded */
+  --g-diff-add: #32d74b; /* accents.diffAdded */
+  --g-diff-del: #f92c55; /* accents.diffRemoved */
+  --g-diff-add-bg: rgb(50 215 75 / 0.12);
+  --g-diff-del-bg: rgb(249 44 85 / 0.13);
+  --g-diff-add-bg-strong: rgb(50 215 75 / 0.24);
+  --g-diff-del-bg-strong: rgb(249 44 85 / 0.26);
+  --g-code-inline-bg: #212121; /* surfaces.inlineCode */
+  --g-code-inline-border: #383838; /* surfaces.inlineCodeBorder */
+  --g-code-inline-text: #e67c7c; /* accents.inlineCodeText */
+  --g-code-block-bg: #1a1a19;
+  --g-mark-bg: #1f1f1e;
+
+  --g-avatar-1: #5b8fc7;
+  --g-avatar-2: #7fae6a;
+  --g-avatar-3: #c6934c;
+  --g-avatar-4: #a87bc9;
+  --g-avatar-5: #c7776b;
+  --g-avatar-6: #4fa3a0;
+  --g-avatar-7: #b0a14f;
+  --g-avatar-8: #7c86c9;
+  --g-avatar-text: #111111;
+
+  --g-mascot-leaf: #7fbf6a;
+  --g-mascot-leaf-dark: #5b9a4c;
+  --g-mascot-pot: #9c6b4e;
+  --g-mascot-pot-rim: #b07a58;
+  --g-mascot-eye: #1a1614;
+
+  --g-shadow-popover: 0 8px 20px rgb(0 0 0 / 0.42), 0 2px 4px rgb(0 0 0 / 0.3);
+  --g-shadow-composer: 0 4px 10px rgb(0 0 0 / 0.22);
+  --g-shadow-panel: -4px 0 12px rgb(0 0 0 / 0.25);
+  --g-overlay: rgb(0 0 0 / 0.55);
+}
+
+/* ---------- Light (derived) ---------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --g-bg: #fbfaf7;
+  --g-bg-sidebar: #f3f2ee;
+  --g-surface: #ffffff;
+  --g-surface-raised: #f4f3ef;
+  --g-surface-sunken: #f1f0ec;
+  --g-surface-inset: #ebeae5;
+  --g-surface-control: #e9e8e3;
+  --g-surface-strong: #dfded8;
+  --g-hover: #ebeae5;
+  --g-sidebar-hover: #e9e8e3;
+  --g-selected: #e2e1db;
+  --g-segment-track: #e7e6e1;
+  --g-segment-thumb: #ffffff;
+  --g-segment-thumb-border: #d3d2cc;
+  --g-toggle-track: #ebeae5;
+  --g-toggle-thumb: #ffffff;
+  --g-toggle-thumb-border: #d0cfc9;
+  --g-badge: #ebeae5;
+  --g-input: #ffffff;
+  --g-input-border: #cfcec8;
+  --g-button-primary: #1f1e1d;
+  --g-button-primary-text: #fbfaf7;
+  --g-button-primary-hover: #33322f;
+  --g-button-primary-disabled: #cac9c3;
+  --g-button-primary-disabled-text: #8a8984;
+  --g-button-secondary: #e9e8e3;
+  --g-button-secondary-hover: #dfded8;
+  --g-button-ghost: #efeee9;
+  --g-scrollbar-thumb: #c4c3bd;
+  --g-scrollbar-thumb-hover: #aeada7;
+
+  --g-border-subtle: #e6e5df;
+  --g-border: #dcdbd5;
+  --g-border-strong: #bfbeb7;
+  --g-border-card: #dcdbd5;
+  --g-border-panel: #e0dfd9;
+  --g-divider: #e3e2dc;
+  --g-key-border: #cfcec8;
+  --g-chip-edge: #dcdbd5;
+
+  --g-text-strong: #141413;
+  --g-text: #1f1e1d;
+  --g-text-secondary: #45443f;
+  --g-text-tertiary: #4d4c47;
+  --g-text-muted: #6b6a64;
+  --g-text-faint: #807f79;
+  --g-text-placeholder: #7a7973;
+  --g-icon: #54534e;
+  --g-icon-strong: #1f1e1d;
+  --g-icon-muted: #74736d;
+  --g-timeline-tick: #d4d3cd;
+  --g-timeline-tick-current: #3d3c38;
+
+  --g-accent: #3f8a36;
+  --g-accent-strong: #2f7128;
+  --g-accent-dim: #cfe6c6;
+  --g-blue: #1f6fd1;
+  --g-link: #1d63bd;
+  --g-focus-ring: #1f6fd1;
+  --g-amber: #e0a100;
+  --g-amber-text: #8f5f00;
+  --g-warning-bg: #fbeed5;
+  --g-warning-text: #8a5700;
+  --g-counter-bg: #faecd2;
+  --g-counter-text: #8a5700;
+  --g-danger: #c4382c;
+  --g-danger-bg: #fbe6e3;
+  --g-success: #1a7f37;
+  --g-diff-add: #1a7f37;
+  --g-diff-del: #cf222e;
+  --g-diff-add-bg: rgb(26 127 55 / 0.1);
+  --g-diff-del-bg: rgb(207 34 46 / 0.1);
+  --g-diff-add-bg-strong: rgb(26 127 55 / 0.2);
+  --g-diff-del-bg-strong: rgb(207 34 46 / 0.2);
+  --g-code-inline-bg: #f1f0ec;
+  --g-code-inline-border: #e0dfd9;
+  --g-code-inline-text: #b3261e;
+  --g-code-block-bg: #f4f3ef;
+  --g-mark-bg: #ffffff;
+
+  --g-avatar-1: #6b9ed3;
+  --g-avatar-2: #8cba77;
+  --g-avatar-3: #d4a05a;
+  --g-avatar-4: #b48ad4;
+  --g-avatar-5: #d48679;
+  --g-avatar-6: #5fb2ae;
+  --g-avatar-7: #bfae5c;
+  --g-avatar-8: #8b94d4;
+  --g-avatar-text: #111111;
+
+  --g-mascot-leaf: #4f9a43;
+  --g-mascot-leaf-dark: #3b7a31;
+  --g-mascot-pot: #a86f4d;
+  --g-mascot-pot-rim: #c0875f;
+  --g-mascot-eye: #1a1614;
+
+  --g-shadow-popover: 0 8px 24px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.08);
+  --g-shadow-composer: 0 2px 8px rgb(0 0 0 / 0.06);
+  --g-shadow-panel: -4px 0 12px rgb(0 0 0 / 0.06);
+  --g-overlay: rgb(20 20 19 / 0.35);
+}
+
+/* Reduced motion: from the OS, or from Settings → Appearance (data-reduced-motion). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --g-duration-fast: 0ms;
+    --g-duration-base: 0ms;
+    --g-duration-slow: 0ms;
+  }
+}
+:root[data-reduced-motion='true'] {
+  --g-duration-fast: 0ms;
+  --g-duration-base: 0ms;
+  --g-duration-slow: 0ms;
+}

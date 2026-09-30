@@ -1,0 +1,263 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/*
+ * Tailwind utilities are generated only from tokens: the default palette,
+ * radii, type scale and shadows are removed, and the spacing unit is 1px so
+ * utilities map one-to-one to measured pixel values (h-24 = 24px).
+ */
+@theme inline {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --spacing: 1px;
+
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-bg: var(--g-bg);
+  --color-sidebar: var(--g-bg-sidebar);
+  --color-surface: var(--g-surface);
+  --color-raised: var(--g-surface-raised);
+  --color-sunken: var(--g-surface-sunken);
+  --color-inset: var(--g-surface-inset);
+  --color-control: var(--g-surface-control);
+  --color-strong: var(--g-surface-strong);
+  --color-hover: var(--g-hover);
+  --color-sidebar-hover: var(--g-sidebar-hover);
+  --color-selected: var(--g-selected);
+  --color-segment-track: var(--g-segment-track);
+  --color-segment-thumb: var(--g-segment-thumb);
+  --color-segment-thumb-border: var(--g-segment-thumb-border);
+  --color-toggle-track: var(--g-toggle-track);
+  --color-toggle-thumb: var(--g-toggle-thumb);
+  --color-toggle-thumb-border: var(--g-toggle-thumb-border);
+  --color-badge: var(--g-badge);
+  --color-input: var(--g-input);
+  --color-input-border: var(--g-input-border);
+  --color-btn-primary: var(--g-button-primary);
+  --color-btn-primary-fg: var(--g-button-primary-text);
+  --color-btn-primary-hover: var(--g-button-primary-hover);
+  --color-btn-primary-disabled: var(--g-button-primary-disabled);
+  --color-btn-primary-disabled-fg: var(--g-button-primary-disabled-text);
+  --color-btn-secondary: var(--g-button-secondary);
+  --color-btn-secondary-hover: var(--g-button-secondary-hover);
+  --color-btn-ghost: var(--g-button-ghost);
+  --color-scrollbar: var(--g-scrollbar-thumb);
+
+  --color-border-subtle: var(--g-border-subtle);
+  --color-border: var(--g-border);
+  --color-border-strong: var(--g-border-strong);
+  --color-border-card: var(--g-border-card);
+  --color-border-panel: var(--g-border-panel);
+  --color-divider: var(--g-divider);
+  --color-key-border: var(--g-key-border);
+  --color-chip-edge: var(--g-chip-edge);
+
+  --color-fg-strong: var(--g-text-strong);
+  --color-fg: var(--g-text);
+  --color-fg-secondary: var(--g-text-secondary);
+  --color-fg-tertiary: var(--g-text-tertiary);
+  --color-fg-muted: var(--g-text-muted);
+  --color-fg-faint: var(--g-text-faint);
+  --color-fg-placeholder: var(--g-text-placeholder);
+  --color-icon: var(--g-icon);
+  --color-icon-strong: var(--g-icon-strong);
+  --color-icon-muted: var(--g-icon-muted);
+  --color-tick: var(--g-timeline-tick);
+  --color-tick-current: var(--g-timeline-tick-current);
+
+  --color-accent: var(--g-accent);
+  --color-accent-strong: var(--g-accent-strong);
+  --color-accent-dim: var(--g-accent-dim);
+  --color-blue: var(--g-blue);
+  --color-link: var(--g-link);
+  --color-focus: var(--g-focus-ring);
+  --color-amber: var(--g-amber);
+  --color-amber-fg: var(--g-amber-text);
+  --color-warning-bg: var(--g-warning-bg);
+  --color-warning-fg: var(--g-warning-text);
+  --color-counter-bg: var(--g-counter-bg);
+  --color-counter-fg: var(--g-counter-text);
+  --color-danger: var(--g-danger);
+  --color-danger-bg: var(--g-danger-bg);
+  --color-success: var(--g-success);
+  --color-diff-add: var(--g-diff-add);
+  --color-diff-del: var(--g-diff-del);
+  --color-diff-add-bg: var(--g-diff-add-bg);
+  --color-diff-del-bg: var(--g-diff-del-bg);
+  --color-diff-add-bg-strong: var(--g-diff-add-bg-strong);
+  --color-diff-del-bg-strong: var(--g-diff-del-bg-strong);
+  --color-code-bg: var(--g-code-inline-bg);
+  --color-code-border: var(--g-code-inline-border);
+  --color-code-fg: var(--g-code-inline-text);
+  --color-code-block: var(--g-code-block-bg);
+  --color-overlay: var(--g-overlay);
+
+  --font-sans: var(--g-font-sans);
+  --font-serif: var(--g-font-serif);
+  --font-mono: var(--g-font-mono);
+
+  --text-2xs: var(--g-text-2xs);
+  --text-2xs--line-height: var(--g-leading-ui);
+  --text-xs: var(--g-text-xs);
+  --text-xs--line-height: var(--g-leading-ui);
+  --text-sm: var(--g-text-sm);
+  --text-sm--line-height: var(--g-leading-ui);
+  --text-base: var(--g-text-base);
+  --text-base--line-height: var(--g-leading-ui);
+  --text-md: var(--g-text-md);
+  --text-md--line-height: var(--g-leading-code-prose);
+  --text-prompt: var(--g-text-prompt);
+  --text-prompt--line-height: 1.45;
+  --text-lg: var(--g-text-lg);
+  --text-lg--line-height: var(--g-leading-chat-prose);
+  --text-xl: var(--g-text-xl);
+  --text-xl--line-height: 1.25;
+  --text-greeting: var(--g-text-greeting);
+  --text-greeting--line-height: 1.15;
+
+  --leading-ui: var(--g-leading-ui);
+  --leading-code: var(--g-leading-code-prose);
+  --leading-chat: var(--g-leading-chat-prose);
+
+  --radius-xs: var(--g-radius-xs);
+  --radius-sm: var(--g-radius-sm);
+  --radius-md: var(--g-radius-md);
+  --radius-lg: var(--g-radius-lg);
+  --radius-xl: var(--g-radius-xl);
+  --radius-full: var(--g-radius-full);
+
+  --shadow-popover: var(--g-shadow-popover);
+  --shadow-composer: var(--g-shadow-composer);
+  --shadow-panel: var(--g-shadow-panel);
+
+  --ease-standard: var(--g-ease);
+  --ease-out: var(--g-ease-out);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--g-bg);
+    color: var(--g-text);
+    font-family: var(--g-font-sans);
+    font-size: var(--g-text-base);
+    line-height: var(--g-leading-ui);
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+  }
+
+  /* Selectable content regions opt back in. */
+  .selectable,
+  input,
+  textarea,
+  [contenteditable='true'] {
+    user-select: text;
+  }
+
+  button {
+    cursor: default;
+  }
+
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--g-focus-ring);
+    outline-offset: 1px;
+  }
+
+  ::placeholder {
+    color: var(--g-text-placeholder);
+    opacity: 1;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--g-blue) 45%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: var(--g-scrollbar-size);
+    height: var(--g-scrollbar-size);
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--g-scrollbar-thumb);
+    border-radius: var(--g-radius-full);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--g-scrollbar-thumb-hover);
+  }
+}
+
+@layer utilities {
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+  .transition-ui {
+    transition-duration: var(--g-duration-fast);
+    transition-timing-function: var(--g-ease);
+    transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  }
+  .scrollbar-stable {
+    scrollbar-gutter: stable;
+  }
+}
+
+@keyframes graft-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes graft-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes graft-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}
+:root[data-reduced-motion='true'] *,
+:root[data-reduced-motion='true'] *::before,
+:root[data-reduced-motion='true'] *::after {
+  animation-duration: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0ms !important;
+}

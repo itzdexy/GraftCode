@@ -1,0 +1,12 @@
+node_modules/
+out/
+dist/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+Thumbs.db
+# Third-party reference screenshots are used locally for measurement only.
+reference/
+# Local-scope Graft settings are per-machine.
+.graft/settings.local.json
