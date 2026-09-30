@@ -25,6 +25,7 @@
     "dist:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.130.0",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@vscode/ripgrep": "1.18.0",
     "better-sqlite3": "13.0.3",
