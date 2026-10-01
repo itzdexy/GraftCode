@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { EffortLevel } from '../../../src/shared/schemas/common';
 import type { ModelInfo } from '../../../src/shared/schemas/models';
 import type { SessionSummary } from '../../../src/shared/schemas/sessions';
+import type { SessionUsage } from '../../../src/shared/schemas/sessions';
 import { baseName, partOfDay, relativeTime, shortenPath } from '../../../src/renderer/src/lib/format';
+import { spendText, usageText } from '../../../src/renderer/src/features/composer/ContextUsage';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
 import {
   DEFAULT_FILTER,
@@ -174,5 +176,29 @@ describe('formatting', () => {
     expect(baseName('C:\\Users\\me\\proj\\')).toBe('proj');
     expect(baseName('/home/me/proj')).toBe('proj');
     expect(shortenPath('C:\\Users\\someone\\very\\deeply\\nested\\project\\folder', 24)).toMatch(/^.{11}….{11}$/);
+  });
+});
+
+describe('context and spend', () => {
+  const usage = (totals: Partial<SessionUsage['totals']>, costUsd: number | null): SessionUsage => ({
+    totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, ...totals },
+    contextTokens: 0,
+    contextLimit: 0,
+    costUsd
+  });
+
+  it('describes the context window', () => {
+    expect(usageText(50_000, 200_000)).toBe('50K of 200K tokens used (25%)');
+    expect(usageText(10, 0)).toBe('Context size unknown');
+  });
+
+  it('summarizes tokens, the share read from cache, and cost', () => {
+    expect(spendText(usage({}, null))).toBeNull();
+    expect(spendText(usage({ inputTokens: 2000, cacheReadTokens: 6000, outputTokens: 1500 }, 0.4213))).toEqual({
+      tokens: '8.0K input (75% from cache) · 1.5K output',
+      cost: 'About $0.42'
+    });
+    expect(spendText(usage({ inputTokens: 900, outputTokens: 20 }, 0.004))).toEqual({ tokens: '900 input · 20 output', cost: 'Less than $0.01' });
+    expect(spendText(usage({ inputTokens: 900 }, null))?.cost).toBe('No published prices for this model');
   });
 });

@@ -186,6 +186,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
                   <ContextUsage
                     used={summary.usage.contextTokens}
                     limit={summary.usage.contextLimit || model?.contextWindow || 0}
+                    session={summary.usage}
                     onCompact={() => compact(summary.id)}
                     compactDisabled={busy || view.messages.length === 0}
                   />

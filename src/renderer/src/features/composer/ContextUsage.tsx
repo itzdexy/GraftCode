@@ -2,6 +2,7 @@ import { Button } from '../../components/Button';
 import { Ring } from '../../components/ContextRing';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover';
 import { Tooltip } from '../../components/Tooltip';
+import type { SessionUsage } from '@shared/schemas/sessions';
 import { formatTokenCount } from '../../lib/format';
 
 interface ContextUsageProps {
@@ -10,6 +11,8 @@ interface ContextUsageProps {
   /** When given, clicking opens details with a "Compact now" action. */
   onCompact?: () => void;
   compactDisabled?: boolean;
+  /** Tokens and spend so far, shown in the details. */
+  session?: SessionUsage;
 }
 
 export function usageText(used: number, limit: number): string {
@@ -18,10 +21,28 @@ export function usageText(used: number, limit: number): string {
   return `${formatTokenCount(used)} of ${formatTokenCount(limit)} tokens used (${pct}%)`;
 }
 
+/** What a session has sent, generated and cost so far; null before the first response. */
+export function spendText(usage: SessionUsage): { tokens: string; cost: string } | null {
+  const t = usage.totals;
+  const sent = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+  if (sent + t.outputTokens === 0) return null;
+  const cached = t.cacheReadTokens > 0 ? ` (${Math.round((t.cacheReadTokens / sent) * 100)}% from cache)` : '';
+  return {
+    tokens: `${formatTokenCount(sent)} input${cached} · ${formatTokenCount(t.outputTokens)} output`,
+    cost:
+      usage.costUsd === null
+        ? 'No published prices for this model'
+        : usage.costUsd < 0.01
+          ? 'Less than $0.01'
+          : `About $${usage.costUsd.toFixed(2)}`
+  };
+}
+
 /** Circular context-window usage indicator for the composer row. */
-export function ContextUsage({ used, limit, onCompact, compactDisabled = false }: ContextUsageProps) {
+export function ContextUsage({ used, limit, onCompact, compactDisabled = false, session }: ContextUsageProps) {
   const fraction = limit > 0 ? used / limit : 0;
   const text = usageText(used, limit);
+  const spend = session ? spendText(session) : null;
   const ring = <Ring value={fraction} size={12} stroke={1.5} />;
   if (!onCompact) {
     return (
@@ -49,6 +70,13 @@ export function ContextUsage({ used, limit, onCompact, compactDisabled = false }
         <div className="mt-8 h-4 overflow-hidden rounded-full bg-control" aria-hidden="true">
           <div className="h-full rounded-full bg-blue" style={{ width: `${Math.min(100, Math.round(fraction * 100))}%` }} />
         </div>
+        {spend ? (
+          <>
+            <p className="mt-12 text-base font-medium text-fg-strong">This session</p>
+            <p className="mt-4 text-sm text-fg-muted">{spend.tokens}</p>
+            <p className="mt-2 text-sm text-fg-muted">{spend.cost}</p>
+          </>
+        ) : null}
         <p className="mt-10 text-sm text-fg-muted">
           Compacting summarizes the conversation so far and keeps the task, decisions and files in view. Graft also compacts
           automatically near the limit.
