@@ -1,16 +1,18 @@
 import type { PermissionMode } from '@shared/schemas/common';
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from '../../components/Menu';
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../../components/Menu';
 import { cn } from '../../lib/cn';
 import { PERMISSION_MODE_INFO } from '../../lib/format';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
+import { openSettings } from '../shell/shellActions';
 
 export const CYCLE_ORDER: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
 
-/** Next mode for Shift+Tab (Bypass is never reached by cycling). */
-export function nextMode(mode: PermissionMode): PermissionMode {
-  const i = CYCLE_ORDER.indexOf(mode);
-  return CYCLE_ORDER[(i + 1) % CYCLE_ORDER.length] ?? 'ask';
+/** Next mode for Shift+Tab; Bypass joins the cycle once it is switched on in Settings. */
+export function nextMode(mode: PermissionMode, bypassEnabled = false): PermissionMode {
+  const order: PermissionMode[] = bypassEnabled ? [...CYCLE_ORDER, 'bypass'] : CYCLE_ORDER;
+  const i = order.indexOf(mode);
+  return order[(i + 1) % order.length] ?? 'ask';
 }
 
 interface PermissionModeMenuProps {
@@ -51,6 +53,14 @@ export function PermissionModeMenu({ value, onChange, disabled = false }: Permis
             {PERMISSION_MODE_INFO[mode].label}
           </MenuItem>
         ))}
+        {bypassEnabled ? null : (
+          <>
+            <MenuSeparator />
+            <MenuItem description="Runs everything without asking. Turn it on in Settings → Permissions first." onSelect={() => openSettings('permissions')}>
+              <span className="text-fg-muted">Bypass (off)</span>
+            </MenuItem>
+          </>
+        )}
       </MenuContent>
     </Menu>
   );

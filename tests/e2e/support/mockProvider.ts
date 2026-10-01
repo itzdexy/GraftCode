@@ -47,7 +47,7 @@ export class MockProvider {
   private readonly turns: ScriptedTurn[] = [];
   private readonly apiKey: string | null;
   private server: http.Server | null = null;
-  private port = 0;
+  private origin = '';
   /** Resolves whenever a held stream is closed by the client. */
   private heldClosed: Array<() => void> = [];
 
@@ -63,7 +63,7 @@ export class MockProvider {
 
   /** Base URL to paste into the "Custom endpoint" form. */
   get url(): string {
-    return `http://127.0.0.1:${this.port}/v1`;
+    return `${this.origin}/v1`;
   }
 
   /** Queues assistant turns; each chat request (except title requests) consumes one. */
@@ -97,8 +97,10 @@ export class MockProvider {
       void this.handle(req, res);
     });
     return new Promise((resolve) => {
-      this.server?.listen(0, '127.0.0.1', () => {
-        this.port = (this.server?.address() as AddressInfo).port;
+      // localhost binds the IPv6 loopback when the machine has one, IPv4 otherwise.
+      this.server?.listen(0, 'localhost', () => {
+        const { address, family, port } = this.server?.address() as AddressInfo;
+        this.origin = `http://${family === 'IPv6' ? `[${address}]` : address}:${port}`;
         resolve();
       });
     });

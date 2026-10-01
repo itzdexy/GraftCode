@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { EffortLevel, ProviderKind, Usage } from '@shared/schemas/common';
+import type { ProviderKind, Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
-import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier, labelFromId } from './catalog';
+import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { parseSse } from './sse';
 import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, StreamRequest } from './types';
 
@@ -18,10 +19,18 @@ const DEFAULT_BASE: Record<ChatKind, string | null> = {
 
 /** Model ids on the OpenAI list endpoint that cannot serve chat completions. */
 const NON_CHAT = /(embed|whisper|tts|dall-e|davinci|babbage|moderation|audio|realtime|transcribe|image|search|computer-use|sora|codex)/i;
+/** Non-chat models other OpenAI-compatible servers commonly list next to chat models. */
+const NON_CHAT_LIGHT = /(embed|whisper|tts|dall-e|moderation|rerank|transcri|text-to-speech|stable-diffusion|sdxl|flux)/i;
+/**
+ * OpenRouter models that only cache prompts at an explicit breakpoint. The
+ * top-level cache_control puts one on the last cacheable block, so each step of
+ * a tool loop reads the prefix the previous step wrote.
+ */
+const BREAKPOINT_CACHING = /^~?anthropic\//;
 
 /**
- * Size hints for the OpenAI catalog, whose list endpoint returns ids only.
- * Keyed by id prefix; the first match wins. Other providers report limits.
+ * Size hints for OpenAI models the catalog doesn't know, keyed by id prefix;
+ * the first match wins. Other providers report limits or come from the catalog.
  */
 const OPENAI_LIMITS: Array<{ prefix: RegExp; context: number; output: number; reasoning: boolean; vision: boolean }> = [
   { prefix: /^gpt-5/, context: 400_000, output: 128_000, reasoning: true, vision: true },
@@ -32,15 +41,6 @@ const OPENAI_LIMITS: Array<{ prefix: RegExp; context: number; output: number; re
   { prefix: /^gpt-3\.5/, context: 16_385, output: 4_096, reasoning: false, vision: false }
 ];
 
-const OPENAI_EFFORT: Partial<Record<EffortLevel, 'low' | 'medium' | 'high'>> = {
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  extra: 'high',
-  max: 'high',
-  taproot: 'high'
-};
-
 interface OpenAiModel {
   id: string;
   created?: number;
@@ -50,7 +50,7 @@ interface OpenAiModel {
   architecture?: { input_modalities?: string[] };
   supported_parameters?: string[];
   top_provider?: { max_completion_tokens?: number | null };
-  pricing?: { prompt?: string; completion?: string };
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string };
 }
 
 type ChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
@@ -61,13 +61,43 @@ type ChatMessage =
       role: 'assistant';
       content: string | null;
       tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+      reasoning_details?: unknown[];
+      reasoning_content?: string;
     }
   | { role: 'tool'; tool_call_id: string; content: string };
 
-/** Converts neutral history into chat-completions messages (tool results become role "tool"). */
-export function toChatMessages(system: string, messages: LlmMessage[], vision: boolean): ChatMessage[] {
+/** Reasoning saved with an assistant message so it can be sent back during a tool loop. */
+interface ReasoningReplay {
+  model: string;
+  reasoning_details?: unknown[];
+  reasoning_content?: string;
+}
+
+function replayOf(block: ContentBlock, kind: ProviderKind, model: string): ReasoningReplay | null {
+  if (block.type !== 'provider' || block.provider !== kind) return null;
+  const raw = block.raw as Partial<ReasoningReplay> | null;
+  return raw && raw.model === model ? (raw as ReasoningReplay) : null;
+}
+
+/** A user message the person typed (not only tool results): it starts a new turn. */
+function startsTurn(message: LlmMessage): boolean {
+  return message.role === 'user' && message.content.some((b) => b.type !== 'tool_result');
+}
+
+/**
+ * Converts neutral history into chat-completions messages (tool results become
+ * role "tool"). With `replay`, reasoning saved from the same provider and model
+ * goes back on assistant messages: `reasoning_details` always (OpenRouter keeps
+ * reasoning valid across tool calls that way), `reasoning_content` only within
+ * the current turn's tool loop, as interleaved-thinking APIs expect.
+ */
+export function toChatMessages(system: string, messages: LlmMessage[], vision: boolean, replay?: { kind: ProviderKind; model: string }): ChatMessage[] {
   const out: ChatMessage[] = [{ role: 'system', content: system }];
-  for (const message of messages) {
+  let lastTurnStart = -1;
+  messages.forEach((m, i) => {
+    if (startsTurn(m)) lastTurnStart = i;
+  });
+  messages.forEach((message, index) => {
     if (message.role === 'assistant') {
       const text = message.content
         .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
@@ -80,9 +110,16 @@ export function toChatMessages(system: string, messages: LlmMessage[], vision: b
           type: 'function' as const,
           function: { name: b.name, arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}) }
         }));
-      if (text.length === 0 && calls.length === 0) continue;
-      out.push({ role: 'assistant', content: text.length > 0 ? text : null, ...(calls.length > 0 ? { tool_calls: calls } : {}) });
-      continue;
+      if (text.length === 0 && calls.length === 0) return;
+      const saved = replay ? message.content.map((b) => replayOf(b, replay.kind, replay.model)).find((r) => r !== null) : null;
+      out.push({
+        role: 'assistant',
+        content: text.length > 0 ? text : null,
+        ...(calls.length > 0 ? { tool_calls: calls } : {}),
+        ...(saved?.reasoning_details ? { reasoning_details: saved.reasoning_details } : {}),
+        ...(saved?.reasoning_content && index > lastTurnStart ? { reasoning_content: saved.reasoning_content } : {})
+      });
+      return;
     }
     const parts: ChatContentPart[] = [];
     const toolImages: ChatContentPart[] = [];
@@ -107,11 +144,30 @@ export function toChatMessages(system: string, messages: LlmMessage[], vision: b
       }
     }
     if (toolImages.length > 0) parts.unshift({ type: 'text', text: 'Images returned by the tool calls above:' }, ...toolImages);
-    if (parts.length === 0) continue;
+    if (parts.length === 0) return;
     const onlyText = parts.every((p) => p.type === 'text');
     out.push({ role: 'user', content: onlyText ? parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n') : parts });
-  }
+  });
   return out;
+}
+
+/** Appends a streamed `reasoning_details` fragment to the details collected so far. */
+export function mergeReasoningDetail(details: Array<Record<string, unknown>>, fragment: unknown): void {
+  if (!fragment || typeof fragment !== 'object') return;
+  const part = fragment as Record<string, unknown>;
+  const index = typeof part.index === 'number' && part.index >= 0 ? part.index : details.length;
+  const existing = details[index];
+  if (!existing) {
+    details[index] = { ...part };
+    return;
+  }
+  for (const [key, value] of Object.entries(part)) {
+    if ((key === 'text' || key === 'summary' || key === 'data') && typeof value === 'string' && typeof existing[key] === 'string') {
+      existing[key] = existing[key] + value;
+    } else if (value !== null && value !== undefined) {
+      existing[key] = value;
+    }
+  }
 }
 
 function mapFinish(reason: string | null): FinishReason {
@@ -142,16 +198,26 @@ export class OpenAiChatProvider implements LLMProvider {
   private readonly base: string;
   private readonly apiKey: string | null;
   private readonly customModels: CustomModel[];
+  private readonly catalog: ProviderCatalog | null;
+  /** Catalog entry used for model metadata. */
+  private readonly presetId: string | null;
   private readonly noStreamOptions = new Set<string>();
+  private readonly noReasoningParam = new Set<string>();
 
-  constructor(connection: ProviderConnection & { kind: ChatKind }, customModels: CustomModel[] = []) {
+  constructor(connection: ProviderConnection & { kind: ChatKind }, customModels: CustomModel[] = [], catalog: ProviderCatalog | null = null) {
     this.id = connection.id;
     this.kind = connection.kind;
     const base = connection.baseUrl ?? DEFAULT_BASE[connection.kind];
     if (!base) throw new ProviderError('bad_base_url', 'A base URL is required for a custom endpoint.', { retryable: false });
+    const placeholder = /\$\{([^}]+)\}/.exec(base);
+    if (placeholder) {
+      throw new ProviderError('bad_base_url', `Replace \${${placeholder[1] ?? ''}} in the base URL with your own value.`, { retryable: false });
+    }
     this.base = base;
     this.apiKey = connection.apiKey;
     this.customModels = customModels;
+    this.catalog = catalog;
+    this.presetId = connection.preset ?? NATIVE_PRESET[connection.kind] ?? null;
     if (this.kind !== 'openai-compatible' && !this.apiKey) {
       throw new ProviderError('auth', 'An API key is required.', { retryable: false });
     }
@@ -164,68 +230,111 @@ export class OpenAiChatProvider implements LLMProvider {
     };
   }
 
+  private meta(modelId: string): CatalogModel | null {
+    return this.catalog?.model(this.presetId, modelId) ?? null;
+  }
+
   async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
     // OpenRouter's catalog is public, so confirm the key against an authenticated endpoint first.
     if (this.kind === 'openrouter') {
       await requestJson<unknown>({ url: joinUrl(this.base, 'key'), headers: this.headers(), ...(signal ? { signal } : {}) });
     }
-    const body = await requestJson<{ data?: OpenAiModel[] }>({
-      url: joinUrl(this.base, 'models'),
-      headers: this.headers(),
-      ...(signal ? { signal } : {})
-    });
-    if (!Array.isArray(body.data)) {
-      throw new ProviderError('bad_base_url', `${hostOf(this.base)} did not return a model list — check the base URL.`, {
-        retryable: false
+    let listed: OpenAiModel[];
+    try {
+      const body = await requestJson<{ data?: OpenAiModel[] }>({
+        url: joinUrl(this.base, 'models'),
+        headers: this.headers(),
+        ...(signal ? { signal } : {})
       });
+      if (!Array.isArray(body.data)) {
+        throw new ProviderError('bad_base_url', `${hostOf(this.base)} did not return a model list — check the base URL.`, { retryable: false });
+      }
+      listed = body.data.filter((m) => typeof m.id === 'string');
+    } catch (error) {
+      // Some providers have no list endpoint: confirm the key with a one-token request and offer the catalog's models.
+      const known = this.kind === 'openai-compatible' && this.presetId ? (this.catalog?.models(this.presetId) ?? []) : [];
+      const listMissing = error instanceof ProviderError && (error.code === 'not_found' || error.code === 'bad_base_url');
+      const first = known.find((m) => !m.deprecated) ?? known[0];
+      if (!listMissing || !first) throw error;
+      await this.ping(first.id, signal);
+      listed = known.filter((m) => !m.deprecated).map((m) => ({ id: m.id }));
     }
-    const models = body.data
-      .filter((m) => typeof m.id === 'string' && (this.kind !== 'openai' || !NON_CHAT.test(m.id)))
+    const models = listed
+      .filter((m) => {
+        if (this.kind === 'openai') return !NON_CHAT.test(m.id);
+        if (this.kind === 'openai-compatible') return this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id);
+        return true;
+      })
       .map((m) => this.toModelInfo(m));
-    const listed = new Set(models.map((m) => m.ref.modelId));
+    const ids = new Set(models.map((m) => m.ref.modelId));
     for (const custom of this.customModels) {
-      if (!listed.has(custom.id)) models.push(this.toModelInfo({ id: custom.id }));
+      if (!ids.has(custom.id)) models.push(this.toModelInfo({ id: custom.id }));
     }
     return arrangeModels(models);
   }
 
+  /** Smallest possible chat request, used to verify a key when there is no list endpoint. */
+  private async ping(modelId: string, signal?: AbortSignal): Promise<void> {
+    const response = await request({
+      url: joinUrl(this.base, 'chat/completions'),
+      headers: this.headers(),
+      body: { model: modelId, messages: [{ role: 'user', content: 'Reply with OK.' }], max_tokens: 1, stream: false },
+      ...(signal ? { signal } : {}),
+      timeoutMs: 60_000
+    });
+    await response.text().catch(() => '');
+  }
+
   private toModelInfo(m: OpenAiModel): ModelInfo {
     const custom = this.customModels.find((c) => c.id === m.id);
-    let context = 32_768;
-    let output = 8_192;
-    let reasoning = false;
-    let vision = false;
-    let tools = true;
-    let pricing: ModelInfo['pricing'] = null;
-    if (this.kind === 'openai') {
+    const meta = this.meta(m.id);
+    let context = meta?.context ?? 32_768;
+    let output = meta?.output ?? 8_192;
+    let reasoning = meta?.reasoning ?? false;
+    let vision = meta?.vision ?? false;
+    let tools = meta ? meta.tools : true;
+    let pricing = modelPricing(meta?.pricing ?? null);
+    if (this.kind === 'openai' && !meta) {
       const hint = OPENAI_LIMITS.find((h) => h.prefix.test(m.id));
       if (hint) ({ context, output, reasoning, vision } = hint);
       else ({ context, output, vision } = { context: 128_000, output: 16_384, vision: true });
     } else if (this.kind === 'openrouter') {
       context = m.context_length ?? context;
-      output = m.top_provider?.max_completion_tokens ?? Math.min(32_768, Math.floor(context / 4));
-      const params = m.supported_parameters ?? [];
-      reasoning = params.includes('reasoning');
-      tools = params.includes('tools');
-      vision = (m.architecture?.input_modalities ?? []).includes('image');
+      output = m.top_provider?.max_completion_tokens ?? meta?.output ?? Math.min(32_768, Math.floor(context / 4));
+      const params = m.supported_parameters;
+      if (params) {
+        reasoning = params.includes('reasoning');
+        tools = params.includes('tools');
+      }
+      if (m.architecture?.input_modalities) vision = m.architecture.input_modalities.includes('image');
       const input = perMillion(m.pricing?.prompt);
       const out = perMillion(m.pricing?.completion);
-      pricing = input !== null && out !== null ? { input, output: out } : null;
+      if (input !== null && out !== null) {
+        const cacheRead = perMillion(m.pricing?.input_cache_read);
+        const cacheWrite = perMillion(m.pricing?.input_cache_write);
+        pricing = { input, output: out, ...(cacheRead !== null ? { cacheRead } : {}), ...(cacheWrite !== null ? { cacheWrite } : {}) };
+      }
     }
     if (custom) {
       context = custom.contextWindow ?? context;
       output = custom.maxOutputTokens ?? output;
       vision = custom.vision ?? vision;
     }
-    const effort = reasoning ? effortSupport(['low', 'medium', 'high', 'taproot']) : null;
+    // Plain OpenAI-compatible servers only get the levels the catalog says the model accepts.
+    const effort = catalogEffort(meta, {
+      reasoning,
+      fallback: this.kind === 'openai-compatible' ? [] : ['low', 'medium', 'high'],
+      allowOff: this.kind !== 'openai-compatible' || (meta?.effortValues?.includes('none') ?? false),
+      budgets: this.kind === 'openrouter'
+    });
     return {
       ref: { providerId: this.id, modelId: m.id },
-      label: custom?.label ?? m.name ?? labelFromId(m.id),
+      label: custom?.label ?? m.name ?? meta?.name ?? labelFromId(m.id),
       description:
         this.kind === 'openrouter' && m.description
           ? firstSentence(m.description)
           : describeCapabilities({ contextWindow: context, supportsVision: vision, effort, supportsTools: tools }),
-      family: familyOf(m.id),
+      family: meta?.family ?? familyOf(m.id),
       contextWindow: context,
       maxOutputTokens: output,
       supportsTools: tools,
@@ -234,7 +343,7 @@ export class OpenAiChatProvider implements LLMProvider {
       effort,
       featured: false,
       cheap: isFastTier(m.id),
-      createdAt: typeof m.created === 'number' ? m.created * 1000 : null,
+      createdAt: typeof m.created === 'number' ? m.created * 1000 : (meta?.releasedAt ?? null),
       pricing
     };
   }
@@ -242,11 +351,12 @@ export class OpenAiChatProvider implements LLMProvider {
   async *streamText(req: StreamRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
     const modelId = req.model.ref.modelId;
     const maxTokens = Math.min(req.model.maxOutputTokens, 64_000);
-    const effort = req.effort && req.model.effort ? OPENAI_EFFORT[req.effort] : undefined;
-    const build = (withStreamOptions: boolean): Record<string, unknown> => ({
+    const wire = req.effort && req.model.effort ? req.model.effort.values?.[req.effort] : undefined;
+    const interleaved = this.meta(modelId)?.interleaved ?? null;
+    const build = (withStreamOptions: boolean, withReasoning: boolean): Record<string, unknown> => ({
       model: modelId,
       stream: true,
-      messages: toChatMessages(req.system, req.messages, req.model.supportsVision),
+      messages: toChatMessages(req.system, req.messages, req.model.supportsVision, { kind: this.kind, model: modelId }),
       ...(req.tools.length > 0 && req.model.supportsTools
         ? {
             tools: req.tools.map((t) => ({
@@ -257,37 +367,42 @@ export class OpenAiChatProvider implements LLMProvider {
         : {}),
       ...(this.kind === 'openai' ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
       ...(withStreamOptions ? { stream_options: { include_usage: true } } : {}),
-      ...(effort && this.kind === 'openai' ? { reasoning_effort: effort } : {}),
-      ...(effort && this.kind === 'openrouter' ? { reasoning: { effort } } : {}),
-      ...(this.kind === 'openai' ? { prompt_cache_key: req.cacheKey } : {})
+      ...(withReasoning ? this.reasoningParams(wire) : {}),
+      ...(this.kind === 'openai' ? { prompt_cache_key: req.cacheKey } : {}),
+      ...(this.kind === 'openrouter' && BREAKPOINT_CACHING.test(modelId) ? { cache_control: { type: 'ephemeral' } } : {})
     });
 
-    let response: Response;
     const url = joinUrl(this.base, 'chat/completions');
-    try {
-      response = await request({
-        url,
-        headers: this.headers(),
-        body: build(!this.noStreamOptions.has(modelId)),
-        signal,
-        timeoutMs: 120_000
-      });
-    } catch (error) {
-      // Some OpenAI-compatible servers reject stream_options; retry once without it.
-      if (error instanceof ProviderError && error.code === 'bad_request' && /stream_options/i.test(error.message)) {
-        this.noStreamOptions.add(modelId);
-        response = await request({ url, headers: this.headers(), body: build(false), signal, timeoutMs: 120_000 });
-      } else {
-        throw error;
+    let streamOptions = !this.noStreamOptions.has(modelId);
+    let reasoningParam = !this.noReasoningParam.has(modelId);
+    let response: Response | null = null;
+    // Some OpenAI-compatible servers reject optional parameters; drop the one named in the error and retry.
+    for (let attempt = 0; attempt < 3 && !response; attempt++) {
+      try {
+        response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
+      } catch (error) {
+        if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
+        if (streamOptions && /stream_options/i.test(error.message)) {
+          this.noStreamOptions.add(modelId);
+          streamOptions = false;
+        } else if (reasoningParam && wire !== undefined && this.kind === 'openai-compatible' && /reasoning/i.test(error.message)) {
+          this.noReasoningParam.add(modelId);
+          reasoningParam = false;
+        } else {
+          throw error;
+        }
       }
     }
+    if (!response) throw new ProviderError('bad_request', 'The provider rejected the request.');
     if (!response.body) throw new ProviderError('server', 'The provider returned an empty stream.');
 
     let text = '';
     let thinking = '';
+    const details: Array<Record<string, unknown>> = [];
     const calls: Array<{ id: string; name: string; args: string }> = [];
     let finish: string | null = null;
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    let costUsd: number | undefined;
 
     for await (const msg of parseSse(response.body)) {
       if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
@@ -306,13 +421,24 @@ export class OpenAiChatProvider implements LLMProvider {
         });
       }
       const u = chunk.usage as
-        | { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } }
+        | {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+            cost?: number;
+            cost_details?: { upstream_inference_cost?: number | null };
+          }
         | undefined;
       if (u) {
+        // prompt_tokens counts every input token; cache reads and writes are reported inside it.
         const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
-        usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached);
+        const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
+        usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached - written);
         usage.cacheReadTokens = cached;
+        usage.cacheWriteTokens = written;
         usage.outputTokens = u.completion_tokens ?? 0;
+        // OpenRouter reports what it charged; with your own upstream key the upstream bill comes on top.
+        if (this.kind === 'openrouter' && typeof u.cost === 'number') costUsd = u.cost + (u.cost_details?.upstream_inference_cost ?? 0);
       }
       const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
       if (!choice) continue;
@@ -325,6 +451,9 @@ export class OpenAiChatProvider implements LLMProvider {
       if (typeof reasoning === 'string' && reasoning.length > 0) {
         thinking += reasoning;
         yield { type: 'thinking-delta', text: reasoning };
+      }
+      if (Array.isArray(delta.reasoning_details)) {
+        for (const fragment of delta.reasoning_details) mergeReasoningDetail(details, fragment);
       }
       if (Array.isArray(delta.tool_calls)) {
         for (const raw of delta.tool_calls as Array<Record<string, unknown>>) {
@@ -340,6 +469,8 @@ export class OpenAiChatProvider implements LLMProvider {
     }
 
     if (thinking.length > 0) yield { type: 'block', block: { type: 'thinking', text: thinking, display: 'summary', origin: this.kind } };
+    const replay = this.replayFor(modelId, details, thinking, interleaved);
+    if (replay) yield { type: 'block', block: { type: 'provider', provider: this.kind, raw: replay, summary: '' } };
     if (text.length > 0) yield { type: 'block', block: { type: 'text', text } };
     for (const call of calls.filter(Boolean)) {
       const id = call.id || `call_${randomUUID().slice(0, 8)}`;
@@ -353,8 +484,23 @@ export class OpenAiChatProvider implements LLMProvider {
         yield { type: 'block', block: { type: 'tool_use', id, name: call.name, input: call.args, meta: { invalidJson: 'true' } } };
       }
     }
-    yield { type: 'usage', usage };
+    yield { type: 'usage', usage, ...(costUsd !== undefined ? { costUsd } : {}) };
     yield { type: 'finish', reason: calls.length > 0 && finish !== 'length' ? 'tool_use' : mapFinish(finish) };
+  }
+
+  /** Request fields for the chosen effort, in each API's own shape. */
+  private reasoningParams(wire: string | number | undefined): Record<string, unknown> {
+    if (wire === undefined) return {};
+    if (this.kind === 'openrouter') return { reasoning: typeof wire === 'number' ? { max_tokens: wire } : { effort: wire } };
+    return typeof wire === 'string' ? { reasoning_effort: wire } : {};
+  }
+
+  /** Reasoning to save for the next request of a tool loop, when the API needs it back. */
+  private replayFor(model: string, details: Array<Record<string, unknown>>, thinking: string, interleaved: string | null): ReasoningReplay | null {
+    const kept = details.filter((d): d is Record<string, unknown> => Boolean(d));
+    if (kept.length > 0 && (this.kind === 'openrouter' || interleaved === 'reasoning_details')) return { model, reasoning_details: kept };
+    if (thinking.length > 0 && this.kind === 'openai-compatible' && interleaved === 'reasoning_content') return { model, reasoning_content: thinking };
+    return null;
   }
 }
 

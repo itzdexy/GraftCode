@@ -14,7 +14,7 @@ import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolRes
 import type { HookRunner } from './hooks';
 import { withoutThinking } from './history';
 import { TAPROOT_REVIEW } from './systemPrompt';
-import { contextTokens, estimateMessagesTokens, estimateTextTokens } from './tokens';
+import { contextTokens, estimateMessagesTokens, estimateTextTokens, usageCost } from './tokens';
 
 export interface PermissionPrompt {
   toolUseId: string;
@@ -41,7 +41,8 @@ export interface LoopHost {
   hooks: HookRunner | null;
   /** Called before each model request; returns a replacement history when it compacted. */
   maybeCompact(history: LlmMessage[], contextTokens: number, signal: AbortSignal): Promise<LlmMessage[] | null>;
-  onUsage(usage: Usage, contextTokens: number): void;
+  /** `contextTokens` is null when the usage isn't from this conversation (a subagent's); `costUsd` null means unknown. */
+  onUsage(usage: Usage, contextTokens: number | null, costUsd: number | null): void;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -279,6 +280,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let pendingText = '';
     let finish: FinishReason = 'other';
     let responseUsage: Usage | null = null;
+    let responseCost: number | null = null;
     const request: StreamRequest = {
       model: config.model,
       system: config.system,
@@ -312,6 +314,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             break;
           case 'usage':
             responseUsage = event.usage;
+            responseCost = event.costUsd ?? null;
             break;
           case 'finish':
             finish = event.reason;
@@ -326,7 +329,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     if (responseUsage) {
       usage = addUsage(usage, responseUsage);
       lastContext = contextTokens(responseUsage);
-      host.onUsage(responseUsage, lastContext);
+      host.onUsage(responseUsage, lastContext, responseCost ?? usageCost(config.model.pricing, responseUsage));
     }
 
     const aborted = signal.aborted || failure?.code === 'aborted';

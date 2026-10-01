@@ -36,9 +36,10 @@ describe('migrations', () => {
   });
 
   it('rolls back a failing migration and reports it with context', () => {
-    const broken = [...MIGRATIONS, { version: 2, name: 'broken', sql: 'CREATE TABLE ok_table (x INTEGER); NOT VALID SQL;' }];
-    expect(() => migrate(db, broken)).toThrow(/Migration 2 \(broken\) failed/);
-    expect(schemaVersion(db)).toBe(1);
+    const current = MIGRATIONS.at(-1)?.version ?? 0;
+    const broken = [...MIGRATIONS, { version: current + 1, name: 'broken', sql: 'CREATE TABLE ok_table (x INTEGER); NOT VALID SQL;' }];
+    expect(() => migrate(db, broken)).toThrow(`Migration ${current + 1} (broken) failed`);
+    expect(schemaVersion(db)).toBe(current);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'ok_table'").get()).toBeUndefined();
   });
 });
@@ -124,8 +125,8 @@ describe('projects and providers', () => {
 
   it('makes the first provider the default and moves the default on delete', () => {
     const repo = new ProvidersRepo(db);
-    const a = repo.create({ kind: 'anthropic', label: 'A', baseUrl: null });
-    const b = repo.create({ kind: 'ollama', label: 'B', baseUrl: 'http://localhost:11434' });
+    const a = repo.create({ kind: 'anthropic', preset: 'anthropic', label: 'A', baseUrl: null });
+    const b = repo.create({ kind: 'ollama', preset: 'ollama', label: 'B', baseUrl: 'http://localhost:11434' });
     expect(repo.get(a.id)?.isDefault).toBe(true);
     expect(repo.get(b.id)?.isDefault).toBe(false);
     repo.delete(a.id);
@@ -182,5 +183,56 @@ describe('key store', () => {
     expect(() => store.get('p1')).toThrow(/keyring/);
     expect(store.purgePlaintext()).toBe(1);
     expect(store.has('p1')).toBe(false);
+  });
+});
+
+describe('provider presets', () => {
+  it('backfills the preset of providers created before presets existed', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const old = new Database(path.join(dir, 'old.db'));
+    try {
+      migrate(old, MIGRATIONS.filter((m) => m.version === 1));
+      const insert = old.prepare('INSERT INTO providers (id, kind, label, base_url, created_at) VALUES (?, ?, ?, ?, 0)');
+      insert.run('a', 'openrouter', 'OpenRouter', null);
+      insert.run('b', 'gemini', 'Gemini', null);
+      insert.run('c', 'openai-compatible', 'My server', 'http://localhost:8000/v1');
+      migrate(old);
+      const presets = new ProvidersRepo(old).list().map((p) => [p.id, p.preset]);
+      expect(presets).toEqual([
+        ['a', 'openrouter'],
+        ['b', 'google'],
+        ['c', null]
+      ]);
+    } finally {
+      old.close();
+    }
+  });
+
+  it('fills in prices a provider list leaves out, from the catalog', async () => {
+    const fs = await import('node:fs');
+    const { ProviderRegistry } = await import('../../src/main/providers/registry');
+    const { ProviderCatalog } = await import('../../src/main/providers/presets');
+    const file = path.join(dir, 'models.json');
+    fs.writeFileSync(file, JSON.stringify({ providers: [{ id: 'anthropic', name: 'Anthropic', kind: 'anthropic', api: null, env: [], doc: null, key: 'required', models: [{ id: 'model-a', n: 'A', p: [3, 15] }] }] }));
+    const repo = new ProvidersRepo(db);
+    const record = repo.create({ kind: 'anthropic', preset: 'anthropic', label: 'Anthropic', baseUrl: null });
+    const keys = new KeyStore(db, { isEncryptionAvailable: () => true, encryptString: (s) => Buffer.from(s), decryptString: (b) => b.toString() }, () => false);
+    keys.set(record.id, 'sk-test');
+    const base = { label: 'A', description: '', family: 'a', contextWindow: 1000, maxOutputTokens: 100, supportsTools: true, supportsVision: false, supportsWebSearch: false, effort: null, featured: true, cheap: false, createdAt: null };
+    const registry = new ProviderRegistry(repo, keys, new ProviderCatalog(file), () => ({
+      id: record.id,
+      kind: 'anthropic',
+      listModels: () =>
+        Promise.resolve([
+          { ...base, ref: { providerId: record.id, modelId: 'model-a' }, pricing: null },
+          { ...base, ref: { providerId: record.id, modelId: 'model-b' }, pricing: null }
+        ]),
+      streamText: () => {
+        throw new Error('not used');
+      }
+    }));
+    const models = await registry.listModels(record.id);
+    expect(models.map((m) => m.pricing)).toEqual([{ input: 3, output: 15 }, null]);
+    expect(registry.providerName(record.id)).toBe('Anthropic');
   });
 });

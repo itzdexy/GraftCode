@@ -123,6 +123,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   useAutoOpenTasks(summary.id);
   useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
+  useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null);
 
   const send = (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> =>
     sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
@@ -135,6 +136,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
         onCompact={() => compact(summary.id)}
         onRewind={lastUser ? () => useRewind.getState().open({ sessionId: summary.id, messageId: lastUser.id, chat: false }) : null}
         onShowTasks={() => usePanels.getState().show(summary.id, 'tasks')}
+        onToggleFiles={() => usePanels.getState().toggleFiles(summary.id)}
         panels={<PanelToggles sessionId={summary.id} hasFolder={folder !== null} />}
       />
       <div className="flex min-h-0 flex-1">

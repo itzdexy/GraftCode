@@ -117,6 +117,7 @@ export class SessionManager {
       models: {
         resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) })
       },
+      providerName: (providerId) => d.registry.providerName(providerId),
       tools: d.tools,
       mcpToolNames: (root) => d.mcp?.toolNames(root) ?? [],
       mcpServerNames: (root) => d.mcp?.serverNames(root) ?? [],
@@ -136,6 +137,8 @@ export class SessionManager {
         const s = d.settings.get();
         return {
           webSearch: s.behavior.webSearch,
+          bypassEnabled: s.behavior.bypassModeEnabled,
+          bypassKeepsChecks: s.behavior.bypassKeepsChecks,
           autoCompact: s.behavior.autoCompact,
           userName: s.profile.name || null,
           defaultModel: s.defaults.model,

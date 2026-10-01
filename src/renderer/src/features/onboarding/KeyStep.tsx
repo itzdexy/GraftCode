@@ -1,21 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CircleCheck, ExternalLink, Eye, EyeOff, TriangleAlert } from 'lucide-react';
 import type { ProviderKind } from '@shared/schemas/common';
 import type { VerifyResult } from '@shared/schemas/models';
-import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
 import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
 import { Checkbox, TextField } from '../../components/Field';
 import { errorText, invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
+import { targetFor, urlPlaceholder } from '../providers/targets';
 import { StepLayout, type StepProps } from './StepLayout';
 
 type Failure = Extract<VerifyResult, { ok: false }>;
 
 /** Plain-language explanation for each verification failure. */
-export function describeVerifyFailure(kind: ProviderKind, baseUrl: string, failure: Failure): { title: string; hint: string } {
-  const name = PROVIDER_KIND_INFO[kind].name;
+export function describeVerifyFailure(name: string, kind: ProviderKind, baseUrl: string, failure: Failure): { title: string; hint: string } {
   switch (failure.code) {
     case 'auth':
       return { title: `${name} rejected this key.`, hint: 'Check that you copied the whole key and that it is still active.' };
@@ -47,7 +46,12 @@ export function KeyStep({ onNext, onBack }: StepProps) {
   const providers = useApp((s) => s.providers);
   const environment = useApp((s) => s.environment);
   const kind = (settings?.onboarding.providerKind ?? 'anthropic') as ProviderKind;
-  const info = PROVIDER_KIND_INFO[kind];
+  const presetId = settings?.onboarding.providerPreset ?? null;
+  const preset = useApp((s) => (presetId ? (s.presets?.find((p) => p.id === presetId) ?? null) : null));
+  useEffect(() => {
+    if (presetId) void useApp.getState().loadPresets().catch(() => undefined);
+  }, [presetId]);
+  const info = targetFor(kind, preset);
   const existing = providers.find((p) => p.id === settings?.onboarding.providerId && p.kind === kind) ?? null;
 
   const [editing, setEditing] = useState(existing === null);
@@ -68,13 +72,15 @@ export function KeyStep({ onNext, onBack }: StepProps) {
 
   const inputs = JSON.stringify({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
   const verified = status.state === 'ok' && status.inputs === inputs;
-  const canVerify = (!needsKey || apiKey.trim().length > 0) && (info.baseUrl !== 'required' || baseUrl.trim().length > 0);
+  const placeholder = showsBaseUrl ? urlPlaceholder(baseUrl) : null;
+  const canVerify = (!needsKey || apiKey.trim().length > 0) && (info.baseUrl !== 'required' || baseUrl.trim().length > 0) && !placeholder;
 
   const verify = async (): Promise<void> => {
     setStatus({ state: 'checking' });
     try {
       const result = await invoke('providers:verify', {
         kind,
+        preset: info.preset,
         baseUrl: showsBaseUrl ? baseUrl.trim() || null : null,
         apiKey: takesKey ? apiKey.trim() || null : null
       });
@@ -111,7 +117,7 @@ export function KeyStep({ onNext, onBack }: StepProps) {
       const key = takesKey ? apiKey.trim() || null : null;
       const provider = existing
         ? await invoke('providers:update', { id: existing.id, baseUrl: url, ...(key ? { apiKey: key } : {}) })
-        : await invoke('providers:add', { kind, label: null, baseUrl: url, apiKey: key });
+        : await invoke('providers:add', { kind, preset: info.preset, label: null, baseUrl: url, apiKey: key });
       const next = await invoke('settings:update', { onboarding: { providerId: provider.id } });
       useApp.getState().setSettings(next);
       setApiKey('');
@@ -122,7 +128,8 @@ export function KeyStep({ onNext, onBack }: StepProps) {
     }
   };
 
-  const title = kind === 'ollama' ? 'Connect to Ollama' : kind === 'openai-compatible' ? 'Connect your endpoint' : `Add your ${info.name} key`;
+  const title =
+    kind === 'ollama' ? 'Connect to Ollama' : kind === 'openai-compatible' && !info.preset ? 'Connect your endpoint' : info.key === 'required' ? `Add your ${info.name} key` : `Connect to ${info.name}`;
 
   if (!editing && existing) {
     return (
@@ -141,7 +148,7 @@ export function KeyStep({ onNext, onBack }: StepProps) {
     );
   }
 
-  const failure = status.state === 'failed' ? describeVerifyFailure(kind, baseUrl.trim() || info.defaultBaseUrl || '', status.failure) : null;
+  const failure = status.state === 'failed' ? describeVerifyFailure(info.name, kind, baseUrl.trim() || info.defaultBaseUrl || '', status.failure) : null;
 
   return (
     <StepLayout
@@ -150,7 +157,8 @@ export function KeyStep({ onNext, onBack }: StepProps) {
         <span>
           {needsKey ? 'Paste an API key. Graft checks it with a real request before saving it, encrypted, on this computer.' : null}
           {kind === 'ollama' ? 'Graft uses the models you have pulled in Ollama. No key needed.' : null}
-          {kind === 'openai-compatible' ? 'Any server that implements the OpenAI chat completions API, local or hosted.' : null}
+          {kind === 'openai-compatible' && !info.preset ? 'Any server that implements the OpenAI chat completions API, local or hosted.' : null}
+          {kind === 'openai-compatible' && info.preset && !needsKey ? `${info.name} runs on this computer; a key is usually not needed.` : null}
           {info.keyHelpUrl ? (
             <button
               type="button"
@@ -182,6 +190,7 @@ export function KeyStep({ onNext, onBack }: StepProps) {
             data-autofocus={kind === 'ollama' || kind === 'openai-compatible' ? true : undefined}
             onChange={(e) => setBaseUrl(e.target.value)}
             hint={kind === 'ollama' ? 'Leave as is unless Ollama runs elsewhere.' : undefined}
+            error={placeholder ? `Replace \${${placeholder}} with your own value.` : undefined}
           />
         ) : null}
         {takesKey ? (

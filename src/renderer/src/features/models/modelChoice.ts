@@ -50,10 +50,11 @@ export function effortFor(model: ModelInfo | null, requested: EffortLevel | null
   if (!support) return null;
   if (requested && support.levels.includes(requested)) return requested;
   if (requested) {
+    // Step down to the nearest supported level, but never to "Off": that only happens when chosen.
     const index = EFFORT_LEVELS.indexOf(requested);
     for (let i = index - 1; i >= 0; i--) {
       const level = EFFORT_LEVELS[i];
-      if (level && support.levels.includes(level)) return level;
+      if (level && level !== 'none' && support.levels.includes(level)) return level;
     }
   }
   return support.default;

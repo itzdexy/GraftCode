@@ -137,6 +137,38 @@ test('the agent asks a question; number keys pick an option and the answer goes 
   expect(answer).toContain('README.md');
 });
 
+test('the session menu opens Files and keeps the computer awake; Bypass points to Settings until it is on', async () => {
+  const w = graft.window;
+  provider.script({ text: 'Hello.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('Say hello');
+  await composer.press('Enter');
+  await expect(w.getByText('Hello.', { exact: true })).toBeVisible();
+
+  await w.getByRole('button', { name: 'More actions' }).click();
+  await w.getByRole('menuitem', { name: /^Files/ }).click();
+  const changes = w.getByRole('region', { name: 'Changes', exact: true });
+  await expect(changes.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
+  await w.keyboard.press('Control+Shift+F');
+  await expect(changes).toBeHidden();
+
+  await w.getByRole('button', { name: 'More actions' }).click();
+  const awake = w.getByRole('menuitemcheckbox', { name: /Keep computer awake/ });
+  await expect(awake).toHaveAttribute('aria-checked', 'false');
+  await awake.click();
+  await expect(awake).toHaveAttribute('aria-checked', 'true');
+  await w.keyboard.press('Escape');
+  const ids = await w.evaluate(async () => {
+    const bridge = (window as unknown as { graft: { invoke(c: string): Promise<{ value: string[] }> } }).graft;
+    return (await bridge.invoke('power:keepAwakeList')).value;
+  });
+  expect(ids).toHaveLength(1);
+
+  await w.getByRole('button', { name: /Permission mode/ }).click();
+  await w.getByRole('menuitem', { name: /Bypass \(off\)/ }).click();
+  await expect(w.getByRole('heading', { level: 2, name: 'Permissions' })).toBeVisible();
+});
+
 test('typing / lists commands and Enter runs one without arguments', async () => {
   const w = graft.window;
   provider.script({ text: 'Hi.' });

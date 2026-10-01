@@ -1,8 +1,7 @@
-import { useState } from 'react';
-import { CircleCheck, Eye, EyeOff, MoreHorizontal, Plus, TriangleAlert } from 'lucide-react';
-import { PROVIDER_KINDS, type ProviderKind } from '@shared/schemas/common';
-import type { ProviderSummary, VerifyResult } from '@shared/schemas/models';
-import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
+import { useEffect, useState } from 'react';
+import { CircleCheck, ExternalLink, Eye, EyeOff, MoreHorizontal, Plus, TriangleAlert } from 'lucide-react';
+import type { ProviderKind } from '@shared/schemas/common';
+import type { ProviderPreset, ProviderSummary, VerifyResult } from '@shared/schemas/models';
 import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
@@ -14,25 +13,35 @@ import { errorText, invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { describeVerifyFailure } from '../onboarding/KeyStep';
+import { ProviderPicker, type PickedProvider } from '../providers/ProviderPicker';
+import { targetFor, urlPlaceholder, type ProviderTarget } from '../providers/targets';
 import { ConfirmDialog, Group } from './common';
 
 type Failure = Extract<VerifyResult, { ok: false }>;
 type Check = { state: 'idle' } | { state: 'checking' } | { state: 'ok'; modelCount: number; inputs: string } | { state: 'failed'; failure: Failure };
 
-function failureText(kind: ProviderKind, baseUrl: string, failure: Failure): string {
-  const described = describeVerifyFailure(kind, baseUrl, failure);
+function failureText(target: Pick<ProviderTarget, 'name' | 'kind'>, baseUrl: string, failure: Failure): string {
+  const described = describeVerifyFailure(target.name, target.kind, baseUrl, failure);
   return `${described.title} ${described.hint}${failure.message ? ` (${failure.message})` : ''}`;
 }
 
+function openLink(url: string | null): void {
+  if (url) invoke('app:openExternal', { url }).catch((e: unknown) => reportError("Couldn't open the link", e));
+}
+
 /**
- * Add a provider (kind → details → verify) or edit one. Keys are verified with
- * a real request before they are saved, and never come back to this screen.
+ * Add a provider (pick one of 200+ → details → verify) or edit one. Keys are
+ * verified with a real request before they are saved, and never come back to
+ * this screen.
  */
 function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | null; onClose: () => void }) {
   const environment = useApp((s) => s.environment);
   const plaintextAllowed = useApp((s) => s.settings?.security.allowPlaintextKeys === true);
-  const [kind, setKind] = useState<ProviderKind | null>(existing?.kind ?? null);
-  const info = kind ? PROVIDER_KIND_INFO[kind] : null;
+  const presets = useApp((s) => s.presets);
+  const [picked, setPicked] = useState<{ kind: ProviderKind; preset: ProviderPreset | null } | null>(null);
+  const existingPreset = existing?.preset ? (presets?.find((p) => p.id === existing.preset) ?? null) : null;
+  const choice = existing ? { kind: existing.kind, preset: existingPreset } : picked;
+  const target = choice ? targetFor(choice.kind, choice.preset) : null;
   const [label, setLabel] = useState(existing?.label ?? '');
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '');
   const [apiKey, setApiKey] = useState('');
@@ -41,22 +50,37 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const takesKey = info !== null && info.key !== 'none';
-  const showsBaseUrl = info !== null && info.baseUrl !== 'hidden';
+  const takesKey = target !== null && target.key !== 'none';
+  const showsBaseUrl = target !== null && target.baseUrl !== 'hidden';
   const keyChanged = apiKey.trim().length > 0;
   const urlChanged = existing ? (baseUrl.trim() || null) !== existing.baseUrl : true;
+  const placeholder = showsBaseUrl ? urlPlaceholder(baseUrl) : null;
   // New providers always verify; edits verify when the key changes (the stored key is never sent back here).
   const needsVerify = existing === null || keyChanged;
-  const inputs = JSON.stringify({ kind, baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
+  const inputs = JSON.stringify({ kind: target?.kind, preset: target?.preset, baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
   const verified = check.state === 'ok' && check.inputs === inputs;
   const storageBlocked = keyChanged && environment?.keyring === false && !plaintextAllowed;
-  const canVerify = info !== null && (info.key !== 'required' || keyChanged) && (info.baseUrl !== 'required' || baseUrl.trim().length > 0);
+  const canVerify =
+    target !== null && (target.key !== 'required' || keyChanged || (existing?.hasKey ?? false)) && (target.baseUrl !== 'required' || baseUrl.trim().length > 0) && !placeholder;
+
+  const pick = (row: PickedProvider): void => {
+    const next = row.type === 'custom' ? { kind: 'openai-compatible' as const, preset: null } : { kind: row.preset.kind, preset: row.preset };
+    const t = targetFor(next.kind, next.preset);
+    setPicked(next);
+    setBaseUrl(t.baseUrl === 'hidden' ? '' : (t.defaultBaseUrl ?? ''));
+    setCheck({ state: 'idle' });
+  };
 
   const verify = async (): Promise<void> => {
-    if (!kind) return;
+    if (!target) return;
     setCheck({ state: 'checking' });
     try {
-      const result = await invoke('providers:verify', { kind, baseUrl: showsBaseUrl ? baseUrl.trim() || null : null, apiKey: takesKey ? apiKey.trim() || null : null });
+      const result = await invoke('providers:verify', {
+        kind: target.kind,
+        preset: target.preset,
+        baseUrl: showsBaseUrl ? baseUrl.trim() || null : null,
+        apiKey: takesKey ? apiKey.trim() || null : null
+      });
       setCheck(result.ok ? { state: 'ok', modelCount: result.modelCount, inputs } : { state: 'failed', failure: result });
     } catch (e) {
       setCheck({ state: 'failed', failure: { ok: false, code: 'unknown', message: errorText(e) } });
@@ -64,7 +88,7 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
   };
 
   const save = async (): Promise<void> => {
-    if (!kind || !info) return;
+    if (!target) return;
     setBusy(true);
     setError(null);
     try {
@@ -78,12 +102,12 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
         });
         if (urlChanged && !keyChanged) {
           const result = await invoke('providers:test', { id: existing.id });
-          if (!result.ok) useToasts.getState().push({ tone: 'error', title: 'Saved, but the connection failed', description: failureText(kind, url ?? '', result) });
+          if (!result.ok) useToasts.getState().push({ tone: 'error', title: 'Saved, but the connection failed', description: failureText(target, url ?? '', result) });
         }
       } else {
-        await invoke('providers:add', { kind, label: label.trim() || null, baseUrl: url, apiKey: takesKey ? apiKey.trim() || null : null });
+        await invoke('providers:add', { kind: target.kind, preset: target.preset, label: label.trim() || null, baseUrl: url, apiKey: takesKey ? apiKey.trim() || null : null });
       }
-      useToasts.getState().push({ tone: 'success', title: existing ? 'Provider updated' : `${label.trim() || info.name} added` });
+      useToasts.getState().push({ tone: 'success', title: existing ? 'Provider updated' : `${label.trim() || target.name} added` });
       onClose();
     } catch (e) {
       setError(errorText(e));
@@ -91,48 +115,29 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
     }
   };
 
-  if (!kind || !info) {
+  if (!target) {
     return (
-      <DialogContent title="Add a provider" description="Graft talks to each provider directly with your own key. Add the same kind twice to use several keys.">
-        <div role="radiogroup" aria-label="Provider" className="grid grid-cols-2 gap-8 pb-12">
-          {PROVIDER_KINDS.map((k) => {
-            const i = PROVIDER_KIND_INFO[k];
-            return (
-              <button
-                key={k}
-                type="button"
-                role="radio"
-                aria-checked={false}
-                onClick={() => {
-                  setKind(k);
-                  setBaseUrl(i.baseUrl === 'hidden' ? '' : (i.defaultBaseUrl ?? ''));
-                }}
-                className="flex min-h-[72px] flex-col items-start gap-4 rounded-lg border border-border bg-surface px-12 py-10 text-left transition-ui hover:bg-raised"
-              >
-                <span className="flex items-center gap-6 text-md font-medium text-fg-strong">
-                  {i.name}
-                  {k === 'ollama' ? <Badge>Local</Badge> : null}
-                </span>
-                <span className="text-sm text-fg-muted">{i.description}</span>
-              </button>
-            );
-          })}
-        </div>
+      <DialogContent
+        title="Add a provider"
+        description="Graft talks to each provider directly with your own key. Add the same provider twice to use several keys."
+        className="w-[min(560px,calc(100vw-48px))]"
+      >
+        <ProviderPicker onPick={pick} autoFocus className="mb-12" />
       </DialogContent>
     );
   }
 
-  const failure = check.state === 'failed' ? describeVerifyFailure(kind, baseUrl.trim() || info.defaultBaseUrl || '', check.failure) : null;
-  const canSave = !busy && !storageBlocked && (!needsVerify || verified) && (existing !== null || canVerify);
+  const failure = check.state === 'failed' ? describeVerifyFailure(target.name, target.kind, baseUrl.trim() || target.defaultBaseUrl || '', check.failure) : null;
+  const canSave = !busy && !storageBlocked && !placeholder && (!needsVerify || verified) && (existing !== null || canVerify);
 
   return (
     <DialogContent
-      title={existing ? `Edit ${existing.label}` : `Add ${info.name}`}
+      title={existing ? `Edit ${existing.label}` : `Add ${target.name}`}
       description={existing ? 'Leave the key empty to keep the one that is stored.' : 'Graft checks the details with a real request before saving. Keys are encrypted on this computer.'}
       footer={
         <>
           {existing ? null : (
-            <Button variant="ghost" className="mr-auto" onClick={() => setKind(null)} disabled={busy}>
+            <Button variant="ghost" className="mr-auto" onClick={() => setPicked(null)} disabled={busy}>
               Back
             </Button>
           )}
@@ -153,27 +158,40 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
           else if (needsVerify && canVerify && check.state !== 'checking') void verify();
         }}
       >
-        <TextField label="Name" value={label} placeholder={info.name} hint="Shown in menus, e.g. “Work key”." maxLength={80} onChange={(e) => setLabel(e.target.value)} />
+        <TextField label="Name" value={label} placeholder={target.name} hint="Shown in menus, e.g. “Work key”." maxLength={80} onChange={(e) => setLabel(e.target.value)} />
         {showsBaseUrl ? (
           <TextField
             label="Base URL"
             value={baseUrl}
-            placeholder={info.defaultBaseUrl ?? 'http://localhost:8080/v1'}
+            placeholder={target.defaultBaseUrl ?? 'http://localhost:8080/v1'}
             spellCheck={false}
             autoComplete="off"
             onChange={(e) => setBaseUrl(e.target.value)}
+            error={placeholder ? `Replace \${${placeholder}} with your own value.` : undefined}
           />
         ) : null}
         {takesKey ? (
           <TextField
-            label={info.key === 'required' && !existing ? 'API key' : existing ? 'New API key (optional)' : 'API key (optional)'}
+            label={target.key === 'required' && !existing ? 'API key' : existing ? 'New API key (optional)' : 'API key (optional)'}
             value={apiKey}
             type={showKey ? 'text' : 'password'}
-            placeholder={existing?.hasKey ? 'Stored key kept' : info.keyPlaceholder}
+            placeholder={existing?.hasKey ? 'Stored key kept' : target.keyPlaceholder}
             spellCheck={false}
             autoComplete="off"
             inputClassName="font-mono text-sm"
             onChange={(e) => setApiKey(e.target.value)}
+            hint={
+              target.envVars.length > 0 || target.keyHelpUrl ? (
+                <span className="flex flex-wrap items-center gap-x-8">
+                  {target.envVars.length > 0 ? <span>Usually stored as {target.envVars.join(' or ')}.</span> : null}
+                  {target.keyHelpUrl ? (
+                    <button type="button" className="inline-flex items-center gap-4 text-link hover:underline" onClick={() => openLink(target.keyHelpUrl)}>
+                      Get a key <ExternalLink className="size-12" aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </span>
+              ) : undefined
+            }
             trailing={
               <IconButton label={showKey ? 'Hide key' : 'Show key'} size="xs" onClick={() => setShowKey(!showKey)}>
                 {showKey ? <EyeOff className="size-14" /> : <Eye className="size-14" />}
@@ -195,7 +213,7 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
             <div className="min-w-0 flex-1 text-base" aria-live="polite">
               {check.state === 'checking' ? (
                 <span className="flex items-center gap-6 text-fg-muted">
-                  <Spinner size={12} label="Checking" /> Contacting {info.name}…
+                  <Spinner size={12} label="Checking" /> Contacting {target.name}…
                 </span>
               ) : null}
               {check.state === 'ok' && verified ? (
@@ -229,14 +247,15 @@ function ProviderDialog({ existing, onClose }: { existing: ProviderSummary | nul
 function ProviderRow({ provider, onEdit, onRemove }: { provider: ProviderSummary; onEdit: () => void; onRemove: () => void }) {
   const defaultModelProvider = useApp((s) => s.settings?.defaults.model?.providerId ?? null);
   const [testing, setTesting] = useState(false);
-  const info = PROVIDER_KIND_INFO[provider.kind];
+  const preset = useApp((s) => (provider.preset ? (s.presets?.find((p) => p.id === provider.preset) ?? null) : null));
+  const target = targetFor(provider.kind, preset);
 
   const test = async (): Promise<void> => {
     setTesting(true);
     try {
       const result = await invoke('providers:test', { id: provider.id });
       if (result.ok) useToasts.getState().push({ tone: 'success', title: `${provider.label} is connected`, description: `${result.modelCount} ${result.modelCount === 1 ? 'model' : 'models'} available.` });
-      else useToasts.getState().push({ tone: 'error', title: `${provider.label} didn't answer`, description: failureText(provider.kind, provider.baseUrl ?? '', result) });
+      else useToasts.getState().push({ tone: 'error', title: `${provider.label} didn't answer`, description: failureText(target, provider.baseUrl ?? '', result) });
     } catch (e) {
       reportError("Couldn't test the provider", e);
     } finally {
@@ -257,12 +276,12 @@ function ProviderRow({ provider, onEdit, onRemove }: { provider: ProviderSummary
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-6 text-base text-fg">
           <span className="truncate">{provider.label}</span>
-          {provider.label !== info.name ? <span className="text-sm text-fg-muted">{info.name}</span> : null}
+          {provider.label !== target.name ? <span className="text-sm text-fg-muted">{target.name}</span> : null}
           {provider.isDefault ? <Badge tone="accent">Default</Badge> : null}
           {defaultModelProvider === provider.id && !provider.isDefault ? <Badge>Default model</Badge> : null}
         </p>
         <p className="mt-2 truncate text-sm text-fg-muted">
-          {[provider.baseUrl, info.key === 'none' ? 'No key needed' : provider.hasKey ? 'Key stored' : 'No key'].filter(Boolean).join(' · ')}
+          {[provider.baseUrl, target.key === 'none' ? 'No key needed' : provider.hasKey ? 'Key stored' : target.key === 'optional' ? 'No key (optional)' : 'No key'].filter(Boolean).join(' · ')}
         </p>
       </div>
       {testing ? <Spinner size={12} label="Testing" /> : null}
@@ -289,6 +308,12 @@ function ProviderRow({ provider, onEdit, onRemove }: { provider: ProviderSummary
 
 export function ProvidersSection() {
   const providers = useApp((s) => s.providers);
+  useEffect(() => {
+    useApp
+      .getState()
+      .loadPresets()
+      .catch((e: unknown) => reportError("Couldn't load the provider list", e));
+  }, []);
   const [dialog, setDialog] = useState<{ provider: ProviderSummary | null } | null>(null);
   const [removing, setRemoving] = useState<ProviderSummary | null>(null);
 

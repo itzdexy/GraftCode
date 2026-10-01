@@ -73,7 +73,18 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await openSettings(w, 'Providers');
   await w.getByRole('button', { name: 'Add provider' }).click();
   const dialog = w.getByRole('dialog', { name: 'Add a provider' });
-  await dialog.getByRole('radio', { name: /Custom endpoint/ }).click();
+  // The picker searches the whole catalog (200+ providers) and fills in what it knows.
+  const search = dialog.getByRole('combobox', { name: 'Search providers' });
+  await expect(search).toHaveAttribute('placeholder', /Search (2\d\d|[3-9]\d\d) providers/);
+  await search.fill('deepseek');
+  await dialog.getByRole('option', { name: /^DeepSeek/ }).first().click();
+  const deepseek = w.getByRole('dialog', { name: 'Add DeepSeek' });
+  await expect(deepseek.getByLabel('Base URL')).toHaveValue('https://api.deepseek.com');
+  await expect(deepseek.getByText(/Usually stored as DEEPSEEK_API_KEY/)).toBeVisible();
+  await shot(w, 'settings-provider-preset');
+  await deepseek.getByRole('button', { name: 'Back' }).click();
+  await dialog.getByRole('combobox', { name: 'Search providers' }).fill('custom');
+  await dialog.getByRole('option', { name: /Custom endpoint/ }).click();
   const form = w.getByRole('dialog', { name: 'Add Custom endpoint' });
   await form.getByLabel('Name').fill('Second endpoint');
   await form.getByLabel('Base URL').fill(provider.url);

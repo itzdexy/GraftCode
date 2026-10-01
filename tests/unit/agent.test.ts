@@ -380,6 +380,28 @@ describe('agent tools that involve the user', () => {
     expect(texts(h).filter((t) => t.includes('Report:'))).toEqual([]);
   });
 
+  it('prices cache reads and writes at their own rates and keeps the context meter on the conversation', async () => {
+    const h = harness({
+      model: { pricing: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } },
+      script: [
+        {
+          toolCalls: [{ name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }],
+          usage: { inputTokens: 1000, cacheReadTokens: 10_000, cacheWriteTokens: 2000, outputTokens: 100 }
+        },
+        { text: 'Report: nothing here', usage: { inputTokens: 50_000, outputTokens: 10 } },
+        { text: 'Done.', usage: { inputTokens: 500, cacheReadTokens: 12_000, outputTokens: 20 } }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    // The sub-agent's own 50K-token context doesn't replace the conversation's.
+    const meters = h.events.flatMap((e) => (e.type === 'usage' ? [e.usage.contextTokens] : []));
+    expect(meters).toEqual([13_100, 13_100, 12_520]);
+    const expected = (1000 * 3 + 10_000 * 0.3 + 2000 * 3.75 + 100 * 15 + 50_000 * 3 + 10 * 15 + 500 * 3 + 12_000 * 0.3 + 20 * 15) / 1_000_000;
+    expect(h.session.summary.usage.costUsd).toBeCloseTo(expected, 10);
+    expect(h.session.summary.usage.totals.inputTokens).toBe(51_500);
+  });
+
   it('runs a PreToolUse hook that blocks shell commands', async () => {
     const h = harness({
       mode: 'bypass',
@@ -434,6 +456,27 @@ describe('commands, memory and history', () => {
     loader.initial(h.projectDir);
     expect(loader.notesFor([path.join(h.projectDir, 'pkg/api/x.ts')])).toContain('validate input');
     expect(loader.notesFor([path.join(h.projectDir, 'pkg/api/y.ts')])).toBeNull();
+  });
+
+  it('tells the model which model and provider it is, and updates that after a switch (regression: "powered by OpenAI" on OpenRouter)', async () => {
+    const other = fakeModel({ ref: { providerId: 'fake', modelId: 'other-model' }, label: 'Other Model' });
+    const h = harness({ kind: 'chat', models: [fakeModel(), other], script: [{ text: 'one' }, { text: 'two' }] });
+    h.session.send('which model are you?');
+    await h.session.idle();
+    expect(h.provider.requests[0]!.system).toContain('You are running on the model Fake Model (id "fake-model"), served through Fake Provider.');
+    h.session.setModel(other.ref, 'medium');
+    h.session.send('and now?');
+    await h.session.idle();
+    expect(h.provider.requests[1]!.system).toContain('Other Model (id "other-model")');
+    expect(h.provider.requests[1]!.system).not.toContain('Fake Model');
+  });
+
+  it('cycles into Bypass only once it is switched on in Settings', () => {
+    const off = harness({ script: [], mode: 'auto' });
+    expect(off.session.cyclePermissionMode()).toBe('ask');
+    const on = harness({ script: [], mode: 'auto', bypassEnabled: true });
+    expect(on.session.cyclePermissionMode()).toBe('bypass');
+    expect(on.session.cyclePermissionMode()).toBe('ask');
   });
 
   it('drops replayed thinking after switching models and repairs unanswered tool calls', async () => {

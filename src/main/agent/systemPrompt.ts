@@ -2,7 +2,16 @@ import type { PermissionMode } from '@shared/schemas/common';
 import type { MemoryFile } from './memory';
 import type { SkillInfo } from './skills';
 
+/** The model a session runs on, so the agent can answer "which model are you?" truthfully. */
+export interface ModelIdentity {
+  label: string;
+  id: string;
+  /** Provider the requests go through, e.g. "OpenRouter". */
+  provider: string;
+}
+
 export interface CodePromptContext {
+  model: ModelIdentity;
   cwd: string;
   projectRoot: string;
   platform: NodeJS.Platform;
@@ -21,8 +30,12 @@ const MODE_LABEL: Record<PermissionMode, string> = {
   'auto-edit': 'Auto-edit (file edits inside the project are approved automatically)',
   plan: 'Plan (read-only research until the user approves a plan)',
   auto: 'Auto (low-risk actions are approved automatically)',
-  bypass: 'Bypass (most actions run without prompts)'
+  bypass: 'Bypass (actions run without prompts; deny rules still apply)'
 };
+
+function identityLine(model: ModelIdentity): string {
+  return `You are running on the model ${model.label} (id "${model.id}"), served through ${model.provider}. If you are asked which model or provider you are, give exactly these names; don't guess a different vendor, model or version.`;
+}
 
 function platformName(platform: NodeJS.Platform): string {
   return platform === 'win32' ? 'Windows' : platform === 'darwin' ? 'macOS' : 'Linux';
@@ -54,6 +67,7 @@ function skillsSection(skills: SkillInfo[]): string {
  */
 export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
   const env = [
+    `- Model: ${ctx.model.label} (${ctx.model.id}) via ${ctx.model.provider}`,
     `- Working directory: ${ctx.cwd}`,
     ctx.projectRoot !== ctx.cwd ? `- Project root: ${ctx.projectRoot}` : null,
     `- Operating system: ${platformName(ctx.platform)}; the Shell tool runs ${ctx.shellLabel}`,
@@ -64,7 +78,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
   ].filter((l): l is string => l !== null);
 
   const sections = [
-    'You are Graft, a coding agent running inside the Graft desktop app. You work in the user\'s project: reading and changing code, running commands, debugging, testing and explaining. You act through tools; the user watches your work and approves actions their settings require.',
+    `You are Graft, a coding agent running inside the Graft desktop app. You work in the user's project: reading and changing code, running commands, debugging, testing and explaining. You act through tools; the user watches your work and approves actions their settings require. ${identityLine(ctx.model)}`,
     ['# Environment', ...env].join('\n'),
     [
       '# How to work',
@@ -104,9 +118,9 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
 }
 
 /** System prompt for Chat sessions (no tools; conversational). */
-export function buildChatSystemPrompt(ctx: { date: string; name: string | null }): string {
+export function buildChatSystemPrompt(ctx: { date: string; name: string | null; model: ModelIdentity }): string {
   return [
-    'You are Graft, an assistant in the Graft desktop app. Answer questions, explain ideas, help write and review code and text, and think problems through with the user.',
+    `You are Graft, an assistant in the Graft desktop app. Answer questions, explain ideas, help write and review code and text, and think problems through with the user. ${identityLine(ctx.model)}`,
     `Today is ${ctx.date}.${ctx.name ? ` The user's name is ${ctx.name}.` : ''}`,
     'Be clear and direct. Match the length of your answer to the question: short answers for simple questions, structured ones (headings, lists, code blocks with a language) for complex ones. Say when you are unsure, and don\'t invent facts, sources or APIs.',
     'You have no tools in this conversation and can\'t see the user\'s files unless they paste or attach them. For work inside a project, suggest switching to Code.'

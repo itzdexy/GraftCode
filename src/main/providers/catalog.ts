@@ -1,4 +1,4 @@
-import { RECOMMENDED_EFFORT, type EffortLevel } from '@shared/schemas/common';
+import { EFFORT_LEVELS, RECOMMENDED_EFFORT, type EffortLevel } from '@shared/schemas/common';
 import type { EffortSupport, ModelInfo } from '@shared/schemas/models';
 
 /**
@@ -95,16 +95,16 @@ export function labelFromId(id: string): string {
 /** Builds effort support for a level set; null when the set is empty. */
 export function effortSupport(levels: EffortLevel[]): EffortSupport | null {
   if (levels.length === 0) return null;
-  const order: EffortLevel[] = ['low', 'medium', 'high', 'extra', 'max', 'taproot'];
-  const sorted = order.filter((l) => levels.includes(l));
-  const recommended = sorted.includes(RECOMMENDED_EFFORT)
-    ? RECOMMENDED_EFFORT
-    : (sorted.find((l) => l !== 'low' && l !== 'taproot') ?? sorted[0]!);
+  const sorted = EFFORT_LEVELS.filter((l) => levels.includes(l));
+  const light: EffortLevel[] = ['none', 'minimal', 'low', 'taproot'];
+  const recommended = sorted.includes(RECOMMENDED_EFFORT) ? RECOMMENDED_EFFORT : (sorted.find((l) => !light.includes(l)) ?? sorted[0]!);
   return { levels: sorted, recommended, default: recommended };
 }
 
 /** Thinking-token budgets for providers that take a budget instead of named levels. */
 export const THINKING_BUDGETS: Record<EffortLevel, number> = {
+  none: 0,
+  minimal: 0,
   low: 0,
   medium: 4096,
   high: 10_000,
@@ -115,7 +115,7 @@ export const THINKING_BUDGETS: Record<EffortLevel, number> = {
 
 /** Picks the closest available value at or below the requested level, else the lowest above it. */
 export function nearestAvailable<T>(level: EffortLevel, available: Partial<Record<EffortLevel, T>>): T | undefined {
-  const order: EffortLevel[] = ['low', 'medium', 'high', 'extra', 'max', 'taproot'];
+  const order = EFFORT_LEVELS;
   const index = order.indexOf(level);
   for (let i = index; i >= 0; i--) {
     const v = available[order[i]!];

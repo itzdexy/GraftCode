@@ -50,10 +50,11 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       });
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
+  // localhost binds the IPv6 loopback when the machine has one, IPv4 otherwise.
+  await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve));
+  const { address, family, port } = server.address() as AddressInfo;
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${family === 'IPv6' ? `[${address}]` : address}:${port}`,
     requests,
     route(method, path, handler) {
       routes.push({ method, path, handler });

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, nativeTheme, protocol, safeStorage } from 'electron';
+import { app, BrowserWindow, nativeTheme, powerSaveBlocker, protocol, safeStorage } from 'electron';
 import type { AppInfo } from '@shared/ipc/contracts';
 import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
@@ -20,6 +20,7 @@ import { McpManager } from './mcp/mcpManager';
 import { ARTIFACT_SCHEME, ArtifactServer } from './artifacts/artifacts';
 import { Scheduler } from './schedule/scheduler';
 import { openExternalSafely } from './app/security';
+import { KeepAwake } from './app/keepAwake';
 import { TrayController } from './app/tray';
 import { UpdateController } from './app/updater';
 
@@ -46,9 +47,13 @@ let browserPanel: BrowserPanel | null = null;
 let quitting = false;
 let settingsSnapshot: AppSettings | null = null;
 
-/** Bundled icons: next to the app when installed, in the repo during development. */
+/** Bundled resources (icons, catalog): next to the app when installed, in the repo during development. */
+function resourcePath(...parts: string[]): string {
+  return app.isPackaged ? path.join(process.resourcesPath, ...parts) : path.join(__dirname, '../../resources', ...parts);
+}
+
 function iconPath(name: string): string {
-  return app.isPackaged ? path.join(process.resourcesPath, 'icons', name) : path.join(__dirname, '../../resources/icons', name);
+  return resourcePath('icons', name);
 }
 
 function showWindow(): void {
@@ -67,6 +72,11 @@ const tray = new TrayController({
   show: showWindow,
   quit: () => app.quit(),
   runningCount: () => sessionManager?.runningCount() ?? 0
+});
+
+const keepAwake = new KeepAwake({
+  start: () => powerSaveBlocker.start('prevent-app-suspension'),
+  stop: (id) => powerSaveBlocker.stop(id)
 });
 
 const updates = new UpdateController({
@@ -138,7 +148,8 @@ function services(): Promise<Services> {
       encryptString: (text) => safeStorage.encryptString(text),
       decryptString: (buffer) => safeStorage.decryptString(buffer)
     },
-    onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total })
+    onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total }),
+    catalogFile: resourcePath('catalog', 'models.json')
   })
     .then((s) => {
       applySystemSettings(s.settings.get());
@@ -249,12 +260,21 @@ async function sessions(): Promise<SessionManager> {
     paths: s.paths,
     rgPath: s.rgPath,
     mcp: m,
-    emitEvent: (sessionId, event) => emit({ type: 'session:event', sessionId, event }),
+    emitEvent: (sessionId, event) => {
+      emit({ type: 'session:event', sessionId, event });
+      if (event.type === 'status') {
+        keepAwake.status(sessionId, event.status);
+        tray.refresh();
+      }
+    },
     emitSummary: (summary) => {
       emit({ type: 'session:summary', summary });
       tray.refresh();
     },
-    emitRemoved: (sessionId) => emit({ type: 'session:removed', sessionId }),
+    emitRemoved: (sessionId) => {
+      emit({ type: 'session:removed', sessionId });
+      keepAwake.forget(sessionId);
+    },
     filesChanged: (dir) => s.diffStats.invalidate(dir),
     notify: (summary, kind, text, visible) =>
       showSessionNotification({ settings: s.settings.get(), summary, kind, text, visible, onClick: focusSession }),
@@ -292,6 +312,7 @@ function openMainWindow(): void {
 async function shutdown(): Promise<void> {
   try {
     updates.dispose();
+    keepAwake.dispose();
     tray.destroy();
     scheduler?.stop();
     browserPanel?.close();
@@ -325,6 +346,8 @@ if (!gotLock) {
       versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
       dataDir: paths.userData
     }),
+    'power:keepAwake': ({ sessionId, on }) => ({ on: keepAwake.set(sessionId, on) }),
+    'power:keepAwakeList': () => keepAwake.list(),
     'window:setTitlebarTheme': ({ theme }) => {
       mainWindow?.setTheme(theme);
     },

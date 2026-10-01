@@ -196,7 +196,7 @@ describe('Anthropic adapter', () => {
 
   it('lists models with capability-derived effort levels and descriptions', async () => {
     server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false, first_id: 'test-model-9', last_id: 'test-model-9' }));
-    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', apiKey: 'sk-test', baseUrl: server.url });
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
     const [model] = await provider.listModels();
     expect(model).toMatchObject({
       label: 'Test Model 9',
@@ -213,7 +213,7 @@ describe('Anthropic adapter', () => {
   it('streams thinking, text and a tool call, and sends effort, caching and progress-update display', async () => {
     server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
     server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents()));
-    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', apiKey: 'sk-test', baseUrl: server.url });
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
     const [model] = await provider.listModels();
     const events = await collect(provider.streamText(request({ model: model!, effort: 'extra' }), new AbortController().signal));
     const blocks = events.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block : null));
@@ -247,7 +247,7 @@ describe('Anthropic adapter', () => {
       if (calls === 1) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'thinking.display: "updates" is not supported' } });
       await sse(res, streamEvents());
     });
-    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', apiKey: 'sk-test', baseUrl: server.url });
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
     const [model] = await provider.listModels();
     const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
     const thinking = events.find((e) => e.type === 'block' && e.block.type === 'thinking');
@@ -268,7 +268,7 @@ describe('Anthropic adapter', () => {
       if (tools.some((t) => t.type === 'web_search_20260209')) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'tools.1: web_search_20260209 is not supported for this model' } });
       await sse(res, streamEvents());
     });
-    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', apiKey: 'sk-test', baseUrl: server.url });
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
     const [model] = await provider.listModels();
     await collect(provider.streamText(request({ model: model!, webSearch: true }), new AbortController().signal));
     const sent = server.requests.filter((r) => r.path.startsWith('/v1/messages')).map((r) => (r.json() as { tools: Array<{ type?: string; name: string }> }).tools.map((t) => t.type ?? t.name));
@@ -280,7 +280,7 @@ describe('Anthropic adapter', () => {
 
   it('normalizes auth and overload errors', async () => {
     server.route('GET', '/v1/models', (_req, res) => json(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }));
-    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', apiKey: 'bad', baseUrl: server.url });
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'bad', baseUrl: server.url });
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'auth', retryable: false });
   });
 
@@ -329,7 +329,7 @@ describe('OpenAI-style chat adapter', () => {
         { data: '[DONE]' }
       ])
     );
-    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', apiKey: null, baseUrl: `${server.url}/v1` });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
     const model = fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null });
     const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
     expect(events.filter((e) => e.type === 'block')).toEqual([
@@ -350,7 +350,7 @@ describe('OpenAI-style chat adapter', () => {
       if ((req.json() as Record<string, unknown>).stream_options) return json(res, 400, { error: { message: 'Unrecognized field stream_options' } });
       await sse(res, [{ data: { choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]);
     });
-    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', apiKey: null, baseUrl: `${server.url}/v1` });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
     const events = await collect(provider.streamText(request({ model: fakeModel({ effort: null }) }), new AbortController().signal));
     expect(calls).toBe(2);
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
@@ -377,9 +377,9 @@ describe('OpenAI-style chat adapter', () => {
         ]
       })
     );
-    const bad = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', apiKey: 'nope', baseUrl: `${server.url}/api/v1` });
+    const bad = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', preset: null, apiKey: 'nope', baseUrl: `${server.url}/api/v1` });
     await expect(bad.listModels()).rejects.toMatchObject({ code: 'auth' });
-    const good = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', apiKey: 'good', baseUrl: `${server.url}/api/v1` });
+    const good = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', preset: null, apiKey: 'good', baseUrl: `${server.url}/api/v1` });
     const [model] = await good.listModels();
     expect(model).toMatchObject({
       label: 'Vendor: Model X',
@@ -435,7 +435,7 @@ describe('Gemini adapter', () => {
         { data: { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'Grep', args: { pattern: 'x' } }, thoughtSignature: 'ts-1' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 5, thoughtsTokenCount: 7 } } }
       ])
     );
-    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
     const models = await provider.listModels();
     expect(models.map((m) => m.ref.modelId)).toEqual(['gen-pro-3']);
     const events = await collect(provider.streamText(request({ model: models[0]!, effort: 'high' }), new AbortController().signal));
@@ -461,7 +461,7 @@ describe('Gemini adapter', () => {
 
   it('reports an invalid key as an auth error', async () => {
     server.route('GET', '/v1beta/models', (_req, res) => json(res, 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }));
-    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', apiKey: 'bad', baseUrl: `${server.url}/v1beta` });
+    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'bad', baseUrl: `${server.url}/v1beta` });
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'auth' });
   });
 });
@@ -486,7 +486,7 @@ describe('Ollama adapter', () => {
         { message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 30, eval_count: 8 }
       ])
     );
-    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', apiKey: null, baseUrl: server.url });
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
     const [model] = await provider.listModels();
     expect(model).toMatchObject({ contextWindow: 65536, supportsTools: true, supportsVision: false, effort: { levels: ['low', 'high', 'taproot'] } });
     const events = await collect(provider.streamText(request({ model: model!, effort: 'high' }), new AbortController().signal));
@@ -500,12 +500,12 @@ describe('Ollama adapter', () => {
     const closed = await startFixtureServer();
     const url = closed.url;
     await closed.close();
-    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', apiKey: null, baseUrl: url });
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: url });
     await expect(provider.listModels()).rejects.toThrow(/Ollama isn't reachable/);
   });
 
   it('rejects ports that fetch refuses with a base-URL error', async () => {
-    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', apiKey: null, baseUrl: 'http://127.0.0.1:9' });
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: 'http://127.0.0.1:9' });
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'bad_base_url', retryable: false });
   });
 });

@@ -102,6 +102,40 @@ export const MenuItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<type
   }
 );
 
+/** On/off row that stays open when toggled (role menuitemcheckbox), drawn with a switch. */
+export const MenuSwitchItem = forwardRef<
+  HTMLDivElement,
+  Omit<ComponentPropsWithoutRef<typeof DM.CheckboxItem>, 'checked' | 'onCheckedChange'> & {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+    icon?: ReactNode;
+    description?: ReactNode;
+  }
+>(function MenuSwitchItem({ className, checked, onCheckedChange, icon, description, children, ...props }, ref) {
+  return (
+    <DM.CheckboxItem
+      ref={ref}
+      checked={checked}
+      onCheckedChange={(value) => onCheckedChange(value === true)}
+      onSelect={(event) => event.preventDefault()}
+      className={cn(ITEM, description ? 'min-h-[var(--g-menu-row-2line-height)] py-4' : 'h-[var(--g-menu-row-height)]', className)}
+      {...props}
+    >
+      {icon ? <span className="flex size-16 shrink-0 items-center justify-center text-icon">{icon}</span> : null}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{children}</span>
+        {description ? <span className="truncate text-sm text-fg-muted">{description}</span> : null}
+      </span>
+      <span
+        aria-hidden="true"
+        className={cn('relative inline-flex h-16 w-28 shrink-0 items-center rounded-full border transition-ui', checked ? 'border-transparent bg-accent' : 'border-border bg-toggle-track')}
+      >
+        <span className={cn('block size-10 rounded-full transition-transform', checked ? 'translate-x-14 bg-switch-thumb-on' : 'translate-x-2 bg-switch-thumb')} />
+      </span>
+    </DM.CheckboxItem>
+  );
+});
+
 export const MenuSubTrigger = forwardRef<
   HTMLDivElement,
   ComponentPropsWithoutRef<typeof DM.SubTrigger> & { icon?: ReactNode; value?: ReactNode }

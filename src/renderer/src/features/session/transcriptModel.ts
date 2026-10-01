@@ -122,8 +122,11 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
           break;
         }
         case 'provider':
-          flush();
-          items.push({ kind: 'provider', key, summary: block.summary });
+          // Reasoning kept only for the provider's next request has no summary and stays hidden.
+          if (block.summary.length > 0) {
+            flush();
+            items.push({ kind: 'provider', key, summary: block.summary });
+          }
           break;
         case 'image':
         case 'redacted_thinking':

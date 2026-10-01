@@ -29,7 +29,8 @@ export type StreamEvent =
   | { type: 'thinking-delta'; text: string }
   /** A finished content block, emitted in order; the loop builds the assistant message from these. */
   | { type: 'block'; block: ContentBlock }
-  | { type: 'usage'; usage: Usage }
+  /** `costUsd` is what the provider says it charged, when it reports that. */
+  | { type: 'usage'; usage: Usage; costUsd?: number }
   | { type: 'finish'; reason: FinishReason; detail?: string };
 
 export interface LLMProvider {
@@ -44,6 +45,8 @@ export interface LLMProvider {
 export interface ProviderConnection {
   id: string;
   kind: ProviderKind;
+  /** Catalog preset (null for a custom endpoint); selects model metadata. */
+  preset: string | null;
   apiKey: string | null;
   baseUrl: string | null;
 }

@@ -8,6 +8,7 @@ import type { GraftEvent } from '@shared/ipc/events';
 import type { ProjectSummary, SearchResult } from '@shared/schemas/app';
 import type { AppSettings } from '@shared/schemas/appSettings';
 import type { VerifyResult } from '@shared/schemas/models';
+import type { ProviderKind } from '@shared/schemas/common';
 import type { ProjectRecord } from '../db/projectsRepo';
 import {
   commit,
@@ -68,6 +69,33 @@ export interface AppContext {
   settingsChanged(settings: AppSettings): void;
   isFirstLaunch: boolean;
   version: string;
+}
+
+/**
+ * Name, key requirement and base URL for a provider being added: a catalog
+ * preset when one is chosen, else the kind's defaults. Native kinds keep their
+ * built-in URL unless the user typed one.
+ */
+function resolveTarget(
+  s: Services,
+  kind: ProviderKind,
+  presetId: string | null,
+  baseUrl: string | null
+): { name: string; key: 'required' | 'optional' | 'none'; baseUrl: string | null; urlRequired: boolean } {
+  const info = PROVIDER_KIND_INFO[kind];
+  const typed = baseUrl?.trim() || null;
+  if (presetId) {
+    const preset = s.catalog.preset(presetId);
+    if (!preset || preset.kind !== kind) throw new GraftError('unknown_preset', `Graft doesn't know the provider "${presetId}".`);
+    const fromPreset = kind === 'openai-compatible' || kind === 'ollama' ? preset.baseUrl : null;
+    return { name: preset.name, key: preset.key, baseUrl: typed ?? fromPreset, urlRequired: kind === 'openai-compatible' };
+  }
+  return {
+    name: info.name,
+    key: info.key,
+    baseUrl: typed ?? (info.baseUrl === 'hidden' ? null : info.defaultBaseUrl),
+    urlRequired: info.baseUrl === 'required'
+  };
 }
 
 function projectSummary(p: ProjectRecord): ProjectSummary {
@@ -189,31 +217,32 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'onboarding:reset': async () => {
       const s = await ctx.services();
-      const next = s.settings.update({ onboarding: { step: 'name', providerKind: null, providerId: null } });
+      const next = s.settings.update({ onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null } });
       ctx.emit({ type: 'settings:changed', settings: next });
       return next;
     },
 
     'providers:list': async () => (await ctx.services()).registry.summaries(),
-    'providers:verify': async ({ kind, baseUrl, apiKey }) => {
+    'providers:presets': async () => (await ctx.services()).catalog.presets(),
+    'providers:verify': async ({ kind, preset, baseUrl, apiKey }) => {
       const s = await ctx.services();
-      const info = PROVIDER_KIND_INFO[kind];
-      if (info.key === 'required' && !apiKey?.trim()) return { ok: false, code: 'auth', message: 'Paste an API key first.' };
-      if (info.baseUrl === 'required' && !baseUrl?.trim()) return { ok: false, code: 'bad_base_url', message: 'Enter the server\'s base URL.' };
+      const target = resolveTarget(s, kind, preset, baseUrl);
+      if (target.key === 'required' && !apiKey?.trim()) return { ok: false, code: 'auth', message: 'Paste an API key first.' };
+      if (target.urlRequired && !target.baseUrl) return { ok: false, code: 'bad_base_url', message: 'Enter the server\'s base URL.' };
       try {
-        return await s.registry.verifyDraft({ kind, baseUrl: baseUrl?.trim() || null, apiKey: apiKey?.trim() || null }, AbortSignal.timeout(30_000));
+        return await s.registry.verifyDraft({ kind, preset, baseUrl: target.baseUrl, apiKey: apiKey?.trim() || null }, AbortSignal.timeout(30_000));
       } catch (error) {
         return verifyError(error);
       }
     },
-    'providers:add': async ({ kind, label, baseUrl, apiKey }) => {
+    'providers:add': async ({ kind, preset, label, baseUrl, apiKey }) => {
       const s = await ctx.services();
-      const info = PROVIDER_KIND_INFO[kind];
+      const target = resolveTarget(s, kind, preset, baseUrl);
       const key = apiKey?.trim() || null;
-      if (info.key === 'required' && !key) throw new GraftError('key_required', `${info.name} needs an API key.`);
-      const url = normalizeBaseUrl(baseUrl ?? (info.baseUrl === 'hidden' ? null : info.defaultBaseUrl));
-      if (info.baseUrl === 'required' && !url) throw new GraftError('base_url_required', 'Enter the server\'s base URL.');
-      const record = s.providers.create({ kind, label: label?.trim() || info.name, baseUrl: url });
+      if (target.key === 'required' && !key) throw new GraftError('key_required', `${target.name} needs an API key.`);
+      const url = normalizeBaseUrl(target.baseUrl);
+      if (target.urlRequired && !url) throw new GraftError('base_url_required', 'Enter the server\'s base URL.');
+      const record = s.providers.create({ kind, preset, label: label?.trim() || target.name, baseUrl: url });
       try {
         if (key) s.keys.set(record.id, key);
       } catch (error) {

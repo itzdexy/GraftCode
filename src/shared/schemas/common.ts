@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
 /**
- * Effort levels shown in the UI. "taproot" is Graft's long-horizon mode above
- * Max: the provider runs at its highest effort and the agent loop gets larger
- * budgets plus a verification pass before it may finish.
+ * Effort levels shown in the UI, weakest first. "none" turns reasoning off and
+ * "minimal" is the lightest reasoning, both only for models that offer them.
+ * "taproot" is Graft's long-horizon mode above Max: the provider runs at its
+ * highest effort and the agent loop gets larger budgets plus a verification
+ * pass before it may finish.
  */
-export const EFFORT_LEVELS = ['low', 'medium', 'high', 'extra', 'max', 'taproot'] as const;
+export const EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'extra', 'max', 'taproot'] as const;
 export const EffortLevelSchema = z.enum(EFFORT_LEVELS);
 export type EffortLevel = z.infer<typeof EffortLevelSchema>;
 export const RECOMMENDED_EFFORT: EffortLevel = 'medium';

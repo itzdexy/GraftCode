@@ -20,6 +20,7 @@
     "test:e2e": "electron-vite build && playwright test",
     "measure": "node scripts/measure-reference.mjs",
     "icons": "node scripts/generate-icons.mjs",
+    "catalog": "node scripts/update-catalog.mjs",
     "dist:win": "electron-vite build && electron-builder --config electron-builder.config.cjs --win --x64",
     "dist:mac": "electron-vite build && electron-builder --config electron-builder.config.cjs --mac",
     "dist:linux": "electron-vite build && electron-builder --config electron-builder.config.cjs --linux"

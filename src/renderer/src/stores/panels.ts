@@ -26,6 +26,8 @@ interface PanelsState {
   show: (sessionId: string, panel: PanelId) => void;
   close: (sessionId: string, panel: PanelId) => void;
   setChangesTab: (sessionId: string, tab: SessionPanels['changesTab']) => void;
+  /** Opens the files view of the changes panel, or closes it when it's already showing. */
+  toggleFiles: (sessionId: string) => void;
   markTasksAutoOpened: (sessionId: string) => void;
   setWidth: (width: number) => void;
   toggleWide: () => void;
@@ -47,6 +49,12 @@ export const usePanels = create<PanelsState>((set, get) => {
     show: (sessionId, panel) => update(sessionId, (p) => (p.open.includes(panel) ? p : { ...p, open: [...p.open, panel] })),
     close: (sessionId, panel) => update(sessionId, (p) => ({ ...p, open: p.open.filter((x) => x !== panel) })),
     setChangesTab: (sessionId, tab) => update(sessionId, (p) => ({ ...p, changesTab: tab })),
+    toggleFiles: (sessionId) =>
+      update(sessionId, (p) =>
+        p.open.includes('changes') && p.changesTab === 'files'
+          ? { ...p, open: p.open.filter((x) => x !== 'changes') }
+          : { ...p, changesTab: 'files', open: p.open.includes('changes') ? p.open : [...p.open, 'changes'] }
+      ),
     markTasksAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, tasksAutoOpened: true })),
     setWidth: (width) => set({ width, wide: false }),
     toggleWide: () => set({ wide: !get().wide }),

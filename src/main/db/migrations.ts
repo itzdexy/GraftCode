@@ -140,5 +140,20 @@ CREATE TABLE schedule_runs (
 ) STRICT;
 CREATE INDEX idx_schedule_runs ON schedule_runs (schedule_id, started_at DESC);
 `
+  },
+  {
+    version: 2,
+    name: 'provider presets',
+    sql: `
+ALTER TABLE providers ADD COLUMN preset TEXT;
+UPDATE providers SET preset = CASE kind
+  WHEN 'anthropic' THEN 'anthropic'
+  WHEN 'openai' THEN 'openai'
+  WHEN 'gemini' THEN 'google'
+  WHEN 'openrouter' THEN 'openrouter'
+  WHEN 'ollama' THEN 'ollama'
+  ELSE NULL
+END;
+`
   }
 ];

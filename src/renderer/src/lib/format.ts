@@ -34,6 +34,8 @@ export function formatTokenCount(n: number): string {
 }
 
 export const EFFORT_LABELS: Record<EffortLevel, string> = {
+  none: 'Off',
+  minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
@@ -47,7 +49,7 @@ export const PERMISSION_MODE_INFO: Record<PermissionMode, { label: string; descr
   'auto-edit': { label: 'Auto-edit', description: 'Edit project files freely; ask before commands' },
   plan: { label: 'Plan', description: 'Read and plan only until you approve a plan' },
   auto: { label: 'Auto', description: 'Approve low-risk actions; ask about anything risky' },
-  bypass: { label: 'Bypass', description: 'Run commands and edits without asking; dangerous actions still ask' }
+  bypass: { label: 'Bypass', description: 'Run everything without asking; only deny rules still block' }
 };
 
 /** Last path segment, for folder chips and group headers. */

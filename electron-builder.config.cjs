@@ -53,7 +53,10 @@ module.exports = {
     '!**/node_modules/better-sqlite3/{deps,src}/**',
     ...otherPlatformPatterns()
   ],
-  extraResources: [{ from: 'resources/icons', to: 'icons' }],
+  extraResources: [
+    { from: 'resources/icons', to: 'icons' },
+    { from: 'resources/catalog', to: 'catalog' }
+  ],
   asar: true,
   asarUnpack: ['**/node_modules/node-pty/**', '**/node_modules/better-sqlite3/**', '**/node_modules/@vscode/ripgrep-*/bin/**'],
   npmRebuild: false,

@@ -7,6 +7,8 @@ import { parseJson, type Db } from './database';
 export interface ProviderRecord {
   id: string;
   kind: ProviderKind;
+  /** Catalog preset id; null for a custom OpenAI-compatible endpoint. */
+  preset: string | null;
   label: string;
   baseUrl: string | null;
   enabled: boolean;
@@ -18,6 +20,7 @@ export interface ProviderRecord {
 interface Row {
   id: string;
   kind: ProviderKind;
+  preset: string | null;
   label: string;
   base_url: string | null;
   enabled: number;
@@ -30,6 +33,7 @@ function toRecord(row: Row): ProviderRecord {
   return {
     id: row.id,
     kind: row.kind,
+    preset: row.preset,
     label: row.label,
     baseUrl: row.base_url,
     enabled: row.enabled === 1,
@@ -57,14 +61,14 @@ export class ProvidersRepo {
     return record;
   }
 
-  create(input: { kind: ProviderKind; label: string; baseUrl: string | null }): ProviderRecord {
+  create(input: { kind: ProviderKind; preset: string | null; label: string; baseUrl: string | null }): ProviderRecord {
     const id = randomUUID();
     const isFirst = (this.db.prepare('SELECT COUNT(*) AS n FROM providers').get() as { n: number }).n === 0;
     this.db
       .prepare(
-        'INSERT INTO providers (id, kind, label, base_url, enabled, is_default, custom_models, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)'
+        'INSERT INTO providers (id, kind, preset, label, base_url, enabled, is_default, custom_models, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)'
       )
-      .run(id, input.kind, input.label, input.baseUrl, isFirst ? 1 : 0, '[]', Date.now());
+      .run(id, input.kind, input.preset, input.label, input.baseUrl, isFirst ? 1 : 0, '[]', Date.now());
     return this.require(id);
   }
 

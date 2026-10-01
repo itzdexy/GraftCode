@@ -25,6 +25,8 @@ const env = (mode: PermissionMode, rules: Partial<PermissionEnv['rules']> = {}):
   home: path.join(root, '..', 'home-for-tests'),
   rules: { allow: [], ask: [], deny: [], ...rules }
 });
+/** Bypass with Settings → "Keep safety checks in Bypass" on. */
+const checked = (mode: PermissionMode, rules: Partial<PermissionEnv['rules']> = {}): PermissionEnv => ({ ...env(mode, rules), bypassKeepsChecks: true });
 const shell = (command: string): PermissionQuery => ({ toolName: 'Shell', permissionClass: 'exec', descriptor: { summary: command, command } });
 const edit = (p: string): PermissionQuery => ({ toolName: 'Edit', permissionClass: 'write', descriptor: { summary: 'edit', writes: [p] } });
 const read = (p: string): PermissionQuery => ({ toolName: 'Read', permissionClass: 'read', descriptor: { summary: 'read', reads: [p] } });
@@ -188,17 +190,17 @@ describe('decisions by mode and class', () => {
     expect(decide(q, env(mode)).behavior).toBe(expected);
   });
 
-  it('never auto-approves dangerous commands, even in bypass or with an allow rule', () => {
+  it('never auto-approves dangerous commands, even with an allow rule (or in Bypass with the checks kept)', () => {
     for (const mode of ['auto', 'bypass'] as PermissionMode[]) {
-      const d = decide(shell('rm -rf dist'), env(mode, { allow: rules('Shell(rm:*)') }));
+      const d = decide(shell('rm -rf dist'), checked(mode, { allow: rules('Shell(rm:*)') }));
       expect(d).toMatchObject({ behavior: 'ask', dangerous: 'Recursively deletes files', suggestedRule: null });
     }
     expect(decide(shell('git push --force'), env('plan')).behavior).toBe('deny');
   });
 
-  it('always asks before writing outside the project, in every mode', () => {
+  it('always asks before writing outside the project, in every mode short of full Bypass', () => {
     for (const mode of ['auto-edit', 'auto', 'bypass'] as PermissionMode[]) {
-      expect(decide(edit(outside()), env(mode, { allow: rules('Edit') }))).toMatchObject({ behavior: 'ask', outsideProject: true });
+      expect(decide(edit(outside()), checked(mode, { allow: rules('Edit') }))).toMatchObject({ behavior: 'ask', outsideProject: true });
     }
     expect(decide(read(outside()), env('ask')).behavior).toBe('ask');
     expect(decide(read(outside()), env('bypass')).behavior).toBe('allow');
@@ -209,7 +211,7 @@ describe('decisions by mode and class', () => {
     const elsewhere = makeTempDir();
     try {
       fs.symlinkSync(elsewhere, path.join(root, 'linked'), 'junction');
-      const d = decide(edit(path.join(root, 'linked', 'file.txt')), env('bypass'));
+      const d = decide(edit(path.join(root, 'linked', 'file.txt')), checked('bypass'));
       expect(d).toMatchObject({ behavior: 'ask', outsideProject: true });
     } finally {
       removeDir(elsewhere);
@@ -217,11 +219,22 @@ describe('decisions by mode and class', () => {
   });
 
   it('protects Graft and git configuration from automatic edits (prompt-injection guard)', () => {
-    expect(decide(edit(path.join(root, '.graft', 'settings.local.json')), env('bypass')).behavior).toBe('ask');
+    expect(decide(edit(path.join(root, '.graft', 'settings.local.json')), checked('bypass')).behavior).toBe('ask');
     expect(decide(edit(path.join(root, '.git', 'hooks', 'pre-commit')), env('auto')).behavior).toBe('ask');
     expect(decide(shell('echo {} > .graft/settings.json'), env('auto')).behavior).toBe('ask');
     // A broad allow rule doesn't open the door either.
     expect(decide(edit(path.join(root, '.graft', 'settings.json')), env('auto', { allow: rules('Edit(**)') })).behavior).toBe('ask');
+  });
+
+  it('full Bypass runs everything without prompts, but deny rules still block', () => {
+    expect(decide(shell('rm -rf dist'), env('bypass')).behavior).toBe('allow');
+    expect(decide(edit(outside()), env('bypass')).behavior).toBe('allow');
+    expect(decide(edit(path.join(root, '.graft', 'settings.json')), env('bypass')).behavior).toBe('allow');
+    expect(decide(shell('git push --force'), env('bypass', { ask: rules('Shell(git push:*)') })).behavior).toBe('allow');
+    expect(decide(shell('rm -rf dist'), env('bypass', { deny: rules('Shell(rm:*)') })).behavior).toBe('deny');
+    // Other modes are unchanged.
+    expect(decide(shell('rm -rf dist'), env('auto')).behavior).toBe('ask');
+    expect(decide(edit(path.join(root, 'a.ts')), env('plan')).behavior).toBe('deny');
   });
 
   it('applies deny rules first and ask rules before allow rules', () => {
@@ -255,7 +268,7 @@ describe('decisions by mode and class', () => {
     expect(decide(mcp(true, false), env('auto-edit')).behavior).toBe('ask');
     expect(decide(mcp(false, false), env('auto')).behavior).toBe('ask');
     expect(decide(mcp(false, false), env('plan')).behavior).toBe('deny');
-    const destructive = decide(mcp(false, true), env('bypass'));
+    const destructive = decide(mcp(false, true), checked('bypass'));
     expect(destructive.behavior).toBe('ask');
     expect(destructive.dangerous).toMatch(/destructive/);
   });

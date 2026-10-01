@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AppSettings, AppSettingsPatch } from '@shared/schemas/appSettings';
 import type { EnvironmentInfo, ProjectSummary } from '@shared/schemas/app';
 import type { ModelRef } from '@shared/schemas/common';
-import type { ModelInfo, ProviderSummary } from '@shared/schemas/models';
+import type { ModelInfo, ProviderPreset, ProviderSummary } from '@shared/schemas/models';
 import type { UpdateState } from '@shared/schemas/system';
 import { errorText, invoke } from '../lib/ipc';
 
@@ -32,6 +32,9 @@ interface AppState {
   /** True right after onboarding, so home greets with "Welcome" instead of "Welcome back". */
   justOnboarded: boolean;
   update: UpdateState | null;
+  /** Provider catalog for the pickers; loaded on first use. */
+  presets: ProviderPreset[] | null;
+  loadPresets: () => Promise<ProviderPreset[]>;
   boot: () => Promise<void>;
   setUpdate: (update: UpdateState) => void;
   setProgress: (label: string, done: number, total: number) => void;
@@ -64,6 +67,15 @@ export const useApp = create<AppState>((set, get) => ({
   projectsError: null,
   justOnboarded: false,
   update: null,
+  presets: null,
+
+  async loadPresets() {
+    const cached = get().presets;
+    if (cached) return cached;
+    const presets = await invoke('providers:presets');
+    set({ presets });
+    return presets;
+  },
 
   async boot() {
     set({ phase: 'booting', bootError: null });

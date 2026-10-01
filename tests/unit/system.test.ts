@@ -172,3 +172,29 @@ describe('rule lists from Settings', () => {
     expect(invalid).toEqual(['not a rule!']);
   });
 });
+
+describe('keep computer awake', () => {
+  it('holds one blocker while any opted-in session works, and releases it when they stop', async () => {
+    const { KeepAwake } = await import('../../src/main/app/keepAwake');
+    const started: number[] = [];
+    const stopped: number[] = [];
+    let next = 1;
+    const keep = new KeepAwake({ start: () => (started.push(next), next++), stop: (id) => stopped.push(id) });
+    keep.status('a', 'running');
+    expect(keep.active).toBe(false);
+    keep.set('a', true);
+    expect(keep.active).toBe(true);
+    keep.set('b', true);
+    keep.status('b', 'needs-input');
+    expect(started).toEqual([1]);
+    keep.status('a', 'idle');
+    expect(keep.active).toBe(true);
+    keep.forget('b');
+    expect(keep.active).toBe(false);
+    expect(stopped).toEqual([1]);
+    expect(keep.list()).toEqual(['a']);
+    keep.status('a', 'running');
+    keep.dispose();
+    expect(stopped).toEqual([1, 2]);
+  });
+});

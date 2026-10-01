@@ -172,7 +172,7 @@ export function CodeHome() {
           supportsImages={defaults.model?.supportsVision ?? false}
           blockedReason={defaults.blockedReason}
           onSubmit={submit}
-          onCyclePermission={() => defaults.setPermissionMode(nextMode(defaults.permissionMode))}
+          onCyclePermission={() => defaults.setPermissionMode(nextMode(defaults.permissionMode, useApp.getState().settings?.behavior.bypassModeEnabled ?? false))}
           autoFocus
           leftControls={<PermissionModeMenu value={defaults.permissionMode} onChange={defaults.setPermissionMode} />}
           rightControls={

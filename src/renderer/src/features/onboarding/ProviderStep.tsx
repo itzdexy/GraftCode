@@ -1,11 +1,13 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { PROVIDER_KINDS, type ProviderKind } from '@shared/schemas/common';
 import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
 import { Badge } from '../../components/Badge';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
+import { ProviderPicker, type PickedProvider } from '../providers/ProviderPicker';
+import { NATIVE_PRESET } from '../providers/targets';
 import { StepLayout, type StepProps } from './StepLayout';
 
 function isKind(value: string | null | undefined): value is ProviderKind {
@@ -14,17 +16,19 @@ function isKind(value: string | null | undefined): value is ProviderKind {
 
 export function ProviderStep({ onNext, onBack }: StepProps) {
   const savedKind = useApp((s) => s.settings?.onboarding.providerKind);
-  const [kind, setKind] = useState<ProviderKind | null>(isKind(savedKind) ? savedKind : null);
+  const savedPreset = useApp((s) => s.settings?.onboarding.providerPreset ?? null);
+  const [kind, setKind] = useState<ProviderKind | null>(isKind(savedKind) && (savedPreset === null || savedPreset === NATIVE_PRESET[savedKind]) ? savedKind : null);
+  const [browsing, setBrowsing] = useState(isKind(savedKind) && savedPreset !== null && savedPreset !== NATIVE_PRESET[savedKind]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const submit = async (chosen: ProviderKind | null = kind): Promise<void> => {
+  const submit = async (chosen: ProviderKind | null = kind, preset: string | null = chosen ? NATIVE_PRESET[chosen] : null): Promise<void> => {
     if (!chosen || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const settings = await invoke('settings:update', { onboarding: { providerKind: chosen } });
+      const settings = await invoke('settings:update', { onboarding: { providerKind: chosen, providerPreset: preset } });
       useApp.getState().setSettings(settings);
       await onNext();
     } catch (e) {
@@ -57,7 +61,7 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
   return (
     <StepLayout
       title="Choose a model provider"
-      description="Graft talks to the provider directly with your own key. You can add more providers later in Settings."
+      description="Graft talks to the provider directly with your own key. Pick one of these, or search more than 200 others below. You can add more later in Settings."
       onSubmit={() => submit()}
       onBack={onBack}
       primaryLabel="Continue"
@@ -104,6 +108,27 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
             </button>
           );
         })}
+      </div>
+      <div className="mt-12">
+        <button
+          type="button"
+          aria-expanded={browsing}
+          onClick={() => setBrowsing(!browsing)}
+          className="inline-flex h-28 items-center gap-4 rounded-md px-6 text-base text-fg-secondary transition-ui hover:bg-hover hover:text-fg"
+        >
+          {browsing ? <ChevronDown className="size-14" aria-hidden="true" /> : <ChevronRight className="size-14" aria-hidden="true" />}
+          More providers
+        </button>
+        {browsing ? (
+          <ProviderPicker
+            className="mt-8"
+            autoFocus
+            onPick={(row: PickedProvider) => {
+              if (row.type === 'custom') void submit('openai-compatible', null);
+              else void submit(row.preset.kind, row.preset.id);
+            }}
+          />
+        ) : null}
       </div>
     </StepLayout>
   );

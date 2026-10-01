@@ -25,7 +25,7 @@ import {
 } from '../schemas/customize';
 import { BackgroundShellSchema, BoundsSchema, FilePreviewSchema, TerminalInfoSchema, TreeEntrySchema } from '../schemas/panels';
 import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
-import { CustomModelSchema, ModelInfoSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
+import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
@@ -92,6 +92,8 @@ export const contracts = {
     z.object({ level: z.enum(['warn', 'error']), message: z.string().max(4000), stack: z.string().max(8000).optional() }),
     Void
   ),
+  'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
+  'power:keepAwakeList': channel(Void, z.array(z.string())),
   'window:setTitlebarTheme': channel(z.object({ theme: ResolvedThemeSchema }), Void),
   'dialog:pickFolder': channel(z.object({ title: z.string().max(200).optional() }), z.string().nullable()),
   'app:openInEditor': channel(z.object({ path: PathSchema }), z.object({ via: z.enum(['editor', 'folder']) })),
@@ -108,13 +110,20 @@ export const contracts = {
 
   // Providers & models
   'providers:list': channel(Void, z.array(ProviderSummarySchema)),
+  'providers:presets': channel(Void, z.array(ProviderPresetSchema)),
   'providers:verify': channel(
-    z.object({ kind: ProviderKindSchema, baseUrl: z.string().max(2048).nullable(), apiKey: z.string().max(4096).nullable() }),
+    z.object({
+      kind: ProviderKindSchema,
+      preset: z.string().max(100).nullable().default(null),
+      baseUrl: z.string().max(2048).nullable(),
+      apiKey: z.string().max(4096).nullable()
+    }),
     VerifyResultSchema
   ),
   'providers:add': channel(
     z.object({
       kind: ProviderKindSchema,
+      preset: z.string().max(100).nullable().default(null),
       label: z.string().min(1).max(80).nullable(),
       baseUrl: z.string().max(2048).nullable(),
       apiKey: z.string().max(4096).nullable()

@@ -20,7 +20,8 @@ export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
   focusComposer: 'Focus the message box',
   interrupt: 'Stop the running session',
   cyclePermissionMode: 'Cycle permission mode (in the message box)',
-  openSettings: 'Open settings'
+  openSettings: 'Open settings',
+  toggleFiles: 'Show or hide the files panel'
 };
 
 /** Shortcuts that act inside the message box may use bare keys; the rest need Ctrl or Alt. */

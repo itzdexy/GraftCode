@@ -168,7 +168,7 @@ export function PermissionsSection() {
         </SettingRow>
         <SettingRow
           label="Allow Bypass mode"
-          description="Adds Bypass to the mode menu. It runs commands and edits without asking. Deny rules, dangerous commands and writes outside the project still stop for you."
+          description="Adds Bypass to the mode menu and the Shift+Tab cycle. In Bypass the agent runs commands, edits and tools without asking; only your deny rules still block."
           control={
             <Switch
               label="Allow Bypass mode"
@@ -180,6 +180,19 @@ export function PermissionsSection() {
             />
           }
         />
+        {bypass ? (
+          <SettingRow
+            label="Keep safety checks in Bypass"
+            description="Still ask before dangerous commands (recursive deletes, force pushes, piping downloads to a shell), writes outside the project, and changes to Graft or git configuration."
+            control={
+              <Switch
+                label="Keep safety checks in Bypass"
+                checked={settings.behavior.bypassKeepsChecks}
+                onChange={(on) => saveSettings({ behavior: { bypassKeepsChecks: on } })}
+              />
+            }
+          />
+        ) : null}
       </Group>
 
       <section aria-label="Rules" className="flex flex-col gap-12">
@@ -216,7 +229,7 @@ export function PermissionsSection() {
         open={confirmBypass}
         onOpenChange={setConfirmBypass}
         title="Allow Bypass mode?"
-        description="In Bypass, the agent edits files and runs commands without asking. Use it for throwaway copies or sandboxes, never on work you can't lose."
+        description="In Bypass, the agent edits files, runs commands and uses tools without asking, including deletes and writes outside the project. Use it in sandboxes or throwaway copies, never on work you can't lose. Deny rules still apply."
         confirmLabel="Allow Bypass"
         danger
         onConfirm={async () => {

@@ -28,6 +28,8 @@ export interface PermissionEnv {
   platform: NodeJS.Platform;
   home?: string;
   rules: RuleSet;
+  /** In Bypass, still ask before dangerous commands, writes outside the project and config changes (Settings → Permissions). */
+  bypassKeepsChecks?: boolean;
 }
 
 export interface Decision {
@@ -125,6 +127,9 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
     }
     if (query.mcp && !mcpReadOnly) return result('deny', planBlock);
   }
+
+  // Bypass runs everything without prompts (deny rules above still apply), unless the user kept the safety checks on.
+  if (env.mode === 'bypass' && !env.bypassKeepsChecks) return result('allow', 'Bypass mode.');
 
   if (dangerous) return result('ask', dangerous);
   if (outsideWrites.length > 0) return result('ask', 'Writes outside the project folder.');

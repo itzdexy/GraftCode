@@ -34,6 +34,10 @@ export interface ModelResolver {
 
 export interface SessionPreferences {
   webSearch: boolean;
+  /** Bypass is switched on in Settings: it joins the Shift+Tab cycle and /permissions. */
+  bypassEnabled: boolean;
+  /** See PermissionEnv.bypassKeepsChecks. */
+  bypassKeepsChecks: boolean;
   autoCompact: boolean;
   userName: string | null;
   defaultModel: ModelRef | null;
@@ -59,6 +63,8 @@ export interface SessionDeps {
   isTrusted(projectRoot: string): boolean;
   trust(projectRoot: string): void;
   preferences(): SessionPreferences;
+  /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
+  providerName(providerId: string): string;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
   /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
   checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
@@ -276,7 +282,8 @@ export class AgentSession {
   /** Shift+Tab: Ask → Auto-edit → Plan → Auto → Ask (Bypass is set explicitly only). */
   cyclePermissionMode(): PermissionMode {
     const current = this.summary.permissionMode;
-    const next = MODE_CYCLE[(MODE_CYCLE.indexOf(current) + 1) % MODE_CYCLE.length] ?? 'ask';
+    const cycle: PermissionMode[] = this.deps.preferences().bypassEnabled ? [...MODE_CYCLE, 'bypass'] : MODE_CYCLE;
+    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length] ?? 'ask';
     this.setPermissionMode(next);
     return next;
   }
@@ -394,7 +401,7 @@ export class AgentSession {
         const u = summary.usage;
         const cost = u.costUsd !== null ? ` · about $${u.costUsd.toFixed(4)}` : ' · cost unknown for this provider';
         this.commandOutput(
-          `Tokens this session: ${u.totals.inputTokens.toLocaleString()} input, ${u.totals.outputTokens.toLocaleString()} output, ${u.totals.cacheReadTokens.toLocaleString()} cache reads${cost}. Context: ${u.contextTokens.toLocaleString()} of ${u.contextLimit.toLocaleString()}.`
+          `Tokens this session: ${u.totals.inputTokens.toLocaleString()} input, ${u.totals.outputTokens.toLocaleString()} output, ${u.totals.cacheReadTokens.toLocaleString()} cache reads, ${u.totals.cacheWriteTokens.toLocaleString()} cache writes${cost}. Context: ${u.contextTokens.toLocaleString()} of ${u.contextLimit.toLocaleString()}.`
         );
         return null;
       }
@@ -410,7 +417,7 @@ export class AgentSession {
         return { text: reviewPrompt(slash.args), typed: item.text };
       case 'permissions': {
         const mode = slash.args as PermissionMode;
-        if (['ask', 'auto-edit', 'plan', 'auto'].includes(mode)) {
+        if ([...MODE_CYCLE, ...(this.deps.preferences().bypassEnabled ? ['bypass'] : [])].includes(mode)) {
           this.setPermissionMode(mode);
           this.commandOutput(`Permission mode set to ${mode}.`);
         } else {
@@ -459,8 +466,13 @@ export class AgentSession {
     return model.effort.levels.includes(wanted) ? wanted : model.effort.default;
   }
 
-  /** System prompt and tool list are built once and then kept stable. */
-  private async ensurePrompt(): Promise<{ system: string; toolNames: string[] }> {
+  /**
+   * System prompt and tool list are built once and then kept stable; a model
+   * switch rebuilds them (the provider cache is lost then anyway) so the
+   * prompt always names the model that is answering.
+   */
+  private async ensurePrompt(model: ModelInfo): Promise<{ system: string; toolNames: string[] }> {
+    const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
     const summary = this.summary;
     const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
     const builtins = summary.kind === 'code' ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__')) : [];
@@ -471,6 +483,7 @@ export class AgentSession {
         this.memory = new MemoryLoader(this.deps.graftHome, root, this.deps.platform);
         const git = await this.deps.gitInfo(this.workingDir());
         this.system = buildCodeSystemPrompt({
+          model: identity,
           cwd: this.workingDir(),
           projectRoot: root,
           platform: this.deps.platform,
@@ -484,7 +497,7 @@ export class AgentSession {
           mcpServers: this.deps.mcpServerNames(this.settingsRoot())
         });
       } else {
-        this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name: this.deps.preferences().userName });
+        this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name: this.deps.preferences().userName, model: identity });
       }
     }
     const key = `${this.system.length}:${toolNames.join(',')}`;
@@ -569,12 +582,15 @@ export class AgentSession {
 
       const { provider, model, ref } = await this.resolveModel(signal);
       const key = `${ref.providerId}:${ref.modelId}`;
-      if (this.modelKey !== null && this.modelKey !== key) this.markThinkingStale();
+      if (this.modelKey !== null && this.modelKey !== key) {
+        this.markThinkingStale();
+        this.system = null;
+      }
       this.modelKey = key;
       if (summary.kind === 'code' && !model.supportsTools) {
         throw new GraftError('model_no_tools', `${model.label} can't use tools, so it can't work on code. Pick a different model.`);
       }
-      const { system, toolNames } = await this.ensurePrompt();
+      const { system, toolNames } = await this.ensurePrompt(model);
       const effort = this.effortFor(model);
       const prefs = this.deps.preferences();
       const host = this.makeHost(model, provider, hooks, root, trusted);
@@ -681,7 +697,8 @@ export class AgentSession {
       mode: this.summary.permissionMode,
       projectRoot: root ?? this.workingDir(),
       platform: this.deps.platform,
-      rules
+      rules,
+      bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks
     };
   }
 
@@ -729,13 +746,14 @@ export class AgentSession {
         if (!this.deps.preferences().autoCompact || !shouldCompact(tokens, model.contextWindow)) return null;
         return this.compact('', signal);
       },
-      onUsage: (usage: Usage, contextTokens: number) => {
+      onUsage: (usage: Usage, contextTokens: number | null, costUsd: number | null) => {
         const current = this.summary.usage;
-        const cost =
-          model.pricing !== null
-            ? (current.costUsd ?? 0) + ((usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens) * model.pricing.input + usage.outputTokens * model.pricing.output) / 1_000_000
-            : current.costUsd;
-        const next = { totals: addUsage(current.totals, usage), contextTokens, contextLimit: model.contextWindow, costUsd: cost };
+        const next = {
+          totals: addUsage(current.totals, usage),
+          contextTokens: contextTokens ?? current.contextTokens,
+          contextLimit: contextTokens === null ? current.contextLimit : model.contextWindow,
+          costUsd: costUsd === null ? current.costUsd : (current.costUsd ?? 0) + costUsd
+        };
         this.deps.store.updateSession(this.id, { usage: next });
         this.emit({ type: 'usage', usage: next });
       },
@@ -844,7 +862,8 @@ export class AgentSession {
         else if (event.type === 'notice') this.emit(event);
       },
       maybeCompact: () => Promise.resolve(null),
-      onUsage: (usage, tokens) => parent.onUsage(usage, tokens)
+      // A subagent's spend counts toward the session; its context size isn't the conversation's.
+      onUsage: (usage, _tokens, costUsd) => parent.onUsage(usage, null, costUsd)
     };
     const result = await runAgentLoop(
       [{ role: 'user', content: [{ type: 'text', text: input.prompt }] }],

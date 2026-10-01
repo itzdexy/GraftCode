@@ -9,11 +9,16 @@ import { ProviderError } from './errors';
 import { GeminiProvider } from './gemini';
 import { OllamaProvider } from './ollama';
 import { OpenAiChatProvider } from './openaiChat';
+import { modelPricing, NATIVE_PRESET, type ProviderCatalog } from './presets';
 import type { LLMProvider, ProviderConnection } from './types';
 
-export type ProviderFactory = (connection: ProviderConnection, record: Pick<ProviderRecord, 'customModels'>) => LLMProvider;
+export type ProviderFactory = (
+  connection: ProviderConnection,
+  record: Pick<ProviderRecord, 'customModels'>,
+  catalog: ProviderCatalog | null
+) => LLMProvider;
 
-export const createProvider: ProviderFactory = (connection, record) => {
+export const createProvider: ProviderFactory = (connection, record, catalog) => {
   switch (connection.kind) {
     case 'anthropic':
       return new AnthropicProvider(connection);
@@ -24,7 +29,7 @@ export const createProvider: ProviderFactory = (connection, record) => {
     case 'openai':
     case 'openrouter':
     case 'openai-compatible':
-      return new OpenAiChatProvider({ ...connection, kind: connection.kind }, record.customModels);
+      return new OpenAiChatProvider({ ...connection, kind: connection.kind }, record.customModels, catalog);
   }
 };
 
@@ -64,6 +69,7 @@ export class ProviderRegistry {
   constructor(
     private readonly repo: ProvidersRepo,
     private readonly keys: KeyStore,
+    private readonly catalog: ProviderCatalog | null = null,
     private readonly factory: ProviderFactory = createProvider
   ) {}
 
@@ -71,6 +77,7 @@ export class ProviderRegistry {
     return this.repo.list().map((r) => ({
       id: r.id,
       kind: r.kind,
+      preset: r.preset,
       label: r.label,
       baseUrl: r.baseUrl,
       hasKey: this.keys.has(r.id),
@@ -81,16 +88,32 @@ export class ProviderRegistry {
     }));
   }
 
+  /** What the provider is called: its catalog name (e.g. "OpenRouter"), else the label the user gave it. */
+  providerName(providerId: string): string {
+    const record = this.repo.get(providerId);
+    if (!record) return providerId;
+    const presetName = record.preset ? this.catalog?.preset(record.preset)?.name : undefined;
+    if (presetName) return presetName;
+    return record.kind === 'openai-compatible' ? record.label : PROVIDER_KIND_INFO[record.kind].name;
+  }
+
+  /** Whether a provider needs a key: the catalog preset decides (local servers don't), else the kind. */
+  keyRequirement(kind: ProviderKind, preset: string | null): 'required' | 'optional' | 'none' {
+    const fromPreset = preset ? this.catalog?.preset(preset)?.key : undefined;
+    return fromPreset ?? PROVIDER_KIND_INFO[kind].key;
+  }
+
   get(providerId: string): LLMProvider {
     const record = this.repo.require(providerId);
-    const key = PROVIDER_KIND_INFO[record.kind].key === 'none' ? null : this.keys.get(providerId);
-    if (PROVIDER_KIND_INFO[record.kind].key === 'required' && !key) {
+    const requirement = this.keyRequirement(record.kind, record.preset);
+    const key = requirement === 'none' ? null : this.keys.get(providerId);
+    if (requirement === 'required' && !key) {
       throw new GraftError('missing_key', `${record.label} has no API key. Add one in Settings → Providers.`);
     }
-    const fingerprint = JSON.stringify([record.kind, record.baseUrl, key ? key.length : 0, key?.slice(-6) ?? '', record.customModels]);
+    const fingerprint = JSON.stringify([record.kind, record.preset, record.baseUrl, key ? key.length : 0, key?.slice(-6) ?? '', record.customModels]);
     const cached = this.instances.get(providerId);
     if (cached && cached.fingerprint === fingerprint) return cached.provider;
-    const provider = this.factory({ id: record.id, kind: record.kind, apiKey: key, baseUrl: record.baseUrl }, record);
+    const provider = this.factory({ id: record.id, kind: record.kind, preset: record.preset, apiKey: key, baseUrl: record.baseUrl }, record, this.catalog);
     this.instances.set(providerId, { fingerprint, provider });
     return provider;
   }
@@ -103,9 +126,22 @@ export class ProviderRegistry {
   async listModels(providerId: string, options: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<ModelInfo[]> {
     const hit = this.cache.get(providerId);
     if (hit && !options.refresh && Date.now() - hit.at < MODEL_CACHE_MS) return hit.models;
-    const models = await this.get(providerId).listModels(options.signal);
+    const listed = await this.get(providerId).listModels(options.signal);
+    const models = this.withCatalogPricing(providerId, listed);
     this.cache.set(providerId, { at: Date.now(), models });
     return models;
+  }
+
+  /** Fills in prices the provider's own list doesn't report (Anthropic, Gemini) from the catalog. */
+  private withCatalogPricing(providerId: string, models: ModelInfo[]): ModelInfo[] {
+    const record = this.repo.get(providerId);
+    const preset = record ? (record.preset ?? NATIVE_PRESET[record.kind] ?? null) : null;
+    if (!preset || !this.catalog) return models;
+    return models.map((m) => {
+      if (m.pricing) return m;
+      const known = modelPricing(this.catalog?.model(preset, m.ref.modelId)?.pricing ?? null);
+      return known ? { ...m, pricing: known } : m;
+    });
   }
 
   /** Models for every enabled provider; one failing provider doesn't hide the others. */
@@ -133,13 +169,14 @@ export class ProviderRegistry {
 
   /** Verifies unsaved credentials with a real list-models call. Never throws. */
   async verifyDraft(
-    draft: { kind: ProviderKind; baseUrl: string | null; apiKey: string | null },
+    draft: { kind: ProviderKind; preset: string | null; baseUrl: string | null; apiKey: string | null },
     signal?: AbortSignal
   ): Promise<VerifyResult> {
     try {
       const provider = this.factory(
-        { id: 'verify', kind: draft.kind, apiKey: draft.apiKey, baseUrl: normalizeBaseUrl(draft.baseUrl) },
-        { customModels: [] }
+        { id: 'verify', kind: draft.kind, preset: draft.preset, apiKey: draft.apiKey, baseUrl: normalizeBaseUrl(draft.baseUrl) },
+        { customModels: [] },
+        this.catalog
       );
       const models = await provider.listModels(signal);
       return { ok: true, modelCount: models.length };

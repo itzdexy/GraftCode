@@ -41,6 +41,8 @@ export interface HarnessOptions {
   worktreeDir?: string;
   /** Which project folders count as trusted (default: all). */
   trusted?: (root: string) => boolean;
+  /** Bypass switched on in Settings. */
+  bypassEnabled?: boolean;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -91,6 +93,7 @@ export function makeHarness(options: HarnessOptions): Harness {
         return Promise.resolve({ provider, model: found });
       }
     },
+    providerName: () => 'Fake Provider',
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],
     mcpServerNames: () => [],
@@ -103,7 +106,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
-    preferences: () => ({ webSearch: false, autoCompact: options.autoCompact ?? true, userName: 'Tester', defaultModel: model.ref, defaultEffort: 'medium' }),
+    preferences: () => ({ webSearch: false, bypassEnabled: options.bypassEnabled ?? false, bypassKeepsChecks: false, autoCompact: options.autoCompact ?? true, userName: 'Tester', defaultModel: model.ref, defaultEffort: 'medium' }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),
     emit: (_id, event) => {

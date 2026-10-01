@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ChevronDown, Clipboard, EllipsisVertical, FileDown, FolderOpen, Ghost, History, Laptop, ListChecks, Shrink } from 'lucide-react';
+import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FolderOpen, Ghost, History, Laptop, ListChecks, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../../components/Menu';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuSwitchItem, MenuTrigger } from '../../components/Menu';
 import { invoke } from '../../lib/ipc';
+import { useShortcutLabel } from '../../lib/shortcuts';
+import { usePower } from '../../stores/power';
 import { reportError, useToasts } from '../../stores/toasts';
 import { exportSession, renameSession } from '../shell/sessionActions';
 import { SessionMenuItems } from '../shell/SessionMenu';
@@ -104,14 +106,18 @@ interface CodeHeaderProps {
   onCompact: () => void;
   onRewind: (() => void) | null;
   onShowTasks: () => void;
+  onToggleFiles: () => void;
   busy: boolean;
   /** Panel toggles (terminal, changes, browser) placed before the menu. */
   panels?: ReactNode;
 }
 
 /** Code session header in the titlebar row: environment, title menu, project chip, panels and more. */
-export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, busy, panels }: CodeHeaderProps) {
+export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, onToggleFiles, busy, panels }: CodeHeaderProps) {
   const folder = summary.worktreePath ?? summary.cwd;
+  const filesLabel = useShortcutLabel('toggleFiles');
+  const keepAwake = usePower((s) => s.keepAwake?.includes(summary.id) ?? false);
+  useEffect(() => usePower.getState().load(), []);
   return (
     <ViewHeader
       actions={
@@ -119,7 +125,7 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, b
           {panels}
           <Menu>
             <MenuTrigger asChild>
-              <IconButton label="More">
+              <IconButton label="More actions">
                 <EllipsisVertical className="size-16" />
               </IconButton>
             </MenuTrigger>
@@ -133,10 +139,23 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, b
                 </MenuItem>
               ) : null}
               {folder ? (
+                <MenuItem icon={<Files className="size-14" />} shortcut={filesLabel} onSelect={onToggleFiles}>
+                  Files
+                </MenuItem>
+              ) : null}
+              {folder ? (
                 <MenuItem icon={<ListChecks className="size-14" />} onSelect={onShowTasks}>
                   Background tasks
                 </MenuItem>
               ) : null}
+              <MenuSwitchItem
+                icon={<Coffee className="size-14" />}
+                checked={keepAwake}
+                onCheckedChange={(on) => usePower.getState().setKeepAwake(summary.id, on)}
+                description="Only for this session, while it works"
+              >
+                Keep computer awake
+              </MenuSwitchItem>
               <MenuSeparator />
               {folder ? (
                 <MenuItem

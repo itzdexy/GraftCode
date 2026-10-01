@@ -23,7 +23,8 @@ export const SHORTCUT_IDS = [
   'focusComposer',
   'interrupt',
   'cyclePermissionMode',
-  'openSettings'
+  'openSettings',
+  'toggleFiles'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -37,7 +38,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   focusComposer: 'Ctrl+L',
   interrupt: 'Escape',
   cyclePermissionMode: 'Shift+Tab',
-  openSettings: 'Ctrl+,'
+  openSettings: 'Ctrl+,',
+  toggleFiles: 'Ctrl+Shift+F'
 };
 
 export const OnboardingStepSchema = z.enum(['name', 'avatar', 'provider', 'key', 'defaults', 'done']);
@@ -49,6 +51,8 @@ export const AppSettingsSchema = z.object({
     step: OnboardingStepSchema,
     /** Provider chosen on the provider step, carried to the key step. */
     providerKind: z.string().nullable(),
+    /** Catalog preset chosen with it (null for a custom endpoint). */
+    providerPreset: z.string().nullable(),
     providerId: z.string().nullable()
   }),
   appearance: z.object({
@@ -73,6 +77,8 @@ export const AppSettingsSchema = z.object({
   behavior: z.object({
     runInTray: z.boolean(),
     bypassModeEnabled: z.boolean(),
+    /** Bypass still asks before dangerous commands, writes outside the project and config changes. */
+    bypassKeepsChecks: z.boolean(),
     autoCompact: z.boolean(),
     webSearch: z.boolean()
   }),
@@ -90,11 +96,11 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
-  onboarding: { step: 'name', providerKind: null, providerId: null },
+  onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
   appearance: { theme: 'system', uiFontSize: 13, codeFontSize: 13, reducedMotion: false },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, autoCompact: true, webSearch: true },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true },
   security: { allowPlaintextKeys: false },
   updates: { enabled: false },
   shortcuts: { ...DEFAULT_SHORTCUTS },

@@ -81,13 +81,17 @@ describe('terminals', () => {
     }
     expect(joined()).toMatch(/pty-42/);
     expect(joined()).toMatch(/marker-file\.txt/);
-    // Offsets are contiguous, and the snapshot ends where the stream is.
+    // Offsets are contiguous. The snapshot holds everything produced so far, including
+    // output still waiting in the batch, so it can run ahead of the emitted chunks.
     let expected = 0;
     for (const c of chunks) {
       expect(c.offset).toBe(expected);
       expected += c.data.length;
     }
-    expect(manager.snapshot(term.id)).toEqual({ data: joined(), end: expected });
+    const snap = manager.snapshot(term.id);
+    expect(snap.data.startsWith(joined())).toBe(true);
+    expect(snap.end).toBe(snap.data.length);
+    expect(snap.end).toBeGreaterThanOrEqual(expected);
     expect(manager.list('s1')).toHaveLength(1);
     await manager.kill(term.id);
     expect(manager.list('s1')).toHaveLength(0);

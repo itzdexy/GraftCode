@@ -10,6 +10,7 @@ import { DiffStatsCache } from '../git/diffStats';
 import { runGit } from '../git/git';
 import { SettingsStore } from '../permissions/settingsStore';
 import { ProviderRegistry } from '../providers/registry';
+import { ProviderCatalog } from '../providers/presets';
 import { KeyStore, type Encryptor } from '../secrets/keyStore';
 import { AppSettingsService } from '../settings/appSettings';
 import { createBuiltinRegistry, findRipgrep } from '../tools/builtin';
@@ -27,6 +28,7 @@ export interface Services {
   keys: KeyStore;
   providers: ProvidersRepo;
   registry: ProviderRegistry;
+  catalog: ProviderCatalog;
   projects: ProjectsRepo;
   sessionsRepo: SessionsRepo;
   checkpoints: CheckpointService;
@@ -64,6 +66,8 @@ export async function initServices(options: {
   paths: GraftPaths;
   encryptor: Encryptor;
   onProgress: ProgressFn;
+  /** Provider and model catalog shipped with the app (resources/catalog/models.json). */
+  catalogFile?: string | null;
 }): Promise<Services> {
   const { paths, onProgress } = options;
   const total = 6;
@@ -101,6 +105,7 @@ export async function initServices(options: {
   const [ghPath, codePath] = await Promise.all([locate('gh'), locate('code')]);
   const settings = new AppSettingsService(db);
   const keys = new KeyStore(db, options.encryptor, () => settings.get().security.allowPlaintextKeys);
+  const catalog = new ProviderCatalog(options.catalogFile ?? null, (message) => log.warn('providers', message));
   const providers = new ProvidersRepo(db);
   const services: Services = {
     paths,
@@ -108,7 +113,8 @@ export async function initServices(options: {
     settings,
     keys,
     providers,
-    registry: new ProviderRegistry(providers, keys),
+    registry: new ProviderRegistry(providers, keys, catalog),
+    catalog,
     projects: new ProjectsRepo(db),
     sessionsRepo: new SessionsRepo(db),
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),

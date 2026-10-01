@@ -1,4 +1,5 @@
 import type { Usage } from '@shared/schemas/common';
+import type { ModelInfo } from '@shared/schemas/models';
 import type { LlmMessage } from '@shared/schemas/messages';
 
 /** Rough per-image cost used by estimates (providers charge ~1–1.6K tokens for typical screenshots). */
@@ -45,6 +46,18 @@ export function estimateMessagesTokens(messages: LlmMessage[]): number {
 /** Tokens occupying the context after a response: everything sent plus what came back. */
 export function contextTokens(usage: Usage): number {
   return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens;
+}
+
+/** Estimated USD for one response, or null when the model has no published prices. */
+export function usageCost(pricing: ModelInfo['pricing'], usage: Usage): number | null {
+  if (!pricing) return null;
+  return (
+    (usage.inputTokens * pricing.input +
+      usage.cacheReadTokens * (pricing.cacheRead ?? pricing.input) +
+      usage.cacheWriteTokens * (pricing.cacheWrite ?? pricing.input) +
+      usage.outputTokens * pricing.output) /
+    1_000_000
+  );
 }
 
 /** Automatic compaction starts once the context passes this share of the window. */
