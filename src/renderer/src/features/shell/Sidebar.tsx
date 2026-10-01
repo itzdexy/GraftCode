@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight, FolderClosed, Plus, Search, Shapes, SlidersHorizontal } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
@@ -164,16 +164,22 @@ export function Sidebar() {
   const sessions = useMemo(() => visibleSessions(Object.values(summaries), mode, filter, now), [summaries, mode, filter, now]);
   const activeId = route.name === 'session' ? route.id : null;
 
-  const nav: NavEntry[] = [
-    {
-      id: 'new',
-      label: 'New',
-      icon: <Plus className="size-14" />,
-      route: { name: 'home' },
-      isActive: (r) => r.name === 'home',
-      onSelect: startNew
-    }
-  ];
+  const moreOpen = useUi((s) => s.moreOpen);
+  const entry = (id: 'projects' | 'artifacts' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
+    id,
+    label,
+    icon,
+    route: { name: id },
+    isActive: (r) => r.name === id
+  });
+  const projectsEntry = entry('projects', 'Projects', <FolderClosed className="size-14" />);
+  const artifactsEntry = entry('artifacts', 'Artifacts', <Shapes className="size-14" />);
+  const scheduledEntry = entry('scheduled', 'Scheduled', <CalendarClock className="size-14" />);
+  const customizeEntry = entry('customize', 'Customize', <SlidersHorizontal className="size-14" />);
+  const newEntry: NavEntry = { id: 'new', label: 'New', icon: <Plus className="size-14" />, route: { name: 'home' }, isActive: (r) => r.name === 'home', onSelect: startNew };
+  // Chat mode shows everything; Code mode keeps the list short and folds the rest under More.
+  const nav: NavEntry[] = mode === 'chat' ? [newEntry, projectsEntry, artifactsEntry, scheduledEntry, customizeEntry] : [newEntry, artifactsEntry, customizeEntry];
+  const more: NavEntry[] = mode === 'chat' ? [] : [projectsEntry, scheduledEntry];
 
   const commitWidth = (next: number): void => {
     useApp
@@ -189,9 +195,27 @@ export function Sidebar() {
       </div>
       <nav aria-label="Main" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-8 pb-12">
         <ul className="flex flex-col">
-          {nav.map((entry) => (
-            <NavRow key={entry.id} entry={entry} active={entry.isActive(route)} />
+          {nav.map((e) => (
+            <NavRow key={e.id} entry={e} active={e.isActive(route)} />
           ))}
+          {more.length > 0 ? (
+            <li>
+              <button
+                type="button"
+                aria-expanded={moreOpen || more.some((e) => e.isActive(route))}
+                onClick={() => useUi.getState().setMoreOpen(!moreOpen)}
+                className="mx-[var(--g-sidebar-inset)] flex h-[var(--g-nav-row-height)] w-[calc(100%-2*var(--g-sidebar-inset))] items-center gap-8 rounded-md px-6 text-left text-base text-fg-muted transition-ui hover:bg-sidebar-hover hover:text-fg-secondary"
+              >
+                <span className="flex size-14 shrink-0 items-center justify-center text-icon-muted">
+                  {moreOpen || more.some((e) => e.isActive(route)) ? <ChevronDown className="size-14" /> : <ChevronRight className="size-14" />}
+                </span>
+                More
+              </button>
+            </li>
+          ) : null}
+          {moreOpen || more.some((e) => e.isActive(route))
+            ? more.map((e) => <NavRow key={e.id} entry={e} active={e.isActive(route)} />)
+            : null}
         </ul>
         {loaded ? (
           mode === 'chat' ? (

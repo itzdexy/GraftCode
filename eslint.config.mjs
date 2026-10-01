@@ -49,7 +49,7 @@ export default defineConfig(
     languageOptions: { globals: globals.node }
   },
   {
-    files: ['scripts/**/*.mjs', 'tests/support/*.mjs', 'eslint.config.mjs'],
+    files: ['scripts/**/*.mjs', 'tests/support/*.mjs', 'tests/fixtures/*.mjs', 'eslint.config.mjs'],
     extends: [tseslint.configs.disableTypeChecked]
   },
   {

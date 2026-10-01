@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { GraftError } from '@shared/errors';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { EffortLevel, ModelRef, PermissionMode } from '@shared/schemas/common';
-import { textOf, type ImageBlock, type StoredMessage } from '@shared/schemas/messages';
+import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from '@shared/schemas/messages';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { RewindMode, RewindPreview, RewindResult } from '@shared/schemas/rewind';
 import type { SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
@@ -27,8 +27,10 @@ import { AgentSession, type SessionDeps } from './session';
 import { generateTitle, titleModel } from './title';
 
 export interface McpToolSource {
-  toolNames(): string[];
-  serverNames(): string[];
+  toolNames(projectRoot: string | null): string[];
+  serverNames(projectRoot: string | null): string[];
+  /** Connects a trusted project's own servers (no-op for untrusted projects). */
+  useProject(root: string, trusted: boolean): Promise<void>;
 }
 
 export interface SessionManagerDeps {
@@ -109,8 +111,8 @@ export class SessionManager {
         resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) })
       },
       tools: d.tools,
-      mcpToolNames: () => d.mcp?.toolNames() ?? [],
-      mcpServerNames: () => d.mcp?.serverNames() ?? [],
+      mcpToolNames: (root) => d.mcp?.toolNames(root) ?? [],
+      mcpServerNames: (root) => d.mcp?.serverNames(root) ?? [],
       shells: d.shells,
       shellLabel: d.shell.label,
       settings: d.settingsFiles,
@@ -200,6 +202,13 @@ export class SessionManager {
     const summary = store.getSummary(id);
     const session = new AgentSession(summary, this.sessionDeps(store));
     this.live.set(id, session);
+    const mcp = this.deps.mcp;
+    if (mcp && summary.kind === 'code' && summary.projectPath) {
+      const trusted = this.deps.projects.findByPath(summary.projectPath)?.trusted ?? false;
+      mcp.useProject(summary.projectPath, trusted).catch((error: unknown) =>
+        this.deps.log('warn', 'Could not start the project MCP servers', { message: (error as Error).message })
+      );
+    }
     return session;
   }
 
@@ -296,14 +305,15 @@ export class SessionManager {
 
   private afterCreate(summary: SessionSummary, input: CreateSessionInput): SessionSummary {
     this.deps.emitSummary(summary);
-    if (input.message && (input.message.text.trim().length > 0 || input.message.images.length > 0)) {
-      this.get(summary.id).send(input.message.text, input.message.images);
+    const m = input.message;
+    if (m && (m.text.trim().length > 0 || m.images.length > 0 || m.files.length > 0)) {
+      this.get(summary.id).send(m.text, m.images, m.files);
     }
     return this.summaryOf(summary.id);
   }
 
-  send(id: string, text: string, images: ImageBlock[]): { queued: boolean } {
-    return this.get(id).send(text, images);
+  send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = []): { queued: boolean } {
+    return this.get(id).send(text, images, files);
   }
 
   interrupt(id: string): void {

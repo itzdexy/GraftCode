@@ -11,8 +11,20 @@ import {
 } from '../schemas/app';
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
+import { HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
+import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
+import {
+  CommandFileSchema,
+  CustomScopeSchema,
+  McpServerInputSchema,
+  McpServerNameSchema,
+  McpServerViewSchema,
+  MemoryInfoSchema,
+  ScopedHooksSchema,
+  SkillFileSchema
+} from '../schemas/customize';
 import { BackgroundShellSchema, BoundsSchema, FilePreviewSchema, TerminalInfoSchema, TreeEntrySchema } from '../schemas/panels';
-import { ImageBlockSchema } from '../schemas/messages';
+import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
 import { CustomModelSchema, ModelInfoSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
@@ -57,7 +69,9 @@ export const CreateSessionInputSchema = z.object({
   effort: EffortLevelSchema.nullable(),
   permissionMode: PermissionModeSchema.nullable(),
   incognito: z.boolean(),
-  message: z.object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20) }).nullable()
+  message: z
+    .object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) })
+    .nullable()
 });
 export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
 
@@ -156,7 +170,7 @@ export const contracts = {
   'sessions:create': channel(CreateSessionInputSchema, SessionSummarySchema),
   'sessions:get': channel(z.object({ id: IdSchema }), SessionDetailSchema),
   'sessions:send': channel(
-    z.object({ id: IdSchema, text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20) }),
+    z.object({ id: IdSchema, text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) }),
     z.object({ queued: z.boolean() })
   ),
   'sessions:interrupt': channel(z.object({ id: IdSchema }), Ok),
@@ -205,7 +219,61 @@ export const contracts = {
   'shells:clear': channel(z.object({ sessionId: IdSchema }), z.object({ removed: z.number().int() })),
   'browser:navigate': channel(z.object({ url: z.string().min(1).max(4096) }), z.object({ url: z.string() })),
   'browser:bounds': channel(z.object({ bounds: BoundsSchema.nullable() }), Void),
-  'browser:command': channel(z.object({ command: z.enum(['back', 'forward', 'reload', 'stop', 'close', 'external']) }), Void)
+  'browser:command': channel(z.object({ command: z.enum(['back', 'forward', 'reload', 'stop', 'close', 'external']) }), Void),
+
+  // Customize
+  'customize:commands': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(CommandFileSchema)),
+  'customize:saveCommand': channel(
+    z.object({
+      scope: CustomScopeSchema,
+      projectPath: PathSchema.nullable(),
+      name: z.string().min(1).max(64),
+      description: z.string().max(300),
+      argumentHint: z.string().max(120).nullable(),
+      body: z.string().max(200_000),
+      previousPath: PathSchema.nullable()
+    }),
+    z.object({ path: z.string() })
+  ),
+  'customize:deleteCommand': channel(z.object({ projectPath: PathSchema.nullable(), path: PathSchema }), Ok),
+  'customize:skills': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SkillFileSchema)),
+  'customize:saveSkill': channel(
+    z.object({
+      scope: CustomScopeSchema,
+      projectPath: PathSchema.nullable(),
+      name: z.string().min(1).max(64),
+      description: z.string().max(500),
+      body: z.string().max(200_000),
+      previousPath: PathSchema.nullable()
+    }),
+    z.object({ path: z.string() })
+  ),
+  'customize:deleteSkill': channel(z.object({ projectPath: PathSchema.nullable(), path: PathSchema }), Ok),
+  'customize:memory': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(MemoryInfoSchema)),
+  'customize:saveMemory': channel(z.object({ scope: CustomScopeSchema, projectPath: PathSchema.nullable(), content: z.string().max(200_000) }), z.object({ path: z.string() })),
+  'customize:hooks': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(ScopedHooksSchema)),
+  'customize:saveHooks': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), hooks: HooksConfigSchema }), Ok),
+  'mcp:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(McpServerViewSchema)),
+  'mcp:save': channel(
+    z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema, previousName: McpServerNameSchema.nullable(), config: McpServerInputSchema }),
+    Ok
+  ),
+  'mcp:remove': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema }), Ok),
+  'mcp:setEnabled': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema, enabled: z.boolean() }), Ok),
+  'mcp:reconnect': channel(z.object({ name: McpServerNameSchema }), Ok),
+  'mcp:authorize': channel(z.object({ name: McpServerNameSchema }), Ok),
+
+  // Artifacts & schedules
+  'artifacts:list': channel(Void, z.array(ArtifactSchema)),
+  'artifacts:read': channel(z.object({ path: PathSchema }), ArtifactTextSchema),
+  'artifacts:previewUrl': channel(z.object({ path: PathSchema }), z.object({ url: z.string() })),
+  'schedules:list': channel(Void, z.array(ScheduleSchema)),
+  'schedules:save': channel(z.object({ id: IdSchema.nullable(), schedule: ScheduleInputSchema }), ScheduleSchema),
+  'schedules:setEnabled': channel(z.object({ id: IdSchema, enabled: z.boolean() }), ScheduleSchema),
+  'schedules:delete': channel(z.object({ id: IdSchema }), Ok),
+  'schedules:runNow': channel(z.object({ id: IdSchema }), ScheduleRunSchema),
+  'schedules:runs': channel(z.object({ id: IdSchema }), z.array(ScheduleRunSchema)),
+  'schedules:describe': channel(z.object({ cron: z.string().max(200) }), z.object({ description: z.string(), next: z.number().int().nullable(), error: z.string().nullable() }))
 };
 
 export type Contracts = typeof contracts;

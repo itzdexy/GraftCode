@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, nativeTheme, safeStorage } from 'electron';
+import { app, BrowserWindow, nativeTheme, protocol, safeStorage } from 'electron';
 import type { AppInfo } from '@shared/ipc/contracts';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
@@ -15,11 +15,18 @@ import { initServices, type Services } from './app/services';
 import { buildHandlers } from './ipc/handlers';
 import { installRouter, missingHandlers, registerHandlers } from './ipc/router';
 import { PtyManager } from './pty/ptyManager';
+import { McpManager } from './mcp/mcpManager';
+import { ARTIFACT_SCHEME, ArtifactServer } from './artifacts/artifacts';
+import { Scheduler } from './schedule/scheduler';
+import { openExternalSafely } from './app/security';
 
 // Test and E2E runs isolate all state before anything touches userData.
 if (process.env.GRAFT_USER_DATA_DIR) {
   app.setPath('userData', path.resolve(process.env.GRAFT_USER_DATA_DIR));
 }
+
+// Artifact previews are served from their own privileged, sandboxed scheme.
+protocol.registerSchemesAsPrivileged([{ scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
 const paths = buildPaths(app.getPath('userData'));
 configureLogFile(paths.logs);
@@ -29,6 +36,9 @@ let mainWindow: MainWindowHandle | null = null;
 let servicesPromise: Promise<Services> | null = null;
 let sessionManager: SessionManager | null = null;
 let ptyManager: PtyManager | null = null;
+let mcpManager: McpManager | null = null;
+let scheduler: Scheduler | null = null;
+const artifactServer = new ArtifactServer();
 let browserPanel: BrowserPanel | null = null;
 let quitting = false;
 
@@ -74,6 +84,12 @@ function services(): Promise<Services> {
     .then((s) => {
       s.shells.on('change', (sessionId: string) => emit({ type: 'shells:changed', sessionId }));
       s.shells.on('error-log', (message: string) => log.warn('shell', message));
+      // Scheduled sessions run while the app is open.
+      queueMicrotask(() => {
+        schedules()
+          .then((sch) => sch.start())
+          .catch((error: unknown) => log.error('schedule', 'Could not start the scheduler', { message: (error as Error).message }));
+      });
       return s;
     })
     .catch((error: unknown) => {
@@ -95,6 +111,42 @@ async function ptys(): Promise<PtyManager> {
   return ptyManager;
 }
 
+async function schedules(): Promise<Scheduler> {
+  if (scheduler) return scheduler;
+  const s = await services();
+  scheduler ??= new Scheduler({
+    db: s.db,
+    start: async (schedule) => {
+      const manager = await sessions();
+      const model = schedule.providerId && schedule.modelId ? { providerId: schedule.providerId, modelId: schedule.modelId } : null;
+      const summary = await manager.create({
+        kind: 'code',
+        projectPath: schedule.projectPath,
+        useWorktree: false,
+        branch: null,
+        model,
+        effort: schedule.effort,
+        permissionMode: schedule.permissionMode,
+        incognito: false,
+        message: { text: schedule.prompt, images: [], files: [] }
+      });
+      manager.rename(summary.id, `${schedule.name} · ${new Date().toLocaleString()}`);
+      return summary.id;
+    },
+    sessionStatus: (id) => {
+      try {
+        return sessionManager?.summary(id).status ?? null;
+      } catch (error) {
+        log.info('schedule', 'Run session is gone', { message: (error as Error).message });
+        return null;
+      }
+    },
+    onChange: () => emit({ type: 'schedules:changed' }),
+    log: (level, message, fields) => log[level]('schedule', message, fields)
+  });
+  return scheduler;
+}
+
 function browser(): BrowserPanel {
   const win = mainWindow?.window;
   if (!win) throw new Error('The window is closed.');
@@ -102,9 +154,28 @@ function browser(): BrowserPanel {
   return browserPanel;
 }
 
+async function mcp(): Promise<McpManager> {
+  if (mcpManager) return mcpManager;
+  const s = await services();
+  if (!mcpManager) {
+    mcpManager = new McpManager({
+      settings: s.settingsFiles,
+      registry: s.tools,
+      keys: s.keys,
+      openBrowser: (url) => openExternalSafely(url),
+      log: (level, message, fields) => log[level]('mcp', message, fields),
+      onChange: () => emit({ type: 'mcp:changed' })
+    });
+    // User-scope servers connect right away; failures show in Customize.
+    mcpManager.sync().catch((error: unknown) => log.warn('mcp', 'Could not start MCP servers', { message: (error as Error).message }));
+  }
+  return mcpManager;
+}
+
 async function sessions(): Promise<SessionManager> {
   if (sessionManager) return sessionManager;
   const s = await services();
+  const m = await mcp();
   sessionManager ??= new SessionManager({
     repo: s.sessionsRepo,
     projects: s.projects,
@@ -117,7 +188,7 @@ async function sessions(): Promise<SessionManager> {
     checkpoints: s.checkpoints,
     paths: s.paths,
     rgPath: s.rgPath,
-    mcp: null,
+    mcp: m,
     emitEvent: (sessionId, event) => emit({ type: 'session:event', sessionId, event }),
     emitSummary: (summary) => emit({ type: 'session:summary', summary }),
     emitRemoved: (sessionId) => emit({ type: 'session:removed', sessionId }),
@@ -150,8 +221,10 @@ function openMainWindow(): void {
 
 async function shutdown(): Promise<void> {
   try {
+    scheduler?.stop();
     browserPanel?.close();
     await ptyManager?.disposeAll();
+    await mcpManager?.disposeAll();
     await sessionManager?.disposeAll();
     if (servicesPromise) {
       const s = await servicesPromise;
@@ -192,6 +265,9 @@ if (!gotLock) {
       services,
       sessions,
       ptys,
+      mcp,
+      scheduler: schedules,
+      artifacts: artifactServer,
       browser,
       window: () => mainWindow?.window ?? null,
       emit,
@@ -206,6 +282,7 @@ if (!gotLock) {
       const handle = mainWindow;
       return handle !== null && contents.id === handle.window.webContents.id && handle.isAppUrl(frameUrl);
     });
+    protocol.handle(ARTIFACT_SCHEME, (request) => artifactServer.respond(request.url));
     const missing = missingHandlers();
     if (missing.length > 0) log.warn('ipc', 'Channels without handlers', { channels: missing.join(',') });
     openMainWindow();

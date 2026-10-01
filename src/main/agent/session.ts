@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode, type Usage } from '@shared/schemas/common';
-import { type ContentBlock, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
+import { type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -46,8 +46,9 @@ export interface SessionDeps {
   retryPolicy?: RetryPolicy;
   models: ModelResolver;
   tools: ToolRegistry;
-  mcpToolNames(): string[];
-  mcpServerNames(): string[];
+  /** MCP tools/servers visible to a session in this project (user servers plus the project's own). */
+  mcpToolNames(projectRoot: string | null): string[];
+  mcpServerNames(projectRoot: string | null): string[];
   shells: ShellManager;
   shellLabel: string;
   settings: SettingsStore;
@@ -72,6 +73,7 @@ interface InternalQueued {
   id: string;
   text: string;
   images: ImageBlock[];
+  files: FileAttachment[];
   createdAt: number;
 }
 
@@ -144,7 +146,7 @@ export class AgentSession {
   }
 
   private publicQueue(): QueuedInput[] {
-    return this.queue.map((q) => ({ id: q.id, text: q.text, imageCount: q.images.length, createdAt: q.createdAt }));
+    return this.queue.map((q) => ({ id: q.id, text: q.text, attachmentCount: q.images.length + q.files.length, createdAt: q.createdAt }));
   }
 
   // ---- events -------------------------------------------------------------
@@ -197,11 +199,11 @@ export class AgentSession {
   // ---- public controls ----------------------------------------------------
 
   /** Sends user input, or queues it while a turn is running. */
-  send(text: string, images: ImageBlock[] = []): { queued: boolean } {
+  send(text: string, images: ImageBlock[] = [], files: FileAttachment[] = []): { queued: boolean } {
     if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
     const trimmed = text.trim();
-    if (trimmed.length === 0 && images.length === 0) throw new GraftError('empty_message', 'Type a message first.');
-    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, createdAt: Date.now() };
+    if (trimmed.length === 0 && images.length === 0 && files.length === 0) throw new GraftError('empty_message', 'Type a message first.');
+    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, files, createdAt: Date.now() };
     if (this.running) {
       this.queue.push(item);
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -238,7 +240,7 @@ export class AgentSession {
     const rule = pending.request.suggestedRule;
     if ((response.decision === 'allow-session' || response.decision === 'allow-always') && rule) this.sessionAllow.push(rule);
     if (response.decision === 'allow-always' && rule) {
-      const root = this.projectRoot();
+      const root = this.settingsRoot();
       if (root) {
         this.deps.trust(root);
         this.deps.settings.addRule('local', root, 'allow', rule).catch((error: unknown) => {
@@ -318,7 +320,7 @@ export class AgentSession {
 
   compactNow(instructions: string): void {
     if (this.running) throw new GraftError('busy', 'Wait for the current turn to finish, or stop it first.');
-    this.start({ id: randomUUID(), text: `/compact ${instructions}`.trim(), images: [], createdAt: Date.now() });
+    this.start({ id: randomUUID(), text: `/compact ${instructions}`.trim(), images: [], files: [], createdAt: Date.now() });
   }
 
   async dispose(): Promise<void> {
@@ -351,9 +353,19 @@ export class AgentSession {
     while (this.running) await this.running;
   }
 
+  /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
   private projectRoot(): string | null {
     const s = this.summary;
     return s.worktreePath ?? s.projectPath ?? s.cwd ?? null;
+  }
+
+  /**
+   * The project's main folder: where trust is recorded and where project and
+   * local settings live. A worktree session shares its project's settings.
+   */
+  private settingsRoot(): string | null {
+    const s = this.summary;
+    return s.projectPath ?? this.projectRoot();
   }
 
   private workingDir(): string {
@@ -450,7 +462,7 @@ export class AgentSession {
   /** System prompt and tool list are built once and then kept stable. */
   private async ensurePrompt(): Promise<{ system: string; toolNames: string[] }> {
     const summary = this.summary;
-    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames() : [];
+    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
     const builtins = summary.kind === 'code' ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__')) : [];
     const toolNames = [...builtins, ...mcpTools];
     if (!this.system) {
@@ -469,7 +481,7 @@ export class AgentSession {
           memory: this.memory.initial(this.workingDir()),
           skills: loadSkills(this.deps.graftHome, root),
           webSearch: this.deps.preferences().webSearch,
-          mcpServers: this.deps.mcpServerNames()
+          mcpServers: this.deps.mcpServerNames(this.settingsRoot())
         });
       } else {
         this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name: this.deps.preferences().userName });
@@ -506,8 +518,9 @@ export class AgentSession {
     try {
       const summary = this.summary;
       const root = this.projectRoot();
-      const trusted = root ? this.deps.isTrusted(root) : false;
-      const hooks = summary.kind === 'code' ? this.deps.hooks(root, trusted) : null;
+      const settingsRoot = this.settingsRoot();
+      const trusted = settingsRoot ? this.deps.isTrusted(settingsRoot) : false;
+      const hooks = summary.kind === 'code' ? this.deps.hooks(settingsRoot, trusted) : null;
 
       let userText: string | null = null;
       if (item) {
@@ -534,6 +547,9 @@ export class AgentSession {
         }
         const content: ContentBlock[] = [...this.notes.map((text) => ({ type: 'text' as const, text })), ...item.images];
         if (userText.length > 0) content.push({ type: 'text', text: userText });
+        for (const file of item.files) {
+          content.push({ type: 'text', text: `<attached-file name="${file.name.replace(/"/g, "'")}">\n${file.content}\n</attached-file>` });
+        }
         if (summary.kind === 'code' && root && userText.includes('@')) {
           const mentions = expandMentions(userText, this.workingDir(), root, this.deps.platform);
           for (const block of mentions.blocks) content.push({ type: 'text', text: block });
@@ -541,7 +557,12 @@ export class AgentSession {
         }
         this.notes = [];
         // The transcript shows what was typed; notes and attachments travel only to the model.
-        const meta: MessageMeta = { turnId, typed: handled.typed ?? item.text, ...(checkpointId ? { checkpointId } : {}) };
+        const meta: MessageMeta = {
+          turnId,
+          typed: handled.typed ?? item.text,
+          ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}),
+          ...(checkpointId ? { checkpointId } : {})
+        };
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
         this.emit({ type: 'message', message: stored });
       }
@@ -654,7 +675,7 @@ export class AgentSession {
   // ---- loop host ----------------------------------------------------------
 
   private permissionEnv(root: string | null, trusted: boolean) {
-    const { rules, problems } = this.deps.settings.rules(root, trusted, this.sessionAllow);
+    const { rules, problems } = this.deps.settings.rules(this.settingsRoot(), trusted, this.sessionAllow);
     for (const p of problems) this.deps.log('warn', 'Settings problem', { message: p });
     return {
       mode: this.summary.permissionMode,

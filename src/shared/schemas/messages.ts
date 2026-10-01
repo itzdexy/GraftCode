@@ -74,6 +74,13 @@ export interface LlmMessage {
   content: ContentBlock[];
 }
 
+/** A text file attached to a message (sent to the model as text, shown as a chip). */
+export const FileAttachmentSchema = z.object({
+  name: z.string().min(1).max(255),
+  content: z.string().max(200_000)
+});
+export type FileAttachment = z.infer<typeof FileAttachmentSchema>;
+
 export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice']);
 export type MessageKind = z.infer<typeof MessageKindSchema>;
 
@@ -89,7 +96,9 @@ export const MessageMetaSchema = z.object({
   interrupted: z.boolean().optional(),
   checkpointId: z.string().optional(),
   /** Queued text or slash command as typed, when the stored content was expanded. */
-  typed: z.string().optional()
+  typed: z.string().optional(),
+  /** Names of text files attached to this message. */
+  attachments: z.array(z.string()).optional()
 });
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;
 

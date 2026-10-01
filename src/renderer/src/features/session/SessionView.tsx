@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FileDiff, Globe, SquareTerminal, X } from 'lucide-react';
-import type { ImageBlock, StoredMessage } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock, StoredMessage } from '@shared/schemas/messages';
 import type { QueuedInput, SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
@@ -44,7 +44,7 @@ function QueueList({ sessionId, queue }: { sessionId: string; queue: QueuedInput
           <span className="shrink-0 text-fg-muted">Queued</span>
           <span className="min-w-0 flex-1 truncate text-fg-secondary">
             {q.text}
-            {q.imageCount > 0 ? ` (+${q.imageCount} image${q.imageCount === 1 ? '' : 's'})` : ''}
+            {q.attachmentCount > 0 ? ` (+${q.attachmentCount} attachment${q.attachmentCount === 1 ? '' : 's'})` : ''}
           </span>
           <IconButton
             label="Remove from queue"
@@ -124,8 +124,8 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
 
-  const send = (text: string, images: ImageBlock[]): Promise<boolean> =>
-    sendMessage(text, images, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
+  const send = (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> =>
+    sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -204,8 +204,8 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
   const busy = view.turnActive;
   const levels = chatEffortLevels(model);
 
-  const send = (text: string, images: ImageBlock[]): Promise<boolean> =>
-    sendMessage(text, images, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => undefined });
+  const send = (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> =>
+    sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => undefined });
 
   return (
     <div className="flex h-full min-h-0 flex-col">

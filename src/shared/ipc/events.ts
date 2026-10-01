@@ -26,7 +26,9 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pty:data'), id: z.string(), data: z.string(), offset: z.number().int() }),
   z.object({ type: z.literal('pty:exit'), id: z.string(), exitCode: z.number().int() }),
   z.object({ type: z.literal('shells:changed'), sessionId: z.string() }),
-  z.object({ type: z.literal('browser:state'), state: BrowserStateSchema })
+  z.object({ type: z.literal('browser:state'), state: BrowserStateSchema }),
+  z.object({ type: z.literal('mcp:changed') }),
+  z.object({ type: z.literal('schedules:changed') })
 ]);
 
 export type GraftEvent = z.infer<typeof GraftEventSchema>;

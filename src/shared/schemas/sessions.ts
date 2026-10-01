@@ -48,7 +48,7 @@ export const SessionSummarySchema = z.object({
 });
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
 
-export const QueuedInputSchema = z.object({ id: z.string(), text: z.string(), imageCount: z.number().int().nonnegative(), createdAt: z.number().int() });
+export const QueuedInputSchema = z.object({ id: z.string(), text: z.string(), attachmentCount: z.number().int().nonnegative(), createdAt: z.number().int() });
 export type QueuedInput = z.infer<typeof QueuedInputSchema>;
 
 export const SessionDetailSchema = z.object({

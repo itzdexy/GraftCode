@@ -9,8 +9,12 @@ import { useNav, type Route } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
+import { ArtifactsView } from '../artifacts/ArtifactsView';
+import { CustomizeView } from '../customize/CustomizeView';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
+import { ProjectsView } from '../projects/ProjectsView';
+import { ScheduledView } from '../scheduled/ScheduledView';
 import { RewindDialog } from '../session/RewindDialog';
 import { SessionView } from '../session/SessionView';
 import { InfoDialogs } from './InfoDialogs';
@@ -32,7 +36,15 @@ function RouteView({ route }: { route: Route }) {
       return mode === 'code' ? <CodeHome /> : <ChatHome />;
     case 'session':
       return <SessionView key={route.id} sessionId={route.id} />;
-    default:
+    case 'projects':
+      return <ProjectsView />;
+    case 'artifacts':
+      return <ArtifactsView />;
+    case 'scheduled':
+      return <ScheduledView />;
+    case 'customize':
+      return <CustomizeView />;
+    case 'settings':
       return <ErrorState title="Not available" message="This view isn't available." />;
   }
 }

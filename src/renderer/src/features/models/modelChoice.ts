@@ -58,3 +58,7 @@ export function effortFor(model: ModelInfo | null, requested: EffortLevel | null
   }
   return support.default;
 }
+
+export function allModelsOf(groups: ProviderModels[]): ModelInfo[] {
+  return groups.flatMap((g) => g.models);
+}

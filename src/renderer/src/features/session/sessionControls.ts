@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SlashCommand } from '@shared/schemas/app';
 import type { EffortLevel, PermissionMode } from '@shared/schemas/common';
-import type { ImageBlock } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { invoke } from '../../lib/ipc';
@@ -88,8 +88,8 @@ export function handleUiCommand(text: string, ctx: UiCommandContext): boolean {
   }
 }
 
-export async function sendMessage(text: string, images: ImageBlock[], ctx: UiCommandContext): Promise<boolean> {
-  if (images.length === 0 && handleUiCommand(text, ctx)) return true;
-  await invoke('sessions:send', { id: ctx.summary.id, text, images });
+export async function sendMessage(text: string, images: ImageBlock[], files: FileAttachment[], ctx: UiCommandContext): Promise<boolean> {
+  if (images.length === 0 && files.length === 0 && handleUiCommand(text, ctx)) return true;
+  await invoke('sessions:send', { id: ctx.summary.id, text, images, files });
   return true;
 }

@@ -45,6 +45,6 @@ export class ToolRegistry {
     const selected = names ? names.map((n) => this.tools.get(n)).filter((t): t is AnyTool => t !== undefined) : this.list();
     return selected
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((t) => ({ name: t.name, description: t.description, inputSchema: jsonSchemaFor(t.input as z.ZodType) }));
+      .map((t) => ({ name: t.name, description: t.description, inputSchema: t.jsonSchema ?? jsonSchemaFor(t.input as z.ZodType) }));
   }
 }

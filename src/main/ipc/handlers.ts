@@ -27,6 +27,15 @@ import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { listDirectory, readPreview } from '../files/fileTree';
 import type { PtyManager } from '../pty/ptyManager';
+import { deleteCommand, deleteSkill, listCommands, listMemory, listSkills, saveCommand, saveMemory, saveSkill } from '../customize/customize';
+import type { McpManager } from '../mcp/mcpManager';
+import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
+import { describeCron, nextRun, parseCron } from '../schedule/cron';
+import type { Schedule, Scheduler } from '../schedule/scheduler';
+import { forgetOAuth } from '../mcp/oauth';
+import type { SettingsScope } from '@shared/schemas/config';
+import type { McpServerView } from '@shared/schemas/customize';
+import { maskConfig, mergeMcpConfig, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { BUILTIN_COMMANDS, loadCustomCommands } from '../agent/slashCommands';
@@ -41,6 +50,9 @@ export interface AppContext {
   services(): Promise<Services>;
   sessions(): Promise<SessionManager>;
   ptys(): Promise<PtyManager>;
+  mcp(): Promise<McpManager>;
+  scheduler(): Promise<Scheduler>;
+  artifacts: ArtifactServer;
   /** The Browser panel of the main window (created on first use). */
   browser(): BrowserPanel;
   window(): BrowserWindow | null;
@@ -64,6 +76,10 @@ function projectSummary(p: ProjectRecord): ProjectSummary {
       ...(p.settings.useWorktree !== undefined ? { useWorktree: p.settings.useWorktree } : {})
     }
   };
+}
+
+function scheduleView(s: Schedule) {
+  return { ...s, description: describeCron(s.cron) };
 }
 
 function verifyError(error: unknown): VerifyResult {
@@ -260,6 +276,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return projectSummary(record);
     },
     'projects:remove': async ({ id }) => {
+      const inUse = (await ctx.sessions()).list(true).filter((s) => s.projectId === id).length;
+      if (inUse > 0) {
+        throw new GraftError('project_in_use', `${inUse} ${inUse === 1 ? 'session uses' : 'sessions use'} this folder. Delete them first, or keep the project.`);
+      }
       (await ctx.services()).projects.delete(id);
       return { ok: true as const };
     },
@@ -337,7 +357,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'sessions:list': async ({ includeArchived }) => (await ctx.sessions()).list(includeArchived),
     'sessions:create': async (input) => (await ctx.sessions()).create(input),
     'sessions:get': async ({ id }) => (await ctx.sessions()).detail(id),
-    'sessions:send': async ({ id, text, images }) => (await ctx.sessions()).send(id, text, images),
+    'sessions:send': async ({ id, text, images, files }) => (await ctx.sessions()).send(id, text, images, files),
     'sessions:interrupt': async ({ id }) => {
       (await ctx.sessions()).interrupt(id);
       return { ok: true as const };
@@ -491,6 +511,140 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'browser:navigate': async ({ url }) => ({ url: await ctx.browser().navigate(url) }),
     'browser:bounds': ({ bounds }) => {
       ctx.browser().setBounds(bounds);
+    },
+    'customize:commands': async ({ projectPath }) => listCommands((await ctx.services()).paths.graftHome, projectPath),
+    'customize:saveCommand': async ({ scope, projectPath, name, description, argumentHint, body, previousPath }) => ({
+      path: await saveCommand((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, argumentHint, body, previousPath })
+    }),
+    'customize:deleteCommand': async ({ projectPath, path }) => {
+      await deleteCommand((await ctx.services()).paths.graftHome, projectPath, path);
+      return { ok: true as const };
+    },
+    'customize:skills': async ({ projectPath }) => listSkills((await ctx.services()).paths.graftHome, projectPath),
+    'customize:saveSkill': async ({ scope, projectPath, name, description, body, previousPath }) => ({
+      path: await saveSkill((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, body, previousPath })
+    }),
+    'customize:deleteSkill': async ({ projectPath, path }) => {
+      await deleteSkill((await ctx.services()).paths.graftHome, projectPath, path);
+      return { ok: true as const };
+    },
+    'customize:memory': async ({ projectPath }) => listMemory((await ctx.services()).paths.graftHome, projectPath),
+    'customize:saveMemory': async ({ scope, projectPath, content }) => ({ path: await saveMemory((await ctx.services()).paths.graftHome, scope, projectPath, content) }),
+    'customize:hooks': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const scopes: SettingsScope[] = projectPath ? ['user', 'project', 'local'] : ['user'];
+      return scopes.map((scope) => {
+        const loaded = s.settingsFiles.load(scope, projectPath ?? undefined);
+        return { scope, path: loaded.path, error: loaded.error, hooks: loaded.settings.hooks ?? {} };
+      });
+    },
+    'customize:saveHooks': async ({ scope, projectPath, hooks }) => {
+      await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => ({ ...settings, hooks }));
+      return { ok: true as const };
+    },
+    'mcp:list': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const live = new Map((await ctx.mcp()).status().map((st) => [st.name, st]));
+      const trusted = projectPath ? (s.projects.findByPath(projectPath)?.trusted ?? false) : true;
+      const scopes: SettingsScope[] = projectPath ? ['user', 'project', 'local'] : ['user'];
+      const views: McpServerView[] = [];
+      for (const scope of scopes) {
+        const loaded = s.settingsFiles.load(scope, projectPath ?? undefined);
+        for (const [name, config] of Object.entries(loaded.settings.mcpServers ?? {})) {
+          const st = live.get(name);
+          const matches = st !== undefined && st.scope === scope && st.projectRoot === (scope === 'user' ? null : projectPath);
+          const state: McpServerView['state'] = !config.enabled
+            ? 'disabled'
+            : matches
+              ? st.state
+              : scope !== 'user' && !trusted
+                ? 'untrusted'
+                : 'idle';
+          views.push({
+            name,
+            scope,
+            path: loaded.path,
+            config: maskConfig(config),
+            state,
+            error: matches ? st.error : null,
+            tools: matches ? st.tools.map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly })) : []
+          });
+        }
+      }
+      return views;
+    },
+    'mcp:save': async ({ scope, projectPath, name, previousName, config }) => {
+      const s = await ctx.services();
+      await s.settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
+        const servers = { ...(settings.mcpServers ?? {}) };
+        const previous = servers[previousName ?? name];
+        if (previousName && previousName !== name) {
+          if (servers[name]) throw new GraftError('mcp_exists', `A server named ${name} already exists in this scope.`);
+          delete servers[previousName];
+        }
+        servers[name] = mergeMcpConfig(config, previous);
+        return { ...settings, mcpServers: servers };
+      });
+      const manager = await ctx.mcp();
+      if (projectPath && scope !== 'user') await manager.useProject(projectPath, s.projects.findByPath(projectPath)?.trusted ?? false);
+      await manager.sync();
+      return { ok: true as const };
+    },
+    'mcp:remove': async ({ scope, projectPath, name }) => {
+      const s = await ctx.services();
+      await s.settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
+        const servers = { ...(settings.mcpServers ?? {}) };
+        delete servers[name];
+        return { ...settings, mcpServers: servers };
+      });
+      forgetOAuth(s.keys, serverKey(scope, scope === 'user' ? null : projectPath, name));
+      await (await ctx.mcp()).sync();
+      return { ok: true as const };
+    },
+    'mcp:setEnabled': async ({ scope, projectPath, name, enabled }) => {
+      await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
+        const servers = { ...(settings.mcpServers ?? {}) };
+        const current = servers[name];
+        if (!current) throw new GraftError('mcp_unknown', `No MCP server named ${name} in this scope.`);
+        servers[name] = { ...current, enabled };
+        return { ...settings, mcpServers: servers };
+      });
+      await (await ctx.mcp()).sync();
+      return { ok: true as const };
+    },
+    'mcp:reconnect': async ({ name }) => {
+      await (await ctx.mcp()).reconnect(name);
+      return { ok: true as const };
+    },
+    'mcp:authorize': async ({ name }) => {
+      await (await ctx.mcp()).authorize(name);
+      return { ok: true as const };
+    },
+    'artifacts:list': async () => listArtifacts((await ctx.services()).db),
+    'artifacts:read': async ({ path }) => readArtifactText((await ctx.services()).db, path),
+    'artifacts:previewUrl': async ({ path }) => {
+      if (!isKnownArtifact((await ctx.services()).db, path)) throw new GraftError('not_an_artifact', 'That file is not an artifact from your sessions.');
+      return { url: ctx.artifacts.urlFor(path) };
+    },
+    'schedules:list': async () => (await ctx.scheduler()).list().map(scheduleView),
+    'schedules:save': async ({ id, schedule }) => {
+      const scheduler = await ctx.scheduler();
+      return scheduleView(id ? scheduler.update(id, schedule) : scheduler.create(schedule));
+    },
+    'schedules:setEnabled': async ({ id, enabled }) => scheduleView((await ctx.scheduler()).setEnabled(id, enabled)),
+    'schedules:delete': async ({ id }) => {
+      (await ctx.scheduler()).remove(id);
+      return { ok: true as const };
+    },
+    'schedules:runNow': async ({ id }) => (await ctx.scheduler()).run(id),
+    'schedules:runs': async ({ id }) => (await ctx.scheduler()).runs(id),
+    'schedules:describe': ({ cron }) => {
+      try {
+        const next = nextRun(parseCron(cron), new Date());
+        return { description: describeCron(cron), next: next?.getTime() ?? null, error: next ? null : 'That schedule never runs.' };
+      } catch (error) {
+        return { description: cron, next: null, error: (error as Error).message };
+      }
     },
     'browser:command': async ({ command }) => {
       const panel = ctx.browser();

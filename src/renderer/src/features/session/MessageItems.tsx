@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Copy, Globe, Pencil, RotateCcw, RotateCw, ThumbsDown, ThumbsUp, Volume2, VolumeX } from 'lucide-react';
+import { Check, ChevronRight, Copy, FileText, Globe, Pencil, RotateCcw, RotateCw, ThumbsDown, ThumbsUp, Volume2, VolumeX } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { Badge } from '../../components/Badge';
@@ -100,10 +100,16 @@ export function UserMessage({
   }, []);
 
   const images =
-    item.images.length > 0 ? (
-      <div className="mb-6 flex flex-wrap gap-6">
+    item.images.length > 0 || item.files.length > 0 ? (
+      <div className="mb-6 flex flex-wrap items-center gap-6">
         {item.images.map((image, i) => (
           <img key={i} src={imageSrc(image)} alt={`Attached image ${i + 1}`} className="max-h-[160px] max-w-[240px] rounded-md border border-border object-cover" />
+        ))}
+        {item.files.map((name, i) => (
+          <span key={`${i}-${name}`} className="flex h-28 max-w-[240px] items-center gap-6 rounded-md border border-border bg-surface px-8 text-sm text-fg">
+            <FileText className="size-14 shrink-0 text-icon" aria-hidden="true" />
+            <span className="truncate">{name}</span>
+          </span>
         ))}
       </div>
     ) : null;

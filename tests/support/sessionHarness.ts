@@ -37,6 +37,10 @@ export interface HarnessOptions {
   hooks?: Partial<Record<HookEvent, ScopedHook[]>>;
   autoCompact?: boolean;
   projectDir?: string;
+  /** Run the session in this worktree folder of the project. */
+  worktreeDir?: string;
+  /** Which project folders count as trusted (default: all). */
+  trusted?: (root: string) => boolean;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -59,7 +63,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     projectPath: options.kind === 'chat' ? null : projectDir,
     projectName: 'project',
     cwd: options.kind === 'chat' ? null : projectDir,
-    worktreePath: null,
+    worktreePath: options.worktreeDir ?? null,
     branch: null,
     baseBranch: null,
     model: model.ref,
@@ -97,7 +101,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     rgPath: RG_PATH,
     graftHome: home,
     platform: process.platform,
-    isTrusted: () => true,
+    isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
     preferences: () => ({ webSearch: false, autoCompact: options.autoCompact ?? true, userName: 'Tester', defaultModel: model.ref, defaultEffort: 'medium' }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),

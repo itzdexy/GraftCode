@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
-import type { EffortLevel, PermissionMode } from '@shared/schemas/common';
+import type { ProjectSummary } from '@shared/schemas/app';
+import { EFFORT_LEVELS, PERMISSION_MODES, type EffortLevel, type PermissionMode } from '@shared/schemas/common';
 import type { ModelInfo } from '@shared/schemas/models';
+import { invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import { effortFor, resolveModel } from '../models/modelChoice';
@@ -23,8 +25,21 @@ function save(patch: Parameters<ReturnType<typeof useApp.getState>['updateSettin
     .catch((e: unknown) => reportError("Couldn't save your default", e));
 }
 
-/** Model, effort and permission mode used for new sessions; the home composers edit these defaults. */
-export function useDefaults(): Defaults {
+function saveProject(project: ProjectSummary, settings: ProjectSummary['settings']): void {
+  invoke('projects:update', { id: project.id, settings })
+    .then((p) => useApp.getState().upsertProject(p))
+    .catch((e: unknown) => reportError("Couldn't save the project default", e));
+}
+
+const asEffort = (v: string | undefined): EffortLevel | null => ((EFFORT_LEVELS as readonly string[]).includes(v ?? '') ? (v as EffortLevel) : null);
+const asMode = (v: string | undefined): PermissionMode | null => ((PERMISSION_MODES as readonly string[]).includes(v ?? '') ? (v as PermissionMode) : null);
+
+/**
+ * Model, effort and permission mode for new sessions. A project's own
+ * defaults (Projects → Settings) win over the global ones; changing a value
+ * here updates whichever of the two it came from.
+ */
+export function useDefaults(project: ProjectSummary | null = null): Defaults {
   const groups = useApp((s) => s.models);
   const loading = useApp((s) => s.modelsLoading);
   const modelsError = useApp((s) => s.modelsError);
@@ -32,8 +47,9 @@ export function useDefaults(): Defaults {
   const providers = useApp((s) => s.providers);
 
   return useMemo(() => {
-    const model = resolveModel(groups, defaults?.model ?? null);
-    const effort = effortFor(model, defaults?.effort ?? null);
+    const ps = project?.settings ?? {};
+    const model = resolveModel(groups, ps.model ?? defaults?.model ?? null);
+    const effort = effortFor(model, asEffort(ps.effort) ?? defaults?.effort ?? null);
     let blockedReason: string | null = null;
     if (!model) {
       if (loading) blockedReason = 'Loading models…';
@@ -44,11 +60,21 @@ export function useDefaults(): Defaults {
     return {
       model,
       effort,
-      permissionMode: defaults?.permissionMode ?? 'ask',
+      permissionMode: asMode(ps.permissionMode) ?? defaults?.permissionMode ?? 'ask',
       blockedReason,
-      setModel: (next) => save({ defaults: { model: next.ref, ...(next.effort ? { effort: effortFor(next, defaults?.effort ?? null) ?? next.effort.default } : {}) } }),
-      setEffort: (next) => save({ defaults: { effort: next } }),
-      setPermissionMode: (next) => save({ defaults: { permissionMode: next } })
+      setModel: (next) => {
+        const nextEffort = next.effort ? (effortFor(next, effort) ?? next.effort.default) : null;
+        if (project && ps.model) saveProject(project, { ...ps, model: next.ref, ...(nextEffort ? { effort: nextEffort } : {}) });
+        else save({ defaults: { model: next.ref, ...(nextEffort ? { effort: nextEffort } : {}) } });
+      },
+      setEffort: (next) => {
+        if (project && ps.effort) saveProject(project, { ...ps, effort: next });
+        else save({ defaults: { effort: next } });
+      },
+      setPermissionMode: (next) => {
+        if (project && ps.permissionMode) saveProject(project, { ...ps, permissionMode: next });
+        else save({ defaults: { permissionMode: next } });
+      }
     };
-  }, [groups, loading, modelsError, defaults, providers.length]);
+  }, [groups, loading, modelsError, defaults, providers.length, project]);
 }

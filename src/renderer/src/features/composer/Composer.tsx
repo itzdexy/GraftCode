@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { CornerDownLeft, Plus, Square, X } from 'lucide-react';
+import { CornerDownLeft, FileText, Plus, Square, X } from 'lucide-react';
 import type { SlashCommand } from '@shared/schemas/app';
-import type { ImageBlock } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-import { filesToImages, imageSrc, MAX_IMAGES } from './attachments';
+import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, readAttachments } from './attachments';
 import { detectToken, useSuggestions, type Suggestion } from './suggestions';
 
 export interface ComposerProps {
@@ -21,7 +21,7 @@ export interface ComposerProps {
   busy?: boolean;
   /** Blocks sending entirely (e.g. no model configured); the reason is shown as the tooltip. */
   blockedReason?: string | null;
-  onSubmit: (text: string, images: ImageBlock[]) => Promise<boolean>;
+  onSubmit: (text: string, images: ImageBlock[], files: FileAttachment[]) => Promise<boolean>;
   onInterrupt?: () => void;
   onCyclePermission?: () => void;
   leftControls?: ReactNode;
@@ -40,8 +40,8 @@ const MAX_HEIGHT = 'min(40vh, 320px)';
 
 /**
  * Message box shared by the home screens and sessions: autogrowing text,
- * Enter to send (Shift+Enter for a newline), image attachments by button,
- * paste or drop, Shift+Tab to cycle permission mode and Esc to stop.
+ * Enter to send (Shift+Enter for a newline), image and text-file attachments
+ * by button, paste or drop, Shift+Tab to cycle permission mode and Esc to stop.
  */
 export function Composer({
   draftKey,
@@ -64,6 +64,7 @@ export function Composer({
   const text = useUi((s) => s.drafts[draftKey] ?? '');
   const setDraft = useUi((s) => s.setDraft);
   const [images, setImages] = useState<ImageBlock[]>([]);
+  const [files, setFiles] = useState<FileAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -111,33 +112,32 @@ export function Composer({
     }
   }, [text]);
 
-  const addFiles = async (files: File[]): Promise<void> => {
-    if (files.length === 0) return;
-    if (!supportsImages) {
-      useToasts.getState().push({ tone: 'info', title: "This model can't read images", description: 'Pick a vision-capable model to attach images.' });
-      return;
-    }
+  const addFiles = async (picked: File[]): Promise<void> => {
+    if (picked.length === 0) return;
     try {
-      const result = await filesToImages(files, MAX_IMAGES - images.length);
+      const result = await readAttachments(picked, { images: MAX_IMAGES - images.length, files: MAX_TEXT_FILES - files.length, allowImages: supportsImages });
       if (result.images.length > 0) setImages((current) => [...current, ...result.images].slice(0, MAX_IMAGES));
+      if (result.files.length > 0) setFiles((current) => [...current, ...result.files].slice(0, MAX_TEXT_FILES));
       if (result.rejected.length > 0) useToasts.getState().push({ tone: 'error', title: 'Some files were not attached', description: result.rejected.join(' ') });
     } catch (error) {
-      reportError("Couldn't attach the image", error);
+      reportError("Couldn't attach the file", error);
     }
   };
 
-  const hasContent = text.trim().length > 0 || images.length > 0;
+  const hasAttachments = images.length > 0 || files.length > 0;
+  const hasContent = text.trim().length > 0 || hasAttachments;
   const canSend = hasContent && !sending && blockedReason === null;
 
   const submit = async (override?: string): Promise<void> => {
     const message = override ?? text;
-    if ((message.trim().length === 0 && images.length === 0) || sending || blockedReason !== null) return;
+    if ((message.trim().length === 0 && !hasAttachments) || sending || blockedReason !== null) return;
     setSending(true);
     try {
-      const sent = await onSubmit(message, images);
+      const sent = await onSubmit(message, images, files);
       if (sent) {
         setDraft(draftKey, '');
         setImages([]);
+        setFiles([]);
       }
     } catch (error) {
       reportError("Couldn't send the message", error);
@@ -208,12 +208,7 @@ export function Composer({
   };
 
   const attachButton = (
-    <IconButton
-      label={supportsImages ? 'Attach images' : "This model can't read images"}
-      size="sm"
-      disabled={!supportsImages}
-      onClick={() => fileRef.current?.click()}
-    >
+    <IconButton label={supportsImages ? 'Attach images or files' : 'Attach text files'} size="sm" onClick={() => fileRef.current?.click()}>
       <Plus className="size-16" />
     </IconButton>
   );
@@ -236,24 +231,31 @@ export function Composer({
     </IconButton>
   );
 
-  const thumbnails =
-    images.length > 0 ? (
-      <ul className="flex flex-wrap gap-6 px-10 pt-8" aria-label="Attached images">
-        {images.map((image, i) => (
-          <li key={`${i}-${image.data.length}`} className="group relative">
-            <img src={imageSrc(image)} alt={`Attachment ${i + 1}`} className="size-48 rounded-md border border-border object-cover" />
-            <button
-              type="button"
-              aria-label={`Remove attachment ${i + 1}`}
-              onClick={() => setImages((current) => current.filter((_, j) => j !== i))}
-              className="absolute -top-5 -right-5 flex size-16 items-center justify-center rounded-full border border-border bg-surface text-icon opacity-0 transition-ui group-hover:opacity-100 focus-visible:opacity-100"
-            >
-              <X className="size-10" />
-            </button>
-          </li>
-        ))}
-      </ul>
-    ) : null;
+  const removeClass =
+    'absolute -top-5 -right-5 flex size-16 items-center justify-center rounded-full border border-border bg-surface text-icon opacity-0 transition-ui group-hover:opacity-100 focus-visible:opacity-100';
+  const thumbnails = hasAttachments ? (
+    <ul className="flex flex-wrap items-center gap-6 px-10 pt-8" aria-label="Attachments">
+      {images.map((image, i) => (
+        <li key={`image-${i}-${image.data.length}`} className="group relative">
+          <img src={imageSrc(image)} alt={`Image ${i + 1}`} className="size-48 rounded-md border border-border object-cover" />
+          <button type="button" aria-label={`Remove image ${i + 1}`} onClick={() => setImages((current) => current.filter((_, j) => j !== i))} className={removeClass}>
+            <X className="size-10" />
+          </button>
+        </li>
+      ))}
+      {files.map((file, i) => (
+        <li key={`file-${i}-${file.name}`} className="group relative">
+          <span className="flex h-32 max-w-[220px] items-center gap-6 rounded-md border border-border bg-raised px-8 text-sm text-fg">
+            <FileText className="size-14 shrink-0 text-icon" />
+            <span className="truncate">{file.name}</span>
+          </span>
+          <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, j) => j !== i))} className={removeClass}>
+            <X className="size-10" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  ) : null;
 
   const textarea = (
     <textarea
@@ -319,7 +321,6 @@ export function Composer({
       ref={fileRef}
       type="file"
       multiple
-      accept="image/png,image/jpeg,image/gif,image/webp"
       className="sr-only"
       tabIndex={-1}
       aria-hidden="true"

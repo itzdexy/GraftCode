@@ -17,7 +17,7 @@ export interface ToolCall {
 }
 
 export type TranscriptItem =
-  | { kind: 'user'; key: string; message: StoredMessage; text: string; images: ImageBlock[]; turn: number }
+  | { kind: 'user'; key: string; message: StoredMessage; text: string; images: ImageBlock[]; files: string[]; turn: number }
   | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; endOfTurn: boolean }
   | { kind: 'thinking'; key: string; text: string; live: boolean; progress: boolean }
   | { kind: 'tools'; key: string; calls: ToolCall[] }
@@ -79,9 +79,10 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
       }
       const text = message.meta.typed ?? textFrom(message);
       const images = message.content.filter((b): b is ImageBlock => b.type === 'image');
-      if (text.trim().length > 0 || images.length > 0) {
+      const files = message.meta.attachments ?? [];
+      if (text.trim().length > 0 || images.length > 0 || files.length > 0) {
         flush();
-        items.push({ kind: 'user', key: message.id, message, text, images, turn: turn++ });
+        items.push({ kind: 'user', key: message.id, message, text, images, files, turn: turn++ });
       }
       continue;
     }

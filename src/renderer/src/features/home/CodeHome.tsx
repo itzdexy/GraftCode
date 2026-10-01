@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
-import type { ImageBlock } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Mark } from '../../brand/Mark';
 import { Mascot } from '../../brand/Mascot';
@@ -77,14 +77,16 @@ export function CodeHome() {
   const justOnboarded = useApp((s) => s.justOnboarded);
   const summaries = useSessions((s) => s.summaries);
   const loaded = useSessions((s) => s.loaded);
-  const defaults = useDefaults();
   const context = useCodeContext();
+  const projects = useApp((s) => s.projects);
+  const project = projects.find((p) => p.path === context?.projectPath) ?? null;
+  const defaults = useDefaults(project);
   const branches = useBranches(context?.projectPath);
   const isRepo = branches.status === 'ready' && branches.list.isRepo;
 
   const sessions = useMemo(() => homeSessions(Object.values(summaries), 'code', HOME_LIST_LIMIT), [summaries]);
 
-  const submit = async (text: string, images: ImageBlock[]): Promise<boolean> => {
+  const submit = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
     let ctx = useUi.getState().codeContext;
     if (!ctx?.projectPath) {
       const picked = await pickProjectFolder();
@@ -101,7 +103,7 @@ export function CodeHome() {
       effort: defaults.effort,
       permissionMode: defaults.permissionMode,
       incognito: false,
-      message: { text, images }
+      message: { text, images, files }
     });
     useUi.getState().setCodeContext({ ...ctx, branch: null });
     useNav.getState().go({ name: 'session', id: summary.id });

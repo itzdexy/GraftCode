@@ -58,6 +58,8 @@ export interface ToolDefinition<I = unknown> {
   name: string;
   description: string;
   input: z.ZodType<I>;
+  /** Raw JSON Schema offered to models instead of one derived from `input` (MCP tools bring their own). */
+  jsonSchema?: Record<string, unknown>;
   permissionClass: PermissionClass;
   /** Present for MCP tools: the server name and the server's own safety annotations. */
   mcp?: { server: string; tool: string; readOnly: boolean; destructive: boolean };

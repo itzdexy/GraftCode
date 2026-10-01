@@ -3,6 +3,7 @@ import { useApp } from '../stores/app';
 import { useNav } from '../stores/nav';
 import { panelBus, usePanels } from '../stores/panels';
 import { useSessions } from '../stores/sessions';
+import { emitChanged } from './bus';
 import { onEvent } from './ipc';
 
 /** Routes main-process push events into the stores. Mounted once at the root. */
@@ -45,6 +46,12 @@ export function useGraftEvents(): void {
             break;
           case 'browser:state':
             usePanels.getState().setBrowser(event.state);
+            break;
+          case 'mcp:changed':
+            emitChanged('mcp');
+            break;
+          case 'schedules:changed':
+            emitChanged('schedules');
             break;
         }
       }),

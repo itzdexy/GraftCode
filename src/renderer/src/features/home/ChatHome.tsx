@@ -1,5 +1,5 @@
 import { Ghost } from 'lucide-react';
-import type { ImageBlock } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { Mark } from '../../brand/Mark';
 import { IconButton } from '../../components/Button';
 import { partOfDay } from '../../lib/format';
@@ -20,7 +20,7 @@ export function ChatHome() {
   const defaults = useDefaults();
   const now = new Date(useNow(60_000));
 
-  const submit = async (text: string, images: ImageBlock[]): Promise<boolean> => {
+  const submit = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
     const summary = await invoke('sessions:create', {
       kind: 'chat',
       projectPath: null,
@@ -30,7 +30,7 @@ export function ChatHome() {
       effort: defaults.effort,
       permissionMode: null,
       incognito,
-      message: { text, images }
+      message: { text, images, files }
     });
     useUi.getState().setIncognito(false);
     useNav.getState().go({ name: 'session', id: summary.id });

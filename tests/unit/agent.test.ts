@@ -9,7 +9,7 @@ import { renderTranscript } from '../../src/main/agent/compaction';
 import type { StoredMessage } from '../../src/shared/schemas/messages';
 import { fakeModel } from '../support/fakeProvider';
 import { makeHarness, type Harness } from '../support/sessionHarness';
-import { removeDir, writeFile } from '../support/tmp';
+import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 let harnesses: Harness[] = [];
 function harness(...args: Parameters<typeof makeHarness>): Harness {
@@ -205,6 +205,43 @@ describe('cancellation, retries and errors', () => {
     expect(sent).toContain('remember the red door');
     expect(sent).toContain('<file path=\\"notes.md\\">');
     expect(sent.toLowerCase()).toContain('plan');
+  });
+
+  it('sends attached text files to the model as tagged blocks and keeps only their names for display', async () => {
+    const h = harness({ script: [{ text: 'ok' }, { text: 'ok again' }] });
+    h.session.send('what does this say?', [], [{ name: 'log "1".txt', content: 'line one\nline two' }]);
+    await h.session.idle();
+    const user = h.store.listMessages('session-1')[0]!;
+    expect(user.meta.typed).toBe('what does this say?');
+    expect(user.meta.attachments).toEqual(['log "1".txt']);
+    const blocks = h.provider.requests[0]!.messages[0]!.content as { type: string; text?: string }[];
+    const file = blocks.find((b) => b.text?.startsWith('<attached-file'));
+    expect(file?.text).toBe(`<attached-file name="log '1'.txt">\nline one\nline two\n</attached-file>`);
+    // A message may be only an attachment.
+    expect(() => h.session.send('', [], [{ name: 'a.txt', content: 'x' }])).not.toThrow();
+    await h.session.idle();
+  });
+
+  it('a worktree session uses its trusted project’s local allow rules (regression: trust was looked up on the worktree)', async () => {
+    const project = makeTempDir();
+    const worktree = makeTempDir();
+    writeFile(worktree, 'notes.txt', 'hello\n');
+    writeFile(project, '.graft/settings.local.json', JSON.stringify({ permissions: { allow: ['Edit(**)'] } }));
+    const h = harness({
+      projectDir: project,
+      worktreeDir: worktree,
+      trusted: (root) => path.resolve(root) === path.resolve(project),
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'notes.txt' } }] },
+        { toolCalls: [{ name: 'Edit', input: { file_path: 'notes.txt', old_string: 'hello', new_string: 'hi' } }] },
+        { text: 'Done.' }
+      ]
+    });
+    h.session.send('edit it');
+    await h.session.idle();
+    expect(h.events.some((e) => e.type === 'permission')).toBe(false);
+    expect(fs.readFileSync(path.join(worktree, 'notes.txt'), 'utf8')).toBe('hi\n');
+    removeDir(worktree);
   });
 
   it('regenerate() replaces the last reply with a new answer to the same message', async () => {
