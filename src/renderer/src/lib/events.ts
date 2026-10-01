@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useApp } from '../stores/app';
 import { useNav } from '../stores/nav';
+import { panelBus, usePanels } from '../stores/panels';
 import { useSessions } from '../stores/sessions';
 import { onEvent } from './ipc';
 
@@ -32,6 +33,18 @@ export function useGraftEvents(): void {
             break;
           case 'app:navigate':
             useNav.getState().go({ name: 'session', id: event.sessionId });
+            break;
+          case 'pty:data':
+            panelBus.ptyData(event.id, event.data, event.offset);
+            break;
+          case 'pty:exit':
+            panelBus.ptyExit(event.id, event.exitCode);
+            break;
+          case 'shells:changed':
+            panelBus.shellsChanged(event.sessionId);
+            break;
+          case 'browser:state':
+            usePanels.getState().setBrowser(event.state);
             break;
         }
       }),

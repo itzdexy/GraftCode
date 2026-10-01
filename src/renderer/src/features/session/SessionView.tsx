@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { FileDiff, Globe, SquareTerminal, X } from 'lucide-react';
 import type { ImageBlock, StoredMessage } from '@shared/schemas/messages';
 import type { QueuedInput, SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
-import { useShortcut } from '../../lib/shortcuts';
+import { useShortcut, useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
+import { panelBus, panelsOf, usePanels } from '../../stores/panels';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { ChatModelMenu, chatEffortLevels } from '../composer/ChatModelMenu';
@@ -16,6 +17,7 @@ import { EffortPopover } from '../composer/EffortPopover';
 import { ModelQuickMenu } from '../composer/ModelQuickMenu';
 import { PermissionModeMenu } from '../composer/PermissionModeMenu';
 import { effortFor, resolveModel, sameModel } from '../models/modelChoice';
+import { PanelColumn } from '../panels/PanelColumn';
 import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
 import { PermissionCard } from './PermissionCard';
@@ -69,6 +71,45 @@ function useSessionModel(summary: SessionSummary) {
   }, [groups, loading, summary.model, summary.effort]);
 }
 
+function PanelToggles({ sessionId, hasFolder }: { sessionId: string; hasFolder: boolean }) {
+  const open = usePanels((s) => panelsOf(s, sessionId).open);
+  const toggle = usePanels((s) => s.toggle);
+  const terminalKey = useShortcutLabel('toggleTerminal');
+  const changesKey = useShortcutLabel('toggleChanges');
+  if (!hasFolder) return null;
+  return (
+    <>
+      <IconButton label="Terminal" shortcut={terminalKey} active={open.includes('terminal')} aria-pressed={open.includes('terminal')} onClick={() => toggle(sessionId, 'terminal')}>
+        <SquareTerminal className="size-16" />
+      </IconButton>
+      <IconButton label="Changes and files" shortcut={changesKey} active={open.includes('changes')} aria-pressed={open.includes('changes')} onClick={() => toggle(sessionId, 'changes')}>
+        <FileDiff className="size-16" />
+      </IconButton>
+      <IconButton label="Browser" active={open.includes('browser')} aria-pressed={open.includes('browser')} onClick={() => toggle(sessionId, 'browser')}>
+        <Globe className="size-16" />
+      </IconButton>
+    </>
+  );
+}
+
+/** Opens the Background tasks panel the first time the agent starts a background command. */
+function useAutoOpenTasks(sessionId: string): void {
+  useEffect(
+    () =>
+      panelBus.onShellsChanged(sessionId, () => {
+        if (panelsOf(usePanels.getState(), sessionId).tasksAutoOpened) return;
+        invoke('shells:list', { sessionId })
+          .then((shells) => {
+            if (!shells.some((s) => s.status === 'running')) return;
+            usePanels.getState().markTasksAutoOpened(sessionId);
+            usePanels.getState().show(sessionId, 'tasks');
+          })
+          .catch((error: unknown) => reportError("Couldn't list background commands", error));
+      }),
+    [sessionId]
+  );
+}
+
 function CodeSession({ summary, view }: { summary: SessionSummary; view: SessionViewState }) {
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -78,6 +119,10 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
   const folder = summary.worktreePath ?? summary.cwd;
+  const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}`;
+  useAutoOpenTasks(summary.id);
+  useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
+  useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
 
   const send = (text: string, images: ImageBlock[]): Promise<boolean> =>
     sendMessage(text, images, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
@@ -89,60 +134,65 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
         busy={busy}
         onCompact={() => compact(summary.id)}
         onRewind={lastUser ? () => useRewind.getState().open({ sessionId: summary.id, messageId: lastUser.id, chat: false }) : null}
+        onShowTasks={() => usePanels.getState().show(summary.id, 'tasks')}
+        panels={<PanelToggles sessionId={summary.id} hasFolder={folder !== null} />}
       />
-      <div className="flex min-h-0 flex-1 flex-col">
-        <Transcript
-          summary={summary}
-          view={view}
-          onRewind={busy ? null : (message) => useRewind.getState().open({ sessionId: summary.id, messageId: message.id, chat: false })}
-          onEdit={null}
-          onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
-          onRegenerate={null}
-        />
-        <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
-          {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
-          {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
-          <QueueList sessionId={summary.id} queue={view.queue} />
-          <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
-          {missing ? (
-            <p role="alert" className="text-sm text-amber-fg">
-              This session's model ({summary.model?.modelId}) is no longer available. Pick another one below.
-            </p>
-          ) : null}
-          <Composer
-            draftKey={summary.id}
-            variant="code"
-            placeholder={busy ? 'Queue a message, or press Esc to stop' : 'Type / for commands'}
-            supportsImages={model?.supportsVision ?? false}
-            busy={busy}
-            blockedReason={blockedReason}
-            onSubmit={send}
-            onInterrupt={() => interrupt(summary.id)}
-            onCyclePermission={() => cycleMode(summary)}
-            commands={commands}
-            mentionRoot={folder}
-            autoFocus
-            leftControls={<PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />}
-            rightControls={
-              <>
-                <ModelQuickMenu
-                  current={model}
-                  onSelect={(m) => setSessionModel(summary, m)}
-                  open={modelMenuOpen}
-                  onOpenChange={setModelMenuOpen}
-                  emptyLabel={blockedReason ?? 'No model'}
-                />
-                {model && effort ? <EffortPopover model={model} value={effort} onChange={(level) => setSessionEffort(summary, model, level)} /> : null}
-                <ContextUsage
-                  used={summary.usage.contextTokens}
-                  limit={summary.usage.contextLimit || model?.contextWindow || 0}
-                  onCompact={() => compact(summary.id)}
-                  compactDisabled={busy || view.messages.length === 0}
-                />
-              </>
-            }
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Transcript
+            summary={summary}
+            view={view}
+            onRewind={busy ? null : (message) => useRewind.getState().open({ sessionId: summary.id, messageId: message.id, chat: false })}
+            onEdit={null}
+            onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
+            onRegenerate={null}
           />
+          <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
+            {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
+            {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
+            <QueueList sessionId={summary.id} queue={view.queue} />
+            <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
+            {missing ? (
+              <p role="alert" className="text-sm text-amber-fg">
+                This session's model ({summary.model?.modelId}) is no longer available. Pick another one below.
+              </p>
+            ) : null}
+            <Composer
+              draftKey={summary.id}
+              variant="code"
+              placeholder={busy ? 'Queue a message, or press Esc to stop' : 'Type / for commands'}
+              supportsImages={model?.supportsVision ?? false}
+              busy={busy}
+              blockedReason={blockedReason}
+              onSubmit={send}
+              onInterrupt={() => interrupt(summary.id)}
+              onCyclePermission={() => cycleMode(summary)}
+              commands={commands}
+              mentionRoot={folder}
+              autoFocus
+              leftControls={<PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />}
+              rightControls={
+                <>
+                  <ModelQuickMenu
+                    current={model}
+                    onSelect={(m) => setSessionModel(summary, m)}
+                    open={modelMenuOpen}
+                    onOpenChange={setModelMenuOpen}
+                    emptyLabel={blockedReason ?? 'No model'}
+                  />
+                  {model && effort ? <EffortPopover model={model} value={effort} onChange={(level) => setSessionEffort(summary, model, level)} /> : null}
+                  <ContextUsage
+                    used={summary.usage.contextTokens}
+                    limit={summary.usage.contextLimit || model?.contextWindow || 0}
+                    onCompact={() => compact(summary.id)}
+                    compactDisabled={busy || view.messages.length === 0}
+                  />
+                </>
+              }
+            />
+          </div>
         </div>
+        {folder ? <PanelColumn sessionId={summary.id} refreshKey={refreshKey} /> : null}
       </div>
     </div>
   );

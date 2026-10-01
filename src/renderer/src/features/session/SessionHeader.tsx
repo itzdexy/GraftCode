@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ChevronDown, Clipboard, EllipsisVertical, FileDown, FolderOpen, Ghost, History, Laptop, Shrink } from 'lucide-react';
+import { ChevronDown, Clipboard, EllipsisVertical, FileDown, FolderOpen, Ghost, History, Laptop, ListChecks, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
@@ -103,13 +103,14 @@ interface CodeHeaderProps {
   summary: SessionSummary;
   onCompact: () => void;
   onRewind: (() => void) | null;
+  onShowTasks: () => void;
   busy: boolean;
   /** Panel toggles (terminal, changes, browser) placed before the menu. */
   panels?: ReactNode;
 }
 
 /** Code session header in the titlebar row: environment, title menu, project chip, panels and more. */
-export function CodeSessionHeader({ summary, onCompact, onRewind, busy, panels }: CodeHeaderProps) {
+export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, busy, panels }: CodeHeaderProps) {
   const folder = summary.worktreePath ?? summary.cwd;
   return (
     <ViewHeader
@@ -129,6 +130,11 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, busy, panels }
               {onRewind ? (
                 <MenuItem icon={<History className="size-14" />} disabled={busy} onSelect={onRewind}>
                   Rewind…
+                </MenuItem>
+              ) : null}
+              {folder ? (
+                <MenuItem icon={<ListChecks className="size-14" />} onSelect={onShowTasks}>
+                  Background tasks
                 </MenuItem>
               ) : null}
               <MenuSeparator />

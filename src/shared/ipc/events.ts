@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AgentEventSchema } from '../schemas/agentEvents';
 import { AppSettingsSchema } from '../schemas/appSettings';
 import { ProviderSummarySchema } from '../schemas/models';
+import { BrowserStateSchema } from '../schemas/panels';
 import { SessionSummarySchema } from '../schemas/sessions';
 
 /**
@@ -21,7 +22,11 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('session:event'), sessionId: z.string(), event: AgentEventSchema }),
   z.object({ type: z.literal('session:summary'), summary: SessionSummarySchema }),
   z.object({ type: z.literal('session:removed'), sessionId: z.string() }),
-  z.object({ type: z.literal('app:navigate'), sessionId: z.string() })
+  z.object({ type: z.literal('app:navigate'), sessionId: z.string() }),
+  z.object({ type: z.literal('pty:data'), id: z.string(), data: z.string(), offset: z.number().int() }),
+  z.object({ type: z.literal('pty:exit'), id: z.string(), exitCode: z.number().int() }),
+  z.object({ type: z.literal('shells:changed'), sessionId: z.string() }),
+  z.object({ type: z.literal('browser:state'), state: BrowserStateSchema })
 ]);
 
 export type GraftEvent = z.infer<typeof GraftEventSchema>;

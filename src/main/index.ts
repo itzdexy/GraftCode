@@ -5,6 +5,7 @@ import type { AppInfo } from '@shared/ipc/contracts';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
+import { BrowserPanel } from './browser/browserPanel';
 import { buildPaths } from './app/paths';
 import { configureLogFile, log } from './app/log';
 import { createMainWindow, type MainWindowHandle } from './app/mainWindow';
@@ -13,6 +14,7 @@ import { installSecurityPolicy } from './app/security';
 import { initServices, type Services } from './app/services';
 import { buildHandlers } from './ipc/handlers';
 import { installRouter, missingHandlers, registerHandlers } from './ipc/router';
+import { PtyManager } from './pty/ptyManager';
 
 // Test and E2E runs isolate all state before anything touches userData.
 if (process.env.GRAFT_USER_DATA_DIR) {
@@ -26,6 +28,8 @@ const isFirstLaunch = !fs.existsSync(paths.database);
 let mainWindow: MainWindowHandle | null = null;
 let servicesPromise: Promise<Services> | null = null;
 let sessionManager: SessionManager | null = null;
+let ptyManager: PtyManager | null = null;
+let browserPanel: BrowserPanel | null = null;
 let quitting = false;
 
 function platform(): AppInfo['platform'] {
@@ -66,12 +70,36 @@ function services(): Promise<Services> {
       decryptString: (buffer) => safeStorage.decryptString(buffer)
     },
     onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total })
-  }).catch((error: unknown) => {
-    log.error('app', 'Initialization failed', { message: (error as Error).message });
-    servicesPromise = null;
-    throw error;
-  });
+  })
+    .then((s) => {
+      s.shells.on('change', (sessionId: string) => emit({ type: 'shells:changed', sessionId }));
+      s.shells.on('error-log', (message: string) => log.warn('shell', message));
+      return s;
+    })
+    .catch((error: unknown) => {
+      log.error('app', 'Initialization failed', { message: (error as Error).message });
+      servicesPromise = null;
+      throw error;
+    });
   return servicesPromise;
+}
+
+async function ptys(): Promise<PtyManager> {
+  if (ptyManager) return ptyManager;
+  const s = await services();
+  ptyManager ??= new PtyManager(s.shell, {
+    data: (id, data, offset) => emit({ type: 'pty:data', id, data, offset }),
+    exit: (id, exitCode) => emit({ type: 'pty:exit', id, exitCode }),
+    log: (message) => log.warn('pty', message)
+  });
+  return ptyManager;
+}
+
+function browser(): BrowserPanel {
+  const win = mainWindow?.window;
+  if (!win) throw new Error('The window is closed.');
+  browserPanel ??= new BrowserPanel(win, (state) => emit({ type: 'browser:state', state }));
+  return browserPanel;
 }
 
 async function sessions(): Promise<SessionManager> {
@@ -116,11 +144,14 @@ function openMainWindow(): void {
   win.on('blur', () => sessionManager?.setWindowFocused(false));
   win.on('closed', () => {
     mainWindow = null;
+    browserPanel = null;
   });
 }
 
 async function shutdown(): Promise<void> {
   try {
+    browserPanel?.close();
+    await ptyManager?.disposeAll();
     await sessionManager?.disposeAll();
     if (servicesPromise) {
       const s = await servicesPromise;
@@ -160,6 +191,8 @@ if (!gotLock) {
     ...buildHandlers({
       services,
       sessions,
+      ptys,
+      browser,
       window: () => mainWindow?.window ?? null,
       emit,
       isFirstLaunch,

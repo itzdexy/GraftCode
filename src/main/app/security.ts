@@ -1,4 +1,5 @@
 import { app, session, shell, type Session, type WebContents } from 'electron';
+import { isBrowserPanel } from '../browser/registry';
 import { log } from './log';
 
 /** Only http(s) URLs may be opened in the user's browser. */
@@ -55,6 +56,8 @@ export function installSecurityPolicy(policy: PermissionPolicy): void {
       return { action: 'deny' };
     });
     contents.on('will-navigate', (event, url) => {
+      // The Browser panel applies its own http(s)-only rule (browser/browserPanel.ts).
+      if (isBrowserPanel(contents)) return;
       if (url !== contents.getURL()) {
         event.preventDefault();
         log.warn('security', 'Blocked in-app navigation', { scheme: url.split(':')[0] ?? '' });

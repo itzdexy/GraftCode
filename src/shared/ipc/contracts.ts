@@ -11,6 +11,7 @@ import {
 } from '../schemas/app';
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
+import { BackgroundShellSchema, BoundsSchema, FilePreviewSchema, TerminalInfoSchema, TreeEntrySchema } from '../schemas/panels';
 import { ImageBlockSchema } from '../schemas/messages';
 import { CustomModelSchema, ModelInfoSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
@@ -184,7 +185,27 @@ export const contracts = {
   'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema }), RewindResultSchema),
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
-  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string()))
+  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
+
+  // Side panels
+  'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
+  'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
+  'pty:create': channel(
+    z.object({ sessionId: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }),
+    TerminalInfoSchema
+  ),
+  'pty:list': channel(z.object({ sessionId: IdSchema }), z.array(TerminalInfoSchema)),
+  'pty:snapshot': channel(z.object({ id: IdSchema }), z.object({ data: z.string(), end: z.number().int() })),
+  'pty:write': channel(z.object({ id: IdSchema, data: z.string().max(100_000) }), Void),
+  'pty:resize': channel(z.object({ id: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }), Void),
+  'pty:kill': channel(z.object({ id: IdSchema }), Ok),
+  'shells:list': channel(z.object({ sessionId: IdSchema }), z.array(BackgroundShellSchema)),
+  'shells:output': channel(z.object({ id: IdSchema }), z.object({ output: z.string(), skipped: z.number().int() })),
+  'shells:kill': channel(z.object({ id: IdSchema }), z.object({ killed: z.boolean() })),
+  'shells:clear': channel(z.object({ sessionId: IdSchema }), z.object({ removed: z.number().int() })),
+  'browser:navigate': channel(z.object({ url: z.string().min(1).max(4096) }), z.object({ url: z.string() })),
+  'browser:bounds': channel(z.object({ bounds: BoundsSchema.nullable() }), Void),
+  'browser:command': channel(z.object({ command: z.enum(['back', 'forward', 'reload', 'stop', 'close', 'external']) }), Void)
 };
 
 export type Contracts = typeof contracts;

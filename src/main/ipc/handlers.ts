@@ -24,6 +24,9 @@ import { createPullRequest } from '../git/pr';
 import { listBranches, gitInfo } from '../git/repo';
 import { generateCommitMessage, titleModel } from '../agent/title';
 import { openInEditor } from '../app/editor';
+import type { BrowserPanel } from '../browser/browserPanel';
+import { listDirectory, readPreview } from '../files/fileTree';
+import type { PtyManager } from '../pty/ptyManager';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { BUILTIN_COMMANDS, loadCustomCommands } from '../agent/slashCommands';
@@ -37,6 +40,9 @@ import type { HandlerGroup } from './router';
 export interface AppContext {
   services(): Promise<Services>;
   sessions(): Promise<SessionManager>;
+  ptys(): Promise<PtyManager>;
+  /** The Browser panel of the main window (created on first use). */
+  browser(): BrowserPanel;
   window(): BrowserWindow | null;
   emit(event: GraftEvent): void;
   isFirstLaunch: boolean;
@@ -361,9 +367,14 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).setPinned(id, pinned);
       return { ok: true as const };
     },
-    'sessions:archive': async ({ id, archived, removeWorktree, force }) => (await ctx.sessions()).archive(id, archived, removeWorktree, force),
+    'sessions:archive': async ({ id, archived, removeWorktree, force }) => {
+      const result = await (await ctx.sessions()).archive(id, archived, removeWorktree, force);
+      if (archived) await (await ctx.ptys()).disposeSession(id);
+      return result;
+    },
     'sessions:delete': async ({ id, force }) => {
       await (await ctx.sessions()).remove(id, force);
+      await (await ctx.ptys()).disposeSession(id);
       return { ok: true as const };
     },
     'sessions:duplicate': async ({ id }) => (await ctx.sessions()).duplicate(id),
@@ -452,6 +463,46 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'files:search': async ({ root, query }) => {
       if (!fs.existsSync(root)) return [];
       return (await files()).search(root, query, 40);
+    },
+
+    'files:list': async ({ sessionId, dir }) => listDirectory(await workDirFor(sessionId), dir),
+    'files:read': async ({ sessionId, path }) => readPreview(await workDirFor(sessionId), path),
+    'pty:create': async ({ sessionId, cols, rows }) => (await ctx.ptys()).create(sessionId, await workDirFor(sessionId), cols, rows),
+    'pty:list': async ({ sessionId }) => (await ctx.ptys()).list(sessionId),
+    'pty:snapshot': async ({ id }) => (await ctx.ptys()).snapshot(id),
+    'pty:write': async ({ id, data }) => {
+      (await ctx.ptys()).write(id, data);
+    },
+    'pty:resize': async ({ id, cols, rows }) => {
+      (await ctx.ptys()).resize(id, cols, rows);
+    },
+    'pty:kill': async ({ id }) => {
+      await (await ctx.ptys()).kill(id);
+      return { ok: true as const };
+    },
+    'shells:list': async ({ sessionId }) => (await ctx.services()).shells.list(sessionId),
+    'shells:output': async ({ id }) => {
+      const read = (await ctx.services()).shells.readOutput(id);
+      if (!read) throw new GraftError('not_found', 'That background command is no longer available.');
+      return { output: read.output, skipped: read.skipped };
+    },
+    'shells:kill': async ({ id }) => ({ killed: await (await ctx.services()).shells.kill(id) }),
+    'shells:clear': async ({ sessionId }) => ({ removed: (await ctx.services()).shells.clearFinished(sessionId) }),
+    'browser:navigate': async ({ url }) => ({ url: await ctx.browser().navigate(url) }),
+    'browser:bounds': ({ bounds }) => {
+      ctx.browser().setBounds(bounds);
+    },
+    'browser:command': async ({ command }) => {
+      const panel = ctx.browser();
+      if (command === 'back') panel.back();
+      else if (command === 'forward') panel.forward();
+      else if (command === 'reload') panel.reload();
+      else if (command === 'stop') panel.stop();
+      else if (command === 'close') panel.close();
+      else {
+        const url = panel.currentUrl();
+        if (url) await openExternalSafely(url);
+      }
     }
   };
 }
