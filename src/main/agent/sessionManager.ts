@@ -48,6 +48,8 @@ export interface SessionManagerDeps {
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
   emitRemoved(sessionId: string): void;
+  /** Tools may have changed files in this folder (drops cached diff stats). */
+  filesChanged(dir: string): void;
   /** Desktop notification; implementations decide based on window focus. */
   notify(summary: SessionSummary, kind: 'needs-input' | 'finished' | 'error', text: string, visible: boolean): void;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
@@ -86,7 +88,7 @@ export class SessionManager {
 
   private summaryOf(id: string): SessionSummary {
     const live = this.live.get(id);
-    if (live) return live.detail().summary;
+    if (live) return live.liveSummary();
     return this.storeFor(id).getSummary(id);
   }
 
@@ -94,7 +96,7 @@ export class SessionManager {
     const stored = this.deps.repo.list({ includeArchived });
     const merged = [...this.incognito.list(), ...stored].map((s) => {
       const live = this.live.get(s.id);
-      return live ? live.detail().summary : s;
+      return live ? live.liveSummary() : s;
     });
     return merged;
   }
@@ -151,6 +153,12 @@ export class SessionManager {
   }
 
   private onEvent(sessionId: string, event: AgentEvent): void {
+    const toolsRan = event.type === 'message' && event.message.role === 'user' && event.message.content.some((b) => b.type === 'tool_result');
+    if (toolsRan || event.type === 'turn-end') {
+      const summary = this.storeFor(sessionId).getSummary(sessionId);
+      const dir = summary.worktreePath ?? summary.cwd;
+      if (dir) this.deps.filesChanged(dir);
+    }
     this.deps.emitEvent(sessionId, event);
     if (SUMMARY_EVENTS.has(event.type)) {
       try {
@@ -197,6 +205,10 @@ export class SessionManager {
 
   detail(id: string): SessionDetail {
     return this.get(id).detail();
+  }
+
+  summary(id: string): SessionSummary {
+    return this.summaryOf(id);
   }
 
   async create(input: CreateSessionInput): Promise<SessionSummary> {
@@ -429,6 +441,10 @@ export class SessionManager {
 
   retry(id: string): void {
     this.get(id).retry();
+  }
+
+  regenerate(id: string): void {
+    this.get(id).regenerate();
   }
 
   compact(id: string, instructions: string): void {

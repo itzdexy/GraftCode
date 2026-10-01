@@ -7,7 +7,23 @@ import type { GraftEvent } from '@shared/ipc/events';
 import type { ProjectSummary, SearchResult } from '@shared/schemas/app';
 import type { VerifyResult } from '@shared/schemas/models';
 import type { ProjectRecord } from '../db/projectsRepo';
+import {
+  commit,
+  diffForMessage,
+  fileDiff,
+  listChanges,
+  push,
+  revertFiles,
+  revertHunk,
+  stageFiles,
+  stageHunk,
+  unstageFiles,
+  unstageHunk
+} from '../git/changes';
+import { createPullRequest } from '../git/pr';
 import { listBranches, gitInfo } from '../git/repo';
+import { generateCommitMessage, titleModel } from '../agent/title';
+import { openInEditor } from '../app/editor';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { BUILTIN_COMMANDS, loadCustomCommands } from '../agent/slashCommands';
@@ -56,6 +72,17 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   const emitProviders = async (): Promise<void> => {
     ctx.emit({ type: 'providers:changed', providers: (await ctx.services()).registry.summaries() });
   };
+  /** The folder a session works in (its worktree, else its project folder). */
+  const workDirFor = async (sessionId: string): Promise<string> => {
+    const summary = (await ctx.sessions()).summary(sessionId);
+    const dir = summary.worktreePath ?? summary.cwd;
+    if (!dir) throw new GraftError('no_folder', 'This session has no folder.');
+    if (!fs.existsSync(dir)) throw new GraftError('folder_missing', `The folder ${dir} no longer exists.`);
+    return dir;
+  };
+  const changed = async (dir: string): Promise<void> => {
+    (await ctx.services()).diffStats.invalidate(dir);
+  };
 
   return {
     'app:bootstrap': async () => {
@@ -85,6 +112,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'app:log': ({ level, message, stack }) => {
       log[level]('renderer', message, stack ? { stack } : undefined);
     },
+    'app:openInEditor': async ({ path }) => ({ via: await openInEditor(path, (await ctx.services()).codePath) }),
     'dialog:pickFolder': async ({ title }) => {
       const win = ctx.window();
       const options = { title: title ?? 'Choose a folder', properties: ['openDirectory' as const, 'createDirectory' as const] };
@@ -236,10 +264,68 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'git:diffStats': async ({ sessionId }) => {
       const s = await ctx.services();
-      const summary = (await ctx.sessions()).detail(sessionId).summary;
+      const summary = (await ctx.sessions()).summary(sessionId);
       const dir = summary.worktreePath ?? summary.cwd;
       if (!dir) return { added: 0, removed: 0, files: 0, base: null, branch: null };
       return s.diffStats.get(dir);
+    },
+    'git:status': async ({ sessionId }) => {
+      const dir = await workDirFor(sessionId);
+      const info = await gitInfo(dir);
+      if (!info.isRepo) return { isRepo: false, workDir: dir, branch: null, files: [] };
+      return { isRepo: true, workDir: dir, branch: info.branch, files: await listChanges(dir) };
+    },
+    'git:fileDiff': async ({ sessionId, path, staged }) => fileDiff(await workDirFor(sessionId), path, staged),
+    'git:stage': async ({ sessionId, paths }) => {
+      const dir = await workDirFor(sessionId);
+      await stageFiles(dir, paths);
+      await changed(dir);
+      return { ok: true as const };
+    },
+    'git:unstage': async ({ sessionId, paths }) => {
+      const dir = await workDirFor(sessionId);
+      await unstageFiles(dir, paths);
+      await changed(dir);
+      return { ok: true as const };
+    },
+    'git:revert': async ({ sessionId, paths }) => {
+      const dir = await workDirFor(sessionId);
+      await revertFiles(dir, paths);
+      await changed(dir);
+      return { ok: true as const };
+    },
+    'git:hunk': async ({ sessionId, path, index, action }) => {
+      const dir = await workDirFor(sessionId);
+      if (action === 'stage') await stageHunk(dir, path, index);
+      else if (action === 'unstage') await unstageHunk(dir, path, index);
+      else await revertHunk(dir, path, index);
+      await changed(dir);
+      return { ok: true as const };
+    },
+    'git:commit': async ({ sessionId, message, stageAll }) => {
+      const dir = await workDirFor(sessionId);
+      const sha = await commit(dir, message, { stageAll });
+      await changed(dir);
+      return { sha };
+    },
+    'git:push': async ({ sessionId }) => push(await workDirFor(sessionId)),
+    'git:createPr': async ({ sessionId }) => {
+      const dir = await workDirFor(sessionId);
+      return createPullRequest(dir, { ghPath: (await ctx.services()).ghPath });
+    },
+    'git:suggestCommitMessage': async ({ sessionId }) => {
+      const s = await ctx.services();
+      const dir = await workDirFor(sessionId);
+      const ref = (await ctx.sessions()).summary(sessionId).model ?? s.settings.get().defaults.model;
+      if (!ref) throw new GraftError('no_model', 'Choose a model for this session first.');
+      const models = await s.registry.listModels(ref.providerId);
+      const current = models.find((m) => m.ref.modelId === ref.modelId);
+      if (!current) throw new GraftError('model_not_found', `The model ${ref.modelId} is no longer available.`);
+      const diff = await diffForMessage(dir);
+      if (diff.trim().length === 0) throw new GraftError('nothing_to_commit', 'There are no changes to describe.');
+      const message = await generateCommitMessage(s.registry.get(ref.providerId), titleModel(current, models), diff, AbortSignal.timeout(60_000));
+      if (!message) throw new GraftError('suggest_failed', 'The model returned an empty commit message. Write one yourself or try again.');
+      return { message };
     },
 
     'sessions:list': async ({ includeArchived }) => (await ctx.sessions()).list(includeArchived),
@@ -283,7 +369,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'sessions:duplicate': async ({ id }) => (await ctx.sessions()).duplicate(id),
     'sessions:export': async ({ id, format }) => {
       const manager = await ctx.sessions();
-      const summary = manager.detail(id).summary;
+      const summary = manager.summary(id);
       const win = ctx.window();
       const ext = format === 'json' ? 'json' : 'md';
       const safe = summary.title.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80) || 'session';
@@ -295,6 +381,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'sessions:retry': async ({ id }) => {
       (await ctx.sessions()).retry(id);
+      return { ok: true as const };
+    },
+    'sessions:regenerate': async ({ id }) => {
+      (await ctx.sessions()).regenerate(id);
       return { ok: true as const };
     },
     'sessions:compact': async ({ id, instructions }) => {

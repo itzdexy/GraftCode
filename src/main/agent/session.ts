@@ -21,6 +21,7 @@ import { summarizeSession, summaryMessageText } from './compaction';
 import type { HookRunner } from './hooks';
 import { toLlmHistory } from './history';
 import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
+import { expandMentions } from './mentions';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import { BUILTIN_COMMANDS, INIT_PROMPT, expandCommand, loadCustomCommands, parseSlash, reviewPrompt } from './slashCommands';
@@ -126,9 +127,14 @@ export class AgentSession {
     return this.running !== null;
   }
 
+  /** Stored summary with the live status (cheap: no message loading). */
+  liveSummary(): SessionSummary {
+    return { ...this.summary, status: this.status };
+  }
+
   detail(): SessionDetail {
     return {
-      summary: { ...this.summary, status: this.status },
+      summary: this.liveSummary(),
       messages: this.deps.store.listMessages(this.id),
       todos: this.deps.store.getTodos(this.id),
       pendingPermission: this.pendingPermission?.request ?? null,
@@ -286,6 +292,19 @@ export class AgentSession {
     const last = messages.at(-1);
     if (!last) throw new GraftError('nothing_to_retry', 'There is nothing to retry.');
     if (last.role === 'assistant' && (last.meta.error || last.meta.interrupted)) this.deps.store.deleteMessagesFrom(this.id, last.seq);
+    this.running = this.runTurn(null).finally(() => this.afterTurn());
+  }
+
+  /** Answers the last typed message again, replacing the reply that followed it. */
+  regenerate(): void {
+    if (this.running) throw new GraftError('busy', 'The session is already running.');
+    const messages = this.deps.store.listMessages(this.id);
+    const lastTyped = messages.findLast(
+      (m) => m.role === 'user' && (m.meta.kind ?? 'normal') === 'normal' && m.content.some((b) => b.type === 'text' || b.type === 'image')
+    );
+    if (!lastTyped) throw new GraftError('nothing_to_retry', 'There is nothing to retry.');
+    const reply = messages.find((m) => m.seq > lastTyped.seq);
+    if (reply) this.deps.store.deleteMessagesFrom(this.id, reply.seq);
     this.running = this.runTurn(null).finally(() => this.afterTurn());
   }
 
@@ -515,8 +534,14 @@ export class AgentSession {
         }
         const content: ContentBlock[] = [...this.notes.map((text) => ({ type: 'text' as const, text })), ...item.images];
         if (userText.length > 0) content.push({ type: 'text', text: userText });
+        if (summary.kind === 'code' && root && userText.includes('@')) {
+          const mentions = expandMentions(userText, this.workingDir(), root, this.deps.platform);
+          for (const block of mentions.blocks) content.push({ type: 'text', text: block });
+          for (const file of mentions.files) this.files.record(file);
+        }
         this.notes = [];
-        const meta: MessageMeta = { turnId, ...(handled.typed ? { typed: handled.typed } : {}), ...(checkpointId ? { checkpointId } : {}) };
+        // The transcript shows what was typed; notes and attachments travel only to the model.
+        const meta: MessageMeta = { turnId, typed: handled.typed ?? item.text, ...(checkpointId ? { checkpointId } : {}) };
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
         this.emit({ type: 'message', message: stored });
       }
@@ -584,8 +609,11 @@ export class AgentSession {
   private maybeTitle(firstText: string): void {
     const summary = this.summary;
     if (!DEFAULT_TITLES.has(summary.title)) return;
-    const userMessages = this.deps.store.listMessages(this.id).filter((m) => m.role === 'user' && !m.meta.kind);
-    if (userMessages.length !== 1) return;
+    // Only typed messages count; tool results are stored as user messages too.
+    const typed = this.deps.store
+      .listMessages(this.id)
+      .filter((m) => m.role === 'user' && (m.meta.kind ?? 'normal') === 'normal' && m.content.some((b) => b.type === 'text' || b.type === 'image'));
+    if (typed.length !== 1) return;
     this.deps.generateTitle(summary, firstText);
   }
 

@@ -12,14 +12,19 @@ interface ModelQuickMenuProps {
   disabled?: boolean;
   /** Text shown when no model is available. */
   emptyLabel?: string;
+  /** Controlled open state (e.g. opened by the /model command). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** Code-mode model menu: featured models with 1–9 keys, then "More models". */
-export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel = 'No model' }: ModelQuickMenuProps) {
+export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel = 'No model', open: openProp, onOpenChange }: ModelQuickMenuProps) {
   const groups = useApp((s) => s.models);
   const providers = useApp((s) => s.providers);
   const loading = useApp((s) => s.modelsLoading);
-  const [open, setOpen] = useState(false);
+  const [innerOpen, setInnerOpen] = useState(false);
+  const open = openProp ?? innerOpen;
+  const setOpen = onOpenChange ?? setInnerOpen;
   const quick = useMemo(() => quickModels(groups, current), [groups, current]);
   const more = useMemo(() => moreModels(groups, quick), [groups, quick]);
   const errors = groups.filter((g) => g.error);

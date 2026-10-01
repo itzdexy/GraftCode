@@ -21,6 +21,8 @@ interface UiState {
   drafts: Record<string, string>;
   codeContext: CodeContext | null;
   dialog: InfoDialog;
+  /** Sessions whose git status bar the user dismissed (until the app restarts). */
+  hiddenStatusBars: Record<string, true>;
   /** Focus callback registered by the composer currently on screen (Ctrl+L). */
   focusComposer: (() => void) | null;
   setSearchOpen: (open: boolean) => void;
@@ -32,6 +34,7 @@ interface UiState {
   setDraft: (key: string, text: string) => void;
   setCodeContext: (context: CodeContext) => void;
   setDialog: (dialog: InfoDialog) => void;
+  hideStatusBar: (sessionId: string) => void;
   registerComposer: (focus: (() => void) | null) => void;
 }
 
@@ -44,6 +47,7 @@ export const useUi = create<UiState>((set, get) => ({
   drafts: {},
   codeContext: null,
   dialog: null,
+  hiddenStatusBars: {},
   focusComposer: null,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
@@ -59,5 +63,6 @@ export const useUi = create<UiState>((set, get) => ({
   },
   setCodeContext: (codeContext) => set({ codeContext }),
   setDialog: (dialog) => set({ dialog }),
+  hideStatusBar: (sessionId) => set({ hiddenStatusBars: { ...get().hiddenStatusBars, [sessionId]: true } }),
   registerComposer: (focusComposer) => set({ focusComposer })
 }));

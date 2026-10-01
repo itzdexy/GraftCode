@@ -27,6 +27,8 @@ export interface SessionView {
   notices: Notice[];
   retrying: { attempt: number; delayMs: number; reason: string } | null;
   turnActive: boolean;
+  /** When the running turn started (for the elapsed time next to the thinking indicator). */
+  turnStartedAt: number | null;
 }
 
 const EMPTY_VIEW: SessionView = {
@@ -41,7 +43,8 @@ const EMPTY_VIEW: SessionView = {
   running: {},
   notices: [],
   retrying: null,
-  turnActive: false
+  turnActive: false,
+  turnStartedAt: null
 };
 
 let noticeSeq = 0;
@@ -52,7 +55,8 @@ interface SessionsState {
   loaded: boolean;
   views: Record<string, SessionView>;
   loadList: () => Promise<void>;
-  open: (id: string) => Promise<void>;
+  /** Loads a session's detail. `reset` discards the local view first (after a rewind removed messages). */
+  open: (id: string, options?: { reset?: boolean }) => Promise<void>;
   applySummary: (summary: SessionSummary) => void;
   applyEvent: (sessionId: string, event: AgentEvent) => void;
   remove: (id: string) => void;
@@ -67,12 +71,22 @@ function upsertMessage(messages: StoredMessage[], message: StoredMessage): Store
   return next;
 }
 
+/**
+ * The detail snapshot plus any messages that arrived by event after it was
+ * taken (events and the reply travel separately, so either can come first).
+ */
+function mergeNewer(snapshot: StoredMessage[], local: StoredMessage[]): StoredMessage[] {
+  const last = snapshot.reduce((max, m) => Math.max(max, m.seq), -1);
+  const newer = local.filter((m) => m.seq > last);
+  return newer.length === 0 ? snapshot : [...snapshot, ...newer].sort((a, b) => a.seq - b.seq);
+}
+
 function reduce(view: SessionView, event: AgentEvent): SessionView {
   switch (event.type) {
     case 'turn-start':
-      return { ...view, turnActive: true, notices: [], retrying: null };
+      return { ...view, turnActive: true, turnStartedAt: Date.now(), notices: [], retrying: null };
     case 'turn-end':
-      return { ...view, turnActive: false, streaming: null, running: {}, retrying: null };
+      return { ...view, turnActive: false, turnStartedAt: null, streaming: null, running: {}, retrying: null };
     case 'assistant-start':
       return { ...view, streaming: { messageId: event.messageId, text: '', thinking: '' }, retrying: null };
     case 'assistant-delta': {
@@ -154,8 +168,8 @@ export const useSessions = create<SessionsState>((set, get) => ({
     set({ summaries: Object.fromEntries(list.map((s) => [s.id, s])), loaded: true });
   },
 
-  async open(id) {
-    const existing = get().views[id];
+  async open(id, options = {}) {
+    const existing = options.reset ? undefined : get().views[id];
     set({ views: { ...get().views, [id]: { ...(existing ?? EMPTY_VIEW), loading: true, error: null } } });
     try {
       const detail: SessionDetail = await invoke('sessions:get', { id });
@@ -167,12 +181,14 @@ export const useSessions = create<SessionsState>((set, get) => ({
           [id]: {
             ...current,
             loading: false,
-            messages: detail.messages,
+            messages: mergeNewer(detail.messages, current.messages),
             todos: detail.todos,
             queue: detail.queue,
             permission: detail.pendingPermission,
             question: detail.pendingQuestion,
-            turnActive: detail.summary.status === 'running' || detail.summary.status === 'needs-input'
+            turnActive: detail.summary.status === 'running' || detail.summary.status === 'needs-input',
+            turnStartedAt:
+              detail.summary.status === 'running' || detail.summary.status === 'needs-input' ? (current.turnStartedAt ?? Date.now()) : null
           }
         }
       });

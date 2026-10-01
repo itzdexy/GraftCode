@@ -224,6 +224,17 @@
   .scrollbar-stable {
     scrollbar-gutter: stable;
   }
+  /* Syntax tokens carry both theme colors as custom properties (lib/highlight.ts). */
+  .code-token {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style, normal);
+    font-weight: var(--shiki-dark-font-weight, normal);
+  }
+  :root[data-theme='light'] .code-token {
+    color: var(--shiki-light);
+    font-style: var(--shiki-light-font-style, normal);
+    font-weight: var(--shiki-light-font-weight, normal);
+  }
 }
 
 @keyframes graft-fade {
@@ -265,4 +276,90 @@
   animation-duration: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0ms !important;
+}
+
+/* Rendered markdown in transcripts. Tailwind's preflight resets margins and list styles. */
+@layer components {
+  .graft-prose {
+    overflow-wrap: anywhere;
+    color: var(--g-text);
+  }
+  .graft-prose--code {
+    font-size: var(--g-text-md);
+    line-height: var(--g-leading-code-prose);
+  }
+  .graft-prose--chat {
+    font-family: var(--g-font-serif);
+    font-size: var(--g-text-lg);
+    line-height: var(--g-leading-chat-prose);
+  }
+  .graft-prose > :first-child {
+    margin-top: 0;
+  }
+  .graft-prose > :last-child {
+    margin-bottom: 0;
+  }
+  .graft-prose p {
+    margin: 0.55em 0;
+  }
+  .graft-prose ul,
+  .graft-prose ol {
+    margin: 0.45em 0;
+    padding-left: 1.45em;
+  }
+  .graft-prose ul {
+    list-style: disc;
+  }
+  .graft-prose ol {
+    list-style: decimal;
+  }
+  .graft-prose li {
+    margin: 0.15em 0;
+  }
+  .graft-prose li > p {
+    margin: 0;
+  }
+  .graft-prose li::marker {
+    color: var(--g-text-muted);
+  }
+  .graft-prose ol > li::marker {
+    color: var(--g-text-secondary);
+  }
+  .graft-prose h1,
+  .graft-prose h2,
+  .graft-prose h3,
+  .graft-prose h4 {
+    margin: 1em 0 0.4em;
+    font-weight: var(--g-weight-semibold);
+    line-height: 1.3;
+    color: var(--g-text-strong);
+  }
+  .graft-prose h1 {
+    font-size: 1.3em;
+  }
+  .graft-prose h2 {
+    font-size: 1.15em;
+  }
+  .graft-prose h3 {
+    font-size: 1.05em;
+  }
+  .graft-prose strong {
+    font-weight: var(--g-weight-semibold);
+    color: var(--g-text-strong);
+  }
+  .graft-prose blockquote {
+    margin: 0.6em 0;
+    border-left: 2px solid var(--g-border-strong);
+    padding-left: 0.8em;
+    color: var(--g-text-secondary);
+  }
+  .graft-prose hr {
+    margin: 1em 0;
+    border: 0;
+    border-top: 1px solid var(--g-divider);
+  }
+  .graft-prose--chat pre,
+  .graft-prose--chat code {
+    font-family: var(--g-font-mono);
+  }
 }

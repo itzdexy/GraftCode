@@ -37,6 +37,8 @@ export interface Services {
   settingsFiles: SettingsStore;
   rgPath: string;
   ghPath: string | null;
+  /** VS Code's `code` launcher, used by "Open in editor". */
+  codePath: string | null;
   environment: EnvironmentInfo;
 }
 
@@ -96,7 +98,7 @@ export async function initServices(options: {
   const keyring = options.encryptor.isEncryptionAvailable();
 
   step('tools', 'Loading tools');
-  const ghPath = await locate('gh');
+  const [ghPath, codePath] = await Promise.all([locate('gh'), locate('code')]);
   const settings = new AppSettingsService(db);
   const keys = new KeyStore(db, options.encryptor, () => settings.get().security.allowPlaintextKeys);
   const providers = new ProvidersRepo(db);
@@ -117,6 +119,7 @@ export async function initServices(options: {
     settingsFiles: new SettingsStore(paths.graftHome),
     rgPath,
     ghPath,
+    codePath,
     environment: {
       platform: process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win32' : 'linux',
       git: { available: gitVersion !== null, version: gitVersion },

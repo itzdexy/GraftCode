@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { CornerDownLeft, Plus, Square, X } from 'lucide-react';
+import type { SlashCommand } from '@shared/schemas/app';
 import type { ImageBlock } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { filesToImages, imageSrc, MAX_IMAGES } from './attachments';
+import { detectToken, useSuggestions, type Suggestion } from './suggestions';
 
 export interface ComposerProps {
   /** Key under which the unsent text survives navigation. */
@@ -26,6 +28,10 @@ export interface ComposerProps {
   rightControls?: ReactNode;
   /** Decoration anchored to the box's top-right edge (the mascot on Code home). */
   perch?: ReactNode;
+  /** Enables the "/" command menu. */
+  commands?: SlashCommand[] | null;
+  /** Project folder for "@" file mentions; null disables them. */
+  mentionRoot?: string | null;
   autoFocus?: boolean;
   className?: string;
 }
@@ -50,6 +56,8 @@ export function Composer({
   leftControls,
   rightControls,
   perch,
+  commands = null,
+  mentionRoot = null,
   autoFocus = false,
   className
 }: ComposerProps) {
@@ -60,6 +68,18 @@ export function Composer({
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const pendingCaret = useRef<number | null>(null);
+
+  const rawToken = commands || mentionRoot ? detectToken(text, caret) : null;
+  const tokenKey = rawToken ? `${rawToken.kind}:${rawToken.start}:${rawToken.query}` : null;
+  const token = rawToken && tokenKey !== dismissed ? rawToken : null;
+  const suggestions = useSuggestions(token, commands, mentionRoot);
+  const popupOpen = token !== null && (suggestions.items.length > 0 || suggestions.loading);
+  const activeIndex = Math.min(active, Math.max(0, suggestions.items.length - 1));
 
   const focus = useCallback(() => {
     const el = textareaRef.current;
@@ -85,6 +105,10 @@ export function Composer({
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
+    if (pendingCaret.current !== null) {
+      el.setSelectionRange(pendingCaret.current, pendingCaret.current);
+      pendingCaret.current = null;
+    }
   }, [text]);
 
   const addFiles = async (files: File[]): Promise<void> => {
@@ -105,11 +129,12 @@ export function Composer({
   const hasContent = text.trim().length > 0 || images.length > 0;
   const canSend = hasContent && !sending && blockedReason === null;
 
-  const submit = async (): Promise<void> => {
-    if (!canSend) return;
+  const submit = async (override?: string): Promise<void> => {
+    const message = override ?? text;
+    if ((message.trim().length === 0 && images.length === 0) || sending || blockedReason !== null) return;
     setSending(true);
     try {
-      const sent = await onSubmit(text, images);
+      const sent = await onSubmit(message, images);
       if (sent) {
         setDraft(draftKey, '');
         setImages([]);
@@ -121,8 +146,42 @@ export function Composer({
     }
   };
 
+  const choose = (item: Suggestion, viaEnter: boolean): void => {
+    if (!token) return;
+    const next = text.slice(0, token.start) + item.insert + text.slice(token.end);
+    if (viaEnter && item.sendOnEnter && next.trim() === item.insert.trim()) {
+      setDraft(draftKey, next);
+      void submit(next);
+      return;
+    }
+    pendingCaret.current = token.start + item.insert.length;
+    setCaret(token.start + item.insert.length);
+    setDraft(draftKey, next);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.nativeEvent.isComposing) return;
+    if (popupOpen) {
+      const count = suggestions.items.length;
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && count > 0) {
+        event.preventDefault();
+        setActive((activeIndex + (event.key === 'ArrowDown' ? 1 : count - 1)) % count);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && count > 0) {
+        const item = suggestions.items[activeIndex];
+        if (item) {
+          event.preventDefault();
+          choose(item, event.key === 'Enter');
+          return;
+        }
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDismissed(tokenKey);
+        return;
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
       event.preventDefault();
       void submit();
@@ -204,9 +263,21 @@ export function Composer({
       aria-label={placeholder}
       placeholder={placeholder}
       spellCheck
-      onChange={(e) => setDraft(draftKey, e.target.value)}
+      onChange={(e) => {
+        setDraft(draftKey, e.target.value);
+        setCaret(e.target.selectionStart);
+        setActive(0);
+      }}
+      onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
+      onBlur={() => setDismissed(tokenKey)}
+      onFocus={() => setDismissed(null)}
+      role={popupOpen ? 'combobox' : undefined}
+      aria-autocomplete={commands || mentionRoot ? 'list' : undefined}
+      aria-expanded={popupOpen ? true : undefined}
+      aria-controls={popupOpen ? listId : undefined}
+      aria-activedescendant={popupOpen && suggestions.items.length > 0 ? `${listId}-${activeIndex}` : undefined}
       style={{ maxHeight: MAX_HEIGHT }}
       className={cn(
         'block w-full resize-none overflow-y-auto bg-transparent text-fg outline-none',
@@ -214,6 +285,34 @@ export function Composer({
       )}
     />
   );
+
+  const popup = popupOpen ? (
+    <div
+      id={listId}
+      role="listbox"
+      aria-label={token?.kind === 'slash' ? 'Commands' : 'Files'}
+      className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-popover)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
+    >
+      {suggestions.items.length === 0 ? <p className="px-8 py-6 text-base text-fg-muted">Searching files…</p> : null}
+      {suggestions.items.map((item, i) => (
+        <div
+          key={item.key}
+          id={`${listId}-${i}`}
+          role="option"
+          aria-selected={i === activeIndex}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            choose(item, false);
+          }}
+          onMouseMove={() => setActive(i)}
+          className={cn('flex min-h-[var(--g-menu-row-height)] cursor-default items-center gap-12 rounded-md px-8', i === activeIndex && 'bg-hover')}
+        >
+          <span className={cn('shrink-0 text-base text-fg', token?.kind === 'mention' && 'min-w-0 flex-1 truncate font-mono text-sm')}>{item.label}</span>
+          {item.detail ? <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">{item.detail}</span> : null}
+        </div>
+      ))}
+    </div>
+  ) : null;
 
   const fileInput = (
     <input
@@ -251,6 +350,7 @@ export function Composer({
     return (
       <div className={cn('relative', className)}>
         {fileInput}
+        {popup}
         <div className={cn(boxClass, 'flex min-h-[var(--g-home-composer-height)] flex-col rounded-xl')} {...dropProps}>
           {perch}
           {thumbnails}
@@ -270,6 +370,7 @@ export function Composer({
   return (
     <div className={cn('relative', className)}>
       {fileInput}
+      {popup}
       <div className={cn(boxClass, 'rounded-lg')} {...dropProps}>
         {perch}
         {thumbnails}

@@ -57,6 +57,8 @@ describe('agent turns', () => {
     expect(JSON.stringify(toolResult)).toContain('hello world');
     expect(JSON.stringify(toolResult)).not.toContain('"display"');
     expect(texts(h).at(-1)).toBe('assistant:It says hello.');
+    // Regression: tool results are stored as user messages and must not block titling.
+    expect(h.titles).toEqual(['what is in notes.txt?']);
   });
 
   it('asks before editing in Ask mode, then applies the edit when approved', async () => {
@@ -189,6 +191,31 @@ describe('cancellation, retries and errors', () => {
     await h.session.idle();
     expect(h.session.summary.status).toBe('idle');
     expect(texts(h)).toEqual(['user:hello', 'assistant:Recovered.']);
+  });
+
+  it('stores the typed text for display while the model also gets notes and @ attachments', async () => {
+    const h = harness({ script: [{ text: 'ok' }] });
+    writeFile(h.projectDir, 'notes.md', 'remember the red door');
+    h.session.setPermissionMode('plan');
+    h.session.send('summarize @notes.md');
+    await h.session.idle();
+    const user = h.store.listMessages('session-1')[0]!;
+    expect(user.meta.typed).toBe('summarize @notes.md');
+    const sent = JSON.stringify(lastRequest(h).messages[0]);
+    expect(sent).toContain('remember the red door');
+    expect(sent).toContain('<file path=\\"notes.md\\">');
+    expect(sent.toLowerCase()).toContain('plan');
+  });
+
+  it('regenerate() replaces the last reply with a new answer to the same message', async () => {
+    const h = harness({ kind: 'chat', script: [{ text: 'First answer.' }, { text: 'Second answer.' }] });
+    h.session.send('question');
+    await h.session.idle();
+    expect(texts(h)).toEqual(['user:question', 'assistant:First answer.']);
+    h.session.regenerate();
+    await h.session.idle();
+    expect(texts(h)).toEqual(['user:question', 'assistant:Second answer.']);
+    expect(lastRequest(h).messages.at(-1)?.role).toBe('user');
   });
 
   it('keeps partial text when the stream fails after output started', async () => {

@@ -27,18 +27,26 @@ export function titleModel(current: ModelInfo, available: ModelInfo[]): ModelInf
   return available.find((m) => m.cheap && m.featured && m.supportsTools) ?? available.find((m) => m.cheap) ?? current;
 }
 
-export async function generateTitle(provider: LLMProvider, model: ModelInfo, firstMessage: string, signal: AbortSignal): Promise<string | null> {
+/** One short completion with the given system prompt (titles, commit messages); not shown while streaming. */
+export async function quickText(
+  provider: LLMProvider,
+  model: ModelInfo,
+  system: string,
+  input: string,
+  signal: AbortSignal,
+  cacheKey: string
+): Promise<string> {
   let text = '';
   for await (const event of streamWithRetry(
     provider,
     {
       model,
-      system: TITLE_SYSTEM,
-      messages: [{ role: 'user', content: [{ type: 'text', text: firstMessage.slice(0, 4000) }] }],
+      system,
+      messages: [{ role: 'user', content: [{ type: 'text', text: input }] }],
       tools: [],
       effort: model.effort ? model.effort.levels[0] ?? null : null,
       webSearch: false,
-      cacheKey: 'title'
+      cacheKey
     },
     signal,
     () => undefined,
@@ -46,5 +54,30 @@ export async function generateTitle(provider: LLMProvider, model: ModelInfo, fir
   )) {
     if (event.type === 'block' && event.block.type === 'text') text += event.block.text;
   }
-  return cleanTitle(text);
+  return text;
+}
+
+export async function generateTitle(provider: LLMProvider, model: ModelInfo, firstMessage: string, signal: AbortSignal): Promise<string | null> {
+  return cleanTitle(await quickText(provider, model, TITLE_SYSTEM, firstMessage.slice(0, 4000), signal, 'title'));
+}
+
+const COMMIT_SYSTEM =
+  'Write a git commit message for the diff below. First line: an imperative summary of at most 72 characters. If the change needs it, add a blank line and up to four short lines explaining what changed and why. Reply with the message only: no quotes, no code fences, no preamble.';
+
+/** Normalizes a model-written commit message: no fences or quotes, subject line capped. */
+export function cleanCommitMessage(raw: string): string | null {
+  const text = raw
+    .replace(/^```[a-z]*\s*\n?/i, '')
+    .replace(/\n?```\s*$/, '')
+    .trim();
+  const lines = text.split(/\r?\n/);
+  const subject = (lines[0] ?? '').replace(/^["'`]+|["'`]+$/g, '').trim();
+  if (subject.length === 0) return null;
+  const body = lines.slice(1).join('\n').trim();
+  const capped = subject.length > 72 ? `${subject.slice(0, 71).trimEnd()}…` : subject;
+  return body.length > 0 ? `${capped}\n\n${body}` : capped;
+}
+
+export async function generateCommitMessage(provider: LLMProvider, model: ModelInfo, diff: string, signal: AbortSignal): Promise<string | null> {
+  return cleanCommitMessage(await quickText(provider, model, COMMIT_SYSTEM, diff, signal, 'commit-message'));
 }

@@ -11,6 +11,7 @@ import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
+import { RewindDialog } from '../session/RewindDialog';
 import { SessionView } from '../session/SessionView';
 import { InfoDialogs } from './InfoDialogs';
 import { SearchDialog } from './SearchDialog';
@@ -69,6 +70,7 @@ export function AppShell() {
       </main>
       <SearchDialog />
       <SessionDialogs />
+      <RewindDialog />
       <InfoDialogs />
     </div>
   );

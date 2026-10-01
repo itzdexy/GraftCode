@@ -93,6 +93,7 @@ async function sessions(): Promise<SessionManager> {
     emitEvent: (sessionId, event) => emit({ type: 'session:event', sessionId, event }),
     emitSummary: (summary) => emit({ type: 'session:summary', summary }),
     emitRemoved: (sessionId) => emit({ type: 'session:removed', sessionId }),
+    filesChanged: (dir) => s.diffStats.invalidate(dir),
     notify: (summary, kind, text, visible) =>
       showSessionNotification({ settings: s.settings.get(), summary, kind, text, visible, onClick: focusSession }),
     log: (level, message, fields) => log[level]('session', message, fields)

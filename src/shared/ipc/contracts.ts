@@ -10,6 +10,7 @@ import {
   SlashCommandSchema
 } from '../schemas/app';
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
+import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
 import { ImageBlockSchema } from '../schemas/messages';
 import { CustomModelSchema, ModelInfoSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
@@ -75,6 +76,7 @@ export const contracts = {
   ),
   'window:setTitlebarTheme': channel(z.object({ theme: ResolvedThemeSchema }), Void),
   'dialog:pickFolder': channel(z.object({ title: z.string().max(200).optional() }), z.string().nullable()),
+  'app:openInEditor': channel(z.object({ path: PathSchema }), z.object({ via: z.enum(['editor', 'folder']) })),
 
   // Settings & onboarding
   'settings:get': channel(Void, AppSettingsSchema),
@@ -133,6 +135,20 @@ export const contracts = {
   'projects:remove': channel(z.object({ id: IdSchema }), Ok),
   'git:branches': channel(z.object({ path: PathSchema }), BranchListSchema),
   'git:diffStats': channel(z.object({ sessionId: IdSchema }), DiffStatsSchema),
+  'git:status': channel(z.object({ sessionId: IdSchema }), GitStatusSchema),
+  'git:fileDiff': channel(z.object({ sessionId: IdSchema, path: PathSchema, staged: z.boolean() }), FileDiffSchema),
+  'git:stage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
+  'git:unstage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
+  /** Discards working-tree changes. Destructive: the renderer confirms with the user first. */
+  'git:revert': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
+  'git:hunk': channel(
+    z.object({ sessionId: IdSchema, path: PathSchema, index: z.number().int().min(0), action: z.enum(['stage', 'unstage', 'revert']) }),
+    Ok
+  ),
+  'git:commit': channel(z.object({ sessionId: IdSchema, message: z.string().min(1).max(20_000), stageAll: z.boolean() }), z.object({ sha: z.string() })),
+  'git:push': channel(z.object({ sessionId: IdSchema }), z.object({ branch: z.string() })),
+  'git:createPr': channel(z.object({ sessionId: IdSchema }), PullRequestResultSchema),
+  'git:suggestCommitMessage': channel(z.object({ sessionId: IdSchema }), z.object({ message: z.string() })),
 
   // Sessions
   'sessions:list': channel(z.object({ includeArchived: z.boolean() }), z.array(SessionSummarySchema)),
@@ -158,6 +174,7 @@ export const contracts = {
   'sessions:duplicate': channel(z.object({ id: IdSchema }), SessionSummarySchema),
   'sessions:export': channel(z.object({ id: IdSchema, format: z.enum(['markdown', 'json']) }), z.string().nullable()),
   'sessions:retry': channel(z.object({ id: IdSchema }), Ok),
+  'sessions:regenerate': channel(z.object({ id: IdSchema }), Ok),
   'sessions:compact': channel(z.object({ id: IdSchema, instructions: z.string().max(4000) }), Ok),
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
