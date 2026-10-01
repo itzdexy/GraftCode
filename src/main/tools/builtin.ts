@@ -9,9 +9,10 @@ import { globTool } from './search/glob';
 import { grepTool } from './search/grep';
 import { killShellTool, shellOutputTool, shellTool } from './shell/shellTools';
 import { webFetchTool } from './web/webFetch';
+import { webSearchTool } from './web/webSearch';
 
 /** Tool names by role; sub-agents and plan mode filter with these. */
-export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch'] as const;
+export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'] as const;
 /** Tools a sub-agent may never use (no nesting, no user interaction). */
 export const PARENT_ONLY_TOOLS = ['Task', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite'] as const;
 
@@ -27,6 +28,7 @@ export function createBuiltinRegistry(): ToolRegistry {
   registry.register(shellOutputTool);
   registry.register(killShellTool);
   registry.register(webFetchTool);
+  registry.register(webSearchTool);
   registry.register(todoWriteTool);
   registry.register(taskTool);
   registry.register(askUserTool);

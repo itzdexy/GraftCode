@@ -4,7 +4,8 @@ import { Mark } from '../../brand/Mark';
 import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
 import { CallRow, DiffCount } from './ToolGroup';
-import { activityTitle, describeCall, diffTotals, durationText, type ActivityItem, type ActivityStep } from './transcriptModel';
+import { SearchStep } from '../web/SearchResults';
+import { activityTitle, describeCall, diffTotals, durationText, searchOfCall, type ActivityItem, type ActivityStep } from './transcriptModel';
 
 function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
@@ -26,6 +27,7 @@ function currentLabel(item: ActivityItem): string {
   if (last.kind === 'text') return firstLine(last.text);
   if (last.kind === 'tool') return describeCall(last.call);
   if (last.kind === 'provider') return last.summary;
+  if (last.kind === 'search') return `Searched the web for “${last.search.query}”`;
   return 'Thinking';
 }
 
@@ -73,14 +75,20 @@ function ThoughtStep({ text, live }: { text: string; live: boolean }) {
   );
 }
 
-function Step({ step }: { step: ActivityStep }) {
+function Step({ step, live }: { step: ActivityStep; live: boolean }) {
   switch (step.kind) {
     case 'text':
       return <NarrationStep text={step.text} />;
     case 'thinking':
       return <ThoughtStep text={step.text} live={step.live} />;
-    case 'tool':
-      return <CallRow call={step.call} />;
+    case 'tool': {
+      const call = step.call;
+      if (call.name !== 'WebSearch') return <CallRow call={call} />;
+      const failed = call.result?.isError ? call.result.content.map((c) => (c.type === 'text' ? c.text : '')).join(' ') : null;
+      return <SearchStep search={searchOfCall(call)} live={call.running !== null || (call.result === null && live)} error={failed} />;
+    }
+    case 'search':
+      return <SearchStep search={step.search} live={step.search.results.length === 0 && live} />;
     case 'provider':
       return (
         <p className="flex min-h-24 items-center gap-6 px-4 text-md text-fg-muted">
@@ -131,7 +139,7 @@ export function ActivityGroup({ item }: { item: ActivityItem }) {
         <ol className="graft-fade-in mt-2 ml-7 flex flex-col gap-1 border-l border-border pl-10">
           {item.steps.map((step) => (
             <li key={step.key}>
-              <Step step={step} />
+              <Step step={step} live={item.live} />
             </li>
           ))}
         </ol>

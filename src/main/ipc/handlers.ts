@@ -50,6 +50,8 @@ import { cleanRuleLists } from '../permissions/rules';
 import { isInside } from '../tools/paths';
 import { openExternalSafely } from '../app/security';
 import type { Services } from '../app/services';
+import { favicon } from '../app/favicons';
+import { searchKeyId } from '../tools/web/search';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
 
@@ -123,6 +125,15 @@ function verifyError(error: unknown): VerifyResult {
   if (error instanceof ProviderError) return { ok: false, code: error.code === 'not_found' ? 'bad_base_url' : error.code, message: error.message };
   if (error instanceof GraftError) return { ok: false, code: 'bad_request', message: error.message };
   return { ok: false, code: 'unknown', message: error instanceof Error ? error.message : String(error) };
+}
+
+/** What Settings → Web search shows; key values never leave the main process. */
+function searchStatus(s: Services) {
+  return {
+    active: s.search.active(),
+    keys: { brave: s.keys.has(searchKeyId('brave')), tavily: s.keys.has(searchKeyId('tavily')) },
+    openRouter: s.registry.summaries().some((p) => p.kind === 'openrouter' && p.enabled && p.hasKey)
+  };
 }
 
 export function buildHandlers(ctx: AppContext): HandlerGroup {
@@ -224,6 +235,20 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'providers:list': async () => (await ctx.services()).registry.summaries(),
     'providers:presets': async () => (await ctx.services()).catalog.presets(),
+
+    'search:status': async () => searchStatus(await ctx.services()),
+    'search:setKey': async ({ engine, key }) => {
+      const s = await ctx.services();
+      if (key === null) s.keys.delete(searchKeyId(engine));
+      else s.keys.set(searchKeyId(engine), key);
+      return searchStatus(s);
+    },
+    'search:test': async () => {
+      const found = await (await ctx.services()).search.search('open source desktop apps', 3, AbortSignal.timeout(45_000));
+      const first = found.results[0];
+      return { engine: found.engine, count: found.results.length, first: first ? { title: first.title, url: first.url } : null };
+    },
+    'web:favicon': ({ host }) => favicon(host),
     'providers:verify': async ({ kind, preset, baseUrl, apiKey }) => {
       const s = await ctx.services();
       const target = resolveTarget(s, kind, preset, baseUrl);

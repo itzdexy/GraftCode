@@ -261,6 +261,7 @@ async function sessions(): Promise<SessionManager> {
     paths: s.paths,
     rgPath: s.rgPath,
     mcp: m,
+    search: s.search,
     emitEvent: (sessionId, event) => {
       emit({ type: 'session:event', sessionId, event });
       if (event.type === 'status') {

@@ -10,6 +10,7 @@ import { DiffStatsCache } from '../git/diffStats';
 import { runGit } from '../git/git';
 import { SettingsStore } from '../permissions/settingsStore';
 import { ProviderRegistry } from '../providers/registry';
+import { SearchService, searchReaderModel } from '../tools/web/search';
 import { ProviderCatalog } from '../providers/presets';
 import { KeyStore, type Encryptor } from '../secrets/keyStore';
 import { AppSettingsService } from '../settings/appSettings';
@@ -29,6 +30,8 @@ export interface Services {
   providers: ProvidersRepo;
   registry: ProviderRegistry;
   catalog: ProviderCatalog;
+  /** Engine behind the WebSearch tool (Settings → Web search). */
+  search: SearchService;
   projects: ProjectsRepo;
   sessionsRepo: SessionsRepo;
   checkpoints: CheckpointService;
@@ -45,6 +48,33 @@ export interface Services {
 }
 
 export type ProgressFn = (step: string, label: string, done: number, total: number) => void;
+
+/** OpenRouter's API when a provider doesn't set its own base URL. */
+const OPENROUTER_API = 'https://openrouter.ai/api/v1';
+const READER_TTL_MS = 60 * 60_000;
+
+/** WebSearch engines; the OpenRouter one uses the user's OpenRouter provider and its cheapest paid model. */
+function searchService(settings: AppSettingsService, keys: KeyStore, registry: ProviderRegistry): SearchService {
+  let reader: { providerId: string; model: string; at: number } | null = null;
+  const openRouter = () => registry.summaries().find((p) => p.kind === 'openrouter' && p.enabled && p.hasKey) ?? null;
+  return new SearchService({
+    settings: () => settings.get().search,
+    noTraining: () => settings.get().privacy.noTraining,
+    keys,
+    hasOpenRouter: () => openRouter() !== null,
+    openRouter: async (signal) => {
+      const provider = openRouter();
+      const apiKey = provider ? keys.get(provider.id) : null;
+      if (!provider || !apiKey) return null;
+      if (!reader || reader.providerId !== provider.id || Date.now() - reader.at > READER_TTL_MS) {
+        const model = searchReaderModel(await registry.listModels(provider.id, signal ? { signal } : {}));
+        if (!model) return null;
+        reader = { providerId: provider.id, model, at: Date.now() };
+      }
+      return { baseUrl: provider.baseUrl ?? OPENROUTER_API, apiKey, model: reader.model };
+    }
+  });
+}
 
 async function locate(binary: string): Promise<string | null> {
   const finder = process.platform === 'win32' ? 'where' : 'which';
@@ -107,14 +137,16 @@ export async function initServices(options: {
   const keys = new KeyStore(db, options.encryptor, () => settings.get().security.allowPlaintextKeys);
   const catalog = new ProviderCatalog(options.catalogFile ?? null, (message) => log.warn('providers', message));
   const providers = new ProvidersRepo(db);
+  const registry = new ProviderRegistry(providers, keys, catalog);
   const services: Services = {
     paths,
     db,
     settings,
     keys,
     providers,
-    registry: new ProviderRegistry(providers, keys, catalog),
+    registry,
     catalog,
+    search: searchService(settings, keys, registry),
     projects: new ProjectsRepo(db),
     sessionsRepo: new SessionsRepo(db),
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),

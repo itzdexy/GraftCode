@@ -6,6 +6,7 @@ export type SettingsSection =
   | 'models'
   | 'permissions'
   | 'privacy'
+  | 'search'
   | 'mcp'
   | 'hooks'
   | 'memory'

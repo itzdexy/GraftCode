@@ -8,6 +8,7 @@ import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
+import type { SearchEngineId, SearchResult } from '../tools/web/search';
 import type { SessionPatch, SessionStore } from '../db/sessionsRepo';
 import type { RetryPolicy } from '../providers/retry';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
@@ -73,6 +74,11 @@ export interface SessionDeps {
   providerName(providerId: string): string;
   /** How the provider behind a provider id treats what it receives. */
   dataHandling(providerId: string): DataHandling;
+  /** Web search for the WebSearch tool (Settings → Web search). */
+  search: {
+    active(): SearchEngineId | null;
+    search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
+  };
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
   /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
   checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
@@ -474,6 +480,20 @@ export class AgentSession {
     return { provider, model, ref };
   }
 
+  /**
+   * Web access for this session and model: the provider's own search when it
+   * has one, else the WebSearch tool when an engine is set up; WebFetch reads
+   * pages. Incognito chats get none, so nothing goes to a search engine.
+   */
+  private webTools(model: ModelInfo): { native: boolean; clientSearch: boolean; fetch: boolean } {
+    const summary = this.summary;
+    const allowed = this.deps.preferences().webSearch && !summary.incognito && model.supportsTools;
+    const native = allowed && model.supportsWebSearch;
+    const clientSearch = allowed && !native && this.deps.search.active() !== null;
+    // Code sessions always had WebFetch (it asks first in Ask mode); chats get it with web access on.
+    return { native, clientSearch, fetch: summary.kind === 'code' || allowed };
+  }
+
   /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
   private privacy(): RequestPrivacy {
     const incognito = this.summary.incognito;
@@ -494,8 +514,12 @@ export class AgentSession {
   private async ensurePrompt(model: ModelInfo): Promise<{ system: string; toolNames: string[] }> {
     const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
     const summary = this.summary;
+    const web = this.webTools(model);
     const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
-    const builtins = summary.kind === 'code' ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__')) : [];
+    const builtins =
+      summary.kind === 'code'
+        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && (n !== 'WebSearch' || web.clientSearch))
+        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : [])];
     const toolNames = [...builtins, ...mcpTools];
     if (!this.system) {
       const root = this.projectRoot();
@@ -513,13 +537,18 @@ export class AgentSession {
           mode: summary.permissionMode,
           memory: this.memory.initial(this.workingDir()),
           skills: loadSkills(this.deps.graftHome, root),
-          webSearch: this.deps.preferences().webSearch,
+          webSearch: web.native || web.clientSearch,
           mcpServers: this.deps.mcpServerNames(this.settingsRoot())
         });
       } else {
         // An incognito chat doesn't tell the provider who is asking.
         const name = summary.incognito ? null : this.deps.preferences().userName;
-        this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name, model: identity });
+        this.system = buildChatSystemPrompt({
+          date: this.deps.now().toISOString().slice(0, 10),
+          name,
+          model: identity,
+          web: { search: web.native || web.clientSearch, fetch: web.fetch }
+        });
       }
     }
     const key = `${this.system.length}:${toolNames.join(',')}`;
@@ -614,7 +643,6 @@ export class AgentSession {
       }
       const { system, toolNames } = await this.ensurePrompt(model);
       const effort = this.effortFor(model);
-      const prefs = this.deps.preferences();
       const host = this.makeHost(model, provider, hooks, root, trusted);
       const result = await runAgentLoop(
         this.history(),
@@ -625,7 +653,7 @@ export class AgentSession {
           toolNames,
           system,
           effort,
-          webSearch: prefs.webSearch && model.supportsWebSearch && summary.kind === 'code',
+          webSearch: this.webTools(model).native,
           cacheKey: this.id,
           privacy: this.privacy(),
           turnId,
@@ -730,7 +758,8 @@ export class AgentSession {
       projectRoot: root ?? this.workingDir(),
       platform: this.deps.platform,
       rules,
-      bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks
+      bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
+      allowNetwork: this.summary.kind === 'chat'
     };
   }
 
@@ -860,7 +889,8 @@ export class AgentSession {
         return { approved: true, feedback: null };
       },
       runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
-      notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null
+      notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
+      search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal)
     };
   }
 
@@ -875,10 +905,10 @@ export class AgentSession {
     trusted: boolean
   ): Promise<{ text: string; toolCalls: number }> {
     const parentOnly = new Set<string>(PARENT_ONLY_TOOLS);
+    // A sub-agent never gets more than the session has (e.g. no WebSearch without a search engine).
+    const available = this.toolNames ?? this.deps.tools.names();
     const toolNames =
-      input.type === 'explore'
-        ? [...READ_ONLY_TOOLS]
-        : (this.toolNames ?? this.deps.tools.names()).filter((n) => !parentOnly.has(n));
+      input.type === 'explore' ? READ_ONLY_TOOLS.filter((n) => available.includes(n)) : available.filter((n) => !parentOnly.has(n));
     const system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${input.type === 'explore' ? ' You are read-only: research and report; do not try to change anything.' : ''}`;
     const scratch: StoredMessage[] = [];
     const parent = this.makeHost(model, provider, hooks, root, trusted);

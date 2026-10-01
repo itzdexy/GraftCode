@@ -42,6 +42,12 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   toggleFiles: 'Ctrl+Shift+F'
 };
 
+/** Engines the WebSearch tool can use (Settings → Web search). */
+export const SEARCH_ENGINE_IDS = ['openrouter', 'brave', 'tavily', 'searxng'] as const;
+export type SearchEngineId = (typeof SEARCH_ENGINE_IDS)[number];
+export const SearchEngineSettingSchema = z.enum(['auto', ...SEARCH_ENGINE_IDS, 'off']);
+export type SearchEngineSetting = z.infer<typeof SearchEngineSettingSchema>;
+
 export const OnboardingStepSchema = z.enum(['name', 'avatar', 'provider', 'key', 'defaults', 'done']);
 export type OnboardingStep = z.infer<typeof OnboardingStepSchema>;
 
@@ -90,6 +96,12 @@ export const AppSettingsSchema = z.object({
     incognitoLocalOnly: z.boolean()
   }),
   updates: z.object({ enabled: z.boolean() }),
+  search: z.object({
+    /** Engine for the WebSearch tool; "auto" picks the first one that is set up. */
+    engine: SearchEngineSettingSchema,
+    /** A SearXNG instance with its JSON API on. */
+    searxngUrl: z.url({ protocol: /^https?$/ }).max(500).nullable()
+  }),
   shortcuts: z.record(ShortcutIdSchema, z.string().max(40)),
   ui: z.object({
     sidebarWidth: z.number().int().min(200).max(480),
@@ -110,6 +122,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: false },
+  search: { engine: 'auto', searxngUrl: null },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
 };
@@ -128,6 +141,7 @@ export const AppSettingsPatchSchema = z.object({
   security: AppSettingsSchema.shape.security.partial().optional(),
   privacy: AppSettingsSchema.shape.privacy.partial().optional(),
   updates: AppSettingsSchema.shape.updates.partial().optional(),
+  search: AppSettingsSchema.shape.search.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()
 });

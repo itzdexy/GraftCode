@@ -224,6 +224,21 @@ function summarizeServerBlock(raw: Record<string, unknown>): string {
   return String(raw.type);
 }
 
+/** Server-side web search blocks in the shape the transcript shows. */
+function searchOf(raw: Record<string, unknown>): { query: string; results: Array<{ title: string; url: string }> } | null {
+  if (raw.type === 'server_tool_use' && raw.name === 'web_search') {
+    const input = raw.input as { query?: unknown } | undefined;
+    return { query: typeof input?.query === 'string' ? input.query : '', results: [] };
+  }
+  if (raw.type === 'web_search_tool_result' && Array.isArray(raw.content)) {
+    const results = (raw.content as Array<{ type?: unknown; url?: unknown; title?: unknown }>)
+      .filter((r) => r.type === 'web_search_result' && typeof r.url === 'string')
+      .map((r) => ({ title: typeof r.title === 'string' ? r.title : String(r.url), url: String(r.url) }));
+    return { query: '', results };
+  }
+  return null;
+}
+
 function mapStop(reason: string | null): FinishReason {
   switch (reason) {
     case 'end_turn':
@@ -479,7 +494,8 @@ function finishBlock(open: OpenBlock, displayMode: 'update' | 'summary'): Conten
           raw.input = {};
         }
       }
-      return { type: 'provider', provider: 'anthropic', raw, summary: summarizeServerBlock(raw) };
+      const search = searchOf(raw);
+      return { type: 'provider', provider: 'anthropic', raw, summary: summarizeServerBlock(raw), ...(search ? { search } : {}) };
     }
   }
 }

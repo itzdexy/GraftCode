@@ -148,6 +148,33 @@ describe('turn activity', () => {
     expect((working[1] as ActivityItem).steps[0]?.kind).toBe('text');
   });
 
+  it('pairs a provider search with its results and counts the sites', () => {
+    seq = 0;
+    const items = groupActivity(
+      buildTranscript(
+        [
+          msg('user', [{ type: 'text', text: 'history of rivals' }]),
+          msg('assistant', [
+            { type: 'provider', provider: 'anthropic', raw: {}, summary: 'Searched the web for “rivals”', search: { query: 'rivals', results: [] } },
+            { type: 'provider', provider: 'anthropic', raw: {}, summary: '2 web results', search: { query: '', results: [{ title: 'A', url: 'https://a.dev' }, { title: 'B', url: 'https://b.dev' }] } },
+            { type: 'text', text: 'Here is the history.' }
+          ])
+        ],
+        NO_LIVE
+      ),
+      false
+    );
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    const block = items[1] as ActivityItem;
+    expect(block.steps).toEqual([{ kind: 'search', key: expect.any(String) as unknown, search: { query: 'rivals', results: [{ title: 'A', url: 'https://a.dev' }, { title: 'B', url: 'https://b.dev' }] } }]);
+    expect(activityTitle(block)).toBe('Searched 2 websites');
+
+    const web = (query: string, urls: string[]): ToolCall =>
+      call('WebSearch', { query }, { display: { kind: 'web-search', query, results: urls.map((url) => ({ title: url, url })) } });
+    expect(summarizeCalls([web('a', ['https://x.dev', 'https://y.dev']), web('b', ['https://y.dev', 'https://z.dev'])])).toBe('Searched 3 websites');
+    expect(summarizeCalls([call('WebSearch', { query: 'nothing' })])).toBe('Searched for “nothing”');
+  });
+
   it('says how long a turn thought when thinking was all it did, and lets todos split the work', () => {
     seq = 0;
     const thought = groupActivity(

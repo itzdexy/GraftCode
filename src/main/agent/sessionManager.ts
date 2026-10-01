@@ -47,6 +47,7 @@ export interface SessionManagerDeps {
   paths: GraftPaths;
   rgPath: string;
   mcp: McpToolSource | null;
+  search: SessionDeps['search'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -119,6 +120,7 @@ export class SessionManager {
         resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) })
       },
       providerName: (providerId) => d.registry.providerName(providerId),
+      search: d.search,
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';

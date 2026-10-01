@@ -160,12 +160,6 @@ export function ModelsSection() {
           checked={settings.behavior.autoCompact}
           onChange={(autoCompact) => saveSettings({ behavior: { autoCompact } })}
         />
-        <SwitchRow
-          label="Web search"
-          description="Let models that support it search the web during code sessions."
-          checked={settings.behavior.webSearch}
-          onChange={(webSearch) => saveSettings({ behavior: { webSearch } })}
-        />
       </Group>
 
       <Group title="Custom model IDs" description="Add models a provider doesn't list, such as fine-tunes or models on a local server.">

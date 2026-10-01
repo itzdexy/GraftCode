@@ -437,6 +437,42 @@ describe('agent tools that involve the user', () => {
     expect(local.session.summary.status).toBe('idle');
   });
 
+  it('gives chats web search and page reading without asking; incognito chats get neither', async () => {
+    const search = {
+      active: () => 'brave' as const,
+      search: () => Promise.resolve({ engine: 'brave' as const, results: [{ title: 'Rivals', url: 'https://rivals.example/a', snippet: 'Fast PvP.' }] })
+    };
+    const h = harness({
+      kind: 'chat',
+      webSearch: true,
+      search,
+      script: [{ toolCalls: [{ name: 'WebSearch', input: { query: 'roblox rivals history' } }] }, { text: 'RIVALS began as a zombie game.' }]
+    });
+    h.session.send('search the history of rivals');
+    await h.session.idle();
+    expect(h.provider.requests[0]!.tools.map((t) => t.name).sort()).toEqual(['WebFetch', 'WebSearch']);
+    expect(h.provider.requests[0]!.system).toContain('search the web');
+    expect(h.events.some((e) => e.type === 'permission')).toBe(false);
+    expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('rivals.example');
+
+    const incognito = harness({ kind: 'chat', incognito: true, webSearch: true, search, script: [{ text: 'ok' }] });
+    incognito.session.send('hi');
+    await incognito.session.idle();
+    expect(incognito.provider.requests[0]!.tools).toEqual([]);
+    expect(incognito.provider.requests[0]!.system).toContain('no tools');
+  });
+
+  it('offers WebSearch to code sessions only when a search engine is set up', async () => {
+    const without = harness({ webSearch: true, script: [{ text: 'ok' }] });
+    without.session.send('hi');
+    await without.session.idle();
+    expect(without.provider.requests[0]!.tools.map((t) => t.name)).not.toContain('WebSearch');
+    const withEngine = harness({ webSearch: true, search: { active: () => 'tavily', search: () => Promise.reject(new Error('unused')) }, script: [{ text: 'ok' }] });
+    withEngine.session.send('hi');
+    await withEngine.session.idle();
+    expect(withEngine.provider.requests[0]!.tools.map((t) => t.name)).toContain('WebSearch');
+  });
+
   it('runs a PreToolUse hook that blocks shell commands', async () => {
     const h = harness({
       mode: 'bypass',

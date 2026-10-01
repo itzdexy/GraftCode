@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema } from '../schemas/appSettings';
+import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema, SEARCH_ENGINE_IDS } from '../schemas/appSettings';
 import {
   BootstrapSchema,
   BranchListSchema,
@@ -57,6 +57,15 @@ const PathSchema = z.string().min(1).max(4096);
 const Void = z.void();
 const Ok = z.object({ ok: z.literal(true) });
 
+export const SearchStatusSchema = z.object({
+  /** The engine searches use now (null: none is set up, or search is off). */
+  active: z.enum(SEARCH_ENGINE_IDS).nullable(),
+  /** Which engines have a stored key; the keys themselves never leave the main process. */
+  keys: z.object({ brave: z.boolean(), tavily: z.boolean() }),
+  openRouter: z.boolean()
+});
+export type SearchStatus = z.infer<typeof SearchStatusSchema>;
+
 export const ProviderModelsSchema = z.object({
   providerId: z.string(),
   models: z.array(ModelInfoSchema),
@@ -92,6 +101,11 @@ export const contracts = {
     z.object({ level: z.enum(['warn', 'error']), message: z.string().max(4000), stack: z.string().max(8000).optional() }),
     Void
   ),
+  // Web search engines and site icons
+  'search:status': channel(Void, SearchStatusSchema),
+  'search:setKey': channel(z.object({ engine: z.enum(['brave', 'tavily']), key: z.string().trim().min(8).max(300).nullable() }), SearchStatusSchema),
+  'search:test': channel(Void, z.object({ engine: z.enum(SEARCH_ENGINE_IDS), count: z.number().int(), first: z.object({ title: z.string(), url: z.string() }).nullable() })),
+  'web:favicon': channel(z.object({ host: z.string().min(3).max(253) }), z.string().nullable()),
   'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
   'power:keepAwakeList': channel(Void, z.array(z.string())),
   'window:setTitlebarTheme': channel(z.object({ theme: ResolvedThemeSchema }), Void),

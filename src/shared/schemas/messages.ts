@@ -46,7 +46,9 @@ export const ProviderBlockSchema = z.object({
   type: z.literal('provider'),
   provider: ProviderKindSchema,
   raw: z.unknown(),
-  summary: z.string()
+  summary: z.string(),
+  /** A provider-side web search, normalized for display: the query block has no results, the results block no query. */
+  search: z.object({ query: z.string(), results: z.array(z.object({ title: z.string(), url: z.string() })) }).optional()
 });
 
 export const ContentBlockSchema = z.discriminatedUnion('type', [

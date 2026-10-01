@@ -4,6 +4,7 @@ import type { PermissionDetail, Question, QuestionAnswer } from '@shared/schemas
 import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import type { FileStateTracker } from './fileState';
 import type { ShellManager } from './shell/shellManager';
+import type { SearchEngineId, SearchResult } from './web/search';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'none';
 export type SubagentType = 'general' | 'explore';
@@ -44,6 +45,8 @@ export interface ToolContext extends DescribeContext {
   runSubagent(input: { description: string; prompt: string; type: SubagentType }): Promise<{ text: string; toolCalls: number }>;
   /** Project notes (GRAFT.md) for directories first touched by these paths, or null. */
   notesForPaths(paths: string[]): string | null;
+  /** Searches the web with the engine chosen in Settings → Web search. */
+  search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
 }
 
 export interface ToolResult {

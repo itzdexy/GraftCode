@@ -23,7 +23,7 @@ export type TranscriptItem =
   | { kind: 'tools'; key: string; calls: ToolCall[]; at: number }
   | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean }
   | { kind: 'plan'; key: string; callId: string; plan: string; display: Extract<ToolDisplay, { kind: 'plan' }> | null }
-  | { kind: 'provider'; key: string; summary: string; at: number }
+  | { kind: 'provider'; key: string; summary: string; at: number; search: SearchInfo | null }
   | { kind: 'compaction'; key: string; text: string }
   | { kind: 'command-output'; key: string; text: string }
   | { kind: 'notice'; key: string; text: string }
@@ -31,11 +31,17 @@ export type TranscriptItem =
   | { kind: 'interrupted'; key: string }
   | ActivityItem;
 
-/** One step inside a turn's activity: narration, a thought, a tool call or a provider-side action. */
+export interface SearchInfo {
+  query: string;
+  results: Array<{ title: string; url: string }>;
+}
+
+/** One step inside a turn's activity: narration, a thought, a tool call, a provider-side search or other action. */
 export type ActivityStep =
   | { kind: 'text'; key: string; text: string }
   | { kind: 'thinking'; key: string; text: string; live: boolean }
   | { kind: 'tool'; key: string; call: ToolCall }
+  | { kind: 'search'; key: string; search: SearchInfo }
   | { kind: 'provider'; key: string; summary: string };
 
 /** The work of a turn before its answer, folded into one block (Transcript shows it collapsed when done). */
@@ -145,9 +151,9 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
         }
         case 'provider':
           // Reasoning kept only for the provider's next request has no summary and stays hidden.
-          if (block.summary.length > 0) {
+          if (block.summary.length > 0 || block.search) {
             flush();
-            items.push({ kind: 'provider', key, summary: block.summary, at: message.createdAt });
+            items.push({ kind: 'provider', key, summary: block.summary, at: message.createdAt, search: block.search ?? null });
           }
           break;
         case 'image':
@@ -219,7 +225,19 @@ function stepsOf(item: WorkItem): ActivityStep[] {
     case 'tools':
       return item.calls.map((call) => ({ kind: 'tool' as const, key: `${item.key}:${call.id}`, call }));
     case 'provider':
-      return [{ kind: 'provider', key: item.key, summary: item.summary }];
+      return item.search ? [{ kind: 'search', key: item.key, search: { ...item.search, results: [...item.search.results] } }] : [{ kind: 'provider', key: item.key, summary: item.summary }];
+  }
+}
+
+/** Adds steps, pairing a provider search's results with the query step just before them. */
+function addSteps(steps: ActivityStep[], next: ActivityStep[]): void {
+  for (const step of next) {
+    const last = steps.at(-1);
+    if (step.kind === 'search' && step.search.query === '' && last?.kind === 'search' && last.search.results.length === 0) {
+      last.search.results = step.search.results;
+      continue;
+    }
+    steps.push(step);
   }
 }
 
@@ -263,7 +281,7 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       }
       if (isWork(item) && i !== answer) {
         if (steps.length === 0) firstKey = item.key;
-        steps.push(...stepsOf(item));
+        addSteps(steps, stepsOf(item));
         endedAt = Math.max(endedAt, item.at);
         return;
       }
@@ -285,6 +303,20 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
     }
   });
   return out;
+}
+
+/** Query and results of a WebSearch tool call (results empty until it finishes). */
+export function searchOfCall(call: ToolCall): SearchInfo {
+  const query = String(inputOf<{ query: string }>(call.input).query ?? '');
+  const d = call.result?.display;
+  return { query, results: d?.kind === 'web-search' ? d.results : [] };
+}
+
+/** "Searched 12 websites", counting each page once across searches. */
+export function searchedPhrase(searches: SearchInfo[]): string {
+  const sites = new Set(searches.flatMap((s) => s.results.map((r) => r.url))).size;
+  if (sites > 0) return `Searched ${String(sites)} ${sites === 1 ? 'website' : 'websites'}`;
+  return searches.length === 1 ? `Searched for “${searches[0]?.query ?? ''}”` : `Searched the web ${String(searches.length)} times`;
 }
 
 /** Lines added and removed by a set of tool calls (edits that went through). */
@@ -312,11 +344,11 @@ export function durationText(ms: number): string {
 /** Header for a finished block: what was done, or how long it took when it was only thinking. */
 export function activityTitle(item: ActivityItem): string {
   const calls = item.steps.flatMap((s) => (s.kind === 'tool' ? [s.call] : []));
-  const searches = item.steps.filter((s) => s.kind === 'provider').length;
+  const native = item.steps.flatMap((s) => (s.kind === 'search' ? [s.search] : []));
   const parts: string[] = [];
+  if (native.length > 0) parts.push(searchedPhrase(native));
   if (calls.length > 0) parts.push(summarizeCalls(calls));
-  if (searches > 0 && calls.length === 0) parts.push(searches === 1 ? 'Searched the web' : `Searched the web ${String(searches)} times`);
-  if (parts.length > 0) return parts.join(', ');
+  if (parts.length > 0) return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
   const duration = item.startedAt === null ? 0 : item.endedAt - item.startedAt;
   const onlyThinking = item.steps.every((s) => s.kind === 'thinking');
   return `${onlyThinking ? 'Thought' : 'Worked'} for ${durationText(duration)}`;
@@ -401,6 +433,8 @@ export function summarizeCalls(calls: ToolCall[]): string {
   }
   const kills = byName(['KillShell']);
   if (kills.length > 0) parts.push(plural(kills.length, 'Stopped a background command', 'Stopped # background commands'));
+  const searches = byName(['WebSearch']);
+  if (searches.length > 0) parts.push(searchedPhrase(searches.map(searchOfCall)));
   const fetches = byName(['WebFetch']);
   if (fetches.length > 0) {
     let host: string;
@@ -418,7 +452,7 @@ export function summarizeCalls(calls: ToolCall[]): string {
   }
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) parts.push('Asked you a question');
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'Task', 'AskUserQuestion']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -467,7 +501,9 @@ export function describeCall(call: ToolCall): string {
     case 'KillShell':
       return `Stop background command ${str('shell_id')}`;
     case 'WebFetch':
-      return `Fetch ${str('url')}`;
+      return `${call.result ? 'Read' : 'Reading'} ${str('url')}`;
+    case 'WebSearch':
+      return `${call.result ? 'Searched' : 'Searching'} the web for “${str('query')}”`;
     case 'Task':
       return `Sub-agent: ${str('description')}`;
     case 'AskUserQuestion':

@@ -30,6 +30,8 @@ export interface PermissionEnv {
   rules: RuleSet;
   /** In Bypass, still ask before dangerous commands, writes outside the project and config changes (Settings → Permissions). */
   bypassKeepsChecks?: boolean;
+  /** Chats search and read the web without asking (deny and ask rules still apply). */
+  allowNetwork?: boolean;
 }
 
 export interface Decision {
@@ -164,6 +166,7 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
       return result('ask', outsideProject ? 'The command refers to paths outside the project.' : 'Runs a command.');
     }
     case 'network':
+      if (env.allowNetwork) return result('allow', 'Chats may search and read the web.');
       if (mode === 'auto' || mode === 'bypass') return result('allow', 'Network reads are allowed in this mode.');
       return result('ask', 'Fetches from the network.');
   }

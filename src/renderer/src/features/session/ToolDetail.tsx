@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { SearchResultList } from '../web/SearchResults';
 import { CircleCheck, CircleDashed, CircleDot, FileText } from 'lucide-react';
 import type { ToolResultBlock } from '@shared/schemas/messages';
 import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
@@ -146,15 +147,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
     case 'mcp':
       return <pre className={OUTPUT}>{display.text}</pre>;
     case 'web-search':
-      return (
-        <ul className="flex flex-col gap-2 text-sm">
-          {display.results.map((r) => (
-            <li key={r.url} className="truncate text-link">
-              {r.title}
-            </li>
-          ))}
-        </ul>
-      );
+      return <SearchResultList results={display.results} />;
     case 'denied':
       return <p className="text-sm text-fg-muted">Not run: {display.reason}</p>;
     case 'error':

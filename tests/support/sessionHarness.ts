@@ -51,6 +51,10 @@ export interface HarnessOptions {
   incognitoLocalOnly?: boolean;
   /** How the fake provider counts for privacy (default: unknown). */
   dataHandling?: DataHandling;
+  /** Web search engine (default: none set up). */
+  search?: SessionDeps['search'];
+  /** Settings: let models search and read the web (default off). */
+  webSearch?: boolean;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -102,6 +106,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       }
     },
     providerName: () => 'Fake Provider',
+    search: options.search ?? { active: () => null, search: () => Promise.reject(new Error('No web search engine in this test.')) },
     dataHandling: () => options.dataHandling ?? 'unknown',
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],
@@ -116,7 +121,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
     preferences: () => ({
-      webSearch: false,
+      webSearch: options.webSearch ?? false,
       bypassEnabled: options.bypassEnabled ?? false,
       bypassKeepsChecks: false,
       autoCompact: options.autoCompact ?? true,
