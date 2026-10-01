@@ -18,17 +18,37 @@ export interface ToolCall {
 
 export type TranscriptItem =
   | { kind: 'user'; key: string; message: StoredMessage; text: string; images: ImageBlock[]; files: string[]; turn: number }
-  | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; endOfTurn: boolean }
-  | { kind: 'thinking'; key: string; text: string; live: boolean; progress: boolean }
-  | { kind: 'tools'; key: string; calls: ToolCall[] }
+  | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; endOfTurn: boolean; at: number }
+  | { kind: 'thinking'; key: string; text: string; live: boolean; progress: boolean; at: number }
+  | { kind: 'tools'; key: string; calls: ToolCall[]; at: number }
   | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean }
   | { kind: 'plan'; key: string; callId: string; plan: string; display: Extract<ToolDisplay, { kind: 'plan' }> | null }
-  | { kind: 'provider'; key: string; summary: string }
+  | { kind: 'provider'; key: string; summary: string; at: number }
   | { kind: 'compaction'; key: string; text: string }
   | { kind: 'command-output'; key: string; text: string }
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
-  | { kind: 'interrupted'; key: string };
+  | { kind: 'interrupted'; key: string }
+  | ActivityItem;
+
+/** One step inside a turn's activity: narration, a thought, a tool call or a provider-side action. */
+export type ActivityStep =
+  | { kind: 'text'; key: string; text: string }
+  | { kind: 'thinking'; key: string; text: string; live: boolean }
+  | { kind: 'tool'; key: string; call: ToolCall }
+  | { kind: 'provider'; key: string; summary: string };
+
+/** The work of a turn before its answer, folded into one block (Transcript shows it collapsed when done). */
+export interface ActivityItem {
+  kind: 'activity';
+  key: string;
+  steps: ActivityStep[];
+  /** Still running: the newest group of the turn in progress. */
+  live: boolean;
+  /** When the turn started (its user message), and when this work ended. */
+  startedAt: number | null;
+  endedAt: number;
+}
 
 export interface LiveState {
   streaming: { messageId: string; text: string; thinking: string } | null;
@@ -44,10 +64,11 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
   const calls = new Map<string, ToolCall>();
   let group: ToolCall[] | null = null;
   let groupKey = '';
+  let groupAt = 0;
   let turn = 0;
 
   const flush = (): void => {
-    if (group && group.length > 0) items.push({ kind: 'tools', key: groupKey, calls: group });
+    if (group && group.length > 0) items.push({ kind: 'tools', key: groupKey, calls: group, at: groupAt });
     group = null;
   };
 
@@ -93,13 +114,13 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
         case 'text':
           if (block.text.trim().length > 0) {
             flush();
-            items.push({ kind: 'text', key, messageId: message.id, text: block.text, live: false, endOfTurn: false });
+            items.push({ kind: 'text', key, messageId: message.id, text: block.text, live: false, endOfTurn: false, at: message.createdAt });
           }
           break;
         case 'thinking':
           if (block.text.trim().length > 0) {
             flush();
-            items.push({ kind: 'thinking', key, text: block.text, live: false, progress: block.display === 'update' });
+            items.push({ kind: 'thinking', key, text: block.text, live: false, progress: block.display === 'update', at: message.createdAt });
           }
           break;
         case 'tool_use': {
@@ -117,6 +138,7 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
               group = [];
               groupKey = key;
             }
+            groupAt = message.createdAt;
             group.push(call);
           }
           break;
@@ -125,7 +147,7 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
           // Reasoning kept only for the provider's next request has no summary and stays hidden.
           if (block.summary.length > 0) {
             flush();
-            items.push({ kind: 'provider', key, summary: block.summary });
+            items.push({ kind: 'provider', key, summary: block.summary, at: message.createdAt });
           }
           break;
         case 'image':
@@ -162,8 +184,9 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
 
   if (live.streaming) {
     const s = live.streaming;
-    if (s.thinking.trim().length > 0) items.push({ kind: 'thinking', key: `${s.messageId}:live-thinking`, text: s.thinking, live: true, progress: false });
-    if (s.text.length > 0) items.push({ kind: 'text', key: `${s.messageId}:live`, messageId: s.messageId, text: s.text, live: true, endOfTurn: false });
+    const at = Date.now();
+    if (s.thinking.trim().length > 0) items.push({ kind: 'thinking', key: `${s.messageId}:live-thinking`, text: s.thinking, live: true, progress: false, at });
+    if (s.text.length > 0) items.push({ kind: 'text', key: `${s.messageId}:live`, messageId: s.messageId, text: s.text, live: true, endOfTurn: false, at });
   }
 
   // The last text before each user turn (or at the end) closes its turn; actions attach there.
@@ -178,6 +201,125 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
     }
   }
   return items;
+}
+
+type WorkItem = Extract<TranscriptItem, { kind: 'text' | 'thinking' | 'tools' | 'provider' }>;
+
+function isWork(item: TranscriptItem): item is WorkItem {
+  return item.kind === 'text' || item.kind === 'thinking' || item.kind === 'tools' || item.kind === 'provider';
+}
+
+function stepsOf(item: WorkItem): ActivityStep[] {
+  switch (item.kind) {
+    case 'text':
+      return [{ kind: 'text', key: item.key, text: item.text }];
+    case 'thinking':
+      // Progress updates are the model narrating, so they read as narration.
+      return item.progress ? [{ kind: 'text', key: item.key, text: item.text }] : [{ kind: 'thinking', key: item.key, text: item.text, live: item.live }];
+    case 'tools':
+      return item.calls.map((call) => ({ kind: 'tool' as const, key: `${item.key}:${call.id}`, call }));
+    case 'provider':
+      return [{ kind: 'provider', key: item.key, summary: item.summary }];
+  }
+}
+
+/**
+ * Folds each turn's work (narration, thinking, tool calls) into activity
+ * blocks, leaving the turn's answer visible: the last text that nothing but
+ * bookkeeping follows. While a turn runs, its streaming text stays outside
+ * and the newest block is live. Todos, plans, errors and notices end a block.
+ */
+export function groupActivity(items: TranscriptItem[], turnActive: boolean): TranscriptItem[] {
+  const out: TranscriptItem[] = [];
+  const turns: TranscriptItem[][] = [[]];
+  for (const item of items) {
+    if (item.kind === 'user') turns.push([item]);
+    else turns.at(-1)?.push(item);
+  }
+  turns.forEach((segment, index) => {
+    const lastTurn = index === turns.length - 1;
+    const turnStart = out.length;
+    const user = segment[0]?.kind === 'user' ? segment[0] : null;
+    const startedAt = user?.kind === 'user' ? user.message.createdAt : null;
+    // The answer: the last text with no work after it (a streaming text counts while it streams).
+    let answer = -1;
+    for (let i = segment.length - 1; i >= 0; i--) {
+      const item = segment[i];
+      if (!item || !isWork(item)) continue;
+      if (item.kind === 'text' && (item.live || !(lastTurn && turnActive))) answer = i;
+      break;
+    }
+    let steps: ActivityStep[] = [];
+    let endedAt = startedAt ?? 0;
+    let firstKey = '';
+    const flush = (): void => {
+      if (steps.length > 0) out.push({ kind: 'activity', key: `activity:${firstKey}`, steps, live: false, startedAt, endedAt });
+      steps = [];
+    };
+    segment.forEach((item, i) => {
+      if (item.kind === 'user') {
+        out.push(item);
+        return;
+      }
+      if (isWork(item) && i !== answer) {
+        if (steps.length === 0) firstKey = item.key;
+        steps.push(...stepsOf(item));
+        endedAt = Math.max(endedAt, item.at);
+        return;
+      }
+      flush();
+      if (isWork(item)) endedAt = Math.max(endedAt, item.at);
+      out.push(item);
+    });
+    flush();
+    // The newest block of a turn in progress is still working, even while the answer streams after it.
+    if (lastTurn && turnActive) {
+      const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
+      if (block) block.live = true;
+    }
+    // The answer arrived after the work: it closes the turn's last block.
+    if (answer >= 0) {
+      const item = segment[answer];
+      const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
+      if (item && isWork(item) && block) block.endedAt = Math.max(block.endedAt, item.at);
+    }
+  });
+  return out;
+}
+
+/** Lines added and removed by a set of tool calls (edits that went through). */
+export function diffTotals(calls: ToolCall[]): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const call of calls) {
+    const d = call.result?.display;
+    if (d?.kind === 'edit' && !call.result?.isError) {
+      added += d.added;
+      removed += d.removed;
+    }
+  }
+  return { added, removed };
+}
+
+export function durationText(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${String(s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${String(m)}m ${String(s % 60)}s`;
+  return `${String(Math.floor(m / 60))}h ${String(m % 60)}m`;
+}
+
+/** Header for a finished block: what was done, or how long it took when it was only thinking. */
+export function activityTitle(item: ActivityItem): string {
+  const calls = item.steps.flatMap((s) => (s.kind === 'tool' ? [s.call] : []));
+  const searches = item.steps.filter((s) => s.kind === 'provider').length;
+  const parts: string[] = [];
+  if (calls.length > 0) parts.push(summarizeCalls(calls));
+  if (searches > 0 && calls.length === 0) parts.push(searches === 1 ? 'Searched the web' : `Searched the web ${String(searches)} times`);
+  if (parts.length > 0) return parts.join(', ');
+  const duration = item.startedAt === null ? 0 : item.endedAt - item.startedAt;
+  const onlyThinking = item.steps.every((s) => s.kind === 'thinking');
+  return `${onlyThinking ? 'Thought' : 'Worked'} for ${durationText(duration)}`;
 }
 
 function textFrom(message: StoredMessage): string {
@@ -204,58 +346,54 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many.replace('#', String(n));
 }
 
-/** One muted line for a group of tool calls, e.g. "Read 2 files, ran 4 commands (1 failed)". */
+/**
+ * One muted line for a group of tool calls, most telling first:
+ * "Ran 4 commands (1 failed), created a.ts, edited 2 files, read b.ts".
+ */
 export function summarizeCalls(calls: ToolCall[]): string {
   if (calls.length === 1) {
     const only = calls[0]!;
-    const description = inputOf<{ description: string }>(only.input).description;
-    if (only.name === 'Shell' && typeof description === 'string' && description.trim().length > 0 && !commandFailed(only)) {
-      const d = description.trim().replace(/\.$/, '');
-      return d.charAt(0).toUpperCase() + d.slice(1);
-    }
+    const description = shellDescription(only);
+    if (description && !commandFailed(only)) return description.charAt(0).toUpperCase() + description.slice(1);
   }
   const parts: string[] = [];
   const byName = (names: string[]): ToolCall[] => calls.filter((c) => names.includes(c.name));
+  const pathsOf = (list: ToolCall[]): Set<string> => new Set(list.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
+  const files = (verb: string, list: ToolCall[]): string => {
+    const paths = pathsOf(list);
+    return paths.size === 1 ? `${verb} ${fileName([...paths][0] ?? '')}` : `${verb} ${String(paths.size)} files`;
+  };
 
-  const reads = byName(['Read']);
-  if (reads.length > 0) {
-    const paths = new Set(reads.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
-    parts.push(paths.size === 1 ? `Read ${fileName([...paths][0] ?? '')}` : `Read ${paths.size} files`);
-  }
-  const allWrites = byName(['Write', 'Edit', 'MultiEdit']);
-  if (allWrites.length > 0) {
-    // Failed edits changed nothing, so they never count as "Edited".
-    const declined = (c: ToolCall): boolean => c.result?.display?.kind === 'denied';
-    const failed = allWrites.filter((c) => c.result?.isError === true && !declined(c));
-    const writes = allWrites.filter((c) => c.result?.isError !== true && !declined(c));
-    const pathsOf = (list: ToolCall[]): Set<string> => new Set(list.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
-    if (writes.length > 0) {
-      const created = writes.filter((c) => c.result?.display?.kind === 'edit' && c.result.display.created);
-      const paths = pathsOf(writes);
-      const verb = created.length === writes.length ? 'Created' : 'Edited';
-      parts.push(paths.size === 1 ? `${verb} ${fileName([...paths][0] ?? '')}` : `${verb} ${paths.size} files`);
-    }
-    if (failed.length > 0) {
-      const paths = pathsOf(failed);
-      parts.push(paths.size === 1 ? `couldn't edit ${fileName([...paths][0] ?? '')}` : `couldn't edit ${paths.size} files`);
-    }
-  }
-  const globs = byName(['Glob']);
-  if (globs.length > 0) parts.push(plural(globs.length, 'Listed files', 'Listed files # times'));
-  const greps = byName(['Grep']);
-  if (greps.length > 0) {
-    const pattern = String(inputOf<{ pattern: string }>(greps[0]!.input).pattern ?? '');
-    parts.push(greps.length === 1 ? `Searched for “${pattern.length > 40 ? `${pattern.slice(0, 39)}…` : pattern}”` : `Ran ${greps.length} searches`);
-  }
   const commands = byName(['Shell']);
   if (commands.length > 0) {
     const failed = commands.filter(commandFailed).length;
     const background = commands.filter((c) => c.result?.display?.kind === 'shell' && c.result.display.backgroundId !== null).length;
     let phrase = plural(commands.length, 'Ran a command', 'Ran # commands');
-    if (failed > 0) phrase += ` (${failed} failed)`;
+    if (failed > 0) phrase += ` (${String(failed)} failed)`;
     if (background > 0) phrase += `, ${plural(background, 'started one in the background', 'started # in the background')}`;
     parts.push(phrase);
   }
+  const allWrites = byName(['Write', 'Edit', 'MultiEdit']);
+  if (allWrites.length > 0) {
+    // Failed edits changed nothing, so they never count as edited.
+    const declined = (c: ToolCall): boolean => c.result?.display?.kind === 'denied';
+    const failed = allWrites.filter((c) => c.result?.isError === true && !declined(c));
+    const writes = allWrites.filter((c) => c.result?.isError !== true && !declined(c));
+    const created = writes.filter((c) => c.result?.display?.kind === 'edit' && c.result.display.created);
+    const edited = writes.filter((c) => !created.includes(c));
+    if (created.length > 0) parts.push(files('Created', created));
+    if (edited.length > 0) parts.push(files('Edited', edited));
+    if (failed.length > 0) parts.push(files("couldn't edit", failed));
+  }
+  const reads = byName(['Read']);
+  if (reads.length > 0) parts.push(files('Read', reads));
+  const greps = byName(['Grep']);
+  if (greps.length > 0) {
+    const pattern = String(inputOf<{ pattern: string }>(greps[0]!.input).pattern ?? '');
+    parts.push(greps.length === 1 ? `Searched for “${pattern.length > 40 ? `${pattern.slice(0, 39)}…` : pattern}”` : `Ran ${String(greps.length)} searches`);
+  }
+  const globs = byName(['Glob']);
+  if (globs.length > 0) parts.push(plural(globs.length, 'Listed files', 'Listed files # times'));
   const checks = byName(['ShellOutput']);
   if (checks.length > 0) {
     const finished = checks.filter((c) => c.result?.display?.kind === 'shell-output' && c.result.display.status !== 'running').length;
@@ -271,12 +409,12 @@ export function summarizeCalls(calls: ToolCall[]): string {
     } catch {
       host = 'a page';
     }
-    parts.push(fetches.length === 1 ? `Fetched ${host}` : `Fetched ${fetches.length} pages`);
+    parts.push(fetches.length === 1 ? `Fetched ${host}` : `Fetched ${String(fetches.length)} pages`);
   }
   const tasks = byName(['Task']);
   if (tasks.length > 0) {
     const description = String(inputOf<{ description: string }>(tasks[0]!.input).description ?? '');
-    parts.push(tasks.length === 1 ? `Delegated: ${description}` : `Ran ${tasks.length} sub-agents`);
+    parts.push(tasks.length === 1 ? `Delegated: ${description}` : `Ran ${String(tasks.length)} sub-agents`);
   }
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) parts.push('Asked you a question');
@@ -284,7 +422,7 @@ export function summarizeCalls(calls: ToolCall[]): string {
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
-    parts.push(mcp.length === 1 ? `Used ${tool} from ${server}` : `Used ${mcp.length} tools from ${server}`);
+    parts.push(mcp.length === 1 ? `Used ${tool} from ${server}` : `Used ${String(mcp.length)} tools from ${server}`);
   }
   const other = calls.filter((c) => !known.has(c.name) && !c.name.startsWith('mcp__'));
   if (other.length > 0) parts.push(`Used ${[...new Set(other.map((c) => c.name))].join(', ')}`);
@@ -295,6 +433,13 @@ export function summarizeCalls(calls: ToolCall[]): string {
   return parts.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
 }
 
+/** The model's own description of a shell command, when it gave one. */
+export function shellDescription(call: ToolCall): string | null {
+  if (call.name !== 'Shell') return null;
+  const description = inputOf<{ description: string }>(call.input).description;
+  return typeof description === 'string' && description.trim().length > 0 ? description.trim().replace(/\.$/, '') : null;
+}
+
 /** Per-call one-liner in the expanded group. */
 export function describeCall(call: ToolCall): string {
   const input = inputOf<Record<string, unknown>>(call.input);
@@ -302,20 +447,21 @@ export function describeCall(call: ToolCall): string {
     const value = input[key];
     return typeof value === 'string' ? value : '';
   };
+  const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
   switch (call.name) {
     case 'Read':
       return `Read ${str('file_path')}`;
     case 'Write':
-      return `Write ${str('file_path')}`;
+      return `${edit && !edit.created ? 'Rewrote' : edit ? 'Created' : 'Write'} ${str('file_path')}`;
     case 'Edit':
     case 'MultiEdit':
-      return `Edit ${str('file_path')}`;
+      return `${edit ? 'Edited' : 'Edit'} ${str('file_path')}`;
     case 'Glob':
       return `Find files ${str('pattern')}`;
     case 'Grep':
-      return `Search ${str('pattern')}${str('path') ? ` in ${str('path')}` : ''}`;
+      return `${call.result ? 'Searched for' : 'Search'} “${str('pattern')}”${str('path') ? ` in ${str('path')}` : ''}`;
     case 'Shell':
-      return str('command').split('\n')[0] ?? '';
+      return shellDescription(call) ?? str('command').split('\n')[0] ?? '';
     case 'ShellOutput':
       return `Check background command ${str('shell_id')}`;
     case 'KillShell':

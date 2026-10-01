@@ -70,6 +70,24 @@
   }
 }
 
+/* Live step label: a soft highlight sweeps across the text. */
+.graft-shimmer {
+  background: linear-gradient(90deg, var(--g-text-muted) 35%, var(--g-text-strong) 50%, var(--g-text-muted) 65%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: graft-shimmer 2400ms linear infinite;
+}
+
+@keyframes graft-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 .graft-fade-in {
   opacity: 0;
   animation: graft-fade 300ms var(--g-ease) forwards;

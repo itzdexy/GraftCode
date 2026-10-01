@@ -3,7 +3,7 @@ import { ChevronRight, CircleAlert } from 'lucide-react';
 import { Ring } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { ToolCallBody } from './ToolDetail';
-import { describeCall, summarizeCalls, type ToolCall } from './transcriptModel';
+import { describeCall, shellDescription, summarizeCalls, type ToolCall } from './transcriptModel';
 
 function callFailed(call: ToolCall): boolean {
   const d = call.result?.display;
@@ -11,9 +11,19 @@ function callFailed(call: ToolCall): boolean {
   return call.result?.isError === true && d?.kind !== 'denied';
 }
 
-function CallRow({ call }: { call: ToolCall }) {
+export function DiffCount({ added, removed }: { added: number; removed: number }) {
+  if (added === 0 && removed === 0) return null;
+  return (
+    <span className="shrink-0 font-mono text-xs" aria-label={`${String(added)} lines added, ${String(removed)} removed`}>
+      <span className="text-diff-add">+{added}</span> <span className="text-diff-del">−{removed}</span>
+    </span>
+  );
+}
+
+export function CallRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(call.running !== null);
   const failed = callFailed(call);
+  const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
   return (
     <li className="flex flex-col">
       <button
@@ -23,7 +33,10 @@ function CallRow({ call }: { call: ToolCall }) {
         className="flex min-h-24 items-center gap-6 rounded-sm px-4 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
       >
         {call.running ? <Ring value={0} size={10} spinning label="Running" /> : failed ? <CircleAlert className="size-12 shrink-0 text-danger" aria-label="Failed" /> : null}
-        <span className={cn('min-w-0 flex-1 truncate', call.name === 'Shell' && 'font-mono text-[calc(var(--g-code-font-size)-1px)]')}>{describeCall(call)}</span>
+        <span className={cn('min-w-0 flex-1 truncate', call.name === 'Shell' && !shellDescription(call) && 'font-mono text-[calc(var(--g-code-font-size)-1px)]')}>
+          {describeCall(call)}
+        </span>
+        {edit ? <DiffCount added={edit.added} removed={edit.removed} /> : null}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
       {open ? (

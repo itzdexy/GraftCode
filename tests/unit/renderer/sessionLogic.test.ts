@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
 import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
-import { buildTranscript, summarizeCalls, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
+import { activityTitle, buildTranscript, diffTotals, groupActivity, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
 import { evictViews, MAX_CACHED_VIEWS, viewOf } from '../../../src/renderer/src/stores/sessions';
 
 let seq = 0;
@@ -89,7 +89,7 @@ describe('transcript model', () => {
         call('Shell', { command: 'b' }, { display: { kind: 'shell', command: 'b', cwd: '.', exitCode: 1, output: '', truncated: false, logPath: null, durationMs: 1, timedOut: false, interrupted: false, backgroundId: null } }),
         call('Edit', { file_path: 'x.ts' })
       ])
-    ).toBe('Edited x.ts, ran 2 commands (1 failed)');
+    ).toBe('Ran 2 commands (1 failed), edited x.ts');
     expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' })])).toBe('Install dependencies');
     expect(summarizeCalls([call('mcp__docs__search', {})])).toBe('Used search from docs');
   });
@@ -101,6 +101,82 @@ describe('transcript model', () => {
     );
     expect(summarizeCalls([call('Edit', { file_path: 'a.ts' }), call('Edit', { file_path: 'b.ts' }, { isError: true })])).toBe("Edited a.ts, couldn't edit b.ts");
     expect(summarizeCalls([call('Edit', { file_path: 'a.ts' }, { isError: true, display: { kind: 'denied', reason: 'no' } })])).toBe('One action was declined');
+  });
+});
+
+describe('turn activity', () => {
+  const edit = (id: string, path: string, added: number, removed: number, created = false): ContentBlock => ({
+    type: 'tool_result',
+    toolUseId: id,
+    content: [],
+    isError: false,
+    display: { kind: 'edit', path, created, patch: '', added, removed }
+  });
+
+  function turn(): StoredMessage[] {
+    seq = 0;
+    return [
+      { ...msg('user', [{ type: 'text', text: 'fix it' }]), createdAt: 1_000 },
+      { ...msg('assistant', [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 'w', name: 'Write', input: { file_path: 'src/new.ts' } }]), createdAt: 2_000 },
+      { ...msg('user', [edit('w', 'src/new.ts', 10, 0, true)]), createdAt: 3_000 },
+      { ...msg('assistant', [{ type: 'tool_use', id: 'e', name: 'Edit', input: { file_path: 'src/old.ts' } }]), createdAt: 4_000 },
+      { ...msg('user', [edit('e', 'src/old.ts', 3, 2)]), createdAt: 5_000 },
+      { ...msg('assistant', [{ type: 'text', text: 'Done.' }]), createdAt: 63_000 }
+    ];
+  }
+
+  it('folds the work before the answer into one block with totals and duration', () => {
+    const items = groupActivity(buildTranscript(turn(), NO_LIVE), false);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    const block = items[1] as ActivityItem;
+    expect(block.live).toBe(false);
+    expect(block.steps.map((s) => s.kind)).toEqual(['text', 'tool', 'tool']);
+    expect(block.endedAt - (block.startedAt ?? 0)).toBe(62_000);
+    expect(activityTitle(block)).toBe('Created new.ts, edited old.ts');
+    const calls = block.steps.flatMap((s) => (s.kind === 'tool' ? [s.call] : []));
+    expect(diffTotals(calls)).toEqual({ added: 13, removed: 2 });
+  });
+
+  it('keeps a running turn open, with streaming text outside the block', () => {
+    const messages = turn().slice(0, 5);
+    const items = groupActivity(buildTranscript(messages, { streaming: { messageId: 'live', text: 'Writing the ans', thinking: '' }, running: {} }), true);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    expect((items[1] as ActivityItem).live).toBe(true);
+    // Without streaming text, the narration so far is work, not the answer.
+    const working = groupActivity(buildTranscript(messages, NO_LIVE), true);
+    expect(working.map((i) => i.kind)).toEqual(['user', 'activity']);
+    expect((working[1] as ActivityItem).steps[0]?.kind).toBe('text');
+  });
+
+  it('says how long a turn thought when thinking was all it did, and lets todos split the work', () => {
+    seq = 0;
+    const thought = groupActivity(
+      buildTranscript(
+        [
+          { ...msg('user', [{ type: 'text', text: 'why?' }]), createdAt: 0 },
+          { ...msg('assistant', [{ type: 'thinking', text: 'hmm' }, { type: 'text', text: 'Because.' }]), createdAt: 7_000 }
+        ],
+        NO_LIVE
+      ),
+      false
+    );
+    expect(activityTitle(thought[1] as ActivityItem)).toBe('Thought for 7s');
+
+    seq = 0;
+    const split = groupActivity(
+      buildTranscript(
+        [
+          msg('user', [{ type: 'text', text: 'plan' }]),
+          msg('assistant', [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: 'a.ts' } }]),
+          msg('assistant', [{ type: 'tool_use', id: 't', name: 'TodoWrite', input: { todos: [] } }]),
+          msg('assistant', [{ type: 'tool_use', id: 's', name: 'Shell', input: { command: 'ls' } }]),
+          msg('assistant', [{ type: 'text', text: 'ok' }])
+        ],
+        NO_LIVE
+      ),
+      false
+    );
+    expect(split.map((i) => i.kind)).toEqual(['user', 'activity', 'todos', 'activity', 'text']);
   });
 });
 

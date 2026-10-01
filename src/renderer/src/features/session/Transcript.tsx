@@ -16,9 +16,10 @@ import {
   TodosItem,
   UserMessage
 } from './MessageItems';
+import { ActivityGroup } from './ActivityGroup';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
-import { buildTranscript, type TranscriptItem } from './transcriptModel';
+import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
 
 const STICK_THRESHOLD = 80;
 
@@ -62,7 +63,10 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
 export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, className }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
-  const items = useMemo(() => buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), [view.messages, view.streaming, view.running]);
+  const items = useMemo(
+    () => groupActivity(buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), view.turnActive),
+    [view.messages, view.streaming, view.running, view.turnActive]
+  );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -126,8 +130,10 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
 
   const runningCall = Object.values(view.running)[0] ?? null;
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
-  const showIndicator = view.turnActive && !view.streaming?.text && view.permission === null && view.question === null;
   const lastItem = items.at(-1);
+  // A running activity block shows its own progress; the indicator covers the wait before the first step.
+  const liveBlock = lastItem?.kind === 'activity' && lastItem.live;
+  const showIndicator = view.turnActive && !liveBlock && !view.streaming?.text && view.permission === null && view.question === null;
   const failed = summary.status === 'error' && summary.lastError && !view.turnActive;
 
   const render = (item: TranscriptItem): JSX.Element | null => {
@@ -151,6 +157,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <ThinkingItem item={item} />;
       case 'tools':
         return <ToolGroup calls={item.calls} />;
+      case 'activity':
+        return <ActivityGroup item={item} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':
