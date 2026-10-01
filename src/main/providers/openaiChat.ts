@@ -7,7 +7,7 @@ import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { parseSse } from './sse';
-import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, StreamRequest } from './types';
+import type { FinishReason, LLMProvider, ProviderConnection, RequestPrivacy, StreamEvent, StreamRequest } from './types';
 
 type ChatKind = Extract<ProviderKind, 'openai' | 'openrouter' | 'openai-compatible'>;
 
@@ -368,7 +368,8 @@ export class OpenAiChatProvider implements LLMProvider {
       ...(this.kind === 'openai' ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
       ...(withStreamOptions ? { stream_options: { include_usage: true } } : {}),
       ...(withReasoning ? this.reasoningParams(wire) : {}),
-      ...(this.kind === 'openai' ? { prompt_cache_key: req.cacheKey } : {}),
+      ...(this.kind === 'openai' ? { prompt_cache_key: req.cacheKey, store: false } : {}),
+      ...(this.kind === 'openrouter' ? routingPrivacy(req.privacy) : {}),
       ...(this.kind === 'openrouter' && BREAKPOINT_CACHING.test(modelId) ? { cache_control: { type: 'ephemeral' } } : {})
     });
 
@@ -381,6 +382,7 @@ export class OpenAiChatProvider implements LLMProvider {
       try {
         response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
       } catch (error) {
+        if (this.kind === 'openrouter') throwIfPrivacyBlocked(error, req.privacy);
         if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
         if (streamOptions && /stream_options/i.test(error.message)) {
           this.noStreamOptions.add(modelId);
@@ -502,6 +504,22 @@ export class OpenAiChatProvider implements LLMProvider {
     if (thinking.length > 0 && this.kind === 'openai-compatible' && interleaved === 'reasoning_content') return { model, reasoning_content: thinking };
     return null;
   }
+}
+
+/** OpenRouter's per-request data policy: skip providers that train on or keep prompts. */
+function routingPrivacy(privacy: RequestPrivacy): Record<string, unknown> {
+  if (!privacy.noTraining && !privacy.zeroRetention) return {};
+  return { provider: { data_collection: 'deny', ...(privacy.zeroRetention ? { zdr: true } : {}) } };
+}
+
+/** OpenRouter answers 404 when no provider of a model meets the data policy; say what to do instead. */
+function throwIfPrivacyBlocked(error: unknown, privacy: RequestPrivacy): void {
+  if (!(error instanceof ProviderError) || error.code !== 'not_found') return;
+  if (!/polic|retention|\bzdr\b/i.test(error.message)) return;
+  const message = privacy.zeroRetention
+    ? "No OpenRouter provider of this model keeps zero data, so this incognito chat can't use it. Pick another model."
+    : 'Every OpenRouter provider of this model may store or train on prompts, so Graft didn\'t send it. Pick another model, or turn off "Ask providers not to train on my data" in Settings → Privacy.';
+  throw new ProviderError('bad_request', message, { status: 404, retryable: false, cause: error });
 }
 
 function firstSentence(text: string): string {

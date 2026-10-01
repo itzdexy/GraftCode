@@ -5,6 +5,7 @@ export type SettingsSection =
   | 'providers'
   | 'models'
   | 'permissions'
+  | 'privacy'
   | 'mcp'
   | 'hooks'
   | 'memory'

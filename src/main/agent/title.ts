@@ -1,6 +1,6 @@
 import type { ModelInfo } from '@shared/schemas/models';
 import { streamWithRetry } from '../providers/retry';
-import type { LLMProvider } from '../providers/types';
+import type { LLMProvider, RequestPrivacy } from '../providers/types';
 
 const TITLE_SYSTEM =
   'Write a title of 2 to 6 words for a conversation that starts with the message below. Use sentence case, no quotes, no trailing punctuation. Reply with the title only.';
@@ -34,7 +34,8 @@ export async function quickText(
   system: string,
   input: string,
   signal: AbortSignal,
-  cacheKey: string
+  cacheKey: string,
+  privacy: RequestPrivacy
 ): Promise<string> {
   let text = '';
   for await (const event of streamWithRetry(
@@ -46,7 +47,8 @@ export async function quickText(
       tools: [],
       effort: model.effort ? model.effort.levels[0] ?? null : null,
       webSearch: false,
-      cacheKey
+      cacheKey,
+      privacy
     },
     signal,
     () => undefined,
@@ -57,8 +59,14 @@ export async function quickText(
   return text;
 }
 
-export async function generateTitle(provider: LLMProvider, model: ModelInfo, firstMessage: string, signal: AbortSignal): Promise<string | null> {
-  return cleanTitle(await quickText(provider, model, TITLE_SYSTEM, firstMessage.slice(0, 4000), signal, 'title'));
+export async function generateTitle(
+  provider: LLMProvider,
+  model: ModelInfo,
+  firstMessage: string,
+  signal: AbortSignal,
+  privacy: RequestPrivacy
+): Promise<string | null> {
+  return cleanTitle(await quickText(provider, model, TITLE_SYSTEM, firstMessage.slice(0, 4000), signal, 'title', privacy));
 }
 
 const COMMIT_SYSTEM =
@@ -78,6 +86,12 @@ export function cleanCommitMessage(raw: string): string | null {
   return body.length > 0 ? `${capped}\n\n${body}` : capped;
 }
 
-export async function generateCommitMessage(provider: LLMProvider, model: ModelInfo, diff: string, signal: AbortSignal): Promise<string | null> {
-  return cleanCommitMessage(await quickText(provider, model, COMMIT_SYSTEM, diff, signal, 'commit-message'));
+export async function generateCommitMessage(
+  provider: LLMProvider,
+  model: ModelInfo,
+  diff: string,
+  signal: AbortSignal,
+  privacy: RequestPrivacy
+): Promise<string | null> {
+  return cleanCommitMessage(await quickText(provider, model, COMMIT_SYSTEM, diff, signal, 'commit-message', privacy));
 }

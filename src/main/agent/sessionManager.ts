@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { GraftError } from '@shared/errors';
+import { dataHandling } from '@shared/privacy';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { EffortLevel, ModelRef, PermissionMode } from '@shared/schemas/common';
 import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from '@shared/schemas/messages';
@@ -118,6 +119,10 @@ export class SessionManager {
         resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) })
       },
       providerName: (providerId) => d.registry.providerName(providerId),
+      dataHandling: (providerId) => {
+        const provider = d.registry.summaries().find((p) => p.id === providerId);
+        return provider ? dataHandling(provider) : 'unknown';
+      },
       tools: d.tools,
       mcpToolNames: (root) => d.mcp?.toolNames(root) ?? [],
       mcpServerNames: (root) => d.mcp?.serverNames(root) ?? [],
@@ -142,7 +147,9 @@ export class SessionManager {
           autoCompact: s.behavior.autoCompact,
           userName: s.profile.name || null,
           defaultModel: s.defaults.model,
-          defaultEffort: s.defaults.effort
+          defaultEffort: s.defaults.effort,
+          noTraining: s.privacy.noTraining,
+          incognitoLocalOnly: s.privacy.incognitoLocalOnly
         };
       },
       gitInfo: async (cwd) => {
@@ -197,7 +204,8 @@ export class SessionManager {
     const current = models.find((m) => m.ref.modelId === ref.modelId);
     if (!current) return;
     const chosen = titleModel(current, models);
-    const title = await generateTitle(this.deps.registry.get(ref.providerId), chosen, firstText, AbortSignal.timeout(30_000));
+    const privacy = { noTraining: this.deps.settings.get().privacy.noTraining, zeroRetention: false };
+    const title = await generateTitle(this.deps.registry.get(ref.providerId), chosen, firstText, AbortSignal.timeout(30_000), privacy);
     if (!title) return;
     const store = this.storeFor(summary.id);
     if (!['New session', 'New chat'].includes(store.getSummary(summary.id).title)) return;

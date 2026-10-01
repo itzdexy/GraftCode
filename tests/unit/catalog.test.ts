@@ -172,8 +172,13 @@ describe('catalog-backed OpenAI-style providers', () => {
     await server.close();
   });
 
-  function request(model: StreamRequest['model'], messages: LlmMessage[], effort: StreamRequest['effort']): StreamRequest {
-    return { model, system: 'sys', messages, tools: [], effort, webSearch: false, cacheKey: 's1' };
+  function request(
+    model: StreamRequest['model'],
+    messages: LlmMessage[],
+    effort: StreamRequest['effort'],
+    privacy: StreamRequest['privacy'] = { noTraining: false, zeroRetention: false }
+  ): StreamRequest {
+    return { model, system: 'sys', messages, tools: [], effort, webSearch: false, cacheKey: 's1', privacy };
   }
 
   it('OpenRouter: offers the catalog levels, sends the native effort and replays reasoning_details', async () => {
@@ -257,6 +262,49 @@ describe('catalog-backed OpenAI-style providers', () => {
     const [toClaude, toOther] = server.requests.filter((r) => r.path.endsWith('/chat/completions')).map((r) => r.json() as Record<string, unknown>);
     expect(toClaude?.cache_control).toEqual({ type: 'ephemeral' });
     expect(toOther).not.toHaveProperty('cache_control');
+  });
+
+  it('OpenRouter: asks for providers that do not train, zero retention for incognito, and explains a refusal', async () => {
+    let refuse = false;
+    server.route('POST', '/api/v1/chat/completions', (_req, res) =>
+      refuse
+        ? json(res, 404, { error: { message: 'No endpoints found matching your data policy (Zero data retention).', code: 404 } })
+        : sse(res, [{ data: { choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] } }, { data: '[DONE]' }])
+    );
+    const provider = new OpenAiChatProvider({ id: 'or', kind: 'openrouter', preset: 'openrouter', apiKey: 'k', baseUrl: `${server.url}/api/v1` }, [], catalog);
+    const model = { ...(await import('../support/fakeProvider')).fakeModel({ ref: { providerId: 'or', modelId: 'vendor/model' }, effort: null }) };
+    const hi: LlmMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }];
+    const send = (privacy: StreamRequest['privacy']) => collect(provider.streamText(request(model, hi, null, privacy), new AbortController().signal));
+
+    await send({ noTraining: false, zeroRetention: false });
+    await send({ noTraining: true, zeroRetention: false });
+    await send({ noTraining: true, zeroRetention: true });
+    const bodies = server.requests.map((r) => r.json() as Record<string, unknown>);
+    expect(bodies[0]).not.toHaveProperty('provider');
+    expect(bodies[1]?.provider).toEqual({ data_collection: 'deny' });
+    expect(bodies[2]?.provider).toEqual({ data_collection: 'deny', zdr: true });
+
+    refuse = true;
+    await expect(send({ noTraining: true, zeroRetention: true })).rejects.toMatchObject({
+      code: 'bad_request',
+      retryable: false,
+      message: expect.stringContaining("this incognito chat can't use it") as unknown
+    });
+    await expect(send({ noTraining: true, zeroRetention: false })).rejects.toMatchObject({
+      message: expect.stringContaining('Settings → Privacy') as unknown
+    });
+  });
+
+  it('OpenAI: asks the API not to store responses', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) =>
+      sse(res, [{ data: { choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] } }, { data: '[DONE]' }])
+    );
+    const provider = new OpenAiChatProvider({ id: 'oa', kind: 'openai', preset: 'openai', apiKey: 'k', baseUrl: `${server.url}/v1` }, [], catalog);
+    const model = (await import('../support/fakeProvider')).fakeModel({ ref: { providerId: 'oa', modelId: 'gpt-test' }, effort: null });
+    await collect(provider.streamText(request(model, [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], null), new AbortController().signal));
+    const body = server.requests[0]?.json() as Record<string, unknown>;
+    expect(body.store).toBe(false);
+    expect(body).not.toHaveProperty('provider');
   });
 
   it('a compatible preset uses catalog metadata, reasoning_effort and drops it when the server refuses', async () => {

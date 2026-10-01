@@ -402,6 +402,41 @@ describe('agent tools that involve the user', () => {
     expect(h.session.summary.usage.totals.inputTokens).toBe(51_500);
   });
 
+  it('an incognito chat asks for zero retention, names itself locally and leaves the name out', async () => {
+    const h = harness({ kind: 'chat', incognito: true, script: [{ text: 'Sure.' }] });
+    h.session.send('Plan a weekend in Lisbon');
+    await h.session.idle();
+    expect(lastRequest(h).privacy).toEqual({ noTraining: true, zeroRetention: true });
+    expect(lastRequest(h).system).not.toContain('Tester');
+    expect(h.titles).toEqual([]);
+    expect(h.session.summary.title).toBe('Plan a weekend in Lisbon');
+    expect(h.provider.requests).toHaveLength(1);
+  });
+
+  it('a saved chat follows the training setting and keeps its usual title and name', async () => {
+    const h = harness({ kind: 'chat', noTraining: true, script: [{ text: 'Sure.' }] });
+    h.session.send('Plan a weekend in Lisbon');
+    await h.session.idle();
+    expect(lastRequest(h).privacy).toEqual({ noTraining: true, zeroRetention: false });
+    expect(lastRequest(h).system).toContain("The user's name is Tester.");
+    expect(h.titles).toEqual(['Plan a weekend in Lisbon']);
+  });
+
+  it('with "local models only", an incognito chat refuses a cloud model and uses a local one', async () => {
+    const cloud = harness({ kind: 'chat', incognito: true, incognitoLocalOnly: true, dataHandling: 'routed', script: [{ text: 'Sure.' }] });
+    cloud.session.send('hello');
+    await cloud.session.idle();
+    expect(cloud.provider.requests).toHaveLength(0);
+    expect(cloud.session.summary.status).toBe('error');
+    expect(cloud.session.summary.lastError?.message).toMatch(/only models on this computer/);
+
+    const local = harness({ kind: 'chat', incognito: true, incognitoLocalOnly: true, dataHandling: 'local', script: [{ text: 'Sure.' }] });
+    local.session.send('hello');
+    await local.session.idle();
+    expect(local.provider.requests).toHaveLength(1);
+    expect(local.session.summary.status).toBe('idle');
+  });
+
   it('runs a PreToolUse hook that blocks shell commands', async () => {
     const h = harness({
       mode: 'bypass',
@@ -525,9 +560,10 @@ describe('auto-titling', () => {
     expect(titleModel(main, [main]).ref.modelId).toBe('fake-model');
     const { FakeProvider } = await import('../support/fakeProvider');
     const provider = new FakeProvider([{ text: 'Debugging flaky websocket tests' }]);
-    expect(await generateTitle(provider, main, 'my websocket tests fail randomly', new AbortController().signal)).toBe(
+    expect(await generateTitle(provider, main, 'my websocket tests fail randomly', new AbortController().signal, { noTraining: true, zeroRetention: false })).toBe(
       'Debugging flaky websocket tests'
     );
     expect(provider.requests[0]!.tools).toEqual([]);
+    expect(provider.requests[0]!.privacy).toEqual({ noTraining: true, zeroRetention: false });
   });
 });

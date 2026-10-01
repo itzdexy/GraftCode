@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { DataHandling } from '../../src/shared/privacy';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import type { EffortLevel, PermissionMode } from '../../src/shared/schemas/common';
 import type { ModelInfo } from '../../src/shared/schemas/models';
@@ -43,6 +44,13 @@ export interface HarnessOptions {
   trusted?: (root: string) => boolean;
   /** Bypass switched on in Settings. */
   bypassEnabled?: boolean;
+  /** Run as an incognito chat (not saved, zero-retention requests). */
+  incognito?: boolean;
+  /** Settings → Privacy. */
+  noTraining?: boolean;
+  incognitoLocalOnly?: boolean;
+  /** How the fake provider counts for privacy (default: unknown). */
+  dataHandling?: DataHandling;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -60,7 +68,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     pinned: false,
     archived: false,
     unread: false,
-    incognito: true,
+    incognito: options.incognito ?? false,
     projectId: null,
     projectPath: options.kind === 'chat' ? null : projectDir,
     projectName: 'project',
@@ -94,6 +102,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       }
     },
     providerName: () => 'Fake Provider',
+    dataHandling: () => options.dataHandling ?? 'unknown',
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],
     mcpServerNames: () => [],
@@ -106,7 +115,17 @@ export function makeHarness(options: HarnessOptions): Harness {
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
-    preferences: () => ({ webSearch: false, bypassEnabled: options.bypassEnabled ?? false, bypassKeepsChecks: false, autoCompact: options.autoCompact ?? true, userName: 'Tester', defaultModel: model.ref, defaultEffort: 'medium' }),
+    preferences: () => ({
+      webSearch: false,
+      bypassEnabled: options.bypassEnabled ?? false,
+      bypassKeepsChecks: false,
+      autoCompact: options.autoCompact ?? true,
+      userName: 'Tester',
+      defaultModel: model.ref,
+      defaultEffort: 'medium',
+      noTraining: options.noTraining ?? false,
+      incognitoLocalOnly: options.incognitoLocalOnly ?? false
+    }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),
     emit: (_id, event) => {

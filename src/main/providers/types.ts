@@ -9,6 +9,18 @@ export interface ToolSpec {
   inputSchema: Record<string, unknown>;
 }
 
+/**
+ * Data-use requests sent with a model call. Only some APIs take them:
+ * OpenRouter routes around providers that don't comply, OpenAI gets
+ * store: false. Others follow their own terms (see shared/privacy.ts).
+ */
+export interface RequestPrivacy {
+  /** Don't use providers that train on or store prompts. */
+  noTraining: boolean;
+  /** Incognito: only endpoints that keep nothing at all (OpenRouter's zero-data-retention routing). */
+  zeroRetention: boolean;
+}
+
 export interface StreamRequest {
   model: ModelInfo;
   system: string;
@@ -16,6 +28,8 @@ export interface StreamRequest {
   tools: ToolSpec[];
   /** null when the model has no effort control. */
   effort: EffortLevel | null;
+  /** What to ask the provider about keeping and training on this request. */
+  privacy: RequestPrivacy;
   /** Provider-side web search, only honored where the model supports it. */
   webSearch: boolean;
   /** Stable key for provider-side prompt caching (the session id). */

@@ -388,7 +388,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if (!current) throw new GraftError('model_not_found', `The model ${ref.modelId} is no longer available.`);
       const diff = await diffForMessage(dir);
       if (diff.trim().length === 0) throw new GraftError('nothing_to_commit', 'There are no changes to describe.');
-      const message = await generateCommitMessage(s.registry.get(ref.providerId), titleModel(current, models), diff, AbortSignal.timeout(60_000));
+      const message = await generateCommitMessage(s.registry.get(ref.providerId), titleModel(current, models), diff, AbortSignal.timeout(60_000), {
+        noTraining: s.settings.get().privacy.noTraining,
+        zeroRetention: false
+      });
       if (!message) throw new GraftError('suggest_failed', 'The model returned an empty commit message. Write one yourself or try again.');
       return { message };
     },

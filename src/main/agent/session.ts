@@ -7,9 +7,10 @@ import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionReq
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { GraftError } from '@shared/errors';
+import type { DataHandling } from '@shared/privacy';
 import type { SessionPatch, SessionStore } from '../db/sessionsRepo';
 import type { RetryPolicy } from '../providers/retry';
-import type { LLMProvider } from '../providers/types';
+import type { LLMProvider, RequestPrivacy } from '../providers/types';
 import { decide, type Decision } from '../permissions/engine';
 import type { SettingsStore } from '../permissions/settingsStore';
 import { FileStateTracker } from '../tools/fileState';
@@ -26,6 +27,7 @@ import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import { BUILTIN_COMMANDS, INIT_PROMPT, expandCommand, loadCustomCommands, parseSlash, reviewPrompt } from './slashCommands';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_NOTE } from './systemPrompt';
+import { cleanTitle } from './title';
 import { shouldCompact } from './tokens';
 
 export interface ModelResolver {
@@ -42,6 +44,10 @@ export interface SessionPreferences {
   userName: string | null;
   defaultModel: ModelRef | null;
   defaultEffort: EffortLevel;
+  /** Ask providers not to train on or keep requests (Settings → Privacy). */
+  noTraining: boolean;
+  /** Incognito chats may only use models served from this computer. */
+  incognitoLocalOnly: boolean;
 }
 
 export interface SessionDeps {
@@ -65,6 +71,8 @@ export interface SessionDeps {
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;
+  /** How the provider behind a provider id treats what it receives. */
+  dataHandling(providerId: string): DataHandling;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
   /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
   checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
@@ -456,8 +464,20 @@ export class AgentSession {
   private async resolveModel(signal: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo; ref: ModelRef }> {
     const ref = this.summary.model ?? this.deps.preferences().defaultModel;
     if (!ref) throw new GraftError('no_model', 'Choose a model for this session first.');
+    if (this.summary.incognito && this.deps.preferences().incognitoLocalOnly && this.deps.dataHandling(ref.providerId) !== 'local') {
+      throw new GraftError(
+        'incognito_local_only',
+        `Incognito chats are set to use only models on this computer, and ${this.deps.providerName(ref.providerId)} isn't one. Pick a model from Ollama, LM Studio or another local server, or change this in Settings → Privacy.`
+      );
+    }
     const { provider, model } = await this.deps.models.resolve(ref, signal);
     return { provider, model, ref };
+  }
+
+  /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
+  private privacy(): RequestPrivacy {
+    const incognito = this.summary.incognito;
+    return { noTraining: incognito || this.deps.preferences().noTraining, zeroRetention: incognito };
   }
 
   private effortFor(model: ModelInfo): EffortLevel | null {
@@ -497,7 +517,9 @@ export class AgentSession {
           mcpServers: this.deps.mcpServerNames(this.settingsRoot())
         });
       } else {
-        this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name: this.deps.preferences().userName, model: identity });
+        // An incognito chat doesn't tell the provider who is asking.
+        const name = summary.incognito ? null : this.deps.preferences().userName;
+        this.system = buildChatSystemPrompt({ date: this.deps.now().toISOString().slice(0, 10), name, model: identity });
       }
     }
     const key = `${this.system.length}:${toolNames.join(',')}`;
@@ -605,6 +627,7 @@ export class AgentSession {
           effort,
           webSearch: prefs.webSearch && model.supportsWebSearch && summary.kind === 'code',
           cacheKey: this.id,
+          privacy: this.privacy(),
           turnId,
           maxIterations: effort === 'taproot' ? TAPROOT_ITERATIONS : MAX_ITERATIONS,
           agentLabel: null,
@@ -651,6 +674,14 @@ export class AgentSession {
       .listMessages(this.id)
       .filter((m) => m.role === 'user' && (m.meta.kind ?? 'normal') === 'normal' && m.content.some((b) => b.type === 'text' || b.type === 'image'));
     if (typed.length !== 1) return;
+    if (summary.incognito) {
+      // Named from the message itself: an incognito chat isn't sent out again just for a title.
+      const title = cleanTitle(firstText);
+      if (!title) return;
+      this.deps.store.updateSession(this.id, { title });
+      this.emit({ type: 'title', title });
+      return;
+    }
     this.deps.generateTitle(summary, firstText);
   }
 
@@ -673,6 +704,7 @@ export class AgentSession {
       files: this.files.touchedFiles(),
       instructions,
       cacheKey: this.id,
+      privacy: this.privacy(),
       signal
     });
     this.deps.store.markCompacted(
@@ -876,6 +908,7 @@ export class AgentSession {
         effort: this.effortFor(model) === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : model.effort?.default ?? null) : this.effortFor(model),
         webSearch: false,
         cacheKey: `${this.id}:${parentToolUseId}`,
+        privacy: this.privacy(),
         turnId: parentToolUseId,
         maxIterations: SUBAGENT_ITERATIONS,
         agentLabel: input.description,

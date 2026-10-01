@@ -83,6 +83,12 @@ export const AppSettingsSchema = z.object({
     webSearch: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
+  privacy: z.object({
+    /** Ask providers not to train on or keep requests (OpenRouter then skips providers that do). */
+    noTraining: z.boolean(),
+    /** Incognito chats refuse models that aren't served from this computer. */
+    incognitoLocalOnly: z.boolean()
+  }),
   updates: z.object({ enabled: z.boolean() }),
   shortcuts: z.record(ShortcutIdSchema, z.string().max(40)),
   ui: z.object({
@@ -102,6 +108,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true },
   security: { allowPlaintextKeys: false },
+  privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: false },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
@@ -119,6 +126,7 @@ export const AppSettingsPatchSchema = z.object({
   notifications: AppSettingsSchema.shape.notifications.partial().optional(),
   behavior: AppSettingsSchema.shape.behavior.partial().optional(),
   security: AppSettingsSchema.shape.security.partial().optional(),
+  privacy: AppSettingsSchema.shape.privacy.partial().optional(),
   updates: AppSettingsSchema.shape.updates.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()

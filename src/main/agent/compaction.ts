@@ -3,7 +3,7 @@ import type { ModelInfo } from '@shared/schemas/models';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { ProviderError } from '../providers/errors';
 import { streamWithRetry } from '../providers/retry';
-import type { LLMProvider } from '../providers/types';
+import type { LLMProvider, RequestPrivacy } from '../providers/types';
 import { toLlmHistory } from './history';
 
 const COMPACTION_SYSTEM = [
@@ -61,6 +61,7 @@ export interface CompactionRequest {
   files: string[];
   instructions: string;
   cacheKey: string;
+  privacy: RequestPrivacy;
   signal: AbortSignal;
 }
 
@@ -80,7 +81,8 @@ export async function summarizeSession(req: CompactionRequest): Promise<string> 
       tools: [],
       effort: req.model.effort ? 'low' : null,
       webSearch: false,
-      cacheKey: `${req.cacheKey}:compact`
+      cacheKey: `${req.cacheKey}:compact`,
+      privacy: req.privacy
     },
     req.signal,
     () => undefined

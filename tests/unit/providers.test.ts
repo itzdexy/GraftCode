@@ -39,6 +39,7 @@ function request(overrides: Partial<StreamRequest> = {}): StreamRequest {
     effort: 'medium',
     webSearch: false,
     cacheKey: 'session-1',
+    privacy: { noTraining: false, zeroRetention: false },
     ...overrides
   };
 }

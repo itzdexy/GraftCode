@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react';
-import { Bell, BookText, Cpu, Database, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, User, Webhook } from 'lucide-react';
+import { Bell, BookText, Cpu, Database, EyeOff, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, User, Webhook } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { useNav, type SettingsSection } from '../../stores/nav';
 import { HooksSection } from '../customize/HooksSection';
@@ -12,6 +12,7 @@ import { DataSection } from './DataSection';
 import { ModelsSection } from './ModelsSection';
 import { NotificationsSection } from './NotificationsSection';
 import { PermissionsSection } from './PermissionsSection';
+import { PrivacySection } from './PrivacySection';
 import { ProfileSection } from './ProfileSection';
 import { ProjectPicker } from './ProjectPicker';
 import { ProvidersSection } from './ProvidersSection';
@@ -29,6 +30,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'providers', label: 'Providers', description: 'Keys and endpoints for model providers.', icon: KeyRound },
   { id: 'models', label: 'Models', description: 'Defaults for new sessions and extra model IDs.', icon: Cpu },
   { id: 'permissions', label: 'Permissions', description: 'What the agent may do without asking.', icon: ShieldCheck },
+  { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
   { id: 'mcp', label: 'MCP servers', description: 'Tools and data from other apps.', icon: Plug },
   { id: 'hooks', label: 'Hooks', description: 'Commands that run around tool calls and turns.', icon: Webhook },
   { id: 'memory', label: 'Memory', description: 'Standing instructions every session reads.', icon: BookText },
@@ -60,6 +62,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <ModelsSection />;
     case 'permissions':
       return <PermissionsSection />;
+    case 'privacy':
+      return <PrivacySection />;
     case 'mcp':
       return <ScopedSection render={(projectPath) => <McpSection projectPath={projectPath} />} />;
     case 'hooks':

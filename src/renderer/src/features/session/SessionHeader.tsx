@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FolderOpen, Ghost, History, Laptop, ListChecks, Shrink } from 'lucide-react';
+import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FolderOpen, History, Laptop, ListChecks, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
@@ -8,6 +8,7 @@ import { invoke } from '../../lib/ipc';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { usePower } from '../../stores/power';
 import { reportError, useToasts } from '../../stores/toasts';
+import { IncognitoBadge } from '../privacy/IncognitoBadge';
 import { exportSession, renameSession } from '../shell/sessionActions';
 import { SessionMenuItems } from '../shell/SessionMenu';
 import { ViewHeader } from '../shell/ViewHeader';
@@ -199,9 +200,7 @@ export function ChatSessionHeader({ summary }: { summary: SessionSummary }) {
       <ViewHeader />
       <div className="flex h-36 shrink-0 items-center gap-8 pr-16 pl-12">
         <TitleMenu summary={summary} size="lg" />
-        {summary.incognito ? (
-          <Badge icon={<Ghost className="size-10" aria-hidden="true" />}>Incognito · not saved</Badge>
-        ) : null}
+        {summary.incognito ? <IncognitoBadge providerId={summary.model?.providerId ?? null} /> : null}
         <div className="flex-1" />
         <Menu>
           <MenuTrigger asChild>

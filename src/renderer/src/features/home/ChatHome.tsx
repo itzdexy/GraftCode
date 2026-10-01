@@ -9,6 +9,7 @@ import { useApp } from '../../stores/app';
 import { useNav } from '../../stores/nav';
 import { useUi } from '../../stores/ui';
 import { ChatModelMenu } from '../composer/ChatModelMenu';
+import { incognitoNote } from '../privacy/privacyText';
 import { Composer } from '../composer/Composer';
 import { ViewHeader } from '../shell/ViewHeader';
 import { useDefaults } from './useDefaults';
@@ -20,6 +21,9 @@ export function ChatHome() {
   const incognito = useUi((s) => s.incognito);
   const defaults = useDefaults();
   const now = new Date(useNow(60_000));
+  const provider = useApp((s) => s.providers.find((p) => p.id === defaults.model?.ref.providerId));
+  const localOnly = useApp((s) => s.settings?.privacy.incognitoLocalOnly ?? false);
+  const note = incognitoNote(provider, localOnly);
 
   const submit = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
     if (images.length === 0 && files.length === 0 && handleAppCommand(text)) return true;
@@ -60,7 +64,8 @@ export function ChatHome() {
               <Ghost className="size-32 text-icon" aria-hidden="true" />
               Incognito chat
             </h1>
-            <p className="text-md text-fg-muted">This chat isn’t saved to your history and disappears when you close Graft.</p>
+            <p className="text-md text-fg-muted">Graft won’t save this chat. It’s gone when you delete it or quit.</p>
+            <p className={note.blocked ? 'max-w-[520px] text-sm text-danger' : 'max-w-[520px] text-sm text-fg-muted'}>{note.text}</p>
           </div>
         ) : (
           <h1 className="flex items-center gap-12 text-center font-serif text-greeting font-normal text-fg-strong">

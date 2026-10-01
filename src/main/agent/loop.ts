@@ -7,7 +7,7 @@ import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { PermissionDecision, PermissionDetail } from '@shared/schemas/permissions';
 import { ProviderError, isAbortError } from '../providers/errors';
 import { streamWithRetry, type RetryPolicy } from '../providers/retry';
-import type { FinishReason, LLMProvider, StreamRequest } from '../providers/types';
+import type { FinishReason, LLMProvider, RequestPrivacy, StreamRequest } from '../providers/types';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
@@ -55,6 +55,7 @@ export interface LoopConfig {
   effort: EffortLevel | null;
   webSearch: boolean;
   cacheKey: string;
+  privacy: RequestPrivacy;
   turnId: string;
   maxIterations: number;
   retryPolicy?: RetryPolicy;
@@ -288,7 +289,8 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       tools: config.registry.specs(config.toolNames),
       effort: config.effort,
       webSearch: config.webSearch,
-      cacheKey: config.cacheKey
+      cacheKey: config.cacheKey,
+      privacy: config.privacy
     };
 
     let failure: ProviderError | null = null;

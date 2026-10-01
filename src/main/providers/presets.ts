@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { EffortLevel, ProviderKind } from '@shared/schemas/common';
 import type { EffortSupport, ModelInfo, ProviderPreset } from '@shared/schemas/models';
+import { isLocalUrl } from '@shared/privacy';
 import { effortSupport } from './catalog';
 
 /**
@@ -77,7 +78,6 @@ const OLLAMA: ProviderPreset = {
   local: true
 };
 
-const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
 
 function toModel(raw: RawModel): CatalogModel {
   const released = raw.d ? Date.parse(raw.d) : Number.NaN;
@@ -151,7 +151,7 @@ export class ProviderCatalog {
         docUrl: p.doc,
         envVars: p.env,
         modelCount: p.models.length,
-        local: p.api !== null && LOCAL.test(p.api)
+        local: p.api !== null && isLocalUrl(p.api)
       })
     );
     return [...list, OLLAMA].sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
