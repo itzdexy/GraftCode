@@ -17,13 +17,15 @@ export interface LaunchOptions {
   userData?: string;
   graftHome?: string;
   env?: Record<string, string>;
+  /** Launch an installed or packaged Graft.exe instead of the development build in out/. */
+  executablePath?: string;
 }
 
 export function makeTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-/** Launches the built app (out/main) with isolated userData and ~/.graft. */
+/** Launches the built app (out/main, or a packaged executable) with isolated userData and ~/.graft. */
 export async function launchGraft(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const userData = options.userData ?? makeTempDir('graft-e2e-data-');
   const graftHome = options.graftHome ?? makeTempDir('graft-e2e-home-');
@@ -33,7 +35,9 @@ export async function launchGraft(options: LaunchOptions = {}): Promise<Launched
   }
   Object.assign(env, { GRAFT_USER_DATA_DIR: userData, GRAFT_HOME: graftHome, GRAFT_E2E: '1' }, options.env ?? {});
 
-  const app = await electron.launch({ args: [path.join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT });
+  const app = options.executablePath
+    ? await electron.launch({ executablePath: options.executablePath, args: [], env, cwd: ROOT })
+    : await electron.launch({ args: [path.join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   return {

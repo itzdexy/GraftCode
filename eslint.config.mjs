@@ -49,8 +49,12 @@ export default defineConfig(
     languageOptions: { globals: globals.node }
   },
   {
-    files: ['scripts/**/*.mjs', 'tests/support/*.mjs', 'tests/fixtures/*.mjs', 'eslint.config.mjs'],
+    files: ['scripts/**/*.mjs', 'tests/support/*.mjs', 'tests/fixtures/*.mjs', 'eslint.config.mjs', '*.config.cjs'],
     extends: [tseslint.configs.disableTypeChecked]
+  },
+  {
+    files: ['*.config.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: globals.node }
   },
   {
     // Calibration/snapshot scripts evaluate callbacks inside the app's page.

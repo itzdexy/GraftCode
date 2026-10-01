@@ -102,3 +102,39 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
     </label>
   );
 });
+
+export interface SwitchProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  /** Accessible name (the visible label usually sits beside it). */
+  label: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** On/off switch for settings that apply immediately. */
+export function Switch({ checked, onChange, label, disabled = false, className }: SwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'relative inline-flex h-18 w-30 shrink-0 items-center rounded-full border transition-ui disabled:opacity-50',
+        checked ? 'border-transparent bg-accent' : 'border-border bg-toggle-track',
+        className
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'block size-12 rounded-full shadow-composer transition-transform duration-[var(--g-duration-base)]',
+          checked ? 'translate-x-14 bg-switch-thumb-on' : 'translate-x-2 bg-switch-thumb'
+        )}
+      />
+    </button>
+  );
+}

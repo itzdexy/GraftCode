@@ -140,6 +140,8 @@
   --g-toggle-track: #2b2b2a; /* surfaces.composerToggleTrack */
   --g-toggle-thumb: #414140; /* surfaces.composerToggleSelected */
   --g-toggle-thumb-border: #535352; /* surfaces.composerToggleSelectedBorder */
+  --g-switch-thumb: #8f8e88; /* settings switch, off */
+  --g-switch-thumb-on: #f0efec;
   --g-badge: #2b2b2a; /* surfaces.badgeNeutral */
   --g-input: #303030; /* surfaces.askInput */
   --g-input-border: #444443; /* surfaces.askInputBorder */
@@ -246,6 +248,8 @@
   --g-toggle-track: #ebeae5;
   --g-toggle-thumb: #ffffff;
   --g-toggle-thumb-border: #d0cfc9;
+  --g-switch-thumb: #ffffff;
+  --g-switch-thumb-on: #ffffff;
   --g-badge: #ebeae5;
   --g-input: #ffffff;
   --g-input-border: #cfcec8;

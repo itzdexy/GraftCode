@@ -1,10 +1,44 @@
-import { ChevronDown, Info, Keyboard } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, Download, Info, Keyboard, KeyRound, Settings } from 'lucide-react';
 import { Avatar } from '../../components/Avatar';
+import { IconButton } from '../../components/Button';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../../components/Menu';
+import { invoke } from '../../lib/ipc';
+import { useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useUi } from '../../stores/ui';
+import { ConfirmDialog } from '../settings/common';
+import { openSettings } from './shellActions';
 
-/** Footer: avatar, name, the provider behind the default model, and the account menu. */
+/** Shown only while an update downloads or waits for a restart. */
+function UpdateIndicator() {
+  const update = useApp((s) => s.update);
+  const [confirm, setConfirm] = useState(false);
+  if (!update || (update.status !== 'ready' && update.status !== 'downloading')) return null;
+  const ready = update.status === 'ready';
+  const label = ready
+    ? `Restart to update to ${update.version ?? 'the new version'}`
+    : `Downloading update${update.progress !== null ? ` (${Math.round(update.progress)}%)` : ''}`;
+  return (
+    <>
+      <IconButton label={label} size="sm" className={ready ? 'text-accent' : undefined} onClick={() => (ready ? setConfirm(true) : openSettings('about'))}>
+        <Download className="size-14" />
+      </IconButton>
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Restart to update?"
+        description="Graft closes, installs the update and opens again. Running sessions stop; their history is kept."
+        confirmLabel="Restart now"
+        onConfirm={async () => {
+          await invoke('updates:install');
+        }}
+      />
+    </>
+  );
+}
+
+/** Footer: avatar, name, the provider behind the default model, the account menu and the update indicator. */
 export function SidebarFooter() {
   const profile = useApp((s) => s.settings?.profile);
   const defaultProviderId = useApp((s) => s.settings?.defaults.model?.providerId ?? null);
@@ -12,10 +46,11 @@ export function SidebarFooter() {
     const byModel = s.providers.find((p) => p.id === defaultProviderId);
     return (byModel ?? s.providers.find((p) => p.isDefault) ?? s.providers[0])?.label ?? 'No provider';
   });
+  const settingsLabel = useShortcutLabel('openSettings');
   const name = profile?.name ?? '';
 
   return (
-    <div className="flex h-[var(--g-status-bar-height)] shrink-0 items-center border-t border-border-subtle px-[var(--g-sidebar-inset)]">
+    <div className="flex h-[var(--g-status-bar-height)] shrink-0 items-center gap-4 border-t border-border-subtle px-[var(--g-sidebar-inset)]">
       <Menu>
         <MenuTrigger asChild>
           <button
@@ -40,6 +75,12 @@ export function SidebarFooter() {
             </span>
           </MenuLabel>
           <MenuSeparator />
+          <MenuItem icon={<Settings className="size-14" />} shortcut={settingsLabel} onSelect={() => openSettings()}>
+            Settings
+          </MenuItem>
+          <MenuItem icon={<KeyRound className="size-14" />} onSelect={() => openSettings('providers')}>
+            Providers
+          </MenuItem>
           <MenuItem icon={<Keyboard className="size-14" />} onSelect={() => useUi.getState().setDialog('shortcuts')}>
             Keyboard shortcuts
           </MenuItem>
@@ -48,6 +89,8 @@ export function SidebarFooter() {
           </MenuItem>
         </MenuContent>
       </Menu>
+      <div className="flex-1" />
+      <UpdateIndicator />
     </div>
   );
 }

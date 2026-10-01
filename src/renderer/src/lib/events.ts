@@ -53,6 +53,9 @@ export function useGraftEvents(): void {
           case 'schedules:changed':
             emitChanged('schedules');
             break;
+          case 'updates:state':
+            useApp.getState().setUpdate(event.state);
+            break;
         }
       }),
     []

@@ -12,6 +12,7 @@ import { ChatModelMenu } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
 import { ViewHeader } from '../shell/ViewHeader';
 import { useDefaults } from './useDefaults';
+import { handleAppCommand } from '../session/sessionControls';
 
 /** Chat home: time-of-day greeting and the composer that starts a chat (optionally incognito). */
 export function ChatHome() {
@@ -21,6 +22,7 @@ export function ChatHome() {
   const now = new Date(useNow(60_000));
 
   const submit = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
+    if (images.length === 0 && files.length === 0 && handleAppCommand(text)) return true;
     const summary = await invoke('sessions:create', {
       kind: 'chat',
       projectPath: null,

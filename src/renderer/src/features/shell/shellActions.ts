@@ -1,5 +1,5 @@
 import { useApp } from '../../stores/app';
-import { useNav } from '../../stores/nav';
+import { useNav, type SettingsSection } from '../../stores/nav';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 
@@ -27,4 +27,9 @@ export function startNew(): void {
   useNav.getState().go({ name: 'home' });
   // The home composer registers itself on mount; focus after the route renders.
   requestAnimationFrame(() => useUi.getState().focusComposer?.());
+}
+
+/** Opens Settings at a section (Profile unless one is named). */
+export function openSettings(section: SettingsSection = 'profile'): void {
+  useNav.getState().go({ name: 'settings', section });
 }

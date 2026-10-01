@@ -8,21 +8,10 @@ import { ErrorState, LoadingState } from '../../components/States';
 import { Mark } from '../../brand/Mark';
 import { Wordmark } from '../../brand/Wordmark';
 import { errorText, invoke } from '../../lib/ipc';
-import { useShortcutLabel } from '../../lib/shortcuts';
+import { SHORTCUT_DESCRIPTIONS, useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-
-export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
-  newSession: 'New session or chat',
-  search: 'Search chats and sessions',
-  toggleSidebar: 'Show or hide the sidebar',
-  toggleTerminal: 'Toggle the terminal panel',
-  toggleChanges: 'Toggle the changes panel',
-  focusComposer: 'Focus the message box',
-  interrupt: 'Stop the running session',
-  cyclePermissionMode: 'Cycle permission mode (in the message box)'
-};
 
 function ShortcutRow({ id }: { id: ShortcutId }) {
   const label = useShortcutLabel(id);

@@ -29,6 +29,7 @@ import { CustomModelSchema, ModelInfoSchema, ProviderSummarySchema, VerifyResult
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
+import { ClearHistoryResultSchema, RuleListsSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
 
 /**
  * Every renderer → main request, with Zod schemas for input and output.
@@ -46,7 +47,9 @@ export const AppInfoSchema = z.object({
   version: z.string(),
   platform: PlatformSchema,
   isPackaged: z.boolean(),
-  versions: z.object({ electron: z.string(), chrome: z.string(), node: z.string() })
+  versions: z.object({ electron: z.string(), chrome: z.string(), node: z.string() }),
+  /** Folder holding the database, logs and window state. */
+  dataDir: z.string()
 });
 export type AppInfo = z.infer<typeof AppInfoSchema>;
 
@@ -273,7 +276,18 @@ export const contracts = {
   'schedules:delete': channel(z.object({ id: IdSchema }), Ok),
   'schedules:runNow': channel(z.object({ id: IdSchema }), ScheduleRunSchema),
   'schedules:runs': channel(z.object({ id: IdSchema }), z.array(ScheduleRunSchema)),
-  'schedules:describe': channel(z.object({ cron: z.string().max(200) }), z.object({ description: z.string(), next: z.number().int().nullable(), error: z.string().nullable() }))
+  'schedules:describe': channel(z.object({ cron: z.string().max(200) }), z.object({ description: z.string(), next: z.number().int().nullable(), error: z.string().nullable() })),
+
+  // Settings: permission rules, notifications, data, updates
+  'permissions:get': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(ScopedRulesSchema)),
+  'permissions:save': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), rules: RuleListsSchema }), Ok),
+  'notifications:test': channel(Void, z.object({ shown: z.boolean() })),
+  'data:export': channel(Void, z.object({ path: z.string(), sessions: z.number().int() }).nullable()),
+  'data:clearHistory': channel(Void, ClearHistoryResultSchema),
+  'data:openFolder': channel(Void, Void),
+  'updates:state': channel(Void, UpdateStateSchema),
+  'updates:check': channel(Void, UpdateStateSchema),
+  'updates:install': channel(Void, Ok)
 };
 
 export type Contracts = typeof contracts;

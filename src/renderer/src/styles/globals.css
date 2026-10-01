@@ -34,6 +34,8 @@
   --color-toggle-track: var(--g-toggle-track);
   --color-toggle-thumb: var(--g-toggle-thumb);
   --color-toggle-thumb-border: var(--g-toggle-thumb-border);
+  --color-switch-thumb: var(--g-switch-thumb);
+  --color-switch-thumb-on: var(--g-switch-thumb-on);
   --color-badge: var(--g-badge);
   --color-input: var(--g-input);
   --color-input-border: var(--g-input-border);

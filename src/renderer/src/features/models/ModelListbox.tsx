@@ -4,7 +4,7 @@ import type { ModelRef } from '@shared/schemas/common';
 import type { ModelInfo } from '@shared/schemas/models';
 import { fuzzyScore } from '@shared/fuzzy';
 import { cn } from '../../lib/cn';
-import { sameRef } from '../../stores/app';
+import { sameRef, useApp } from '../../stores/app';
 
 interface ModelListboxProps {
   models: ModelInfo[];
@@ -36,6 +36,10 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
       .map((x) => x.m);
   }, [models, query]);
   const selectedIndex = filtered.findIndex((m) => sameRef(m.ref, value));
+  // With models from several providers, each option names its provider.
+  const providers = useApp((s) => s.providers);
+  const multiProvider = new Set(models.map((m) => m.ref.providerId)).size > 1;
+  const providerLabel = (providerId: string): string | null => (multiProvider ? (providers.find((p) => p.id === providerId)?.label ?? null) : null);
   const [active, setActive] = useState(Math.max(0, selectedIndex));
   const activeIndex = Math.min(active, Math.max(0, filtered.length - 1));
   const optionId = (i: number): string => `${id}-opt-${i}`;
@@ -100,7 +104,7 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-base text-fg">{m.label}</p>
-                <p className="truncate text-sm text-fg-muted">{m.description}</p>
+                <p className="truncate text-sm text-fg-muted">{[providerLabel(m.ref.providerId), m.description].filter(Boolean).join(' · ')}</p>
               </div>
               {selected ? <Check className="size-16 shrink-0 text-blue" aria-hidden="true" /> : null}
             </div>

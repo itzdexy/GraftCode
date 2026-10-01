@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Code, Keyboard, Info, Menu as MenuIcon, MessagesSquare, PanelLeft, Plus, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Code, Keyboard, Info, Menu as MenuIcon, MessagesSquare, PanelLeft, Plus, Search, Settings } from 'lucide-react';
 import { IconButton } from '../../components/Button';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../../components/Menu';
 import { Segmented } from '../../components/Segmented';
@@ -10,7 +10,7 @@ import { useSessions } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { needsAttention } from './sessionLists';
-import { startNew, setMode, toggleSidebar } from './shellActions';
+import { openSettings, startNew, setMode, toggleSidebar } from './shellActions';
 
 /** Hamburger, sidebar toggle, back/forward and the Chat|Code toggle. */
 export function TitlebarControls({ showModeToggle = true, className }: { showModeToggle?: boolean; className?: string }) {
@@ -31,6 +31,7 @@ export function TitlebarControls({ showModeToggle = true, className }: { showMod
   const newLabel = useShortcutLabel('newSession');
   const searchLabel = useShortcutLabel('search');
   const sidebarLabel = useShortcutLabel('toggleSidebar');
+  const settingsLabel = useShortcutLabel('openSettings');
 
   return (
     <div className={cn('flex items-center gap-4', className)}>
@@ -51,6 +52,9 @@ export function TitlebarControls({ showModeToggle = true, className }: { showMod
             {collapsed ? 'Show sidebar' : 'Hide sidebar'}
           </MenuItem>
           <MenuSeparator />
+          <MenuItem icon={<Settings className="size-14" />} shortcut={settingsLabel} onSelect={() => openSettings()}>
+            Settings
+          </MenuItem>
           <MenuItem icon={<Keyboard className="size-14" />} onSelect={() => useUi.getState().setDialog('shortcuts')}>
             Keyboard shortcuts
           </MenuItem>

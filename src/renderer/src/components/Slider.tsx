@@ -27,7 +27,7 @@ export function Slider({ value, min, max, step, onChange, label, valueText, clas
       }}
       className={cn('relative flex h-16 w-full touch-none items-center select-none', className)}
     >
-      <RS.Track className="relative h-4 grow overflow-hidden rounded-full bg-control">
+      <RS.Track className="relative h-4 grow overflow-hidden rounded-full bg-strong">
         <RS.Range className="absolute h-full rounded-full bg-fg-muted" />
       </RS.Track>
       <RS.Thumb

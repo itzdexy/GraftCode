@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { ErrorState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useShortcut } from '../../lib/shortcuts';
@@ -21,7 +20,8 @@ import { InfoDialogs } from './InfoDialogs';
 import { SearchDialog } from './SearchDialog';
 import { SessionDialogs } from './SessionDialogs';
 import { Sidebar } from './Sidebar';
-import { startNew, toggleSidebar } from './shellActions';
+import { openSettings, startNew, toggleSidebar } from './shellActions';
+import { SettingsView } from '../settings/SettingsView';
 
 function routeKey(route: Route): string {
   if (route.name === 'session') return `session:${route.id}`;
@@ -45,7 +45,7 @@ function RouteView({ route }: { route: Route }) {
     case 'customize':
       return <CustomizeView />;
     case 'settings':
-      return <ErrorState title="Not available" message="This view isn't available." />;
+      return <SettingsView section={route.section} />;
   }
 }
 
@@ -71,6 +71,7 @@ export function AppShell() {
   useShortcut('search', () => useUi.getState().setSearchOpen(true));
   useShortcut('toggleSidebar', () => void toggleSidebar());
   useShortcut('focusComposer', () => useUi.getState().focusComposer?.());
+  useShortcut('openSettings', () => openSettings());
 
   return (
     <div className="flex h-full bg-bg">

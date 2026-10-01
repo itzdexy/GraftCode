@@ -94,6 +94,13 @@ export class SessionManager {
     return this.storeFor(id).getSummary(id);
   }
 
+  /** Sessions with a turn in progress (for the tray tooltip). */
+  runningCount(): number {
+    let count = 0;
+    for (const session of this.live.values()) if (session.liveSummary().status === 'running') count++;
+    return count;
+  }
+
   list(includeArchived: boolean): SessionSummary[] {
     const stored = this.deps.repo.list({ includeArchived });
     const merged = [...this.incognito.list(), ...stored].map((s) => {
@@ -418,6 +425,28 @@ export class SessionManager {
       this.deps.repo.delete(id);
     }
     this.deps.emitRemoved(id);
+  }
+
+  /**
+   * Deletes every saved session (Settings → Data). Worktree folders stay on
+   * disk so no uncommitted work is lost; their count is reported instead.
+   */
+  async clearHistory(): Promise<{ removed: number; worktreesKept: number }> {
+    let removed = 0;
+    let worktreesKept = 0;
+    for (const summary of this.deps.repo.list({ includeArchived: true })) {
+      const live = this.live.get(summary.id);
+      if (live) {
+        await live.dispose();
+        this.live.delete(summary.id);
+      }
+      if (summary.worktreePath && fs.existsSync(summary.worktreePath)) worktreesKept++;
+      await this.deps.checkpoints.deleteForSession(summary.id);
+      this.deps.repo.delete(summary.id);
+      this.deps.emitRemoved(summary.id);
+      removed++;
+    }
+    return { removed, worktreesKept };
   }
 
   duplicate(id: string): SessionSummary {

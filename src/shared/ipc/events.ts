@@ -4,6 +4,7 @@ import { AppSettingsSchema } from '../schemas/appSettings';
 import { ProviderSummarySchema } from '../schemas/models';
 import { BrowserStateSchema } from '../schemas/panels';
 import { SessionSummarySchema } from '../schemas/sessions';
+import { UpdateStateSchema } from '../schemas/system';
 
 /**
  * Main → renderer push events. One IPC channel carries this discriminated
@@ -28,7 +29,8 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('shells:changed'), sessionId: z.string() }),
   z.object({ type: z.literal('browser:state'), state: BrowserStateSchema }),
   z.object({ type: z.literal('mcp:changed') }),
-  z.object({ type: z.literal('schedules:changed') })
+  z.object({ type: z.literal('schedules:changed') }),
+  z.object({ type: z.literal('updates:state'), state: UpdateStateSchema })
 ]);
 
 export type GraftEvent = z.infer<typeof GraftEventSchema>;

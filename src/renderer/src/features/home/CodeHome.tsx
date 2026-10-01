@@ -24,6 +24,7 @@ import { initialCodeContext } from './codeContext';
 import { ContextChips, pickProjectFolder, useBranches } from './ContextChips';
 import { codeHomeTips, SuggestionBanner } from './SuggestionBanner';
 import { useDefaults } from './useDefaults';
+import { handleAppCommand } from '../session/sessionControls';
 import { WhatsNewLink } from './WhatsNew';
 
 const HOME_LIST_LIMIT = 8;
@@ -87,6 +88,7 @@ export function CodeHome() {
   const sessions = useMemo(() => homeSessions(Object.values(summaries), 'code', HOME_LIST_LIMIT), [summaries]);
 
   const submit = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
+    if (images.length === 0 && files.length === 0 && handleAppCommand(text)) return true;
     let ctx = useUi.getState().codeContext;
     if (!ctx?.projectPath) {
       const picked = await pickProjectFolder();

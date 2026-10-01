@@ -1,10 +1,12 @@
 import fs from 'node:fs';
-import { dialog, shell as electronShell, type BrowserWindow } from 'electron';
+import path from 'node:path';
+import { app, dialog, Notification, shell as electronShell, type BrowserWindow } from 'electron';
 import { GraftError } from '@shared/errors';
 import { fuzzyScore } from '@shared/fuzzy';
 import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
 import type { GraftEvent } from '@shared/ipc/events';
 import type { ProjectSummary, SearchResult } from '@shared/schemas/app';
+import type { AppSettings } from '@shared/schemas/appSettings';
 import type { VerifyResult } from '@shared/schemas/models';
 import type { ProjectRecord } from '../db/projectsRepo';
 import {
@@ -40,7 +42,10 @@ import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { BUILTIN_COMMANDS, loadCustomCommands } from '../agent/slashCommands';
 import type { SessionManager } from '../agent/sessionManager';
+import { writeExport } from '../app/dataExport';
 import { log } from '../app/log';
+import type { UpdateController } from '../app/updater';
+import { cleanRuleLists } from '../permissions/rules';
 import { openExternalSafely } from '../app/security';
 import type { Services } from '../app/services';
 import { FileIndex } from './fileIndex';
@@ -57,6 +62,9 @@ export interface AppContext {
   browser(): BrowserPanel;
   window(): BrowserWindow | null;
   emit(event: GraftEvent): void;
+  updates: UpdateController;
+  /** Applies settings that live outside the renderer (tray, updates). */
+  settingsChanged(settings: AppSettings): void;
   isFirstLaunch: boolean;
   version: string;
 }
@@ -152,6 +160,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
         if (removed > 0) await emitProviders();
       }
       ctx.emit({ type: 'settings:changed', settings: next });
+      ctx.settingsChanged(next);
       return next;
     },
     'profile:update': async (profile) => {
@@ -625,6 +634,73 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'artifacts:previewUrl': async ({ path }) => {
       if (!isKnownArtifact((await ctx.services()).db, path)) throw new GraftError('not_an_artifact', 'That file is not an artifact from your sessions.');
       return { url: ctx.artifacts.urlFor(path) };
+    },
+    'permissions:get': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const scopes: SettingsScope[] = projectPath ? ['user', 'project', 'local'] : ['user'];
+      return scopes.map((scope) => {
+        const loaded = s.settingsFiles.load(scope, projectPath ?? undefined);
+        const p = loaded.settings.permissions;
+        return { scope, path: loaded.path, error: loaded.error, allow: p?.allow ?? [], ask: p?.ask ?? [], deny: p?.deny ?? [], defaultMode: p?.defaultMode ?? null };
+      });
+    },
+    'permissions:save': async ({ scope, projectPath, rules }) => {
+      if (scope !== 'user' && !projectPath) throw new GraftError('project_required', 'Choose a project for project rules.');
+      const { lists: next, invalid } = cleanRuleLists(rules, scope);
+      if (invalid.length > 0) {
+        throw new GraftError(
+          'invalid_rule',
+          `${invalid.slice(0, 3).map((r) => `"${r}"`).join(', ')} ${invalid.length === 1 ? 'is not a valid rule' : 'are not valid rules'}. Use Tool or Tool(pattern), for example Shell(npm test:*) or Edit(src/**).`
+        );
+      }
+      await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => ({
+        ...settings,
+        permissions: { ...(settings.permissions ?? {}), ...next }
+      }));
+      return { ok: true as const };
+    },
+    'notifications:test': () => {
+      if (!Notification.isSupported()) return { shown: false };
+      new Notification({ title: 'Graft', body: 'Notifications are on. Sessions that need you or finish in the background show up like this.' }).show();
+      return { shown: true };
+    },
+    'data:export': async () => {
+      const s = await ctx.services();
+      const win = ctx.window();
+      const options = {
+        title: 'Export Graft data',
+        defaultPath: path.join(app.getPath('documents'), `graft-export-${new Date().toISOString().slice(0, 10)}.json`),
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      };
+      const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) return null;
+      const scheduler = await ctx.scheduler();
+      const sessions = await writeExport(result.filePath, {
+        version: ctx.version,
+        settings: s.settings.get(),
+        providers: s.registry.summaries().map(({ id, kind, label, baseUrl, enabled, isDefault, customModels }) => ({ id, kind, label, baseUrl, enabled, isDefault, customModels })),
+        projects: s.projects.list().map(projectSummary),
+        schedules: scheduler.list(),
+        sessions: () => s.sessionsRepo.list({ includeArchived: true }),
+        messages: (id) => s.sessionsRepo.listMessages(id)
+      });
+      log.info('data', 'Exported data', { sessions: String(sessions) });
+      return { path: result.filePath, sessions };
+    },
+    'data:clearHistory': async () => {
+      const result = await (await ctx.sessions()).clearHistory();
+      log.info('data', 'Cleared session history', { removed: String(result.removed), worktreesKept: String(result.worktreesKept) });
+      return result;
+    },
+    'data:openFolder': async () => {
+      const failure = await electronShell.openPath((await ctx.services()).paths.userData);
+      if (failure) throw new GraftError('open_failed', `Couldn't open the data folder: ${failure}`);
+    },
+    'updates:state': () => ctx.updates.get(),
+    'updates:check': () => ctx.updates.check(),
+    'updates:install': () => {
+      ctx.updates.install();
+      return { ok: true as const };
     },
     'schedules:list': async () => (await ctx.scheduler()).list().map(scheduleView),
     'schedules:save': async ({ id, schedule }) => {

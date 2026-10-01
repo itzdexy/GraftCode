@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { CornerDownLeft, FileText, Plus, Square, X } from 'lucide-react';
 import type { SlashCommand } from '@shared/schemas/app';
+import { DEFAULT_SHORTCUTS } from '@shared/schemas/appSettings';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
+import { matchesAccelerator } from '../../lib/shortcuts';
+import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, readAttachments } from './attachments';
@@ -62,6 +65,8 @@ export function Composer({
   className
 }: ComposerProps) {
   const text = useUi((s) => s.drafts[draftKey] ?? '');
+  const cycleKeys = useApp((s) => s.settings?.shortcuts.cyclePermissionMode ?? DEFAULT_SHORTCUTS.cyclePermissionMode);
+  const interruptKeys = useApp((s) => s.settings?.shortcuts.interrupt ?? DEFAULT_SHORTCUTS.interrupt);
   const setDraft = useUi((s) => s.setDraft);
   const [images, setImages] = useState<ImageBlock[]>([]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
@@ -185,10 +190,10 @@ export function Composer({
     if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
       event.preventDefault();
       void submit();
-    } else if (event.key === 'Tab' && event.shiftKey && onCyclePermission) {
+    } else if (onCyclePermission && matchesAccelerator(event.nativeEvent, cycleKeys)) {
       event.preventDefault();
       onCyclePermission();
-    } else if (event.key === 'Escape' && busy && onInterrupt) {
+    } else if (busy && onInterrupt && matchesAccelerator(event.nativeEvent, interruptKeys)) {
       event.preventDefault();
       onInterrupt();
     }

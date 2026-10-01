@@ -3,6 +3,7 @@ import type { AppSettings, AppSettingsPatch } from '@shared/schemas/appSettings'
 import type { EnvironmentInfo, ProjectSummary } from '@shared/schemas/app';
 import type { ModelRef } from '@shared/schemas/common';
 import type { ModelInfo, ProviderSummary } from '@shared/schemas/models';
+import type { UpdateState } from '@shared/schemas/system';
 import { errorText, invoke } from '../lib/ipc';
 
 export interface ProviderModelsState {
@@ -30,12 +31,16 @@ interface AppState {
   projectsError: string | null;
   /** True right after onboarding, so home greets with "Welcome" instead of "Welcome back". */
   justOnboarded: boolean;
+  update: UpdateState | null;
   boot: () => Promise<void>;
+  setUpdate: (update: UpdateState) => void;
   setProgress: (label: string, done: number, total: number) => void;
   setSettings: (settings: AppSettings) => void;
   setProviders: (providers: ProviderSummary[]) => void;
   updateSettings: (patch: AppSettingsPatch) => Promise<AppSettings>;
   finishOnboarding: (settings: AppSettings) => void;
+  /** "Run setup again" from Settings → Data. */
+  restartOnboarding: (settings: AppSettings) => void;
   loadModels: (refresh?: boolean) => Promise<void>;
   loadProjects: () => Promise<void>;
   upsertProject: (project: ProjectSummary) => void;
@@ -58,6 +63,7 @@ export const useApp = create<AppState>((set, get) => ({
   projects: [],
   projectsError: null,
   justOnboarded: false,
+  update: null,
 
   async boot() {
     set({ phase: 'booting', bootError: null });
@@ -78,10 +84,17 @@ export const useApp = create<AppState>((set, get) => ({
         void get().loadModels();
         void get().loadProjects();
       }
+      invoke('updates:state')
+        .then((update) => set({ update }))
+        .catch(() => set({ update: null }));
       set({ phase: boot.firstRun ? 'onboarding' : 'ready' });
     } catch (error) {
       set({ phase: 'error', bootError: errorText(error), splashKnown: true });
     }
+  },
+
+  setUpdate(update) {
+    set({ update });
   },
 
   setProgress(label, done, total) {
@@ -100,6 +113,10 @@ export const useApp = create<AppState>((set, get) => ({
     const settings = await invoke('settings:update', patch);
     set({ settings });
     return settings;
+  },
+
+  restartOnboarding(settings) {
+    set({ settings, phase: 'onboarding', justOnboarded: false });
   },
 
   finishOnboarding(settings) {

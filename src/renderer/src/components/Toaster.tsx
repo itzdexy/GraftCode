@@ -9,12 +9,12 @@ const ICONS: Record<Toast['tone'], JSX.Element> = {
   error: <TriangleAlert className="size-16 text-danger" aria-hidden="true" />
 };
 
-/** Transient notices for finished or failed actions, stacked under the titlebar. */
+/** Transient notices for finished or failed actions, stacked in the bottom-right corner clear of page actions. */
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
   return (
-    <div className="pointer-events-none fixed top-[calc(var(--g-titlebar-height)+8px)] right-16 z-[var(--g-z-toast)] flex w-[min(360px,calc(100vw-32px))] flex-col gap-8">
+    <div className="pointer-events-none fixed right-16 bottom-16 z-[var(--g-z-toast)] flex w-[min(360px,calc(100vw-32px))] flex-col justify-end gap-8">
       {toasts.map((toast) => (
         <div
           key={toast.id}

@@ -45,6 +45,20 @@ export function parseRule(raw: string, source: RuleSource): Rule | null {
   return { raw: raw.trim(), tool: match[1]!, content: content === undefined || content === '' || content === '*' ? null : content, source };
 }
 
+export interface RuleListsInput {
+  allow: string[];
+  ask: string[];
+  deny: string[];
+}
+
+/** Trims and de-duplicates rule lists from Settings, and reports the rules that don't parse. */
+export function cleanRuleLists(lists: RuleListsInput, source: RuleSource): { lists: RuleListsInput; invalid: string[] } {
+  const clean = (list: string[]): string[] => [...new Set(list.map((r) => r.trim()).filter((r) => r.length > 0))];
+  const next = { allow: clean(lists.allow), ask: clean(lists.ask), deny: clean(lists.deny) };
+  const invalid = [...next.allow, ...next.ask, ...next.deny].filter((r) => !parseRule(r, source));
+  return { lists: next, invalid };
+}
+
 function coversTool(rule: Rule, toolName: string): boolean {
   if (rule.tool.startsWith('mcp__')) {
     if (rule.tool === toolName) return true;

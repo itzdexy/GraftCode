@@ -8,6 +8,7 @@ import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
+import { openSettings } from '../shell/shellActions';
 import { effortFor } from '../models/modelChoice';
 import { useRewind } from './RewindDialog';
 
@@ -62,17 +63,40 @@ export interface UiCommandContext {
   openModelMenu: () => void;
 }
 
+function commandName(text: string): string | null {
+  return /^\/([a-z]+)\s*$/i.exec(text.trim())?.[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * Commands that open app-wide UI and need no session (they also work on the
+ * home screens). Returns true when the text was one of them.
+ */
+export function handleAppCommand(text: string): boolean {
+  switch (commandName(text)) {
+    case 'resume':
+      useUi.getState().setSearchOpen(true);
+      return true;
+    case 'config':
+      openSettings();
+      return true;
+    case 'mcp':
+      openSettings('mcp');
+      return true;
+    case 'permissions':
+      openSettings('permissions');
+      return true;
+    default:
+      return false;
+  }
+}
+
 /**
  * Commands that open app UI instead of going to the agent. Returns true when
  * the text was one of them and has been handled.
  */
 export function handleUiCommand(text: string, ctx: UiCommandContext): boolean {
-  const match = /^\/([a-z]+)\s*$/i.exec(text.trim());
-  if (!match) return false;
-  switch (match[1]?.toLowerCase()) {
-    case 'resume':
-      useUi.getState().setSearchOpen(true);
-      return true;
+  if (handleAppCommand(text)) return true;
+  switch (commandName(text)) {
     case 'model':
       ctx.openModelMenu();
       return true;

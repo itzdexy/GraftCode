@@ -92,6 +92,15 @@ describe('transcript model', () => {
     expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' })])).toBe('Install dependencies');
     expect(summarizeCalls([call('mcp__docs__search', {})])).toBe('Used search from docs');
   });
+
+  it('never reports a failed or declined edit as edited (regression: "Edited notes.txt" after an error)', () => {
+    expect(summarizeCalls([call('Edit', { file_path: 'notes.txt' }, { isError: true })])).toBe("Couldn't edit notes.txt");
+    expect(summarizeCalls([call('Grep', { pattern: 'needle' }), call('Edit', { file_path: 'notes.txt' }, { isError: true })])).toBe(
+      "Couldn't edit notes.txt, searched for “needle”"
+    );
+    expect(summarizeCalls([call('Edit', { file_path: 'a.ts' }), call('Edit', { file_path: 'b.ts' }, { isError: true })])).toBe("Edited a.ts, couldn't edit b.ts");
+    expect(summarizeCalls([call('Edit', { file_path: 'a.ts' }, { isError: true, display: { kind: 'denied', reason: 'no' } })])).toBe('One action was declined');
+  });
 });
 
 describe('diff model', () => {

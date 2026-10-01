@@ -219,14 +219,22 @@ export function summarizeCalls(calls: ToolCall[]): string {
     const paths = new Set(reads.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
     parts.push(paths.size === 1 ? `Read ${fileName([...paths][0] ?? '')}` : `Read ${paths.size} files`);
   }
-  const writes = byName(['Write', 'Edit', 'MultiEdit']);
-  if (writes.length > 0) {
-    const created = writes.filter((c) => c.result?.display?.kind === 'edit' && c.result.display.created);
-    const paths = new Set(writes.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
-    if (created.length === writes.length) {
-      parts.push(paths.size === 1 ? `Created ${fileName([...paths][0] ?? '')}` : `Created ${paths.size} files`);
-    } else {
-      parts.push(paths.size === 1 ? `Edited ${fileName([...paths][0] ?? '')}` : `Edited ${paths.size} files`);
+  const allWrites = byName(['Write', 'Edit', 'MultiEdit']);
+  if (allWrites.length > 0) {
+    // Failed edits changed nothing, so they never count as "Edited".
+    const declined = (c: ToolCall): boolean => c.result?.display?.kind === 'denied';
+    const failed = allWrites.filter((c) => c.result?.isError === true && !declined(c));
+    const writes = allWrites.filter((c) => c.result?.isError !== true && !declined(c));
+    const pathsOf = (list: ToolCall[]): Set<string> => new Set(list.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
+    if (writes.length > 0) {
+      const created = writes.filter((c) => c.result?.display?.kind === 'edit' && c.result.display.created);
+      const paths = pathsOf(writes);
+      const verb = created.length === writes.length ? 'Created' : 'Edited';
+      parts.push(paths.size === 1 ? `${verb} ${fileName([...paths][0] ?? '')}` : `${verb} ${paths.size} files`);
+    }
+    if (failed.length > 0) {
+      const paths = pathsOf(failed);
+      parts.push(paths.size === 1 ? `couldn't edit ${fileName([...paths][0] ?? '')}` : `couldn't edit ${paths.size} files`);
     }
   }
   const globs = byName(['Glob']);
@@ -281,7 +289,7 @@ export function summarizeCalls(calls: ToolCall[]): string {
   const denied = calls.filter((c) => c.result?.display?.kind === 'denied').length;
   if (denied > 0) parts.push(plural(denied, 'one action was declined', '# actions were declined'));
 
-  return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
+  return parts.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
 }
 
 /** Per-call one-liner in the expanded group. */

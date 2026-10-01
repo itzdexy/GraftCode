@@ -22,7 +22,8 @@ export const SHORTCUT_IDS = [
   'toggleChanges',
   'focusComposer',
   'interrupt',
-  'cyclePermissionMode'
+  'cyclePermissionMode',
+  'openSettings'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -35,7 +36,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   toggleChanges: 'Ctrl+Shift+D',
   focusComposer: 'Ctrl+L',
   interrupt: 'Escape',
-  cyclePermissionMode: 'Shift+Tab'
+  cyclePermissionMode: 'Shift+Tab',
+  openSettings: 'Ctrl+,'
 };
 
 export const OnboardingStepSchema = z.enum(['name', 'avatar', 'provider', 'key', 'defaults', 'done']);

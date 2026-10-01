@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, nativeTheme, protocol, safeStorage } from 'electron';
 import type { AppInfo } from '@shared/ipc/contracts';
+import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
@@ -19,6 +20,8 @@ import { McpManager } from './mcp/mcpManager';
 import { ARTIFACT_SCHEME, ArtifactServer } from './artifacts/artifacts';
 import { Scheduler } from './schedule/scheduler';
 import { openExternalSafely } from './app/security';
+import { TrayController } from './app/tray';
+import { UpdateController } from './app/updater';
 
 // Test and E2E runs isolate all state before anything touches userData.
 if (process.env.GRAFT_USER_DATA_DIR) {
@@ -41,6 +44,62 @@ let scheduler: Scheduler | null = null;
 const artifactServer = new ArtifactServer();
 let browserPanel: BrowserPanel | null = null;
 let quitting = false;
+let settingsSnapshot: AppSettings | null = null;
+
+/** Bundled icons: next to the app when installed, in the repo during development. */
+function iconPath(name: string): string {
+  return app.isPackaged ? path.join(process.resourcesPath, 'icons', name) : path.join(__dirname, '../../resources/icons', name);
+}
+
+function showWindow(): void {
+  const win = mainWindow?.window;
+  if (!win) {
+    if (app.isReady()) openMainWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+const tray = new TrayController({
+  iconPath: iconPath('tray.png'),
+  show: showWindow,
+  quit: () => app.quit(),
+  runningCount: () => sessionManager?.runningCount() ?? 0
+});
+
+const updates = new UpdateController({
+  enabled: () => settingsSnapshot?.updates.enabled ?? false,
+  support: () => {
+    if (!app.isPackaged) return { ok: false, reason: 'Updates are delivered to installed builds.' };
+    if (!fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))) return { ok: false, reason: 'This build has no update feed configured.' };
+    return { ok: true };
+  },
+  loadBackend: async () => (await import('electron-updater')).autoUpdater,
+  emit: (state) => emit({ type: 'updates:state', state }),
+  log: (level, message, fields) => log[level]('updates', message, fields)
+});
+
+/** Tray and update checks follow their settings. */
+function applySystemSettings(settings: AppSettings): void {
+  settingsSnapshot = settings;
+  tray.sync(settings.behavior.runInTray);
+  updates.sync();
+}
+
+/** app.getVersion() reports Electron's own version when run unpackaged from out/main, so read package.json then. */
+function readAppVersion(): string {
+  if (app.isPackaged) return app.getVersion();
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : app.getVersion();
+  } catch (error) {
+    log.warn('app', 'Could not read the version from package.json', { message: (error as Error).message });
+    return app.getVersion();
+  }
+}
+const appVersion = readAppVersion();
 
 function platform(): AppInfo['platform'] {
   const p = process.platform;
@@ -82,6 +141,7 @@ function services(): Promise<Services> {
     onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total })
   })
     .then((s) => {
+      applySystemSettings(s.settings.get());
       s.shells.on('change', (sessionId: string) => emit({ type: 'shells:changed', sessionId }));
       s.shells.on('error-log', (message: string) => log.warn('shell', message));
       // Scheduled sessions run while the app is open.
@@ -190,7 +250,10 @@ async function sessions(): Promise<SessionManager> {
     rgPath: s.rgPath,
     mcp: m,
     emitEvent: (sessionId, event) => emit({ type: 'session:event', sessionId, event }),
-    emitSummary: (summary) => emit({ type: 'session:summary', summary }),
+    emitSummary: (summary) => {
+      emit({ type: 'session:summary', summary });
+      tray.refresh();
+    },
     emitRemoved: (sessionId) => emit({ type: 'session:removed', sessionId }),
     filesChanged: (dir) => s.diffStats.invalidate(dir),
     notify: (summary, kind, text, visible) =>
@@ -211,6 +274,13 @@ function openMainWindow(): void {
     devServerUrl: app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
   });
   const win = mainWindow.window;
+  // With the tray on, closing hides the window; sessions keep running.
+  win.on('close', (event) => {
+    if (quitting || !tray.active) return;
+    event.preventDefault();
+    win.hide();
+    sessionManager?.setWindowFocused(false);
+  });
   win.on('focus', () => sessionManager?.setWindowFocused(true));
   win.on('blur', () => sessionManager?.setWindowFocused(false));
   win.on('closed', () => {
@@ -221,6 +291,8 @@ function openMainWindow(): void {
 
 async function shutdown(): Promise<void> {
   try {
+    updates.dispose();
+    tray.destroy();
     scheduler?.stop();
     browserPanel?.close();
     await ptyManager?.disposeAll();
@@ -240,23 +312,18 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const win = mainWindow?.window;
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-  });
+  app.on('second-instance', () => showWindow());
 
   if (process.platform === 'win32') app.setAppUserModelId('app.graft.desktop');
 
   registerHandlers({
     'app:info': () => ({
       name: 'Graft',
-      version: app.getVersion(),
+      version: appVersion,
       platform: platform(),
       isPackaged: app.isPackaged,
-      versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node }
+      versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
+      dataDir: paths.userData
     }),
     'window:setTitlebarTheme': ({ theme }) => {
       mainWindow?.setTheme(theme);
@@ -271,8 +338,10 @@ if (!gotLock) {
       browser,
       window: () => mainWindow?.window ?? null,
       emit,
+      updates,
+      settingsChanged: applySystemSettings,
       isFirstLaunch,
-      version: app.getVersion()
+      version: appVersion
     })
   });
 
@@ -286,7 +355,7 @@ if (!gotLock) {
     const missing = missingHandlers();
     if (missing.length > 0) log.warn('ipc', 'Channels without handlers', { channels: missing.join(',') });
     openMainWindow();
-    log.info('app', 'Ready', { version: app.getVersion(), packaged: app.isPackaged, firstLaunch: isFirstLaunch });
+    log.info('app', 'Ready', { version: appVersion, packaged: app.isPackaged, firstLaunch: isFirstLaunch });
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
     });
