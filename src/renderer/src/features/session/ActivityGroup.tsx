@@ -1,20 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Brain, ChevronRight, Globe } from 'lucide-react';
-import { Mark } from '../../brand/Mark';
 import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
 import { CallRow, DiffCount } from './ToolGroup';
 import { SearchStep } from '../web/SearchResults';
 import { activityTitle, describeCall, diffTotals, durationText, searchOfCall, type ActivityItem, type ActivityStep } from './transcriptModel';
-
-function Elapsed({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return <span className="shrink-0 text-sm text-fg-faint tabular-nums">{durationText(now - since)}</span>;
-}
 
 /** What a running block is doing now: the running tool, else its newest step. */
 function currentLabel(item: ActivityItem): string {
@@ -28,7 +18,7 @@ function currentLabel(item: ActivityItem): string {
   if (last.kind === 'tool') return describeCall(last.call);
   if (last.kind === 'provider') return last.summary;
   if (last.kind === 'search') return `Searched the web for “${last.search.query}”`;
-  return 'Thinking';
+  return thoughtLabel(last.text, last.live);
 }
 
 function firstLine(text: string): string {
@@ -56,6 +46,13 @@ function NarrationStep({ text }: { text: string }) {
   );
 }
 
+/** A summarized thought usually opens with a short heading; that names the step. */
+function thoughtLabel(text: string, live: boolean): string {
+  const line = firstLine(text).replace(/[.:]$/, '');
+  if (line.length > 0 && line.length <= 90) return line;
+  return live ? 'Thinking' : 'Thought it through';
+}
+
 function ThoughtStep({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -67,7 +64,7 @@ function ThoughtStep({ text, live }: { text: string; live: boolean }) {
         className="flex min-h-24 items-center gap-6 rounded-sm px-4 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
       >
         <Brain className="size-12 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">{live ? 'Thinking' : 'Thought it through'}</span>
+        <span className={cn('min-w-0 flex-1 truncate', live && 'graft-shimmer')}>{thoughtLabel(text, live)}</span>
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
       {open ? <p className="selectable px-4 pt-2 pb-6 text-md whitespace-pre-wrap text-fg-muted">{text}</p> : null}
@@ -121,15 +118,11 @@ export function ActivityGroup({ item }: { item: ActivityItem }) {
         className="group flex min-h-26 items-center gap-8 self-start rounded-sm text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
       >
         {item.live ? (
-          <>
-            <Mark size={16} motion="thinking" />
-            <span className="graft-shimmer min-w-0 truncate">{currentLabel(item)}</span>
-            {item.startedAt !== null ? <Elapsed since={item.startedAt} /> : null}
-          </>
+          <span className="graft-shimmer min-w-0 truncate">{currentLabel(item)}</span>
         ) : (
           <>
             <span className="min-w-0 truncate">{title}</span>
-            <DiffCount added={diff.added} removed={diff.removed} />
+            <DiffCount added={diff.added} removed={diff.removed} pill />
             {duration !== null && !timed ? <span className="shrink-0 text-sm text-fg-faint">· {duration}</span> : null}
           </>
         )}

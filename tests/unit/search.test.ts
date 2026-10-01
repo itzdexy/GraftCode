@@ -14,7 +14,7 @@ import {
   type SearchDeps
 } from '../../src/main/tools/web/search';
 import { webSearchTool } from '../../src/main/tools/web/webSearch';
-import { isPublicHost } from '../../src/main/app/favicons';
+import { declaredIcon, iconDataUrl, isPublicHost } from '../../src/main/app/favicons';
 import { fakeModel } from '../support/fakeProvider';
 import { json, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 import { makeToolContext } from '../support/toolContext';
@@ -235,6 +235,16 @@ describe('search engines', () => {
 });
 
 describe('site icons', () => {
+  it('finds the icon a page declares and keeps SVG icons as images', () => {
+    const html = '<head><link rel="stylesheet" href="/a.css"><link rel="shortcut icon" href="/static/fav.png"><link rel="icon" href="x.svg"></head>';
+    expect(declaredIcon(html, 'https://www.anthropic.com/news')).toBe('https://www.anthropic.com/static/fav.png');
+    expect(declaredIcon('<link rel="apple-touch-icon" href="https://cdn.site.dev/t.png">', 'https://site.dev/')).toBe('https://cdn.site.dev/t.png');
+    expect(declaredIcon('<p>no icons</p>', 'https://site.dev/')).toBeNull();
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>');
+    expect(iconDataUrl(svg, 'image/svg+xml')).toBe(`data:image/svg+xml;base64,${svg.toString('base64')}`);
+    expect(iconDataUrl(Buffer.from('<html>not an icon</html>'), 'text/html')).toBeNull();
+  });
+
   it('only fetches icons for public host names', () => {
     expect(isPublicHost('www.roblox.com')).toBe(true);
     expect(isPublicHost('rivals.fandom.com')).toBe(true);

@@ -17,7 +17,8 @@ import {
   UserMessage
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
-import { ThinkingIndicator } from './ThinkingIndicator';
+import { EditsCard } from './EditsCard';
+import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
 import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
 
@@ -128,12 +129,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     scrollToBottom();
   }, [summary.id, scrollToBottom]);
 
-  const runningCall = Object.values(view.running)[0] ?? null;
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
   const lastItem = items.at(-1);
-  // A running activity block shows its own progress; the indicator covers the wait before the first step.
-  const liveBlock = lastItem?.kind === 'activity' && lastItem.live;
-  const showIndicator = view.turnActive && !liveBlock && !view.streaming?.text && view.permission === null && view.question === null;
+  const showStatus = view.turnActive && view.permission === null && view.question === null;
   const failed = summary.status === 'error' && summary.lastError && !view.turnActive;
 
   const render = (item: TranscriptItem): JSX.Element | null => {
@@ -159,6 +157,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <ToolGroup calls={item.calls} />;
       case 'activity':
         return <ActivityGroup item={item} />;
+      case 'edits':
+        return <EditsCard files={item.files} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':
@@ -219,7 +219,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
               </div>
             </div>
           ) : null}
-          {showIndicator ? <ThinkingIndicator startedAt={view.turnStartedAt} detail={runningCall?.summary ?? null} /> : null}
+          {showStatus ? (
+            <StatusLine sessionId={summary.id} startedAt={view.turnStartedAt} contextTokens={summary.usage.contextTokens} tasks={summary.kind === 'code'} />
+          ) : null}
         </div>
       </div>
       {atBottom ? null : (

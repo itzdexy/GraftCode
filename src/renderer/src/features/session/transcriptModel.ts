@@ -29,7 +29,17 @@ export type TranscriptItem =
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
+  | { kind: 'edits'; key: string; files: EditedFile[] }
   | ActivityItem;
+
+/** A file a turn changed, with its line counts and the patches that did it. */
+export interface EditedFile {
+  path: string;
+  added: number;
+  removed: number;
+  created: boolean;
+  patches: string[];
+}
 
 export interface SearchInfo {
   query: string;
@@ -291,6 +301,13 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       out.push(item);
     });
     flush();
+    // A finished turn ends with the files it changed.
+    const running = lastTurn && turnActive;
+    if (!running) {
+      const calls = segment.flatMap((item) => (item.kind === 'tools' ? item.calls : []));
+      const files = editedFiles(calls);
+      if (files.length > 0) out.push({ kind: 'edits', key: `edits:${segment[0]?.key ?? String(index)}`, files });
+    }
     // The newest block of a turn in progress is still working, even while the answer streams after it.
     if (lastTurn && turnActive) {
       const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
@@ -318,6 +335,22 @@ export function searchedPhrase(searches: SearchInfo[]): string {
   const sites = new Set(searches.flatMap((s) => s.results.map((r) => r.url))).size;
   if (sites > 0) return `Searched ${String(sites)} ${sites === 1 ? 'website' : 'websites'}`;
   return searches.length === 1 ? `Searched for “${searches[0]?.query ?? ''}”` : `Searched the web ${String(searches.length)} times`;
+}
+
+/** Files changed by edits that went through, in the order they were first changed. */
+export function editedFiles(calls: ToolCall[]): EditedFile[] {
+  const byPath = new Map<string, EditedFile>();
+  for (const call of calls) {
+    const d = call.result?.display;
+    if (d?.kind !== 'edit' || call.result?.isError) continue;
+    const file = byPath.get(d.path) ?? { path: d.path, added: 0, removed: 0, created: false, patches: [] };
+    file.added += d.added;
+    file.removed += d.removed;
+    file.created ||= d.created;
+    if (d.patch) file.patches.push(d.patch);
+    byPath.set(d.path, file);
+  }
+  return [...byPath.values()];
 }
 
 /** Lines added and removed by a set of tool calls (edits that went through). */
@@ -348,7 +381,7 @@ export function activityTitle(item: ActivityItem): string {
   const native = item.steps.flatMap((s) => (s.kind === 'search' ? [s.search] : []));
   const parts: string[] = [];
   if (native.length > 0) parts.push(searchedPhrase(native));
-  if (calls.length > 0) parts.push(summarizeCalls(calls));
+  if (calls.length > 0) parts.push(summarizeCalls(calls, 3));
   if (parts.length > 0) return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
   const duration = item.startedAt === null ? 0 : item.endedAt - item.startedAt;
   const onlyThinking = item.steps.every((s) => s.kind === 'thinking');
@@ -383,13 +416,26 @@ function plural(n: number, one: string, many: string): string {
  * One muted line for a group of tool calls, most telling first:
  * "Ran 4 commands (1 failed), created a.ts, edited 2 files, read b.ts".
  */
-export function summarizeCalls(calls: ToolCall[]): string {
+export function summarizeCalls(calls: ToolCall[], limit = Number.POSITIVE_INFINITY): string {
   if (calls.length === 1) {
     const only = calls[0]!;
     const description = shellDescription(only);
     if (description && !commandFailed(only)) return description.charAt(0).toUpperCase() + description.slice(1);
   }
-  const parts: string[] = [];
+  const all = summaryParts(calls);
+  const kept = all.slice(0, limit);
+  const rest = all.slice(kept.length).reduce((n, part) => n + part.calls, 0);
+  const phrases = kept.map((part) => part.text);
+  if (rest > 0) phrases.push(`and ${String(rest)} more ${rest === 1 ? 'action' : 'actions'}`);
+  return phrases.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
+}
+
+/** The phrases of a summary, each with how many calls it stands for. */
+function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }> {
+  const parts: Array<{ text: string; calls: number }> = [];
+  const push = (text: string, count: number): void => {
+    parts.push({ text, calls: count });
+  };
   const byName = (names: string[]): ToolCall[] => calls.filter((c) => names.includes(c.name));
   const pathsOf = (list: ToolCall[]): Set<string> => new Set(list.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
   const files = (verb: string, list: ToolCall[]): string => {
@@ -404,7 +450,7 @@ export function summarizeCalls(calls: ToolCall[]): string {
     let phrase = plural(commands.length, 'Ran a command', 'Ran # commands');
     if (failed > 0) phrase += ` (${String(failed)} failed)`;
     if (background > 0) phrase += `, ${plural(background, 'started one in the background', 'started # in the background')}`;
-    parts.push(phrase);
+    push(phrase, commands.length);
   }
   const allWrites = byName(['Write', 'Edit', 'MultiEdit']);
   if (allWrites.length > 0) {
@@ -414,28 +460,28 @@ export function summarizeCalls(calls: ToolCall[]): string {
     const writes = allWrites.filter((c) => c.result?.isError !== true && !declined(c));
     const created = writes.filter((c) => c.result?.display?.kind === 'edit' && c.result.display.created);
     const edited = writes.filter((c) => !created.includes(c));
-    if (created.length > 0) parts.push(files('Created', created));
-    if (edited.length > 0) parts.push(files('Edited', edited));
-    if (failed.length > 0) parts.push(files("couldn't edit", failed));
+    if (created.length > 0) push(files('Created', created), created.length);
+    if (edited.length > 0) push(files('Edited', edited), edited.length);
+    if (failed.length > 0) push(files("couldn't edit", failed), failed.length);
   }
   const reads = byName(['Read']);
-  if (reads.length > 0) parts.push(files('Read', reads));
+  if (reads.length > 0) push(files('Read', reads), reads.length);
   const greps = byName(['Grep']);
   if (greps.length > 0) {
     const pattern = String(inputOf<{ pattern: string }>(greps[0]!.input).pattern ?? '');
-    parts.push(greps.length === 1 ? `Searched for “${pattern.length > 40 ? `${pattern.slice(0, 39)}…` : pattern}”` : `Ran ${String(greps.length)} searches`);
+    push(greps.length === 1 ? `Searched for “${pattern.length > 40 ? `${pattern.slice(0, 39)}…` : pattern}”` : `Ran ${String(greps.length)} searches`, greps.length);
   }
   const globs = byName(['Glob']);
-  if (globs.length > 0) parts.push(plural(globs.length, 'Listed files', 'Listed files # times'));
+  if (globs.length > 0) push(plural(globs.length, 'Listed files', 'Listed files # times'), globs.length);
   const checks = byName(['ShellOutput']);
   if (checks.length > 0) {
     const finished = checks.filter((c) => c.result?.display?.kind === 'shell-output' && c.result.display.status !== 'running').length;
-    parts.push(finished > 0 ? plural(finished, 'Finished a background command', 'Finished # background commands') : 'Checked a background command');
+    push(finished > 0 ? plural(finished, 'Finished a background command', 'Finished # background commands') : 'Checked a background command', checks.length);
   }
   const kills = byName(['KillShell']);
-  if (kills.length > 0) parts.push(plural(kills.length, 'Stopped a background command', 'Stopped # background commands'));
+  if (kills.length > 0) push(plural(kills.length, 'Stopped a background command', 'Stopped # background commands'), kills.length);
   const searches = byName(['WebSearch']);
-  if (searches.length > 0) parts.push(searchedPhrase(searches.map(searchOfCall)));
+  if (searches.length > 0) push(searchedPhrase(searches.map(searchOfCall)), searches.length);
   const fetches = byName(['WebFetch']);
   if (fetches.length > 0) {
     let host: string;
@@ -444,28 +490,72 @@ export function summarizeCalls(calls: ToolCall[]): string {
     } catch {
       host = 'a page';
     }
-    parts.push(fetches.length === 1 ? `Fetched ${host}` : `Fetched ${String(fetches.length)} pages`);
+    push(fetches.length === 1 ? `Fetched ${host}` : `Fetched ${String(fetches.length)} pages`, fetches.length);
   }
   const tasks = byName(['Task']);
   if (tasks.length > 0) {
     const description = String(inputOf<{ description: string }>(tasks[0]!.input).description ?? '');
-    parts.push(tasks.length === 1 ? `Delegated: ${description}` : `Ran ${String(tasks.length)} sub-agents`);
+    push(tasks.length === 1 ? `Delegated: ${description}` : `Ran ${String(tasks.length)} sub-agents`, tasks.length);
   }
   const questions = byName(['AskUserQuestion']);
-  if (questions.length > 0) parts.push('Asked you a question');
+  if (questions.length > 0) push('Asked you a question', questions.length);
   const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
-    parts.push(mcp.length === 1 ? `Used ${tool} from ${server}` : `Used ${String(mcp.length)} tools from ${server}`);
+    push(mcp.length === 1 ? `Used ${tool} from ${server}` : `Used ${String(mcp.length)} tools from ${server}`, mcp.length);
   }
   const other = calls.filter((c) => !known.has(c.name) && !c.name.startsWith('mcp__'));
-  if (other.length > 0) parts.push(`Used ${[...new Set(other.map((c) => c.name))].join(', ')}`);
+  if (other.length > 0) push(`Used ${[...new Set(other.map((c) => c.name))].join(', ')}`, other.length);
 
   const denied = calls.filter((c) => c.result?.display?.kind === 'denied').length;
-  if (denied > 0) parts.push(plural(denied, 'one action was declined', '# actions were declined'));
+  if (denied > 0) push(plural(denied, 'one action was declined', '# actions were declined'), 0);
+  return parts;
+}
 
-  return parts.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p.charAt(0).toLowerCase() + p.slice(1))).join(', ');
+/** A row's wording: the action in muted text, then what it acted on in strong text (paths shortened to file names). */
+export function callParts(call: ToolCall): { verb: string; target: string; mono: boolean; title: string } {
+  const input = inputOf<Record<string, unknown>>(call.input);
+  const str = (key: string): string => {
+    const value = input[key];
+    return typeof value === 'string' ? value : '';
+  };
+  const done = call.result !== null;
+  const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
+  const path = str('file_path');
+  switch (call.name) {
+    case 'Read':
+      return { verb: done ? 'Read' : 'Reading', target: fileName(path), mono: false, title: path };
+    case 'Write':
+      return { verb: edit && !edit.created ? 'Rewrote' : edit ? 'Created' : 'Writing', target: fileName(path), mono: false, title: path };
+    case 'Edit':
+    case 'MultiEdit':
+      return { verb: edit ? 'Edited' : 'Editing', target: fileName(path), mono: false, title: path };
+    case 'Grep':
+      return { verb: done ? 'Searched for' : 'Searching for', target: `“${str('pattern')}”`, mono: false, title: str('path') || str('pattern') };
+    case 'Glob':
+      return { verb: done ? 'Listed' : 'Listing', target: str('pattern'), mono: false, title: str('pattern') };
+    case 'Shell': {
+      const description = shellDescription(call);
+      const command = str('command').split('\n')[0] ?? '';
+      return description ? { verb: description, target: '', mono: false, title: command } : { verb: '', target: command, mono: true, title: command };
+    }
+    case 'WebFetch': {
+      const url = str('url');
+      let shown = url;
+      try {
+        const u = new URL(url);
+        shown = `${u.hostname.replace(/^www\./, '')}${u.pathname === '/' ? '' : u.pathname}`;
+      } catch {
+        // Keep the raw string; the schema already checked it is a URL.
+      }
+      return { verb: done ? 'Read' : 'Reading', target: shown, mono: false, title: url };
+    }
+    case 'Task':
+      return { verb: 'Sub-agent', target: str('description'), mono: false, title: str('prompt') };
+    default:
+      return { verb: describeCall(call), target: '', mono: false, title: call.name };
+  }
 }
 
 /** The model's own description of a shell command, when it gave one. */

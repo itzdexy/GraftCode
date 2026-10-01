@@ -15,6 +15,12 @@ export function chatEffortLevels(model: ModelInfo | null): EffortLevel[] {
   return model?.effort ? model.effort.levels.filter((l) => l !== 'taproot') : [];
 }
 
+/** What a chat runs at: Taproot (a code-session mode) becomes the strongest chat level, as the agent does. */
+export function chatEffort(model: ModelInfo | null, effort: EffortLevel | null): EffortLevel | null {
+  if (effort !== 'taproot') return effort;
+  return chatEffortLevels(model).at(-1) ?? null;
+}
+
 interface ChatModelMenuProps {
   model: ModelInfo | null;
   effort: EffortLevel | null;

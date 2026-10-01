@@ -502,7 +502,9 @@ export class AgentSession {
 
   private effortFor(model: ModelInfo): EffortLevel | null {
     if (!model.effort) return null;
-    const wanted = this.summary.effort ?? this.deps.preferences().defaultEffort;
+    let wanted = this.summary.effort ?? this.deps.preferences().defaultEffort;
+    // Taproot is the long-horizon mode for code; a chat's highest effort is the model's strongest level.
+    if (wanted === 'taproot' && this.summary.kind === 'chat') wanted = model.effort.levels.filter((l) => l !== 'taproot').at(-1) ?? model.effort.default;
     return model.effort.levels.includes(wanted) ? wanted : model.effort.default;
   }
 

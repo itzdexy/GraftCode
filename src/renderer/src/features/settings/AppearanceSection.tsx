@@ -7,6 +7,12 @@ import { cn } from '../../lib/cn';
 import { useApp } from '../../stores/app';
 import { Group, saveSettings, SettingRow } from './common';
 
+const WIDTHS = [
+  { value: 'narrow', label: 'Narrow' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'wide', label: 'Wide' }
+] as const;
+
 const THEMES = [
   { value: 'system', label: 'System', icon: Monitor },
   { value: 'dark', label: 'Dark', icon: Moon },
@@ -64,6 +70,29 @@ export function AppearanceSection() {
             })}
           </div>
         </SettingRow>
+        <SettingRow
+          label="Transcript width"
+          description="How wide conversations and the message box get on large windows."
+          control={
+            <div role="radiogroup" aria-label="Transcript width" className="flex rounded-md border border-border p-2">
+              {WIDTHS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={appearance.transcriptWidth === value}
+                  onClick={() => saveSettings({ appearance: { transcriptWidth: value } })}
+                  className={cn(
+                    'h-24 rounded-sm px-10 text-sm transition-ui',
+                    appearance.transcriptWidth === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
+        />
         <SizeRow
           label="Interface text size"
           description="Menus, the sidebar and messages."

@@ -59,8 +59,20 @@ function open(url: string): void {
   invoke('app:openExternal', { url }).catch((error: unknown) => reportError("Couldn't open the page", error));
 }
 
+/** One chip per site (the first result from it), in the order they were found. */
+function bySite(results: SearchInfo['results']): SearchInfo['results'] {
+  const seen = new Set<string>();
+  return results.filter((r) => {
+    const name = siteName(r.url, r.site);
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
 /** Result sites as chips with their icons; they arrive one after another. */
-export function SearchChips({ results, max = 6 }: { results: SearchInfo['results']; max?: number }) {
+export function SearchChips({ results: all, max = 6 }: { results: SearchInfo['results']; max?: number }) {
+  const results = bySite(all);
   const shown = results.slice(0, max);
   return (
     <ul aria-label="Sites found" className="flex flex-wrap gap-6">

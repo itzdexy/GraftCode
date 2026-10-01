@@ -10,7 +10,7 @@ import { useApp } from '../../stores/app';
 import { panelBus, panelsOf, usePanels } from '../../stores/panels';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
-import { ChatModelMenu, chatEffortLevels } from '../composer/ChatModelMenu';
+import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
 import { ContextUsage } from '../composer/ContextUsage';
 import { EffortPopover } from '../composer/EffortPopover';
@@ -242,7 +242,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
             rightControls={
               <ChatModelMenu
                 model={model}
-                effort={levels.length > 0 ? effort : null}
+                effort={levels.length > 0 ? chatEffort(model, effort) : null}
                 onModel={(m) => setSessionModel(summary, m)}
                 onEffort={(level) => {
                   if (model) setSessionEffort(summary, model, level);

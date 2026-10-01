@@ -473,6 +473,14 @@ describe('agent tools that involve the user', () => {
     expect(withEngine.provider.requests[0]!.tools.map((t) => t.name)).toContain('WebSearch');
   });
 
+  it('runs a chat set to Taproot at the model’s strongest level, without the code-session review pass', async () => {
+    const h = harness({ kind: 'chat', effort: 'taproot', script: [{ text: 'Sure.' }] });
+    h.session.send('hi');
+    await h.session.idle();
+    expect(lastRequest(h).effort).toBe('high');
+    expect(h.provider.requests).toHaveLength(1);
+  });
+
   it('runs a PreToolUse hook that blocks shell commands', async () => {
     const h = harness({
       mode: 'bypass',

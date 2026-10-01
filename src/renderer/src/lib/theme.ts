@@ -28,9 +28,13 @@ export function applyTheme(preference: ThemePreference, onError: (error: unknown
   return () => media.removeEventListener('change', apply);
 }
 
-/** Reduced motion and font sizes from Settings → Appearance. */
+/** Column widths behind Settings → Appearance → Transcript width (narrow is the measured default). */
+const TRANSCRIPT_WIDTHS: Record<AppSettings['appearance']['transcriptWidth'], string> = { narrow: '700px', medium: '860px', wide: '1060px' };
+
+/** Reduced motion, font sizes and the transcript width from Settings → Appearance. */
 export function applyAppearance(appearance: AppSettings['appearance']): void {
   const root = document.documentElement;
+  root.style.setProperty('--g-content-width', TRANSCRIPT_WIDTHS[appearance.transcriptWidth]);
   root.dataset.reducedMotion = appearance.reducedMotion ? 'true' : 'false';
   root.style.setProperty('--g-font-scale', String(appearance.uiFontSize / BASE_UI_FONT_SIZE));
   root.style.setProperty('--g-code-font-size', `${appearance.codeFontSize}px`);

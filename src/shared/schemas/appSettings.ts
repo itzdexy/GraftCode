@@ -65,7 +65,9 @@ export const AppSettingsSchema = z.object({
     theme: z.enum(['system', 'dark', 'light']),
     uiFontSize: z.number().int().min(11).max(18),
     codeFontSize: z.number().int().min(10).max(20),
-    reducedMotion: z.boolean()
+    reducedMotion: z.boolean(),
+    /** Width of the transcript and composer column. */
+    transcriptWidth: z.enum(['narrow', 'medium', 'wide'])
   }),
   defaults: z.object({
     model: ModelRefSchema.nullable(),
@@ -115,7 +117,7 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', uiFontSize: 13, codeFontSize: 13, reducedMotion: false },
+  appearance: { theme: 'system', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true },

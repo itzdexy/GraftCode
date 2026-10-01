@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
 import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
-import { activityTitle, buildTranscript, diffTotals, groupActivity, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
+import { activityTitle, buildTranscript, callParts, diffTotals, groupActivity, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
 import { evictViews, MAX_CACHED_VIEWS, viewOf } from '../../../src/renderer/src/stores/sessions';
 
 let seq = 0;
@@ -125,9 +125,14 @@ describe('turn activity', () => {
     ];
   }
 
-  it('folds the work before the answer into one block with totals and duration', () => {
+  it('folds the work before the answer into one block with totals and duration, then lists the files it changed', () => {
     const items = groupActivity(buildTranscript(turn(), NO_LIVE), false);
-    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text', 'edits']);
+    const edits = items[3];
+    expect(edits?.kind === 'edits' && edits.files.map((f) => [f.path, f.added, f.removed, f.created])).toEqual([
+      ['src/new.ts', 10, 0, true],
+      ['src/old.ts', 3, 2, false]
+    ]);
     const block = items[1] as ActivityItem;
     expect(block.live).toBe(false);
     expect(block.steps.map((s) => s.kind)).toEqual(['text', 'tool', 'tool']);
@@ -135,6 +140,25 @@ describe('turn activity', () => {
     expect(activityTitle(block)).toBe('Created new.ts, edited old.ts');
     const calls = block.steps.flatMap((s) => (s.kind === 'tool' ? [s.call] : []));
     expect(diffTotals(calls)).toEqual({ added: 13, removed: 2 });
+  });
+
+  it('stops a long summary after three kinds of work, counting the rest as actions', () => {
+    const shell = (command: string): ToolCall => call('Shell', { command });
+    const calls = [shell('a'), shell('b'), call('Read', { file_path: 'x.ts' }), call('Grep', { pattern: 'p' }), call('Glob', { pattern: '*' }), call('Glob', { pattern: '**' })];
+    expect(summarizeCalls(calls, 3)).toBe('Ran 2 commands, read x.ts, searched for “p”, and 2 more actions');
+    expect(summarizeCalls(calls)).toBe('Ran 2 commands, read x.ts, searched for “p”, listed files 2 times');
+  });
+
+  it('words each step as what was done, then what it was done to', () => {
+    expect(callParts(call('Edit', { file_path: 'src/main/agent/session.ts' }, { display: { kind: 'edit', path: 'src/main/agent/session.ts', created: false, patch: '', added: 3, removed: 1 } }))).toEqual({
+      verb: 'Edited',
+      target: 'session.ts',
+      mono: false,
+      title: 'src/main/agent/session.ts'
+    });
+    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }))).toMatchObject({ verb: 'Run the unit tests', target: '' });
+    expect(callParts(call('Shell', { command: ['git status', 'git diff'].join('\n') }))).toMatchObject({ verb: '', target: 'git status', mono: true });
+    expect(callParts(call('WebFetch', { url: 'https://www.anthropic.com/claude-opus-5-5' }))).toMatchObject({ verb: 'Reading', target: 'anthropic.com/claude-opus-5-5' });
   });
 
   it('keeps a running turn open, with streaming text outside the block', () => {
