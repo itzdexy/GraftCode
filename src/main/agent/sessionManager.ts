@@ -431,8 +431,8 @@ export class SessionManager {
    * Deletes every saved session (Settings → Data). Worktree folders stay on
    * disk so no uncommitted work is lost; their count is reported instead.
    */
-  async clearHistory(): Promise<{ removed: number; worktreesKept: number }> {
-    let removed = 0;
+  async clearHistory(): Promise<{ removed: string[]; worktreesKept: number }> {
+    const removed: string[] = [];
     let worktreesKept = 0;
     for (const summary of this.deps.repo.list({ includeArchived: true })) {
       const live = this.live.get(summary.id);
@@ -443,8 +443,9 @@ export class SessionManager {
       if (summary.worktreePath && fs.existsSync(summary.worktreePath)) worktreesKept++;
       await this.deps.checkpoints.deleteForSession(summary.id);
       this.deps.repo.delete(summary.id);
+      await this.deps.shells.disposeSession(summary.id);
       this.deps.emitRemoved(summary.id);
-      removed++;
+      removed.push(summary.id);
     }
     return { removed, worktreesKept };
   }

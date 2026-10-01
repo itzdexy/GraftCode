@@ -357,7 +357,9 @@ if (!gotLock) {
     openMainWindow();
     log.info('app', 'Ready', { version: appVersion, packaged: app.isPackaged, firstLaunch: isFirstLaunch });
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
+      // A window hidden to the tray comes back; otherwise open a new one.
+      if (mainWindow) showWindow();
+      else if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
     });
   });
 

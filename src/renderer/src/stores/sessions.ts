@@ -49,11 +49,23 @@ const EMPTY_VIEW: SessionView = {
 
 let noticeSeq = 0;
 const MAX_TOOL_OUTPUT = 20_000;
+/** Transcripts kept in memory; older ones are dropped and reloaded from main when reopened. */
+export const MAX_CACHED_VIEWS = 8;
+
+/** Keeps the most recently opened views (the one just opened last). */
+export function evictViews(views: Record<string, SessionView>, order: string[], opened: string): { views: Record<string, SessionView>; order: string[] } {
+  const nextOrder = [...order.filter((id) => id !== opened && id in views), opened];
+  if (nextOrder.length <= MAX_CACHED_VIEWS) return { views, order: nextOrder };
+  const dropped = new Set(nextOrder.slice(0, nextOrder.length - MAX_CACHED_VIEWS));
+  return { views: Object.fromEntries(Object.entries(views).filter(([id]) => !dropped.has(id))), order: nextOrder.filter((id) => !dropped.has(id)) };
+}
 
 interface SessionsState {
   summaries: Record<string, SessionSummary>;
   loaded: boolean;
   views: Record<string, SessionView>;
+  /** Opened session ids, least recent first (for evicting cached views). */
+  viewOrder: string[];
   loadList: () => Promise<void>;
   /** Loads a session's detail. `reset` discards the local view first (after a rewind removed messages). */
   open: (id: string, options?: { reset?: boolean }) => Promise<void>;
@@ -162,6 +174,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
   summaries: {},
   loaded: false,
   views: {},
+  viewOrder: [],
 
   async loadList() {
     const list = await invoke('sessions:list', { includeArchived: true });
@@ -170,10 +183,16 @@ export const useSessions = create<SessionsState>((set, get) => ({
 
   async open(id, options = {}) {
     const existing = options.reset ? undefined : get().views[id];
-    set({ views: { ...get().views, [id]: { ...(existing ?? EMPTY_VIEW), loading: true, error: null } } });
+    const cached = evictViews({ ...get().views, [id]: { ...(existing ?? EMPTY_VIEW), loading: true, error: null } }, get().viewOrder, id);
+    set({ views: cached.views, viewOrder: cached.order });
     try {
       const detail: SessionDetail = await invoke('sessions:get', { id });
-      const current = get().views[id] ?? EMPTY_VIEW;
+      const current = get().views[id];
+      // Evicted while loading (many sessions opened quickly): keep only the summary.
+      if (!current) {
+        set({ summaries: { ...get().summaries, [id]: detail.summary } });
+        return;
+      }
       set({
         summaries: { ...get().summaries, [id]: detail.summary },
         views: {
@@ -193,8 +212,8 @@ export const useSessions = create<SessionsState>((set, get) => ({
         }
       });
     } catch (error) {
-      const current = get().views[id] ?? EMPTY_VIEW;
-      set({ views: { ...get().views, [id]: { ...current, loading: false, error: errorText(error) } } });
+      const current = get().views[id];
+      if (current) set({ views: { ...get().views, [id]: { ...current, loading: false, error: errorText(error) } } });
     }
   },
 
@@ -216,7 +235,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
   remove(id) {
     const { [id]: _removed, ...summaries } = get().summaries;
     const { [id]: _view, ...views } = get().views;
-    set({ summaries, views });
+    set({ summaries, views, viewOrder: get().viewOrder.filter((x) => x !== id) });
   },
 
   dismissNotice(sessionId, noticeId) {

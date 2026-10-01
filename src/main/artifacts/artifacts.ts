@@ -6,7 +6,7 @@ import { GraftError } from '@shared/errors';
 import type { ContentBlock } from '@shared/schemas/messages';
 import type { Db } from '../db/database';
 import { looksBinary } from '../tools/fs/read';
-import { isInside } from '../tools/paths';
+import { isInsideReal } from '../tools/paths';
 
 /**
  * Artifacts are files the agent created or edited in a session. They are
@@ -176,12 +176,20 @@ const MIME: Record<string, string> = {
  * graft-artifact://<token>/<file>; relative assets resolve inside that
  * folder only.
  */
+const MAX_PREVIEW_TOKENS = 64;
+
 export class ArtifactServer {
   private readonly roots = new Map<string, string>();
 
   urlFor(file: string): string {
     const token = randomBytes(16).toString('hex');
     this.roots.set(token, path.dirname(path.resolve(file)));
+    // Each preview gets a fresh token; forget the oldest so the map stays small.
+    while (this.roots.size > MAX_PREVIEW_TOKENS) {
+      const oldest = this.roots.keys().next().value;
+      if (oldest === undefined) break;
+      this.roots.delete(oldest);
+    }
     return `${ARTIFACT_SCHEME}://${token}/${encodeURIComponent(path.basename(file))}`;
   }
 
@@ -197,7 +205,7 @@ export class ArtifactServer {
     if (!root) return new Response('Not found', { status: 404 });
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
     const file = path.resolve(root, rel);
-    if (!isInside(root, file)) return new Response('Forbidden', { status: 403 });
+    if (!isInsideReal(root, file)) return new Response('Forbidden', { status: 403 });
     let data: Buffer;
     try {
       data = await fs.promises.readFile(file);

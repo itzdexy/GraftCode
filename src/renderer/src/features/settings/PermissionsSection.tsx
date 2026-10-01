@@ -183,8 +183,8 @@ export function PermissionsSection() {
       </Group>
 
       <section aria-label="Rules" className="flex flex-col gap-12">
-        <header className="flex items-end gap-12">
-          <div className="min-w-0 flex-1">
+        <header className="flex flex-wrap items-end gap-12">
+          <div className="min-w-[260px] flex-1">
             <h3 className="text-md font-medium text-fg-strong">Rules</h3>
             <p className="mt-2 text-sm text-fg-muted">
               Patterns per tool: <span className="font-mono">Shell(npm test:*)</span>, <span className="font-mono">Edit(src/**)</span>,{' '}

@@ -169,9 +169,9 @@
   --g-text: #e8e8e5; /* text.menuTitle, text.assistantProse */
   --g-text-secondary: #bebdb2; /* text.navLabel, text.chipLabel */
   --g-text-tertiary: #b9b9ae; /* text.modelLabel, text.panelTitle */
-  --g-text-muted: #817f7a; /* text.menuDescription, text.statusBarText */
-  --g-text-faint: #74736e; /* text.footerPlan */
-  --g-text-placeholder: #83817b; /* text.placeholder */
+  --g-text-muted: #8f8d89; /* text.menuDescription, text.statusBarText; lightened from #817f7a for WCAG AA on raised surfaces */
+  --g-text-faint: #898884; /* text.footerPlan; lightened from #74736e for WCAG AA */
+  --g-text-placeholder: #999792; /* text.placeholder; lightened from #83817b for WCAG AA on inputs */
   --g-icon: #c3c2b7; /* text.headerIcons, text.windowControls */
   --g-icon-strong: #eae9e6;
   --g-icon-muted: #807e78; /* text.messageActions */
@@ -278,15 +278,15 @@
   --g-text-secondary: #45443f;
   --g-text-tertiary: #4d4c47;
   --g-text-muted: #6b6a64;
-  --g-text-faint: #807f79;
-  --g-text-placeholder: #7a7973;
+  --g-text-faint: #6f6e69; /* WCAG AA */
+  --g-text-placeholder: #6f6e69; /* WCAG AA */
   --g-icon: #54534e;
   --g-icon-strong: #1f1e1d;
   --g-icon-muted: #74736d;
   --g-timeline-tick: #d4d3cd;
   --g-timeline-tick-current: #3d3c38;
 
-  --g-accent: #3f8a36;
+  --g-accent: #397d31; /* WCAG AA as text on light surfaces */
   --g-accent-strong: #2f7128;
   --g-accent-dim: #cfe6c6;
   --g-blue: #1f6fd1;

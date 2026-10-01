@@ -3,6 +3,7 @@ import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/me
 import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
 import { buildTranscript, summarizeCalls, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
+import { evictViews, MAX_CACHED_VIEWS, viewOf } from '../../../src/renderer/src/stores/sessions';
 
 let seq = 0;
 function msg(role: 'user' | 'assistant', content: ContentBlock[], meta: StoredMessage['meta'] = {}): StoredMessage {
@@ -159,5 +160,24 @@ describe('composer suggestions', () => {
       insert: '/compact ',
       sendOnEnter: false
     });
+  });
+});
+
+describe('cached session views', () => {
+  it('keeps the most recently opened transcripts and drops the oldest', () => {
+    const empty = viewOf({ views: {} }, 'none');
+    let views: Record<string, typeof empty> = {};
+    let order: string[] = [];
+    for (let i = 0; i < MAX_CACHED_VIEWS + 3; i++) {
+      const id = `s${i}`;
+      ({ views, order } = evictViews({ ...views, [id]: empty }, order, id));
+    }
+    expect(Object.keys(views)).toHaveLength(MAX_CACHED_VIEWS);
+    expect(views.s0).toBeUndefined();
+    expect(order.at(-1)).toBe(`s${MAX_CACHED_VIEWS + 2}`);
+    // Reopening an old one moves it to the end instead of evicting it.
+    ({ views, order } = evictViews(views, order, 's3'));
+    expect(order.at(-1)).toBe('s3');
+    expect(Object.keys(views)).toHaveLength(MAX_CACHED_VIEWS);
   });
 });

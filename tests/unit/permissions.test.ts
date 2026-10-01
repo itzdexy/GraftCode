@@ -220,6 +220,8 @@ describe('decisions by mode and class', () => {
     expect(decide(edit(path.join(root, '.graft', 'settings.local.json')), env('bypass')).behavior).toBe('ask');
     expect(decide(edit(path.join(root, '.git', 'hooks', 'pre-commit')), env('auto')).behavior).toBe('ask');
     expect(decide(shell('echo {} > .graft/settings.json'), env('auto')).behavior).toBe('ask');
+    // A broad allow rule doesn't open the door either.
+    expect(decide(edit(path.join(root, '.graft', 'settings.json')), env('auto', { allow: rules('Edit(**)') })).behavior).toBe('ask');
   });
 
   it('applies deny rules first and ask rules before allow rules', () => {
@@ -240,14 +242,17 @@ describe('decisions by mode and class', () => {
     expect(decide(shell('npm test && npm run build'), env('ask')).suggestedRule).toBeNull();
   });
 
-  it('gates MCP tools by their annotations', () => {
+  it('gates MCP tools by their annotations, trusting read-only hints only in Auto mode', () => {
     const mcp = (readOnly: boolean, destructive: boolean): PermissionQuery => ({
       toolName: 'mcp__tracker__list_issues',
       permissionClass: 'exec',
       descriptor: { summary: 'mcp' },
       mcp: { readOnly, destructive }
     });
-    expect(decide(mcp(true, false), env('ask')).behavior).toBe('allow');
+    expect(decide(mcp(true, false), env('auto')).behavior).toBe('allow');
+    // A server can claim anything about itself, so Ask and Auto-edit still ask.
+    expect(decide(mcp(true, false), env('ask')).behavior).toBe('ask');
+    expect(decide(mcp(true, false), env('auto-edit')).behavior).toBe('ask');
     expect(decide(mcp(false, false), env('auto')).behavior).toBe('ask');
     expect(decide(mcp(false, false), env('plan')).behavior).toBe('deny');
     const destructive = decide(mcp(false, true), env('bypass'));

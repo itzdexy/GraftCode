@@ -44,13 +44,15 @@ test('connects a local MCP server from Customize and the agent uses its tools', 
     expect(listed).toContain('GRAFT_TEST_TOKEN');
     expect(listed).not.toContain('not-shown');
 
-    // A session can call the read-only tool without asking, and asks before the other one.
+    // In Auto mode a session calls the read-only tool without asking, and asks before the other one.
     provider.script(
       { toolCalls: [{ name: 'mcp__test__shout', input: { text: 'quiet please' } }] },
       { toolCalls: [{ name: 'mcp__test__save_note', input: { note: 'remember' } }] },
       { text: 'Both tools worked.' }
     );
     await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New' }).click();
+    await w.getByRole('button', { name: /Permission mode/ }).click();
+    await w.getByRole('menuitem', { name: /^Auto(?!-)/ }).click();
     const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
     await composer.fill('Use the test tools');
     await composer.press('Enter');

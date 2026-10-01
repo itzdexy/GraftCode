@@ -46,6 +46,7 @@ import { writeExport } from '../app/dataExport';
 import { log } from '../app/log';
 import type { UpdateController } from '../app/updater';
 import { cleanRuleLists } from '../permissions/rules';
+import { isInside } from '../tools/paths';
 import { openExternalSafely } from '../app/security';
 import type { Services } from '../app/services';
 import { FileIndex } from './fileIndex';
@@ -491,6 +492,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'files:search': async ({ root, query }) => {
       if (!fs.existsSync(root)) return [];
+      // Only folders Graft works in: a known project or one of its worktrees.
+      const s = await ctx.services();
+      const known = s.projects.list().some((p) => isInside(p.path, root)) || isInside(s.paths.worktrees, root);
+      if (!known) throw new GraftError('unknown_folder', 'File search works in project folders only.');
       return (await files()).search(root, query, 40);
     },
 
@@ -688,9 +693,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { path: result.filePath, sessions };
     },
     'data:clearHistory': async () => {
-      const result = await (await ctx.sessions()).clearHistory();
-      log.info('data', 'Cleared session history', { removed: String(result.removed), worktreesKept: String(result.worktreesKept) });
-      return result;
+      const { removed, worktreesKept } = await (await ctx.sessions()).clearHistory();
+      const ptys = await ctx.ptys();
+      for (const id of removed) await ptys.disposeSession(id);
+      log.info('data', 'Cleared session history', { removed: String(removed.length), worktreesKept: String(worktreesKept) });
+      return { removed: removed.length, worktreesKept };
     },
     'data:openFolder': async () => {
       const failure = await electronShell.openPath((await ctx.services()).paths.userData);

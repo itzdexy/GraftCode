@@ -137,7 +137,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
 
   const mode = env.mode;
   if (query.mcp) {
-    if (mcpReadOnly && !outsideProject) return result('allow', 'Read-only tool.');
+    // Annotations come from the server and are only hints: they relax approval in Auto mode, never in Ask.
+    if (mcpReadOnly && !outsideProject && mode === 'auto') return result('allow', 'Read-only tool allowed in Auto mode.');
     if (mode === 'bypass') return result('allow', 'Bypass mode.');
     return result('ask', `Uses ${query.toolName.split('__')[1] ?? 'an MCP server'}.`);
   }

@@ -10,7 +10,9 @@ import { GraftError } from '@shared/errors';
  */
 export async function openInEditor(dir: string, codePath: string | null): Promise<'editor' | 'folder'> {
   if (!fs.existsSync(dir)) throw new GraftError('folder_missing', `The folder ${dir} no longer exists.`);
-  if (codePath) {
+  // cmd.exe expands %VAR% even inside quotes, so such paths go to the file manager instead.
+  const cmdSafe = process.platform !== 'win32' || !/["%!^]/.test(dir);
+  if (codePath && cmdSafe) {
     const child =
       process.platform === 'win32'
         ? // code.cmd is a batch file; cmd.exe runs it. Windows paths cannot contain double quotes.
