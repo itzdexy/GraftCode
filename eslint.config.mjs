@@ -53,8 +53,10 @@ export default defineConfig(
     extends: [tseslint.configs.disableTypeChecked]
   },
   {
+    // CommonJS tool configs (electron-builder) load modules with require().
     files: ['*.config.cjs'],
-    languageOptions: { sourceType: 'commonjs', globals: globals.node }
+    languageOptions: { sourceType: 'commonjs', globals: globals.node },
+    rules: { '@typescript-eslint/no-require-imports': 'off' }
   },
   {
     // Calibration/snapshot scripts evaluate callbacks inside the app's page.
