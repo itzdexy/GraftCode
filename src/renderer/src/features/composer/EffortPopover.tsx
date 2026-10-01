@@ -8,7 +8,7 @@ import { cn } from '../../lib/cn';
 import { EFFORT_LABELS } from '../../lib/format';
 
 export const EFFORT_HELP =
-  'Higher effort thinks longer and checks its work more, but is slower and uses more tokens. Taproot is a long-horizon mode: larger budgets, and it keeps going until the work is verified.';
+  'Higher effort thinks longer and checks its work more, but is slower and uses more tokens. Taproot is maximum effort for long tasks: it investigates, plans with a task list it must finish, verifies with real checks and reviews its own diff before reporting back.';
 
 /** Thumb width (--g-effort-knob-width); ticks are laid out on the thumb-center path. */
 const KNOB = 16;

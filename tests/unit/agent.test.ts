@@ -499,8 +499,43 @@ describe('agent tools that involve the user', () => {
     });
     h.session.send('build it');
     await h.session.idle();
-    expect(JSON.stringify(h.provider.requests[2]!.messages.at(-1))).toContain('Before you finish: verify the work');
+    // A session that starts in Taproot gets the working protocol with its first message.
+    expect(JSON.stringify(h.provider.requests[0]!.messages[0])).toContain('[Taproot mode is on');
+    expect(JSON.stringify(h.provider.requests[2]!.messages.at(-1))).toContain('Before you finish, verify the work end to end');
     expect(texts(h).at(-1)).toBe('assistant:Verified: tests pass.');
+  });
+
+  it('sends a Taproot turn back to its open tasks before it may finish, once briefed', async () => {
+    const todos = (status: 'pending' | 'completed') => ({
+      todos: [
+        { id: '1', content: 'Add the parser', status },
+        { id: '2', content: 'Cover it with tests', status }
+      ]
+    });
+    const h = harness({
+      effort: 'taproot',
+      script: [
+        { toolCalls: [{ name: 'TodoWrite', input: todos('pending') }] },
+        { text: 'Done, I think.' },
+        { toolCalls: [{ name: 'TodoWrite', input: todos('completed') }] },
+        { text: 'All tasks finished.' },
+        { text: 'Verified: 12 tests pass.' },
+        { text: 'Again.' }
+      ]
+    });
+    h.session.send('build the parser');
+    await h.session.idle();
+    const nudge = JSON.stringify(h.provider.requests[2]!.messages.at(-1));
+    expect(nudge).toContain('You still have open tasks');
+    expect(nudge).toContain('Cover it with tests');
+    expect(JSON.stringify(h.provider.requests[4]!.messages.at(-1))).toContain('Before you finish, verify the work end to end');
+    expect(texts(h).at(-1)).toBe('assistant:Verified: 12 tests pass.');
+
+    // The briefing goes out once per session.
+    h.session.send('one more thing');
+    await h.session.idle();
+    const second = h.provider.requests.at(-1)!.messages.filter((m) => JSON.stringify(m).includes('[Taproot mode is on'));
+    expect(second).toHaveLength(1);
   });
 });
 

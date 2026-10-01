@@ -27,7 +27,7 @@ import { expandMentions } from './mentions';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import { BUILTIN_COMMANDS, INIT_PROMPT, expandCommand, loadCustomCommands, parseSlash, reviewPrompt } from './slashCommands';
-import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_NOTE } from './systemPrompt';
+import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE } from './systemPrompt';
 import { cleanTitle } from './title';
 import { shouldCompact } from './tokens';
 
@@ -305,7 +305,16 @@ export class AgentSession {
   setModel(model: ModelRef, effort: EffortLevel | null): void {
     const previous = this.summary.effort;
     this.deps.store.updateSession(this.id, { model, effort });
-    if (effort === 'taproot' && previous !== 'taproot') this.notes.push(TAPROOT_NOTE);
+    if (effort === 'taproot' && previous !== 'taproot') this.briefTaproot();
+  }
+
+  /** Queues the Taproot briefing for the next message unless this code session already has it. */
+  private briefTaproot(): void {
+    if (this.summary.kind !== 'code' || this.notes.includes(TAPROOT_NOTE)) return;
+    const briefed = this.deps.store
+      .listMessages(this.id)
+      .some((m) => m.role === 'user' && m.content.some((b) => b.type === 'text' && b.text.startsWith(TAPROOT_MARKER)));
+    if (!briefed) this.notes.push(TAPROOT_NOTE);
   }
 
   /** Retries the last failed turn without adding a new user message. */
@@ -593,6 +602,8 @@ export class AgentSession {
         const handled = await this.handleSlash(item);
         if (!handled) return;
         userText = handled.text;
+        // A session that starts in Taproot (or reopens in it) gets the briefing with its first message.
+        if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (hooks?.has('UserPromptSubmit')) {
           const verdict = await hooks.run('UserPromptSubmit', { session_id: this.id, prompt: userText }, signal);
           for (const e of verdict.errors) this.notice('warning', e);
@@ -805,6 +816,7 @@ export class AgentSession {
       toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, model, provider, hooks, root, trusted),
       describeContext: () => describeContext,
       hooks,
+      todos: () => this.deps.store.getTodos(this.id),
       maybeCompact: async (_history, tokens, signal) => {
         if (!this.deps.preferences().autoCompact || !shouldCompact(tokens, model.contextWindow)) return null;
         return this.compact('', signal);
@@ -926,6 +938,7 @@ export class AgentSession {
         else if (event.type === 'notice') this.emit(event);
       },
       maybeCompact: () => Promise.resolve(null),
+      todos: () => [],
       // A subagent's spend counts toward the session; its context size isn't the conversation's.
       onUsage: (usage, _tokens, costUsd) => parent.onUsage(usage, null, costUsd)
     };

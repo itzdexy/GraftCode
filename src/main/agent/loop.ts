@@ -8,12 +8,13 @@ import type { PermissionDecision, PermissionDetail } from '@shared/schemas/permi
 import { ProviderError, isAbortError } from '../providers/errors';
 import { streamWithRetry, type RetryPolicy } from '../providers/retry';
 import type { FinishReason, LLMProvider, RequestPrivacy, StreamRequest } from '../providers/types';
+import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
 import type { HookRunner } from './hooks';
 import { withoutThinking } from './history';
-import { TAPROOT_REVIEW } from './systemPrompt';
+import { TAPROOT_REVIEW, taprootOpenTasks } from './systemPrompt';
 import { contextTokens, estimateMessagesTokens, estimateTextTokens, usageCost } from './tokens';
 
 export interface PermissionPrompt {
@@ -31,6 +32,9 @@ export interface PermissionAnswer {
 }
 
 /** Everything the loop needs from its surroundings (session, UI, storage). */
+/** How many times a Taproot turn is sent back to its open tasks before it may finish. */
+const MAX_TODO_NUDGES = 3;
+
 export interface LoopHost {
   append(role: 'user' | 'assistant', content: ContentBlock[], meta: MessageMeta, id?: string): StoredMessage;
   emit(event: AgentEvent): void;
@@ -43,6 +47,8 @@ export interface LoopHost {
   maybeCompact(history: LlmMessage[], contextTokens: number, signal: AbortSignal): Promise<LlmMessage[] | null>;
   /** `contextTokens` is null when the usage isn't from this conversation (a subagent's); `costUsd` null means unknown. */
   onUsage(usage: Usage, contextTokens: number | null, costUsd: number | null): void;
+  /** The session's task list (Taproot won't finish with tasks open). */
+  todos(): TodoItem[];
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -252,6 +258,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
   let toolCalls = 0;
   let finalText = '';
   let reviewed = false;
+  let todoNudges = 0;
   let repeatStrikes = 0;
   const recent: string[] = [];
   const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText });
@@ -367,6 +374,16 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
           history.push({ role: 'user', content: [{ type: 'text', text }] });
           continue;
         }
+      }
+      // Taproot keeps going while its own plan has open tasks (a few nudges at most), then verifies once.
+      const open = config.taproot && finish === 'stop' ? host.todos().filter((t) => t.status !== 'completed') : [];
+      if (open.length > 0 && todoNudges < MAX_TODO_NUDGES) {
+        todoNudges++;
+        const text = taprootOpenTasks(open.map((t) => t.content));
+        const stored = host.append('user', [{ type: 'text', text }], { turnId: config.turnId, kind: 'reminder' });
+        host.emit({ type: 'message', message: stored });
+        history.push({ role: 'user', content: [{ type: 'text', text }] });
+        continue;
       }
       if (config.taproot && !reviewed && toolCalls > 0 && finish === 'stop') {
         reviewed = true;

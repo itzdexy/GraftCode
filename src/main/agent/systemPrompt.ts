@@ -137,10 +137,26 @@ export function modeChangeNote(mode: PermissionMode): string {
   return `[The permission mode is now ${MODE_LABEL[mode]}.]`;
 }
 
-/** Note appended when the long-horizon Taproot mode is switched on. */
-export const TAPROOT_NOTE =
-  '[Taproot mode is on: this is a long-horizon task. Keep working until it is fully done and verified — plan, implement, run the checks, fix what fails, and review your own diff before you finish. Don\'t stop to ask for confirmation unless a decision is genuinely the user\'s.]';
+/** Marks the Taproot briefing in a conversation, so it is sent once per session. */
+export const TAPROOT_MARKER = '[Taproot mode is on';
+
+/** Sent with the first message of a Taproot session: the working protocol of the long-horizon mode. */
+export const TAPROOT_NOTE = [
+  `${TAPROOT_MARKER}: you are working at maximum effort on a long-horizon task. Work like a senior engineer who owns the outcome:`,
+  '1. Investigate before changing anything: read the code involved, its callers and its tests; for broad areas, run explore sub-agents in parallel.',
+  '2. Plan: record concrete steps with TodoWrite, each with how you will check it. Keep the list current as you learn more.',
+  '3. Execute step by step with focused changes that follow the project\'s conventions; mark each task done as you finish it.',
+  '4. Verify with evidence: run the relevant tests, type checks, linters and builds, and fix every failure. Never claim something works without having checked it.',
+  '5. Review your whole diff for bugs, edge cases, leftovers and missing tests before you finish.',
+  '6. Report what changed, how you verified it (the commands and their results), and anything left or risky.',
+  'Keep going until the task is done. Ask only when a decision is genuinely the user\'s.]'
+].join('\n');
+
+/** Sent when a Taproot turn tries to finish with tasks still open. */
+export function taprootOpenTasks(tasks: string[]): string {
+  return `You still have open tasks:\n${tasks.map((t) => `- ${t}`).join('\n')}\nFinish them, or update the list with TodoWrite if they no longer apply, before you wrap up.`;
+}
 
 /** Sent once when a Taproot turn tries to finish, to force a verification pass. */
 export const TAPROOT_REVIEW =
-  'Before you finish: verify the work end to end. Re-read the task, run the relevant tests, type checks and builds, review your full diff for mistakes and leftovers, and confirm every requirement is met. If anything fails or is missing, keep working. When everything checks out, give your final summary.';
+  'Before you finish, verify the work end to end: re-read the original request, run the relevant tests, type checks, linters and builds, and read your full diff for mistakes, leftovers and missing tests. If anything fails or is missing, keep working. When everything checks out, give your final report: what changed, how you verified it (commands and results), and anything left or risky.';
