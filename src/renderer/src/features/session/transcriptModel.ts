@@ -33,7 +33,8 @@ export type TranscriptItem =
 
 export interface SearchInfo {
   query: string;
-  results: Array<{ title: string; url: string }>;
+  /** `site` names the site when the URL is a redirect. */
+  results: Array<{ title: string; url: string; site?: string }>;
 }
 
 /** One step inside a turn's activity: narration, a thought, a tool call, a provider-side search or other action. */

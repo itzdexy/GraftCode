@@ -13,19 +13,29 @@ import { Group, saveSettings, SwitchRow } from './common';
 
 const ENGINE_LABEL: Record<Exclude<SearchEngineSetting, 'auto' | 'off'>, string> = {
   openrouter: 'OpenRouter',
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  gemini: 'Google Gemini',
   brave: 'Brave Search',
   tavily: 'Tavily',
   searxng: 'SearXNG'
 };
 
 const OPTIONS: Array<{ value: SearchEngineSetting; label: string; description: string }> = [
-  { value: 'auto', label: 'Automatic', description: 'The first one that is set up: a search key, then your SearXNG server, then OpenRouter.' },
-  { value: 'openrouter', label: 'OpenRouter', description: 'Uses your OpenRouter key and its web search: about a cent per search.' },
+  { value: 'auto', label: 'Automatic', description: 'A search key or SearXNG server you set up, else the search of the provider your default model uses.' },
+  { value: 'openrouter', label: 'OpenRouter', description: 'Its web plugin with your OpenRouter key: about a cent per search.' },
+  { value: 'anthropic', label: 'Anthropic', description: 'Claude’s web search with your Anthropic key: about a cent per search, plus tokens.' },
+  { value: 'openai', label: 'OpenAI', description: 'The Responses API’s web search with your OpenAI key, billed per search.' },
+  { value: 'gemini', label: 'Google Gemini', description: 'Grounding with Google Search with your Gemini key: a free daily allowance, then billed.' },
   { value: 'brave', label: 'Brave Search', description: 'An independent search index. Needs a Brave Search API key.' },
   { value: 'tavily', label: 'Tavily', description: 'Search made for AI agents. Needs a Tavily API key.' },
   { value: 'searxng', label: 'SearXNG', description: 'Your own SearXNG server, with JSON output turned on.' },
   { value: 'off', label: 'Off', description: 'Only models with a built-in search (Claude on Anthropic) can search.' }
 ];
+
+function isProviderOption(value: SearchEngineSetting): value is keyof SearchStatus['providers'] {
+  return value === 'openrouter' || value === 'anthropic' || value === 'openai' || value === 'gemini';
+}
 
 /** Save or remove a search API key; the key goes to the main process and never comes back. */
 function KeyField({ engine, stored, onSaved }: { engine: 'brave' | 'tavily'; stored: boolean; onSaved: (status: SearchStatus) => void }) {
@@ -154,7 +164,7 @@ export function WebSearchSection() {
                     <span className="text-base text-fg">{option.label}</span>
                     <span className="mt-2 block text-sm text-fg-muted">
                       {option.description}
-                      {option.value === 'openrouter' && !current.openRouter ? ' Add an OpenRouter provider first.' : ''}
+                      {isProviderOption(option.value) && !current.providers[option.value] ? ` Add ${ENGINE_LABEL[option.value]} as a provider first.` : ''}
                       {(option.value === 'brave' || option.value === 'tavily') && current.keys[option.value] ? ' Key saved.' : ''}
                     </span>
                   </span>

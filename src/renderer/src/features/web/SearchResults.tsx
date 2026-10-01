@@ -25,14 +25,14 @@ function hostname(url: string): string {
   }
 }
 
-/** Host as people read it: no "www.". */
-export function siteName(url: string): string {
-  return hostname(url).replace(/^www\./, '') || url;
+/** Host as people read it: no "www."; `site` wins when the URL is a redirect. */
+export function siteName(url: string, site?: string): string {
+  return (site ?? hostname(url)).replace(/^www\./, '') || url;
 }
 
 /** A site's icon, or a letter tile in a color of its own while it loads or when the site has none. */
-export function SiteIcon({ url, size = 14 }: { url: string; size?: number }) {
-  const host = hostname(url);
+export function SiteIcon({ url, site, size = 14 }: { url: string; site?: string; size?: number }) {
+  const host = site ?? hostname(url);
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
@@ -42,7 +42,7 @@ export function SiteIcon({ url, size = 14 }: { url: string; size?: number }) {
     };
   }, [host]);
   if (src) return <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-xs" />;
-  const name = siteName(url);
+  const name = siteName(url, site);
   const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   return (
     <span
@@ -72,8 +72,8 @@ export function SearchChips({ results, max = 6 }: { results: SearchInfo['results
             onClick={() => open(r.url)}
             className="flex h-24 max-w-[220px] items-center gap-6 rounded-full border border-border bg-raised pr-10 pl-6 text-sm text-fg-secondary transition-ui hover:bg-hover hover:text-fg"
           >
-            <SiteIcon url={r.url} />
-            <span className="truncate">{siteName(r.url)}</span>
+            <SiteIcon url={r.url} site={r.site} />
+            <span className="truncate">{siteName(r.url, r.site)}</span>
           </button>
         </li>
       ))}
@@ -97,9 +97,9 @@ export function SearchResultList({ results }: { results: SearchInfo['results'] }
             onClick={() => open(r.url)}
             className="flex w-full min-w-0 items-center gap-8 rounded-sm px-4 py-2 text-left text-sm transition-ui hover:bg-hover"
           >
-            <SiteIcon url={r.url} />
+            <SiteIcon url={r.url} site={r.site} />
             <span className="min-w-0 flex-1 truncate text-fg-secondary">{r.title}</span>
-            <span className="shrink-0 text-fg-faint">{siteName(r.url)}</span>
+            <span className="shrink-0 text-fg-faint">{siteName(r.url, r.site)}</span>
           </button>
         </li>
       ))}

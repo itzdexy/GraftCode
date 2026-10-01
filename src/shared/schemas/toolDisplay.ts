@@ -61,7 +61,12 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('plan'), plan: z.string(), approved: z.boolean(), feedback: z.string().nullable() }),
   z.object({ kind: z.literal('mcp'), server: z.string(), tool: z.string(), text: z.string() }),
-  z.object({ kind: z.literal('web-search'), query: z.string(), results: z.array(z.object({ title: z.string(), url: z.string() })) }),
+  z.object({
+    kind: z.literal('web-search'),
+    query: z.string(),
+    /** `site` names the site when the URL is a redirect. */
+    results: z.array(z.object({ title: z.string(), url: z.string(), site: z.string().optional() }))
+  }),
   z.object({ kind: z.literal('denied'), reason: z.string() }),
   z.object({ kind: z.literal('error'), message: z.string() }),
   z.object({ kind: z.literal('text'), text: z.string() })

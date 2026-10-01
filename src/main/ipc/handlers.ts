@@ -129,10 +129,16 @@ function verifyError(error: unknown): VerifyResult {
 
 /** What Settings → Web search shows; key values never leave the main process. */
 function searchStatus(s: Services) {
+  const providers = s.search.providers();
   return {
     active: s.search.active(),
     keys: { brave: s.keys.has(searchKeyId('brave')), tavily: s.keys.has(searchKeyId('tavily')) },
-    openRouter: s.registry.summaries().some((p) => p.kind === 'openrouter' && p.enabled && p.hasKey)
+    providers: {
+      openrouter: providers.includes('openrouter'),
+      anthropic: providers.includes('anthropic'),
+      openai: providers.includes('openai'),
+      gemini: providers.includes('gemini')
+    }
   };
 }
 

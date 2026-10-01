@@ -62,7 +62,8 @@ export const SearchStatusSchema = z.object({
   active: z.enum(SEARCH_ENGINE_IDS).nullable(),
   /** Which engines have a stored key; the keys themselves never leave the main process. */
   keys: z.object({ brave: z.boolean(), tavily: z.boolean() }),
-  openRouter: z.boolean()
+  /** Providers whose own search is available (a key on the vendor's endpoint). */
+  providers: z.object({ openrouter: z.boolean(), anthropic: z.boolean(), openai: z.boolean(), gemini: z.boolean() })
 });
 export type SearchStatus = z.infer<typeof SearchStatusSchema>;
 

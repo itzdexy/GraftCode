@@ -10,7 +10,9 @@ import { DiffStatsCache } from '../git/diffStats';
 import { runGit } from '../git/git';
 import { SettingsStore } from '../permissions/settingsStore';
 import { ProviderRegistry } from '../providers/registry';
-import { SearchService, searchReaderModel } from '../tools/web/search';
+import { dataHandling } from '@shared/privacy';
+import type { ProviderSummary } from '@shared/schemas/models';
+import { PROVIDER_ENGINES, SearchService, searchReaderModel, type ProviderEngine } from '../tools/web/search';
 import { ProviderCatalog } from '../providers/presets';
 import { KeyStore, type Encryptor } from '../secrets/keyStore';
 import { AppSettingsService } from '../settings/appSettings';
@@ -49,29 +51,46 @@ export interface Services {
 
 export type ProgressFn = (step: string, label: string, done: number, total: number) => void;
 
-/** OpenRouter's API when a provider doesn't set its own base URL. */
-const OPENROUTER_API = 'https://openrouter.ai/api/v1';
 const READER_TTL_MS = 60 * 60_000;
 
-/** WebSearch engines; the OpenRouter one uses the user's OpenRouter provider and its cheapest paid model. */
+/**
+ * WebSearch engines. Providers search with their own web search through the
+ * user's key and their cheapest suitable model; only vendor endpoints count,
+ * since a proxy or local server may not offer search. The default model's
+ * provider comes first.
+ */
 function searchService(settings: AppSettingsService, keys: KeyStore, registry: ProviderRegistry): SearchService {
-  let reader: { providerId: string; model: string; at: number } | null = null;
-  const openRouter = () => registry.summaries().find((p) => p.kind === 'openrouter' && p.enabled && p.hasKey) ?? null;
+  const readers = new Map<string, { model: string; at: number }>();
+  const usable = (): ProviderSummary[] => {
+    const preferred = settings.get().defaults.model?.providerId ?? null;
+    const list = registry
+      .summaries()
+      .filter((p) => p.enabled && p.hasKey && (PROVIDER_ENGINES as readonly string[]).includes(p.kind) && dataHandling(p) !== 'unknown' && dataHandling(p) !== 'local');
+    return [...list.filter((p) => p.id === preferred), ...list.filter((p) => p.id !== preferred)];
+  };
   return new SearchService({
     settings: () => settings.get().search,
     noTraining: () => settings.get().privacy.noTraining,
     keys,
-    hasOpenRouter: () => openRouter() !== null,
-    openRouter: async (signal) => {
-      const provider = openRouter();
-      const apiKey = provider ? keys.get(provider.id) : null;
-      if (!provider || !apiKey) return null;
-      if (!reader || reader.providerId !== provider.id || Date.now() - reader.at > READER_TTL_MS) {
-        const model = searchReaderModel(await registry.listModels(provider.id, signal ? { signal } : {}));
-        if (!model) return null;
-        reader = { providerId: provider.id, model, at: Date.now() };
+    providers: () => [...new Set(usable().map((p) => p.kind as ProviderEngine))],
+    access: async (engine, signal) => {
+      const provider = usable().find((p) => p.kind === engine);
+      if (!provider) return null;
+      let apiKey: string | null;
+      try {
+        apiKey = keys.get(provider.id);
+      } catch {
+        apiKey = null;
       }
-      return { baseUrl: provider.baseUrl ?? OPENROUTER_API, apiKey, model: reader.model };
+      if (!apiKey) return null;
+      let reader = readers.get(provider.id);
+      if (!reader || Date.now() - reader.at > READER_TTL_MS) {
+        const model = searchReaderModel(engine, await registry.listModels(provider.id, signal ? { signal } : {}));
+        if (!model) return null;
+        reader = { model, at: Date.now() };
+        readers.set(provider.id, reader);
+      }
+      return { baseUrl: provider.baseUrl, apiKey, model: reader.model };
     }
   });
 }
