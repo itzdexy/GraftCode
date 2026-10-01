@@ -30,7 +30,8 @@ function setup(servers: Record<string, unknown>): { manager: McpManager; registr
     keys,
     openBrowser: () => Promise.resolve(),
     log: () => undefined,
-    onChange: () => undefined
+    onChange: () => undefined,
+    version: '0.0.0-test'
   });
   cleanup.push(async () => {
     await manager.disposeAll();

@@ -1,0 +1,6 @@
+{
+  "comment": "Scion, Graft's pixel mascot: a seedling in a clay pot with a face, 11x8 cells. Legend: L leaf, D leaf shadow, S stem, R pot rim, P pot, E eye. In the app each cell is filled with var(--g-mascot-<fill>) from tokens.css; scripts/generate-icons.mjs uses iconColors (the dark-theme values).",
+  "sprite": [".LL.....LL.", "LLLL...LLLL", ".DDDS.SDDD.", ".....S.....", ".RRRRRRRRR.", "..PEPPPEP..", "..PPPPPPP..", "...PPPPP..."],
+  "fills": { "L": "leaf", "D": "leaf-dark", "S": "leaf-dark", "R": "pot-rim", "P": "pot", "E": "eye" },
+  "iconColors": { "leaf": "#7fbf6a", "leaf-dark": "#5b9a4c", "pot-rim": "#b07a58", "pot": "#9c6b4e", "eye": "#1a1614" }
+}

@@ -47,7 +47,8 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
     return (await bridge.invoke('app:info')).value;
   });
   expect(info.isPackaged).toBe(true);
-  expect(info.version).toBe('0.1.0');
+  const { version } = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { version: string };
+  expect(info.version).toBe(version);
 
   // Onboarding writes to SQLite and stores the provider.
   await completeOnboarding(app, mock, { project });

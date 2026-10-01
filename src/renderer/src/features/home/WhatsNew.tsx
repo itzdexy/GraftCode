@@ -3,6 +3,17 @@ import { Dialog, DialogContent, DialogTrigger } from '../../components/Dialog';
 /** Release notes shown from Code home's "What's new" link; newest first. */
 export const RELEASE_NOTES: ReadonlyArray<{ version: string; date: string; items: string[] }> = [
   {
+    version: '0.2.0',
+    date: '2026-10-01',
+    items: [
+      'Meet Scion: the pixel sprout is now Graft’s icon in the taskbar, the tray and the installer, and its mark inside the app.',
+      'Over 200 providers from an open model catalog, with a searchable picker, per-model effort levels and accurate costs.',
+      'Settings → Privacy: ask providers not to train on your data, and incognito chats that stay off your computer.',
+      'A real Bypass mode you switch on in Settings, plus Files and “Keep computer awake” in the session menu.',
+      'Prompt caching for Claude models on OpenRouter, and session spend in the context popover.'
+    ]
+  },
+  {
     version: '0.1.0',
     date: '2026-09-30',
     items: [

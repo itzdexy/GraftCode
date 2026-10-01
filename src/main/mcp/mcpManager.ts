@@ -104,6 +104,8 @@ export interface McpManagerDeps {
   openBrowser: (url: string) => Promise<void>;
   log: (level: 'info' | 'warn', message: string, fields?: Record<string, string>) => void;
   onChange: () => void;
+  /** Graft's version, reported to MCP servers. */
+  version: string;
 }
 
 /**
@@ -186,7 +188,7 @@ export class McpManager implements McpToolSource {
         conn.stderr = (conn.stderr + chunk.toString('utf8')).slice(-2000);
       });
     }
-    const client = new Client({ name: 'graft', version: '0.1.0' }, { capabilities: {} });
+    const client = new Client({ name: 'graft', version: this.deps.version }, { capabilities: {} });
     try {
       await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `${conn.name} did not answer within 30 seconds.`);
       const listed = await client.listTools();
@@ -289,7 +291,7 @@ export class McpManager implements McpToolSource {
     try {
       const provider = new McpOAuthProvider(this.deps.keys, this.serverKey(conn), callback.url, this.deps.openBrowser);
       const transport = this.transportFor(conn, provider) as StreamableHTTPClientTransport;
-      const client = new Client({ name: 'graft', version: '0.1.0' }, { capabilities: {} });
+      const client = new Client({ name: 'graft', version: this.deps.version }, { capabilities: {} });
       try {
         await client.connect(transport);
         // Already authorized (tokens were refreshed): use this connection.

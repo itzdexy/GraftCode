@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Renders Graft's application and tray icons from the mark geometry in
- * src/renderer/src/brand/Mark.tsx (an open "G" whose terminal sprouts a leaf).
+ * Renders Graft's application and tray icons from Scion, the pixel mascot in
+ * src/renderer/src/brand/scion.json (the same sprite Mascot.tsx and Mark.tsx draw).
  *
  *   build/icon.png        1024×1024 (macOS / Linux, electron-builder source)
  *   build/icon.ico        16–256 px, PNG-compressed entries (Windows exe + installer)
  *   resources/icons/tray.png, tray@2x.png   tray / notification-area icon
- *   resources/icons/app.png                 256×256 window icon (Linux)
+ *   resources/icons/app.png                 256×256 window icon
+ *
+ * Every size uses a whole number of pixels per cell, so the art stays crisp.
  *
  * Usage: npm run icons
  */
@@ -18,39 +20,50 @@ import sharp from 'sharp';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD = path.join(root, 'build');
 const ICONS = path.join(root, 'resources', 'icons');
-
-// Keep in sync with MARK_ARC / MARK_LEAF in Mark.tsx (32×32 grid).
-const ARC = 'M22.07 9.93 A10 10 0 1 0 25 17 H17';
-const LEAF = 'M22.07 9.93 Q27.16 9.36 27.73 4.27 Q22.64 4.84 22.07 9.93 Z';
+const SCION = JSON.parse(fs.readFileSync(path.join(root, 'src', 'renderer', 'src', 'brand', 'scion.json'), 'utf8'));
+const COLUMNS = SCION.sprite[0].length;
+const ROWS = SCION.sprite.length;
 
 const TILE = '#171816';
 const TILE_EDGE = '#2a2c27';
-const STROKE = '#eae8e0';
-const LEAF_FILL = '#7fbf6a';
 
-/** App tile: rounded square, light "G", green leaf. Small sizes get a heavier stroke. */
+/** Scion as crisp rects: `cell` pixels per sprite cell, top-left at (x, y). */
+function art(cell, x, y) {
+  const rects = SCION.sprite
+    .flatMap((row, cy) =>
+      [...row].map((key, cx) => {
+        const fill = SCION.fills[key];
+        return fill ? `<rect x="${x + cx * cell}" y="${y + cy * cell}" width="${cell}" height="${cell}" fill="${SCION.iconColors[fill]}"/>` : '';
+      })
+    )
+    .join('');
+  return `<g shape-rendering="crispEdges">${rects}</g>`;
+}
+
+/** Largest whole cell size that keeps the art within `share` of the icon's width. */
+function cellFor(size, share) {
+  return Math.max(1, Math.floor((size * share) / COLUMNS));
+}
+
+/** App tile: dark rounded square with Scion centered. */
 function tileSvg(size) {
-  const stroke = size <= 24 ? 4.4 : size <= 48 ? 3.8 : 3.2;
-  const inset = size <= 32 ? 0 : 1.2;
-  const radius = 7.2;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32">
-  <rect x="${inset}" y="${inset}" width="${32 - inset * 2}" height="${32 - inset * 2}" rx="${radius}" fill="${TILE}" stroke="${TILE_EDGE}" stroke-width="${size <= 32 ? 0 : 0.35}"/>
-  <g transform="translate(16 16) scale(0.74) translate(-16 -16.5)">
-    <path d="${ARC}" fill="none" stroke="${STROKE}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${LEAF}" fill="${LEAF_FILL}"/>
-  </g>
+  const cell = cellFor(size, 0.72);
+  const x = Math.floor((size - COLUMNS * cell) / 2);
+  const y = Math.floor((size - ROWS * cell) / 2);
+  const inset = size <= 32 ? 0 : size * 0.0375;
+  const edge = size <= 32 ? 0 : size * 0.011;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <rect x="${inset}" y="${inset}" width="${size - inset * 2}" height="${size - inset * 2}" rx="${size * 0.225}" fill="${TILE}" stroke="${TILE_EDGE}" stroke-width="${edge}"/>
+  ${art(cell, x, y)}
 </svg>`;
 }
 
-/** Tray: the bare mark in the leaf green, which reads on light and dark taskbars. */
+/** Tray: Scion alone, which reads on light and dark taskbars. */
 function traySvg(size) {
-  const stroke = size <= 16 ? 4.6 : 4;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32">
-  <g transform="translate(16 16) scale(0.95) translate(-16 -16.5)">
-    <path d="${ARC}" fill="none" stroke="${LEAF_FILL}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${LEAF}" fill="${LEAF_FILL}"/>
-  </g>
-</svg>`;
+  const cell = cellFor(size, 1);
+  const x = Math.floor((size - COLUMNS * cell) / 2);
+  const y = Math.floor((size - ROWS * cell) / 2);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${art(cell, x, y)}</svg>`;
 }
 
 async function png(svg) {

@@ -18,6 +18,8 @@ export interface MainWindowOptions {
   preloadPath: string;
   rendererDir: string;
   devServerUrl: string | undefined;
+  /** Window and taskbar icon; packaged Windows builds also carry it in the exe. */
+  iconPath: string;
 }
 
 export interface MainWindowHandle {
@@ -42,6 +44,7 @@ export function createMainWindow(options: MainWindowOptions): MainWindowHandle {
     minHeight: MIN_WINDOW.height,
     show: false,
     title: 'Graft',
+    ...(isMac ? {} : { icon: options.iconPath }),
     backgroundColor: BACKGROUND[options.theme],
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac ? { trafficLightPosition: { x: 12, y: 10 } } : { titleBarOverlay: OVERLAY[options.theme] }),

@@ -235,7 +235,8 @@ async function mcp(): Promise<McpManager> {
       keys: s.keys,
       openBrowser: (url) => openExternalSafely(url),
       log: (level, message, fields) => log[level]('mcp', message, fields),
-      onChange: () => emit({ type: 'mcp:changed' })
+      onChange: () => emit({ type: 'mcp:changed' }),
+      version: app.getVersion()
     });
     // User-scope servers connect right away; failures show in Customize.
     mcpManager.sync().catch((error: unknown) => log.warn('mcp', 'Could not start MCP servers', { message: (error as Error).message }));
@@ -291,7 +292,8 @@ function openMainWindow(): void {
     theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
     preloadPath: path.join(__dirname, '../preload/index.js'),
     rendererDir: path.join(__dirname, '../renderer'),
-    devServerUrl: app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
+    devServerUrl: app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL,
+    iconPath: iconPath('app.png')
   });
   const win = mainWindow.window;
   // With the tray on, closing hides the window; sessions keep running.
