@@ -10,10 +10,18 @@ import { useUi } from '../../stores/ui';
 import { ConfirmDialog } from '../settings/common';
 import { openSettings } from './shellActions';
 
-/** Shown only while an update downloads or waits for a restart. */
+/** Shown only while an update downloads or waits for a restart; a downloaded update asks once to restart. */
 function UpdateIndicator() {
   const update = useApp((s) => s.update);
-  const [confirm, setConfirm] = useState(false);
+  const [reopened, setReopened] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const readyVersion = update?.status === 'ready' ? (update.version ?? 'new') : null;
+  // The prompt opens by itself for each newly downloaded version, and again from the icon.
+  const confirm = reopened || (readyVersion !== null && readyVersion !== dismissed);
+  const setConfirm = (open: boolean): void => {
+    setReopened(open);
+    if (!open) setDismissed(readyVersion);
+  };
   if (!update || (update.status !== 'ready' && update.status !== 'downloading')) return null;
   const ready = update.status === 'ready';
   const label = ready
@@ -27,8 +35,8 @@ function UpdateIndicator() {
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
-        title="Restart to update?"
-        description="Graft closes, installs the update and opens again. Running sessions stop; their history is kept."
+        title={update.version ? `Graft ${update.version} is ready` : 'An update is ready'}
+        description="Restart to install it now, or keep working: it installs the next time Graft quits. Running sessions stop on restart; their history is kept."
         confirmLabel="Restart now"
         onConfirm={async () => {
           await invoke('updates:install');

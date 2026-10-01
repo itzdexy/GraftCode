@@ -91,6 +91,10 @@ describe('update controller', () => {
     const failing = controller({ enabled: true, supported: true, onCheck: (b) => b.fire('error', new Error('feed unreachable')) });
     expect(await failing.updates.check()).toMatchObject({ status: 'error', message: 'feed unreachable', checkedAt: 1_000 });
 
+    // Nothing published yet (or a releases page that isn't public) is "up to date", not a failure.
+    const unpublished = controller({ enabled: true, supported: true, onCheck: (b) => b.fire('error', new Error('HttpError: 404 Not Found "No published versions on GitHub"')) });
+    expect(await unpublished.updates.check()).toMatchObject({ status: 'none', message: null, checkedAt: 1_000 });
+
     const current = controller({ enabled: true, supported: true, onCheck: (b) => b.fire('update-not-available', { version: '0.1.0' }) });
     expect(await current.updates.check()).toMatchObject({ status: 'none', checkedAt: 1_000 });
     expect(current.backend.autoInstallOnAppQuit).toBe(true);

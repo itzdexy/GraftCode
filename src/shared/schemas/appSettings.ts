@@ -123,7 +123,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
-  updates: { enabled: false },
+  updates: { enabled: true },
   search: { engine: 'auto', searxngUrl: null },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }

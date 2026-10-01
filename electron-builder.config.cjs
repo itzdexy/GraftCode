@@ -4,9 +4,10 @@
  * Only the built app (out/) and production dependencies are packaged; sources,
  * tests, docs and the reference screenshots never ship.
  *
- * Updates: set GRAFT_UPDATE_URL (a generic HTTPS feed holding latest.yml and
- * the installers) when building to ship an update feed. Without it the build
- * has no feed and Settings → About says so; the updater stays idle.
+ * Updates: installed builds check the GitHub releases of itzdexy/GraftCode
+ * (the release workflow publishes them on each version tag). Set
+ * GRAFT_UPDATE_URL to a generic HTTPS feed (latest.yml plus installers) to
+ * ship from somewhere else instead.
  *
  * Native modules (better-sqlite3, node-pty) ship N-API prebuilds that load in
  * Electron as-is, so no rebuild runs here. They and ripgrep are unpacked from
@@ -60,7 +61,7 @@ module.exports = {
   asar: true,
   asarUnpack: ['**/node_modules/node-pty/**', '**/node_modules/better-sqlite3/**', '**/node_modules/@vscode/ripgrep-*/bin/**'],
   npmRebuild: false,
-  publish: updateUrl ? [{ provider: 'generic', url: updateUrl }] : null,
+  publish: updateUrl ? [{ provider: 'generic', url: updateUrl }] : [{ provider: 'github', owner: 'itzdexy', repo: 'GraftCode', releaseType: 'release' }],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
     icon: 'build/icon.ico'

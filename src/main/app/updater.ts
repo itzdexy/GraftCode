@@ -23,6 +23,11 @@ export interface UpdaterDeps {
 const FIRST_CHECK_MS = 20_000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
+/** A feed with nothing published yet (or a releases page that isn't public) means there is no update, not a failure. */
+export function noReleaseYet(message: string): boolean {
+  return /\b404\b|no published versions|unable to find latest version|cannot find latest|latest version not found|no releases/i.test(message);
+}
+
 function versionOf(info: unknown): string | null {
   const version = (info as { version?: unknown } | null)?.version;
   return typeof version === 'string' ? version.slice(0, 64) : null;
@@ -81,11 +86,7 @@ export class UpdateController {
       this.deps.log('info', 'Update downloaded', { version: versionOf(info) ?? '' });
       this.set({ ...this.state, status: 'ready', version: versionOf(info) ?? this.state.version, progress: 100, message: null });
     });
-    backend.on('error', (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      this.deps.log('warn', 'Update check failed', { message });
-      this.set({ ...this.state, status: 'error', progress: null, message: message.slice(0, 300), checkedAt: this.now() });
-    });
+    backend.on('error', (error) => this.failed(error instanceof Error ? error.message : String(error)));
     this.backend = backend;
     return backend;
   }
@@ -122,11 +123,18 @@ export class UpdateController {
       const backend = await this.ensureBackend();
       await backend.checkForUpdates();
     } catch (error) {
-      const message = (error as Error).message;
-      this.deps.log('warn', 'Update check failed', { message });
-      this.set({ ...this.state, status: 'error', progress: null, message: message.slice(0, 300), checkedAt: this.now() });
+      this.failed((error as Error).message);
     }
     return this.state;
+  }
+
+  private failed(message: string): void {
+    if (noReleaseYet(message)) {
+      this.set({ ...this.state, status: 'none', version: null, progress: null, message: null, checkedAt: this.now() });
+      return;
+    }
+    this.deps.log('warn', 'Update check failed', { message });
+    this.set({ ...this.state, status: 'error', progress: null, message: message.slice(0, 300), checkedAt: this.now() });
   }
 
   /** Quits and runs the downloaded installer. */
