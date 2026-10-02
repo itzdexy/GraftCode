@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { LoadingState } from '../../components/States';
 import { useApp } from '../../stores/app';
 import { panelsOf, PANEL_MIN_WIDTH, usePanels, type PanelId } from '../../stores/panels';
 import { BrowserPanelView } from './BrowserPanel';
 import { ChangesPanel } from './ChangesPanel';
 import { TasksPanel } from './TasksPanel';
-import { TerminalPanel } from './TerminalPanel';
+
+// The terminal brings xterm.js, so it loads the first time a terminal opens.
+const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 
 /** Leave at least this much room for the transcript next to the panels. */
 const TRANSCRIPT_MIN = 420;
@@ -60,7 +63,11 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
     const onClose = (): void => close(sessionId, id);
     switch (id) {
       case 'terminal':
-        return <TerminalPanel key={id} sessionId={sessionId} onClose={onClose} />;
+        return (
+          <Suspense key={id} fallback={<LoadingState label="Starting the terminal" />}>
+            <TerminalPanel sessionId={sessionId} onClose={onClose} />
+          </Suspense>
+        );
       case 'changes':
         return <ChangesPanel key={id} sessionId={sessionId} refreshKey={refreshKey} onClose={onClose} />;
       case 'browser':

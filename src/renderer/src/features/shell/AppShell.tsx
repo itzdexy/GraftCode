@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useShortcut } from '../../lib/shortcuts';
@@ -8,12 +9,8 @@ import { useNav, type Route } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-import { ArtifactsView } from '../artifacts/ArtifactsView';
-import { CustomizeView } from '../customize/CustomizeView';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
-import { ProjectsView } from '../projects/ProjectsView';
-import { ScheduledView } from '../scheduled/ScheduledView';
 import { RewindDialog } from '../session/RewindDialog';
 import { SessionView } from '../session/SessionView';
 import { InfoDialogs } from './InfoDialogs';
@@ -21,7 +18,13 @@ import { SearchDialog } from './SearchDialog';
 import { SessionDialogs } from './SessionDialogs';
 import { Sidebar } from './Sidebar';
 import { openSettings, startNew, toggleSidebar } from './shellActions';
-import { SettingsView } from '../settings/SettingsView';
+
+// Views opened now and then load on first use, which keeps startup light.
+const ProjectsView = lazy(() => import('../projects/ProjectsView').then((m) => ({ default: m.ProjectsView })));
+const ArtifactsView = lazy(() => import('../artifacts/ArtifactsView').then((m) => ({ default: m.ArtifactsView })));
+const ScheduledView = lazy(() => import('../scheduled/ScheduledView').then((m) => ({ default: m.ScheduledView })));
+const CustomizeView = lazy(() => import('../customize/CustomizeView').then((m) => ({ default: m.CustomizeView })));
+const SettingsView = lazy(() => import('../settings/SettingsView').then((m) => ({ default: m.SettingsView })));
 
 function routeKey(route: Route): string {
   if (route.name === 'session') return `session:${route.id}`;
@@ -37,16 +40,20 @@ function RouteView({ route }: { route: Route }) {
     case 'session':
       return <SessionView key={route.id} sessionId={route.id} />;
     case 'projects':
-      return <ProjectsView />;
+      return <Later>{<ProjectsView />}</Later>;
     case 'artifacts':
-      return <ArtifactsView />;
+      return <Later>{<ArtifactsView />}</Later>;
     case 'scheduled':
-      return <ScheduledView />;
+      return <Later>{<ScheduledView />}</Later>;
     case 'customize':
-      return <CustomizeView />;
+      return <Later>{<CustomizeView />}</Later>;
     case 'settings':
-      return <SettingsView section={route.section} />;
+      return <Later>{<SettingsView section={route.section} />}</Later>;
   }
+}
+
+function Later({ children }: { children: JSX.Element }) {
+  return <Suspense fallback={<LoadingState className="h-full" />}>{children}</Suspense>;
 }
 
 /** Main window after onboarding: sidebar, the routed view, and app-wide dialogs and shortcuts. */
