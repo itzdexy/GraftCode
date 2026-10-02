@@ -70,6 +70,7 @@ You can add more providers at any time in **Settings → Providers**.
 - **Git:** an optional worktree per session, hidden checkpoints before every turn, and rewind for files, the conversation or both. Diff and commit from the app, and open a pull request.
 - **A transcript in the style of a terminal agent.** Each turn's work folds into one line, such as "Ran 3 commands, created a.ts, edited 2 files +75 −4 · 2m 50s". A card lists the files the turn changed, each opening to its diff. While a turn runs, a live status line shows elapsed time, context size and background tasks.
 - **Panels:** an integrated terminal, a file browser with previews, changes and diffs, an embedded browser for local apps, and background tasks.
+- **Computer use (Windows, opt-in):** with a model that can see images, the agent can take screenshots and use the mouse and keyboard. Each action asks first unless you allow it for the session, a banner shows while it is in control, and `Ctrl+Alt+Esc` stops it.
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 
 ### Chats

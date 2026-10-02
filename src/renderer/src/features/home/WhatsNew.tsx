@@ -3,6 +3,17 @@ import { Dialog, DialogContent, DialogTrigger } from '../../components/Dialog';
 /** Release notes shown from Code home's "What's new" link; newest first. */
 export const RELEASE_NOTES: ReadonlyArray<{ version: string; date: string; items: string[] }> = [
   {
+    version: '0.3.0',
+    date: '2026-10-01',
+    items: [
+      'Web search in chats and code sessions through your own provider (Anthropic, OpenAI, Gemini or OpenRouter), or Brave, Tavily or SearXNG, with site chips while it searches and cited sources as pills.',
+      'Each turn’s work folds into one line with a live status while it runs, and an “Edited N files” card lists every change with its diff.',
+      'Taproot now investigates, plans with a task list it has to finish, verifies with real checks and reviews its own diff before reporting.',
+      'Computer use on Windows (opt-in in Settings → Permissions): the agent can see the screen and use the mouse and keyboard, asking first, and Ctrl+Alt+Esc stops it.',
+      'Updates from GitHub releases, with a prompt to restart when one is ready; a transcript width setting; faster startup.'
+    ]
+  },
+  {
     version: '0.2.0',
     date: '2026-10-01',
     items: [
