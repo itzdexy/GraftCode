@@ -10,8 +10,12 @@ export function resolvePath(input: string, cwd: string, home: string = os.homedi
   return path.resolve(cwd, p);
 }
 
+function pathsOf(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 function normalizeForCompare(p: string, platform: NodeJS.Platform): string {
-  const n = path.resolve(p).replace(/[\\/]+$/, '');
+  const n = pathsOf(platform).resolve(p).replace(/[\\/]+$/, '');
   return platform === 'win32' ? n.toLowerCase() : n;
 }
 
@@ -20,8 +24,8 @@ export function isInside(root: string, target: string, platform: NodeJS.Platform
   const r = normalizeForCompare(root, platform);
   const t = normalizeForCompare(target, platform);
   if (t === r) return true;
-  const rel = path.relative(r, t);
-  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+  const rel = pathsOf(platform).relative(r, t);
+  return rel.length > 0 && !rel.startsWith('..') && !pathsOf(platform).isAbsolute(rel);
 }
 
 /**

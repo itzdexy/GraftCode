@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { launchGraft, NO_SANDBOX } from './support/launch';
+import { launchGraft } from './support/launch';
 
 test('app launches with a sandboxed renderer and shows the Graft mark', async () => {
   const graft = await launchGraft();
@@ -14,7 +14,8 @@ test('app launches with a sandboxed renderer and shows the Graft mark', async ()
       const metric = app.getAppMetrics().find((m) => m.pid === pid);
       return { rendererSandboxed: metric?.sandboxed ?? null, minSize: win.getMinimumSize() };
     });
-    expect(posture).toEqual({ rendererSandboxed: !NO_SANDBOX, minSize: [900, 600] });
+    // Electron reports the OS-level sandbox on Windows and macOS only.
+    expect(posture).toEqual({ rendererSandboxed: process.platform === 'linux' ? null : true, minSize: [900, 600] });
 
     const surface = await graft.window.evaluate(() => ({
       hasRequire: 'require' in globalThis,

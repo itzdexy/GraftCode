@@ -356,7 +356,10 @@ if (!gotLock) {
 } else {
   app.on('second-instance', () => showWindow());
 
-  if (process.platform === 'win32') app.setAppUserModelId('app.graft.desktop');
+  // Windows takes the taskbar name and icon from the Start menu shortcut with this ID, which the installer
+  // creates for Graft.exe. Development runs (electron.exe) get their own ID so they can never claim the
+  // installed app's identity (a dev shortcut with the shared ID once made the taskbar show Electron's icon).
+  if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'app.graft.desktop' : 'app.graft.desktop.dev');
 
   registerHandlers({
     'app:info': () => ({
