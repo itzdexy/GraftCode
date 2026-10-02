@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,3 +28,32 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  e2e:
+    name: End-to-end tests and the packaged app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: End-to-end tests (development build)
+        run: npm run test:e2e
+      # The packaged checks run even when the suite above failed, so one run reports both.
+      - name: Package the Windows app
+        if: ${{ !cancelled() }}
+        run: npm run dist:win
+      - name: Smoke-test the packaged app
+        if: ${{ !cancelled() }}
+        run: npx playwright test packaged
+        env:
+          GRAFT_PACKAGED_EXE: dist/win-unpacked/Graft.exe
+      - name: Keep traces and screenshots of failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7

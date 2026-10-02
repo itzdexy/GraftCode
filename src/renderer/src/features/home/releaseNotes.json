@@ -1,0 +1,35 @@
+[
+  {
+    "version": "0.3.0",
+    "date": "2026-10-01",
+    "items": [
+      "Web search in chats and code sessions through your own provider (Anthropic, OpenAI, Gemini or OpenRouter), or Brave, Tavily or SearXNG, with site chips while it searches and cited sources as pills.",
+      "Each turn’s work folds into one line with a live status while it runs, and an “Edited N files” card lists every change with its diff.",
+      "Taproot now investigates, plans with a task list it has to finish, verifies with real checks and reviews its own diff before reporting.",
+      "Computer use on Windows (opt-in in Settings → Permissions): the agent can see the screen and use the mouse and keyboard, asking first, and Ctrl+Alt+Esc stops it.",
+      "Updates from GitHub releases, with a prompt to restart when one is ready; a transcript width setting; faster startup."
+    ]
+  },
+  {
+    "version": "0.2.0",
+    "date": "2026-10-01",
+    "items": [
+      "Meet Scion: the pixel sprout is now Graft’s icon in the taskbar, the tray and the installer, and its mark inside the app.",
+      "Over 200 providers from an open model catalog, with a searchable picker, per-model effort levels and accurate costs.",
+      "Settings → Privacy: ask providers not to train on your data, and incognito chats that stay off your computer.",
+      "A real Bypass mode you switch on in Settings, plus Files and “Keep computer awake” in the session menu.",
+      "Prompt caching for Claude models on OpenRouter, and session spend in the context popover."
+    ]
+  },
+  {
+    "version": "0.1.0",
+    "date": "2026-09-30",
+    "items": [
+      "Code sessions with a real agent loop: read, edit, search, run commands and fetch pages, with a permission prompt for anything risky.",
+      "Five permission modes, including Plan (read-only until you approve a plan) and Auto (low-risk actions run without asking).",
+      "Git worktrees per session, hidden checkpoints before every turn, and rewind for files, conversation or both.",
+      "Works with Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama and any OpenAI-compatible endpoint.",
+      "Taproot: a long-horizon effort mode that keeps going until the work is verified."
+    ]
+  }
+]

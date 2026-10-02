@@ -1,22 +1,54 @@
 name: Release
 
-# Push a version tag (v0.3.0) to build installers for every platform and
-# publish them as a GitHub release. Installed copies of Graft check these
-# releases and offer the update with a "Restart to update" prompt.
+# Pushing a version tag (v0.3.0) builds the installers on Windows, macOS and
+# Linux, smoke-tests each packaged app, attaches everything to a draft release
+# and publishes it once every platform passed. Installed copies of Graft read
+# these releases and offer the update with a "Restart to update" prompt.
+#
+# Running the workflow by hand (Actions → Release → Run workflow) is a dry run:
+# the same builds and checks, with the installers kept as workflow artifacts.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  draft:
+    name: Draft the release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches package.json
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - name: Create the draft with the notes from What's new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then exit 0; fi
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Graft ${GITHUB_REF_NAME#v}" --notes-file notes.md
+
   build:
     name: Build on ${{ matrix.os }}
+    needs: draft
+    if: ${{ !cancelled() && needs.draft.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            platform: --win
+            app: dist/win-unpacked/Graft.exe
+          - os: macos-latest
+            platform: --mac
+            app: dist/mac-arm64/Graft.app/Contents/MacOS/Graft
+          - os: ubuntu-latest
+            platform: --linux
+            app: dist/linux-unpacked/graft
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,11 +57,53 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Check the tag matches package.json
-        shell: bash
-        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
       - run: npm run build
-      - name: Package and publish
-        run: npx electron-builder --config electron-builder.config.cjs --publish always
+      - name: Package
+        run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.platform }} --publish never
+      - name: Smoke-test the packaged app
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a npx playwright test packaged; else npx playwright test packaged; fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GRAFT_PACKAGED_EXE: ${{ matrix.app }}
+      - name: Attach the installers to the draft
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb dist/*.blockmap dist/latest*.yml)
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+      - name: Keep the installers (dry run)
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: graft-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
+            dist/latest*.yml
+          retention-days: 7
+      - name: Keep traces and screenshots of failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results-${{ runner.os }}
+          path: test-results/
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

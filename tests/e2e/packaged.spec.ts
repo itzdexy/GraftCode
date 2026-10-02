@@ -8,13 +8,19 @@ import { completeOnboarding, makeGitProject } from './support/onboard';
 
 /**
  * Smoke test of the packaged app (electron-builder output). Runs only when
- * GRAFT_PACKAGED_EXE points at Graft.exe, e.g. after `npm run dist:win`:
+ * GRAFT_PACKAGED_EXE points at the packaged executable, e.g. after `npm run dist:win`:
  *   GRAFT_PACKAGED_EXE=dist/win-unpacked/Graft.exe npx playwright test packaged
+ * (macOS: dist/mac-arm64/Graft.app/Contents/MacOS/Graft, Linux: dist/linux-unpacked/graft).
  */
 const exe = process.env.GRAFT_PACKAGED_EXE ? path.resolve(process.env.GRAFT_PACKAGED_EXE) : null;
 const SHOTS = path.join(__dirname, '..', '..', 'test-results', 'shots');
 
 test.skip(!exe, 'Set GRAFT_PACKAGED_EXE to the packaged Graft executable.');
+
+/** The packaged resources folder: next to the executable, or Contents/Resources in a macOS bundle. */
+function resourcesDir(executable: string): string {
+  return process.platform === 'darwin' ? path.join(path.dirname(executable), '..', 'Resources') : path.join(path.dirname(executable), 'resources');
+}
 
 let provider: MockProvider | undefined;
 let graft: LaunchedApp | undefined;
@@ -25,12 +31,16 @@ test.afterEach(async () => {
 });
 
 test('the package holds only the built app and production dependencies (regression: sources and screenshots were packed)', () => {
-  const asarPath = path.join(path.dirname(exe!), 'resources', 'app.asar');
-  const top = new Set(listPackage(asarPath, { isPack: false }).map((entry) => entry.split(/[\\/]/).filter(Boolean)[0]));
+  const resources = resourcesDir(exe!);
+  const top = new Set(listPackage(path.join(resources, 'app.asar'), { isPack: false }).map((entry) => entry.split(/[\\/]/).filter(Boolean)[0]));
   expect([...top].sort()).toEqual(['node_modules', 'out', 'package.json']);
-  // Only this platform's native binaries are unpacked.
-  const prebuilds = fs.readdirSync(path.join(path.dirname(exe!), 'resources', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'prebuilds'));
-  expect(prebuilds).toEqual([`${process.platform}-${process.arch}.node`]);
+  // Only this platform's native binaries are unpacked (Windows ships x64 only; macOS and Linux keep both architectures).
+  const prebuilds = fs.readdirSync(path.join(resources, 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'prebuilds'));
+  if (process.platform === 'win32') expect(prebuilds).toEqual(['win32-x64.node']);
+  else {
+    expect(prebuilds).toContain(`${process.platform}-${process.arch}.node`);
+    expect(prebuilds.filter((name) => !name.startsWith(process.platform === 'linux' ? 'linux' : process.platform))).toEqual([]);
+  }
 });
 
 test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pty) and Settings', async () => {
@@ -79,12 +89,17 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
   await w.keyboard.press('Enter');
   await expect(panel.locator('.xterm-rows')).toContainText(/packaged-(42|\$\(\(6\*7\)\))/);
 
-  // Settings → About reports the update feed state for this build.
+  // Settings → About: the build reads updates from the release feed, and turning updates off stops the checks.
   await w.getByRole('button', { name: /^Account menu for/ }).click();
   await w.getByRole('menuitem', { name: 'Settings' }).click();
   await w.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About', exact: true }).click();
-  await w.getByRole('switch', { name: 'Check for updates automatically' }).click();
-  await expect(w.getByText('This build has no update feed configured.')).toBeVisible();
+  expect(fs.existsSync(path.join(resourcesDir(exe!), 'app-update.yml'))).toBe(true);
+  const updates = w.getByRole('switch', { name: 'Check for updates automatically' });
+  await expect(updates).toBeChecked();
+  await expect(w.getByRole('button', { name: /^(Check for updates|Checking…)$/ })).toBeVisible();
+  await expect(w.getByText('This build has no update feed configured.')).toHaveCount(0);
+  await updates.click();
+  await expect(w.getByText('Automatic updates are off.')).toBeVisible();
   fs.mkdirSync(SHOTS, { recursive: true });
   await w.screenshot({ path: path.join(SHOTS, 'packaged-about.png') });
 

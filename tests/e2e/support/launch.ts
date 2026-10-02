@@ -35,9 +35,11 @@ export async function launchGraft(options: LaunchOptions = {}): Promise<Launched
   }
   Object.assign(env, { GRAFT_USER_DATA_DIR: userData, GRAFT_HOME: graftHome, GRAFT_E2E: '1' }, options.env ?? {});
 
+  // Linux CI runners restrict the user namespaces Chromium's sandbox needs.
+  const flags = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [];
   const app = options.executablePath
-    ? await electron.launch({ executablePath: options.executablePath, args: [], env, cwd: ROOT })
-    : await electron.launch({ args: [path.join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT });
+    ? await electron.launch({ executablePath: options.executablePath, args: flags, env, cwd: ROOT })
+    : await electron.launch({ args: [...flags, path.join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   return {
