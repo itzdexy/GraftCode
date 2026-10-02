@@ -55,6 +55,8 @@ export interface HarnessOptions {
   search?: SessionDeps['search'];
   /** Settings: let models search and read the web (default off). */
   webSearch?: boolean;
+  /** Computer use switched on with this controller (default off). */
+  computer?: SessionDeps['computer'];
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -107,6 +109,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     },
     providerName: () => 'Fake Provider',
     search: options.search ?? { active: () => null, search: () => Promise.reject(new Error('No web search engine in this test.')) },
+    computer: options.computer ?? null,
     dataHandling: () => options.dataHandling ?? 'unknown',
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],
@@ -129,7 +132,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       defaultModel: model.ref,
       defaultEffort: 'medium',
       noTraining: options.noTraining ?? false,
-      incognitoLocalOnly: options.incognitoLocalOnly ?? false
+      incognitoLocalOnly: options.incognitoLocalOnly ?? false,
+      computerUse: options.computer !== undefined
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),

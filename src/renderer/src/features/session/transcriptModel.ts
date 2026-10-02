@@ -482,6 +482,8 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   if (kills.length > 0) push(plural(kills.length, 'Stopped a background command', 'Stopped # background commands'), kills.length);
   const searches = byName(['WebSearch']);
   if (searches.length > 0) push(searchedPhrase(searches.map(searchOfCall)), searches.length);
+  const computer = byName(['Computer']);
+  if (computer.length > 0) push(plural(computer.length, 'Used the computer once', 'Used the computer # times'), computer.length);
   const fetches = byName(['WebFetch']);
   if (fetches.length > 0) {
     let host: string;
@@ -499,7 +501,7 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   }
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) push('Asked you a question', questions.length);
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Task', 'AskUserQuestion']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -553,9 +555,30 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
     }
     case 'Task':
       return { verb: 'Sub-agent', target: str('description'), mono: false, title: str('prompt') };
+    case 'Computer': {
+      const d = call.result?.display;
+      return { verb: d?.kind === 'text' ? d.text : computerVerb(str('action')), target: '', mono: false, title: 'Computer' };
+    }
     default:
       return { verb: describeCall(call), target: '', mono: false, title: call.name };
   }
+}
+
+/** A computer action before its result names it. */
+function computerVerb(action: string): string {
+  const verbs: Record<string, string> = {
+    screenshot: 'Taking a screenshot',
+    click: 'Clicking',
+    double_click: 'Double-clicking',
+    right_click: 'Right-clicking',
+    move: 'Moving the pointer',
+    drag: 'Dragging',
+    scroll: 'Scrolling',
+    type: 'Typing',
+    key: 'Pressing keys',
+    wait: 'Waiting'
+  };
+  return verbs[action] ?? 'Using the computer';
 }
 
 /** The model's own description of a shell command, when it gave one. */

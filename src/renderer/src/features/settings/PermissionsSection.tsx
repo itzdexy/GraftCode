@@ -137,6 +137,7 @@ export function PermissionsSection() {
   const [confirmBypass, setConfirmBypass] = useState(false);
   const { load: rules } = useLoad(() => invoke('permissions:get', { projectPath }), `${projectPath ?? ''}:${version}`);
   const project = useApp((s) => s.projects.find((p) => p.path === projectPath) ?? null);
+  const windows = useApp((s) => s.environment?.platform === 'win32');
   if (!settings) return null;
   const bypass = settings.behavior.bypassModeEnabled;
   const modes = (Object.keys(PERMISSION_MODE_INFO) as PermissionMode[]).filter((m) => m !== 'bypass' || bypass);
@@ -193,6 +194,25 @@ export function PermissionsSection() {
             }
           />
         ) : null}
+      </Group>
+
+      <Group title="Computer use">
+        <SettingRow
+          label="Let the agent use this computer"
+          description={
+            windows
+              ? 'Code sessions with a model that can see images may take screenshots and use the mouse and keyboard. Each action asks first unless you allow it for the session, and a banner shows while it is in control. Press Ctrl+Alt+Esc to stop it.'
+              : 'Available on Windows for now.'
+          }
+          control={
+            <Switch
+              label="Let the agent use this computer"
+              checked={windows && settings.behavior.computerUse}
+              disabled={!windows}
+              onChange={(on) => saveSettings({ behavior: { computerUse: on } })}
+            />
+          }
+        />
       </Group>
 
       <section aria-label="Rules" className="flex flex-col gap-12">

@@ -88,7 +88,9 @@ export const AppSettingsSchema = z.object({
     /** Bypass still asks before dangerous commands, writes outside the project and config changes. */
     bypassKeepsChecks: z.boolean(),
     autoCompact: z.boolean(),
-    webSearch: z.boolean()
+    webSearch: z.boolean(),
+    /** Code sessions may see the screen and use the mouse and keyboard (asks before each action). */
+    computerUse: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -120,7 +122,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: { theme: 'system', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },

@@ -9,6 +9,7 @@ import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
 import type { SearchEngineId, SearchResult } from '../tools/web/search';
+import type { ComputerControl } from '../computer/desktop';
 import type { SessionPatch, SessionStore } from '../db/sessionsRepo';
 import type { RetryPolicy } from '../providers/retry';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
@@ -49,6 +50,8 @@ export interface SessionPreferences {
   noTraining: boolean;
   /** Incognito chats may only use models served from this computer. */
   incognitoLocalOnly: boolean;
+  /** Settings → Permissions: code sessions may use the screen, mouse and keyboard. */
+  computerUse: boolean;
 }
 
 export interface SessionDeps {
@@ -74,6 +77,8 @@ export interface SessionDeps {
   providerName(providerId: string): string;
   /** How the provider behind a provider id treats what it receives. */
   dataHandling(providerId: string): DataHandling;
+  /** Screen, mouse and keyboard (Windows); null where computer use isn't available. */
+  computer: ComputerControl | null;
   /** Web search for the WebSearch tool (Settings → Web search). */
   search: {
     active(): SearchEngineId | null;
@@ -527,9 +532,10 @@ export class AgentSession {
     const summary = this.summary;
     const web = this.webTools(model);
     const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
+    const computer = summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
     const builtins =
       summary.kind === 'code'
-        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && (n !== 'WebSearch' || web.clientSearch))
+        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
         : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : [])];
     const toolNames = [...builtins, ...mcpTools];
     if (!this.system) {
@@ -549,6 +555,7 @@ export class AgentSession {
           memory: this.memory.initial(this.workingDir()),
           skills: loadSkills(this.deps.graftHome, root),
           webSearch: web.native || web.clientSearch,
+          computer,
           mcpServers: this.deps.mcpServerNames(this.settingsRoot())
         });
       } else {
@@ -904,7 +911,8 @@ export class AgentSession {
       },
       runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
       notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
-      search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal)
+      search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
+      computer: this.deps.computer
     };
   }
 

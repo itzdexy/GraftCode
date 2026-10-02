@@ -10,6 +10,7 @@ import { grepTool } from './search/grep';
 import { killShellTool, shellOutputTool, shellTool } from './shell/shellTools';
 import { webFetchTool } from './web/webFetch';
 import { webSearchTool } from './web/webSearch';
+import { computerTool } from './computer';
 
 /** Tool names by role; sub-agents and plan mode filter with these. */
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'] as const;
@@ -29,6 +30,7 @@ export function createBuiltinRegistry(): ToolRegistry {
   registry.register(killShellTool);
   registry.register(webFetchTool);
   registry.register(webSearchTool);
+  registry.register(computerTool);
   registry.register(todoWriteTool);
   registry.register(taskTool);
   registry.register(askUserTool);

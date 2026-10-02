@@ -21,6 +21,8 @@ import { ARTIFACT_SCHEME, ArtifactServer } from './artifacts/artifacts';
 import { Scheduler } from './schedule/scheduler';
 import { openExternalSafely } from './app/security';
 import { KeepAwake } from './app/keepAwake';
+import { DesktopComputer } from './computer/desktop';
+import { WindowsInput } from './computer/windowsInput';
 import { TrayController } from './app/tray';
 import { UpdateController } from './app/updater';
 
@@ -78,6 +80,20 @@ const keepAwake = new KeepAwake({
   start: () => powerSaveBlocker.start('prevent-app-suspension'),
   stop: (id) => powerSaveBlocker.stop(id)
 });
+
+/** Computer use runs on Windows; created on first use, stopped from Ctrl+Alt+Esc. */
+let desktop: DesktopComputer | null = null;
+function computer(): DesktopComputer | null {
+  if (process.platform !== 'win32') return null;
+  desktop ??= new DesktopComputer({
+    input: new WindowsInput(),
+    stop: (ids) => {
+      for (const id of ids) sessionManager?.interrupt(id);
+    },
+    log: (message) => log.warn('computer', message)
+  });
+  return desktop;
+}
 
 const updates = new UpdateController({
   enabled: () => settingsSnapshot?.updates.enabled ?? false,
@@ -262,6 +278,7 @@ async function sessions(): Promise<SessionManager> {
     rgPath: s.rgPath,
     mcp: m,
     search: s.search,
+    computer: computer(),
     emitEvent: (sessionId, event) => {
       emit({ type: 'session:event', sessionId, event });
       if (event.type === 'status') {
@@ -315,6 +332,7 @@ function openMainWindow(): void {
 async function shutdown(): Promise<void> {
   try {
     updates.dispose();
+    desktop?.dispose();
     keepAwake.dispose();
     tray.destroy();
     scheduler?.stop();

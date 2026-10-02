@@ -128,6 +128,7 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
       if (!readOnly || dangerous || outsideProject) return result('deny', planBlock);
     }
     if (query.mcp && !mcpReadOnly) return result('deny', planBlock);
+    if (cls === 'computer') return result('deny', planBlock);
   }
 
   // Bypass runs everything without prompts (deny rules above still apply), unless the user kept the safety checks on.
@@ -165,6 +166,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
       if (mode === 'auto' && risk === 'low' && !outsideProject) return result('allow', 'Low-risk command allowed in Auto mode.');
       return result('ask', outsideProject ? 'The command refers to paths outside the project.' : 'Runs a command.');
     }
+    case 'computer':
+      return result('ask', 'Uses your screen, mouse and keyboard.');
     case 'network':
       if (env.allowNetwork) return result('allow', 'Chats may search and read the web.');
       if (mode === 'auto' || mode === 'bypass') return result('allow', 'Network reads are allowed in this mode.');

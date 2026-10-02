@@ -48,6 +48,7 @@ export interface SessionManagerDeps {
   rgPath: string;
   mcp: McpToolSource | null;
   search: SessionDeps['search'];
+  computer: SessionDeps['computer'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -121,6 +122,7 @@ export class SessionManager {
       },
       providerName: (providerId) => d.registry.providerName(providerId),
       search: d.search,
+      computer: d.computer,
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -151,7 +153,8 @@ export class SessionManager {
           defaultModel: s.defaults.model,
           defaultEffort: s.defaults.effort,
           noTraining: s.privacy.noTraining,
-          incognitoLocalOnly: s.privacy.incognitoLocalOnly
+          incognitoLocalOnly: s.privacy.incognitoLocalOnly,
+          computerUse: s.behavior.computerUse
         };
       },
       gitInfo: async (cwd) => {

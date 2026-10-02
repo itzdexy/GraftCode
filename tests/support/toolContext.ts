@@ -38,6 +38,7 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     runSubagent: () => Promise.resolve({ text: '', toolCalls: 0 }),
     notesForPaths: () => null,
     search: () => Promise.reject(new Error('No web search engine in this test.')),
+    computer: null,
     todoList,
     progressChunks,
     ...overrides

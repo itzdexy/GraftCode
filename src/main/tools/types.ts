@@ -5,8 +5,9 @@ import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import type { FileStateTracker } from './fileState';
 import type { ShellManager } from './shell/shellManager';
 import type { SearchEngineId, SearchResult } from './web/search';
+import type { ComputerControl } from '../computer/desktop';
 
-export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'none';
+export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 export type SubagentType = 'general' | 'explore';
 
 /** What a pending call touches; drives permission checks, prompts and summary lines. */
@@ -45,6 +46,8 @@ export interface ToolContext extends DescribeContext {
   runSubagent(input: { description: string; prompt: string; type: SubagentType }): Promise<{ text: string; toolCalls: number }>;
   /** Project notes (GRAFT.md) for directories first touched by these paths, or null. */
   notesForPaths(paths: string[]): string | null;
+  /** Screen, mouse and keyboard when computer use is on (Settings → Permissions); null otherwise. */
+  computer: ComputerControl | null;
   /** Searches the web with the engine chosen in Settings → Web search. */
   search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
 }
