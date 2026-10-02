@@ -127,7 +127,7 @@ test('the browser panel opens local pages and blocks non-web addresses', async (
 
   await panel.getByRole('textbox', { name: 'Address' }).fill(provider.url.replace('/v1', '/v1/models'));
   await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
-  await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(/127\.0\.0\.1:\d+\/v1\/models/);
+  await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(/(127\.0\.0\.1|\[::1\]|localhost):\d+\/v1\/models/);
   const page = await graft.app.evaluate(async ({ webContents }) => {
     const panelContents = webContents.getAllWebContents().find((c) => c.getURL().includes('/v1/models'));
     if (!panelContents) return null;

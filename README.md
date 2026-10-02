@@ -48,8 +48,10 @@ Download the latest installer from the [Releases](https://github.com/itzdexy/Gra
 | Platform | File |
 | --- | --- |
 | Windows (x64) | `Graft-Setup-<version>.exe` |
-| macOS | `.dmg` or `.zip` |
-| Linux | `.AppImage` or `.deb` |
+| macOS (Apple silicon) | `.dmg` or `.zip` |
+| Linux (x64) | `.AppImage` or `.deb` |
+
+The installers aren't code-signed yet. On Windows, SmartScreen may warn the first time: choose **More info → Run anyway**. On macOS, if the app won't open, choose **Open Anyway** in System Settings → Privacy & Security.
 
 Installed copies check for new releases in the background. When an update has downloaded, Graft asks to restart, or installs it the next time you quit.
 
@@ -149,15 +151,25 @@ npm run dev        # run Graft with hot reload
 
 ## Releases and updates
 
-1. Bump `version` in `package.json` and add the release notes to `src/renderer/src/features/home/WhatsNew.tsx`.
+1. Bump `version` in `package.json` and add the release notes to `src/renderer/src/features/home/releaseNotes.json`. The app shows them under "What's new", and the release on GitHub uses the same text.
 2. Commit, tag and push:
    ```bash
    git tag v0.3.0
    git push origin main --tags
    ```
-3. The **Release** workflow builds installers on Windows, macOS and Linux and publishes them as a GitHub release. Installed copies pick up the update automatically.
+3. The **Release** workflow builds the installers on Windows, macOS and Linux, starts each packaged app for a smoke test, and attaches them to a draft release. It publishes the release only when every platform passed. Installed copies then pick up the update automatically.
 
-> Installed apps read releases without signing in, so the repository (or wherever the releases are published) must be **public** for updates to reach users. To ship from your own server instead, build with `GRAFT_UPDATE_URL` set to an HTTPS folder that holds `latest.yml` and the installers.
+Running the Release workflow by hand (**Actions → Release → Run workflow**) is a dry run: the same builds and checks, with the installers kept as workflow artifacts.
+
+Without GitHub Actions, build on your own machine and upload the files `electron-builder` wrote to `dist/` (the installer, its `.blockmap` and `latest.yml`; `latest-linux.yml` or `latest-mac.yml` on the other platforms):
+
+```bash
+npm run dist:win
+node scripts/release-notes.mjs 0.3.0 > notes.md
+gh release create v0.3.0 dist/Graft-Setup-0.3.0.exe dist/Graft-Setup-0.3.0.exe.blockmap dist/latest.yml --title "Graft 0.3.0" --notes-file notes.md
+```
+
+> Installed apps read releases without signing in, so the releases must be public for updates to reach users. To ship from your own server instead, build with `GRAFT_UPDATE_URL` set to an HTTPS folder that holds `latest.yml` and the installers.
 
 ## Architecture
 

@@ -5,6 +5,8 @@
   "description": "Graft — a desktop coding agent.",
   "author": "Graft",
   "license": "MIT",
+  "homepage": "https://github.com/itzdexy/GraftCode",
+  "desktopName": "graft.desktop",
   "private": true,
   "main": "./out/main/index.js",
   "engines": {

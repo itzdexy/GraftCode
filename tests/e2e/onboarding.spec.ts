@@ -56,6 +56,12 @@ test('first run: name, picture, provider, verified key and defaults land on Code
     await w.getByLabel('API key (optional)').fill(KEY);
     await w.getByRole('button', { name: 'Verify' }).click();
     await expect(w.getByText('Connected. 2 models available.')).toBeVisible();
+    // Without an OS keyring (Linux containers), keys are stored only after an explicit opt-in.
+    const plaintext = w.getByRole('checkbox', { name: 'Store keys unencrypted on this computer' });
+    if ((await plaintext.count()) > 0) {
+      await expect(w.getByRole('button', { name: 'Continue' })).toBeDisabled();
+      await plaintext.check();
+    }
     await w.getByRole('button', { name: 'Continue' }).click();
 
     // Defaults: models come from the provider's list-models call.

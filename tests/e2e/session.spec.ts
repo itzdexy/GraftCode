@@ -53,11 +53,12 @@ test('an edit turn asks for approval, applies the change and shows it in the tra
   await expect(card).toBeHidden();
   expect(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8')).toBe('hello world\n');
 
-  // Tool calls fold into one summary line that expands to details.
-  const summary = w.getByRole('button', { name: /Read notes\.txt, edited notes\.txt/ });
+  // The turn's work folds into one summary line that expands to each step.
+  const summary = w.getByRole('button', { name: /^Edited notes\.txt, read notes\.txt/ });
   await expect(summary).toBeVisible();
   await summary.click();
-  await expect(w.getByRole('button', { name: /Edit .*notes\.txt/ })).toBeVisible();
+  await expect(w.getByRole('button', { name: /^Edited notes\.txt(?!,)/ })).toBeVisible();
+  await expect(w.getByRole('button', { name: /^Read notes\.txt/ })).toBeVisible();
 
   // The status bar shows the branch and the diff counts.
   await expect(w.getByRole('img', { name: '1 line added, 1 removed' })).toBeVisible();

@@ -35,6 +35,8 @@ interface Target {
   root: string;
   gitDir: string;
   shadow: boolean;
+  /** Git can set the project's .gitattributes aside with --attr-source (Git 2.40+). */
+  attrSource: boolean;
   env: Record<string, string>;
 }
 
@@ -61,6 +63,37 @@ const SHADOW_EXCLUDES = [
 
 /** Git's well-known empty tree; used as an attribute source that defines no attributes. */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+/**
+ * info/attributes of the private snapshot repositories. It outranks every
+ * .gitattributes file, so no line-ending conversion, filter, keyword
+ * expansion or re-encoding touches the snapshot bytes.
+ */
+const RAW_ATTRIBUTES = '* -text -eol -crlf -filter -ident -working-tree-encoding\n';
+
+let attrSourceSupport: Promise<boolean> | null = null;
+
+/** Whether the installed git has --attr-source (added in Git 2.40; macOS still ships 2.39). */
+function supportsAttrSource(): Promise<boolean> {
+  attrSourceSupport ??= runGit(['--version'], { cwd: os.homedir(), allowFail: true }).then(
+    ({ stdout }) => {
+      const match = /(\d+)\.(\d+)/.exec(stdout);
+      return match !== null && Number(match[1]) * 1000 + Number(match[2]) >= 2040;
+    },
+    () => false
+  );
+  return attrSourceSupport;
+}
+
+function writeIfChanged(file: string, content: string): void {
+  try {
+    if (fs.readFileSync(file, 'utf8') === content) return;
+  } catch {
+    // Missing: written below.
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+}
 
 const AUTHOR_ENV = {
   GIT_AUTHOR_NAME: 'Graft',
@@ -102,7 +135,8 @@ function safeRefPart(value: string): string {
  * in a private per-session index with line-ending conversion and attribute
  * filters off, so restores are byte-exact, and stored as commits under
  * refs/graft/checkpoints/… — no branch, HEAD or real index is touched. Folders that aren't git
- * repositories get a private shadow repository in the app's data folder.
+ * repositories get a private shadow repository in the app's data folder, and
+ * so do repositories when git is older than 2.40 (see target()).
  */
 export class CheckpointService {
   /** Serializes work on each private index file (one per session and repository). */
@@ -112,7 +146,9 @@ export class CheckpointService {
     private readonly db: Db,
     private readonly shadowRoot: string,
     /** Folder for the private snapshot indexes (their stat cache keeps later snapshots fast). */
-    private readonly indexRoot: string = path.join(shadowRoot, '..', 'checkpoint-index')
+    private readonly indexRoot: string = path.join(shadowRoot, '..', 'checkpoint-index'),
+    /** Whether git has --attr-source; tests pass `() => Promise.resolve(false)` to exercise older git. */
+    private readonly attrSource: () => Promise<boolean> = supportsAttrSource
   ) {}
 
   private indexFile(sessionId: string, gitDir: string): string {
@@ -132,21 +168,38 @@ export class CheckpointService {
 
   private async target(workDir: string): Promise<Target> {
     const top = await runGit(['rev-parse', '--show-toplevel'], { cwd: workDir, allowFail: true });
+    const attrSource = await this.attrSource();
     if (top.code === 0) {
       const root = fromGitPath(top.stdout);
-      const gitDir = fromGitPath(await git(['rev-parse', '--absolute-git-dir'], { cwd: root }));
-      return { root, gitDir, shadow: false, env: {} };
+      if (attrSource) {
+        const gitDir = fromGitPath(await git(['rev-parse', '--absolute-git-dir'], { cwd: root }));
+        return { root, gitDir, shadow: false, attrSource, env: {} };
+      }
+      // Older git can't set the project's .gitattributes aside, and they may convert line endings or run
+      // filters, so the snapshots go to a private repository whose info/attributes outrank them. The
+      // project's .gitignore files apply as usual; its info/exclude is copied over.
+      const exclude = path.resolve(root, (await git(['rev-parse', '--git-path', 'info/exclude'], { cwd: root })).trim());
+      return this.shadow(root, 'repo-', fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '', attrSource);
     }
-    const root = path.resolve(workDir);
-    const key = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex').slice(0, 24);
+    return this.shadow(path.resolve(workDir), '', `${SHADOW_EXCLUDES.join('\n')}\n`, attrSource);
+  }
+
+  /** The private repository in the app's data folder that snapshots `root`. */
+  private async shadow(root: string, prefix: string, excludes: string, attrSource: boolean): Promise<Target> {
+    const key = prefix + createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex').slice(0, 24);
     const gitDir = path.join(this.shadowRoot, key);
     if (!fs.existsSync(path.join(gitDir, 'HEAD'))) {
       fs.mkdirSync(gitDir, { recursive: true });
       await git(['init', '--bare', '-q', gitDir], { cwd: this.shadowRoot });
-      fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true });
-      fs.writeFileSync(path.join(gitDir, 'info', 'exclude'), `${SHADOW_EXCLUDES.join('\n')}\n`);
     }
-    return { root, gitDir, shadow: true, env: { GIT_DIR: gitDir, GIT_WORK_TREE: root } };
+    writeIfChanged(path.join(gitDir, 'info', 'exclude'), excludes);
+    return this.shadowTarget(root, gitDir, attrSource);
+  }
+
+  private shadowTarget(root: string, gitDir: string, attrSource: boolean): Target {
+    // Shadow repositories made before info/attributes existed get it on first use.
+    if (fs.existsSync(gitDir)) writeIfChanged(path.join(gitDir, 'info', 'attributes'), RAW_ATTRIBUTES);
+    return { root, gitDir, shadow: true, attrSource, env: { GIT_DIR: gitDir, GIT_WORK_TREE: root } };
   }
 
   /**
@@ -160,7 +213,7 @@ export class CheckpointService {
       'core.autocrlf=false',
       '-c',
       'core.safecrlf=false',
-      `--attr-source=${EMPTY_TREE}`,
+      ...(target.attrSource ? [`--attr-source=${EMPTY_TREE}`] : []),
       ...(target.shadow ? ['-c', 'core.bare=false'] : []),
       ...args
     ];
@@ -234,11 +287,12 @@ export class CheckpointService {
   }
 
   private async targetFor(record: CheckpointRecord): Promise<Target> {
-    // A checkpoint lives where it was taken, even if the folder was later turned into a repo.
+    // A checkpoint lives where it was taken, even if the folder was later turned into a repo or git changed.
+    const attrSource = await this.attrSource();
     const shadow = path.resolve(record.gitDir).startsWith(path.resolve(this.shadowRoot));
-    if (shadow) return { root: record.repoDir, gitDir: record.gitDir, shadow: true, env: { GIT_DIR: record.gitDir, GIT_WORK_TREE: record.repoDir } };
+    if (shadow) return this.shadowTarget(record.repoDir, record.gitDir, attrSource);
     if (!fs.existsSync(record.repoDir)) throw new GraftError('checkpoint_missing_dir', `The folder ${record.repoDir} no longer exists.`);
-    return this.target(record.repoDir);
+    return { root: record.repoDir, gitDir: record.gitDir, shadow: false, attrSource, env: {} };
   }
 
   /** What restoring a checkpoint would do to the current files. */

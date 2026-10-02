@@ -21,6 +21,9 @@ export interface LaunchOptions {
   executablePath?: string;
 }
 
+/** Linux CI runners and containers can't give Chromium's sandbox the user namespaces it needs, so it is off there. */
+export const NO_SANDBOX = process.platform === 'linux' && Boolean(process.env.CI);
+
 export function makeTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
@@ -35,8 +38,7 @@ export async function launchGraft(options: LaunchOptions = {}): Promise<Launched
   }
   Object.assign(env, { GRAFT_USER_DATA_DIR: userData, GRAFT_HOME: graftHome, GRAFT_E2E: '1' }, options.env ?? {});
 
-  // Linux CI runners restrict the user namespaces Chromium's sandbox needs.
-  const flags = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [];
+  const flags = NO_SANDBOX ? ['--no-sandbox'] : [];
   const app = options.executablePath
     ? await electron.launch({ executablePath: options.executablePath, args: flags, env, cwd: ROOT })
     : await electron.launch({ args: [...flags, path.join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT });

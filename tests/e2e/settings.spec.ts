@@ -104,10 +104,11 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await openSettings(w, 'Models');
   await expect(w.getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);
   await shot(w, 'settings-models');
+  // Updates are on by default; a development build explains where they come from.
   await openSettings(w, 'About');
-  await expect(w.getByText('Updates are delivered to installed builds.')).toHaveCount(0);
-  await w.getByRole('switch', { name: 'Check for updates automatically' }).click();
   await expect(w.getByText('Updates are delivered to installed builds.')).toBeVisible();
+  await w.getByRole('switch', { name: 'Check for updates automatically' }).click();
+  await expect(w.getByText('Automatic updates are off.')).toBeVisible();
   await shot(w, 'settings-about');
 
   // Permission rules: invalid rules are refused, valid ones land in ~/.graft/settings.json.

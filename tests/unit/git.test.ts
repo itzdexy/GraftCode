@@ -80,121 +80,152 @@ describe('repository info and worktrees', () => {
   });
 });
 
-describe('checkpoints and rewind', () => {
-  let db: Db;
-  let shadow: string;
-  beforeEach(() => {
-    db = openDatabase(':memory:');
-    db.prepare("INSERT INTO sessions (id, kind, title, permission_mode, usage, created_at, updated_at) VALUES ('s1', 'code', 't', 'ask', '{}', 0, 0)").run();
-    shadow = track(makeTempDir('graft shadow (tmp) '));
+/** Git 2.40 added --attr-source; older git (macOS ships 2.39) snapshots repositories in a private repository. */
+const gitHasAttrSource = ((): boolean => {
+  const match = /(\d+)\.(\d+)/.exec(gitSync(process.cwd(), '--version'));
+  return match !== null && Number(match[1]) * 1000 + Number(match[2]) >= 2040;
+})();
+
+for (const { mode, attrSource } of [
+  { mode: 'git 2.40 and later', attrSource: true },
+  { mode: 'older git', attrSource: false }
+]) {
+  describe.skipIf(attrSource && !gitHasAttrSource)(`checkpoints and rewind (${mode})`, () => {
+    let db: Db;
+    let shadow: string;
+    const newService = (): CheckpointService => new CheckpointService(db, shadow, undefined, () => Promise.resolve(attrSource));
+    beforeEach(() => {
+      db = openDatabase(':memory:');
+      db.prepare("INSERT INTO sessions (id, kind, title, permission_mode, usage, created_at, updated_at) VALUES ('s1', 'code', 't', 'ask', '{}', 0, 0)").run();
+      shadow = track(makeTempDir('graft shadow (tmp) '));
+    });
+    afterEach(() => db.close());
+
+    it('snapshots without touching HEAD, branches or the staged index, and rewinds exactly', async () => {
+      const repo = track(makeRepo({ 'a.txt': 'alpha\n', 'b.txt': 'bravo\n', '.gitignore': 'node_modules/\n' }));
+      writeFile(repo, 'a.txt', 'alpha staged by the user\n');
+      gitSync(repo, 'add', 'a.txt');
+      writeFile(repo, 'user-notes.txt', 'mine\n');
+      writeFile(repo, 'node_modules/pkg/index.js', 'ignored v1\n');
+      const before = {
+        head: gitSync(repo, 'rev-parse', 'HEAD'),
+        staged: gitSync(repo, 'diff', '--cached'),
+        status: gitSync(repo, 'status', '--porcelain'),
+        branches: gitSync(repo, 'branch', '--list'),
+        log: gitSync(repo, 'log', '--oneline')
+      };
+      const service = newService();
+      const cp = await service.create('s1', repo, 'msg-1');
+      expect(cp.ref).toMatch(/^refs\/graft\/checkpoints\/s1\//);
+      // With older git the snapshot lives in the private repository, so the project gets no refs at all.
+      expect(gitSync(repo, 'for-each-ref', 'refs/graft') === '').toBe(!attrSource);
+      expect({
+        head: gitSync(repo, 'rev-parse', 'HEAD'),
+        staged: gitSync(repo, 'diff', '--cached'),
+        status: gitSync(repo, 'status', '--porcelain'),
+        branches: gitSync(repo, 'branch', '--list'),
+        log: gitSync(repo, 'log', '--oneline')
+      }).toEqual(before);
+
+      // The agent then changes things.
+      writeFile(repo, 'b.txt', 'bravo rewritten\n');
+      fs.rmSync(path.join(repo, 'a.txt'));
+      writeFile(repo, 'c.txt', 'created\n');
+      writeFile(repo, 'deep/dir/d.txt', 'created deep\n');
+      writeFile(repo, 'node_modules/pkg/index.js', 'ignored v2\n');
+
+      const preview = await service.preview(cp.id);
+      expect(preview.changes).toEqual([
+        { path: 'a.txt', change: 'recreate' },
+        { path: 'b.txt', change: 'restore' },
+        { path: 'c.txt', change: 'delete' },
+        { path: 'deep/dir/d.txt', change: 'delete' }
+      ]);
+      const result = await service.restore(cp.id);
+      expect(result.changes).toEqual(preview.changes);
+      expect(read(repo, 'a.txt')).toBe('alpha staged by the user\n');
+      expect(read(repo, 'b.txt')).toBe('bravo\n');
+      expect(exists(repo, 'c.txt')).toBe(false);
+      expect(exists(repo, 'deep')).toBe(false);
+      expect(read(repo, 'user-notes.txt')).toBe('mine\n');
+      expect(read(repo, 'node_modules/pkg/index.js')).toBe('ignored v2\n');
+      expect(gitSync(repo, 'diff', '--cached')).toBe(before.staged);
+      expect(gitSync(repo, 'rev-parse', 'HEAD')).toBe(before.head);
+
+      // The rewind itself can be undone from its safety checkpoint.
+      await service.restore(result.safetyCheckpointId);
+      expect(read(repo, 'c.txt')).toBe('created\n');
+      expect(read(repo, 'b.txt')).toBe('bravo rewritten\n');
+      expect(exists(repo, 'a.txt')).toBe(false);
+
+      await service.deleteForSession('s1');
+      expect(gitSync(repo, 'for-each-ref', 'refs/graft')).toBe('');
+      expect(service.list('s1')).toEqual([]);
+    });
+
+    it('restores exact bytes despite autocrlf and eol attributes (regression: CRLF appeared on rewind)', async () => {
+      const repo = track(makeRepo({ '.gitattributes': '* text=auto\n', 'win.txt': 'one\r\ntwo\r\n' }));
+      gitSync(repo, 'config', 'core.autocrlf', 'true');
+      writeFile(repo, 'unix.txt', 'agent\nwritten\n');
+      writeFile(repo, 'win.txt', 'one\r\ntwo\r\nthree\r\n');
+      const service = newService();
+      const cp = await service.create('s1', repo, 'm');
+      writeFile(repo, 'unix.txt', 'changed\n');
+      writeFile(repo, 'win.txt', 'changed\r\n');
+      await service.restore(cp.id);
+      expect(fs.readFileSync(path.join(repo, 'unix.txt'))).toEqual(Buffer.from('agent\nwritten\n'));
+      expect(fs.readFileSync(path.join(repo, 'win.txt'))).toEqual(Buffer.from('one\r\ntwo\r\nthree\r\n'));
+    });
+
+    it('works in folders that are not git repositories, without adding a .git folder', async () => {
+      const dir = track(makeTempDir('plain project (tmp) '));
+      writeFile(dir, 'index.html', '<h1>v1</h1>\n');
+      writeFile(dir, 'node_modules/big/file.js', 'x\n');
+      const service = newService();
+      const cp = await service.create('s1', dir, 'msg-1');
+      writeFile(dir, 'index.html', '<h1>v2</h1>\n');
+      writeFile(dir, 'extra.css', 'body{}\n');
+      fs.rmSync(path.join(dir, 'node_modules'), { recursive: true });
+      expect((await service.preview(cp.id)).changes).toEqual([
+        { path: 'extra.css', change: 'delete' },
+        { path: 'index.html', change: 'restore' }
+      ]);
+      await service.restore(cp.id);
+      expect(read(dir, 'index.html')).toBe('<h1>v1</h1>\n');
+      expect(exists(dir, 'extra.css')).toBe(false);
+      expect(exists(dir, '.git')).toBe(false);
+    });
+
+    it('skips what the project ignores, including its .git/info/exclude', async () => {
+      const repo = track(makeRepo({ 'app.ts': 'v1\n', '.gitignore': 'logs/\n' }));
+      fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), 'local-notes.txt\n');
+      writeFile(repo, 'local-notes.txt', 'mine\n');
+      writeFile(repo, 'logs/run.log', 'v1\n');
+      const service = newService();
+      const cp = await service.create('s1', repo, 'm');
+      writeFile(repo, 'app.ts', 'v2\n');
+      writeFile(repo, 'local-notes.txt', 'still mine\n');
+      writeFile(repo, 'logs/run.log', 'v2\n');
+      expect((await service.preview(cp.id)).changes).toEqual([{ path: 'app.ts', change: 'restore' }]);
+      await service.restore(cp.id);
+      expect(read(repo, 'app.ts')).toBe('v1\n');
+      expect(read(repo, 'local-notes.txt')).toBe('still mine\n');
+      expect(read(repo, 'logs/run.log')).toBe('v2\n');
+    });
+
+    it('checkpoints inside a session worktree independently of the main checkout', async () => {
+      const repo = track(makeRepo({ 'app.ts': 'v1\n' }));
+      const wt = await createWorktree({ repoDir: repo, worktreesRoot: track(makeTempDir()), slug: 'feature' });
+      const service = newService();
+      const cp = await service.create('s1', wt.path, 'm');
+      writeFile(wt.path, 'app.ts', 'v2\n');
+      writeFile(repo, 'app.ts', 'main checkout edit\n');
+      await service.restore(cp.id);
+      expect(read(wt.path, 'app.ts')).toBe('v1\n');
+      expect(read(repo, 'app.ts')).toBe('main checkout edit\n');
+    });
   });
-  afterEach(() => db.close());
-
-  it('snapshots without touching HEAD, branches or the staged index, and rewinds exactly', async () => {
-    const repo = track(makeRepo({ 'a.txt': 'alpha\n', 'b.txt': 'bravo\n', '.gitignore': 'node_modules/\n' }));
-    writeFile(repo, 'a.txt', 'alpha staged by the user\n');
-    gitSync(repo, 'add', 'a.txt');
-    writeFile(repo, 'user-notes.txt', 'mine\n');
-    writeFile(repo, 'node_modules/pkg/index.js', 'ignored v1\n');
-    const before = {
-      head: gitSync(repo, 'rev-parse', 'HEAD'),
-      staged: gitSync(repo, 'diff', '--cached'),
-      status: gitSync(repo, 'status', '--porcelain'),
-      branches: gitSync(repo, 'branch', '--list'),
-      log: gitSync(repo, 'log', '--oneline')
-    };
-    const service = new CheckpointService(db, shadow);
-    const cp = await service.create('s1', repo, 'msg-1');
-    expect(cp.ref).toMatch(/^refs\/graft\/checkpoints\/s1\//);
-    expect({
-      head: gitSync(repo, 'rev-parse', 'HEAD'),
-      staged: gitSync(repo, 'diff', '--cached'),
-      status: gitSync(repo, 'status', '--porcelain'),
-      branches: gitSync(repo, 'branch', '--list'),
-      log: gitSync(repo, 'log', '--oneline')
-    }).toEqual(before);
-
-    // The agent then changes things.
-    writeFile(repo, 'b.txt', 'bravo rewritten\n');
-    fs.rmSync(path.join(repo, 'a.txt'));
-    writeFile(repo, 'c.txt', 'created\n');
-    writeFile(repo, 'deep/dir/d.txt', 'created deep\n');
-    writeFile(repo, 'node_modules/pkg/index.js', 'ignored v2\n');
-
-    const preview = await service.preview(cp.id);
-    expect(preview.changes).toEqual([
-      { path: 'a.txt', change: 'recreate' },
-      { path: 'b.txt', change: 'restore' },
-      { path: 'c.txt', change: 'delete' },
-      { path: 'deep/dir/d.txt', change: 'delete' }
-    ]);
-    const result = await service.restore(cp.id);
-    expect(result.changes).toEqual(preview.changes);
-    expect(read(repo, 'a.txt')).toBe('alpha staged by the user\n');
-    expect(read(repo, 'b.txt')).toBe('bravo\n');
-    expect(exists(repo, 'c.txt')).toBe(false);
-    expect(exists(repo, 'deep')).toBe(false);
-    expect(read(repo, 'user-notes.txt')).toBe('mine\n');
-    expect(read(repo, 'node_modules/pkg/index.js')).toBe('ignored v2\n');
-    expect(gitSync(repo, 'diff', '--cached')).toBe(before.staged);
-    expect(gitSync(repo, 'rev-parse', 'HEAD')).toBe(before.head);
-
-    // The rewind itself can be undone from its safety checkpoint.
-    await service.restore(result.safetyCheckpointId);
-    expect(read(repo, 'c.txt')).toBe('created\n');
-    expect(read(repo, 'b.txt')).toBe('bravo rewritten\n');
-    expect(exists(repo, 'a.txt')).toBe(false);
-
-    await service.deleteForSession('s1');
-    expect(gitSync(repo, 'for-each-ref', 'refs/graft')).toBe('');
-    expect(service.list('s1')).toEqual([]);
-  });
-
-  it('restores exact bytes despite autocrlf and eol attributes (regression: CRLF appeared on rewind)', async () => {
-    const repo = track(makeRepo({ '.gitattributes': '* text=auto\n', 'win.txt': 'one\r\ntwo\r\n' }));
-    gitSync(repo, 'config', 'core.autocrlf', 'true');
-    writeFile(repo, 'unix.txt', 'agent\nwritten\n');
-    writeFile(repo, 'win.txt', 'one\r\ntwo\r\nthree\r\n');
-    const service = new CheckpointService(db, shadow);
-    const cp = await service.create('s1', repo, 'm');
-    writeFile(repo, 'unix.txt', 'changed\n');
-    writeFile(repo, 'win.txt', 'changed\r\n');
-    await service.restore(cp.id);
-    expect(fs.readFileSync(path.join(repo, 'unix.txt'))).toEqual(Buffer.from('agent\nwritten\n'));
-    expect(fs.readFileSync(path.join(repo, 'win.txt'))).toEqual(Buffer.from('one\r\ntwo\r\nthree\r\n'));
-  });
-
-  it('works in folders that are not git repositories, without adding a .git folder', async () => {
-    const dir = track(makeTempDir('plain project (tmp) '));
-    writeFile(dir, 'index.html', '<h1>v1</h1>\n');
-    writeFile(dir, 'node_modules/big/file.js', 'x\n');
-    const service = new CheckpointService(db, shadow);
-    const cp = await service.create('s1', dir, 'msg-1');
-    writeFile(dir, 'index.html', '<h1>v2</h1>\n');
-    writeFile(dir, 'extra.css', 'body{}\n');
-    fs.rmSync(path.join(dir, 'node_modules'), { recursive: true });
-    expect((await service.preview(cp.id)).changes).toEqual([
-      { path: 'extra.css', change: 'delete' },
-      { path: 'index.html', change: 'restore' }
-    ]);
-    await service.restore(cp.id);
-    expect(read(dir, 'index.html')).toBe('<h1>v1</h1>\n');
-    expect(exists(dir, 'extra.css')).toBe(false);
-    expect(exists(dir, '.git')).toBe(false);
-  });
-
-  it('checkpoints inside a session worktree independently of the main checkout', async () => {
-    const repo = track(makeRepo({ 'app.ts': 'v1\n' }));
-    const wt = await createWorktree({ repoDir: repo, worktreesRoot: track(makeTempDir()), slug: 'feature' });
-    const service = new CheckpointService(db, shadow);
-    const cp = await service.create('s1', wt.path, 'm');
-    writeFile(wt.path, 'app.ts', 'v2\n');
-    writeFile(repo, 'app.ts', 'main checkout edit\n');
-    await service.restore(cp.id);
-    expect(read(wt.path, 'app.ts')).toBe('v1\n');
-    expect(read(repo, 'app.ts')).toBe('main checkout edit\n');
-  });
-});
+}
 
 describe('diff stats', () => {
   it('counts branch work against the merge-base, plus unstaged and untracked changes', async () => {

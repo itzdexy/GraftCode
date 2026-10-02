@@ -86,6 +86,8 @@ module.exports = {
     target: ['AppImage', 'deb'],
     category: 'Development',
     icon: 'build/icon.png',
-    maintainer: 'Graft contributors'
+    maintainer: 'Graft contributors',
+    // Names the .desktop entry after package.json's desktopName, so docks group Graft's windows under its icon.
+    syncDesktopName: true
   }
 };
