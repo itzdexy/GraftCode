@@ -4,6 +4,7 @@ export interface HttpRequest {
   url: string;
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
+  /** Sent as JSON; a string is sent as it is (the caller sets its content-type). */
   body?: unknown;
   signal?: AbortSignal;
   /** Time to first byte; streaming bodies are then unbounded. */
@@ -33,15 +34,16 @@ export async function request(req: HttpRequest): Promise<Response> {
   req.signal?.addEventListener('abort', onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(new Error('timeout')), req.timeoutMs ?? 60_000);
   const where = hostOf(req.url);
+  const json = req.body !== undefined && typeof req.body !== 'string';
   let response: Response;
   try {
     response = await fetch(req.url, {
       method: req.method ?? (req.body === undefined ? 'GET' : 'POST'),
       headers: {
-        ...(req.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(json ? { 'content-type': 'application/json' } : {}),
         ...req.headers
       },
-      body: req.body === undefined ? undefined : JSON.stringify(req.body),
+      body: req.body === undefined ? undefined : json ? JSON.stringify(req.body) : (req.body as string),
       signal: controller.signal
     });
   } catch (error) {

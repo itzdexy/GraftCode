@@ -1,10 +1,14 @@
 import type { SearchEngineId, SearchEngineSetting } from '@shared/schemas/appSettings';
 import type { ModelInfo } from '@shared/schemas/models';
 import { ProviderError } from '../../providers/errors';
-import { joinUrl, requestJson } from '../../providers/http';
+import { joinUrl, request, requestJson } from '../../providers/http';
 
 /**
  * Web search for the WebSearch tool, behind one interface. Engines:
+ * - exa / duckduckgo: free, with no key or account. Exa's hosted search
+ *   (rate-limited) and DuckDuckGo's plain-HTML results; each stands in for
+ *   the other when it fails. Automatic uses them unless the user set up a
+ *   search service.
  * - openrouter / anthropic / openai / gemini: one small request to that
  *   provider's own web search (OpenRouter's web plugin, Anthropic's
  *   web_search tool, OpenAI's Responses web_search, Gemini's Google Search
@@ -27,7 +31,13 @@ export type { SearchEngineId } from '@shared/schemas/appSettings';
 export const PROVIDER_ENGINES = ['openrouter', 'anthropic', 'openai', 'gemini'] as const;
 export type ProviderEngine = (typeof PROVIDER_ENGINES)[number];
 
+/** Engines that need no key or setup. */
+export const FREE_ENGINES = ['exa', 'duckduckgo'] as const;
+export type FreeEngine = (typeof FREE_ENGINES)[number];
+
 export const SEARCH_ENGINE_LABELS: Record<SearchEngineId, string> = {
+  exa: 'Exa',
+  duckduckgo: 'DuckDuckGo',
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -39,6 +49,10 @@ export const SEARCH_ENGINE_LABELS: Record<SearchEngineId, string> = {
 
 function isProviderEngine(id: SearchEngineId): id is ProviderEngine {
   return (PROVIDER_ENGINES as readonly string[]).includes(id);
+}
+
+function isFreeEngine(id: SearchEngineId): id is FreeEngine {
+  return (FREE_ENGINES as readonly string[]).includes(id);
 }
 
 /** KeyStore id of a search engine's API key. */
@@ -79,6 +93,8 @@ export interface SearchDeps {
   /** Providers with a key whose search can be used, the default model's provider first (no network). */
   providers(): ProviderEngine[];
   access(engine: ProviderEngine, signal?: AbortSignal): Promise<ProviderAccess | null>;
+  /** Where the free engines answer; tests point them at local servers. */
+  endpoints?: Partial<Record<FreeEngine, string>>;
 }
 
 const TIMEOUT = 45_000;
@@ -168,6 +184,130 @@ async function searchSearxng(base: string, query: string, signal: AbortSignal): 
     timeoutMs: TIMEOUT
   });
   return (body.results ?? []).map((r) => ({ title: r.title ?? '', url: r.url ?? '', snippet: r.content ?? '' }));
+}
+
+// ---- free engines (no key) ---------------------------------------------------------
+
+const EXA_MCP = 'https://mcp.exa.ai/mcp';
+const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
+/** Names Graft honestly; DuckDuckGo serves its plain-HTML results to such clients. */
+const USER_AGENT = 'Mozilla/5.0 (compatible; Graft; +https://github.com/itzdexy/GraftCode)';
+
+/** Exa's highlights are Markdown (tables, headings, reference marks); keep the words. */
+function plainText(markdown: string): string {
+  return markdown
+    .replace(/^\s*\|?\s*:?-{3,}.*$/gm, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/\*\*|`|\|/g, ' ')
+    .replace(/\[\d+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Exa's results as text: "Title:", "URL:" and other header lines, then highlights, with "---" lines between results. */
+export function parseExa(text: string): SearchResult[] {
+  return text.split(/\n-{3,}[ \t]*\n/).flatMap((block) => {
+    const url = /^URL:\s*(\S+)/m.exec(block)?.[1];
+    if (!url) return [];
+    const body = /^(?:Highlights|Summary|Text):/m.exec(block);
+    return [{ title: /^Title:[ \t]*(.*)$/m.exec(block)?.[1] ?? '', url, snippet: body ? plainText(block.slice(body.index + body[0].length)) : '' }];
+  });
+}
+
+type McpReply = { result?: { content?: Array<{ type?: string; text?: unknown }>; isError?: boolean }; error?: { message?: string } };
+
+/** The JSON-RPC reply in an MCP response: plain JSON, or the server-sent event that carries it. */
+function mcpReply(body: string): McpReply | null {
+  const trimmed = body.trim();
+  const candidates = trimmed.startsWith('{') ? [trimmed] : trimmed.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim());
+  for (const candidate of candidates) {
+    try {
+      const reply = JSON.parse(candidate) as McpReply;
+      if (reply.result || reply.error) return reply;
+    } catch {
+      // Not JSON: keep looking.
+    }
+  }
+  return null;
+}
+
+/** Exa's hosted search: free without a key (rate-limited). It speaks MCP over HTTP. */
+export async function searchExa(query: string, count: number, signal: AbortSignal, endpoint = EXA_MCP): Promise<SearchResult[]> {
+  const response = await request({
+    url: endpoint,
+    headers: { accept: 'application/json, text/event-stream' },
+    body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'web_search_exa', arguments: { query, numResults: count } } },
+    signal,
+    timeoutMs: TIMEOUT
+  });
+  const reply = mcpReply(await response.text());
+  if (!reply) throw new ProviderError('bad_request', 'Exa answered in a form Graft could not read.', { retryable: false });
+  const text = (reply.result?.content ?? []).flatMap((c) => (c.type === 'text' && typeof c.text === 'string' ? [c.text] : [])).join('\n---\n');
+  if (reply.error || reply.result?.isError) {
+    throw new ProviderError('bad_request', `Exa search failed: ${(reply.error?.message ?? text).slice(0, 200) || 'no reason given'}`, { retryable: false });
+  }
+  return parseExa(text);
+}
+
+function decodeEntities(text: string): string {
+  const char = (code: number): string => (code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '');
+  return text
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => char(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => char(Number(dec)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
+}
+
+function htmlText(html: string | undefined): string {
+  return decodeEntities((html ?? '').replace(/<[^>]+>/g, ''));
+}
+
+/** A result link, unwrapped when DuckDuckGo routes it through //duckduckgo.com/l/?uddg=<address>; its own pages are skipped. */
+function resultUrl(href: string): string | null {
+  try {
+    const url = new URL(decodeEntities(href), 'https://duckduckgo.com');
+    if (!/(^|\.)duckduckgo\.com$/.test(url.hostname)) return url.href;
+    return url.pathname === '/l/' ? url.searchParams.get('uddg') : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Results from DuckDuckGo's plain-HTML page, without its ads. */
+export function parseDuckDuckGo(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  for (const block of html.split(/<div class="result\b/).slice(1)) {
+    if (/^[^>]*result--ad/.test(block)) continue;
+    const link = /<a\b[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/.exec(block) ?? /<a\b[^>]*href="([^"]*)"[^>]*class="result__a"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+    const url = link ? resultUrl(link[1] ?? '') : null;
+    if (!link || !url) continue;
+    const snippet = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div|td)>/.exec(block)?.[1];
+    results.push({ title: htmlText(link[2]), url, snippet: htmlText(snippet) });
+  }
+  return results;
+}
+
+/** DuckDuckGo's plain-HTML search: free, no key, no tracking. */
+export async function searchDuckDuckGo(query: string, count: number, signal: AbortSignal, endpoint = DUCKDUCKGO_HTML): Promise<SearchResult[]> {
+  const response = await request({
+    url: endpoint,
+    method: 'POST',
+    headers: { accept: 'text/html', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': USER_AGENT },
+    body: new URLSearchParams({ q: query }).toString(),
+    signal,
+    timeoutMs: TIMEOUT
+  });
+  const html = await response.text();
+  const results = parseDuckDuckGo(html);
+  if (results.length === 0 && html.includes('anomaly-modal')) {
+    throw new ProviderError('rate_limit', 'DuckDuckGo wants a human check right now. Try again in a little while.', { retryable: false });
+  }
+  return results.slice(0, count);
 }
 
 // ---- providers' own search ---------------------------------------------------------
@@ -320,19 +460,48 @@ export class SearchService {
     const { engine, searxngUrl } = this.deps.settings();
     const providers = this.deps.providers();
     const ready = (id: SearchEngineId): boolean => {
+      if (isFreeEngine(id)) return true;
       if (isProviderEngine(id)) return providers.includes(id);
       if (id === 'searxng') return searxngUrl !== null;
       return this.deps.keys.has(searchKeyId(id));
     };
     if (engine === 'off') return null;
     if (engine !== 'auto') return ready(engine) ? engine : null;
-    // Automatic: an engine the user set up for search wins, then the default model's provider.
-    return (['brave', 'tavily', 'searxng'] as const).find(ready) ?? providers[0] ?? null;
+    // Automatic: a search service the user set up wins, else the free engines. A provider's paid search runs only when picked.
+    return (['brave', 'tavily', 'searxng'] as const).find(ready) ?? 'exa';
+  }
+
+  /** A free engine, then the other one when it fails or finds nothing. */
+  private async free(first: FreeEngine, query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }> {
+    let failure: Error | null = null;
+    for (const engine of first === 'exa' ? (['exa', 'duckduckgo'] as const) : (['duckduckgo', 'exa'] as const)) {
+      try {
+        const endpoint = this.deps.endpoints?.[engine];
+        const found = engine === 'exa' ? await searchExa(query, count, signal, endpoint) : await searchDuckDuckGo(query, count, signal, endpoint);
+        const results = tidyResults(found, count);
+        if (results.length > 0) return { engine, results };
+      } catch (error) {
+        if (signal.aborted) throw error;
+        failure = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    if (failure) throw failure;
+    return { engine: first, results: [] };
   }
 
   async search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }> {
     const engine = this.active();
-    if (!engine) throw new ProviderError('bad_request', 'No web search engine is set up. Add one in Settings → Web search.', { retryable: false });
+    if (!engine) {
+      const chosen = this.deps.settings().engine;
+      throw new ProviderError(
+        'bad_request',
+        chosen === 'off' || chosen === 'auto'
+          ? 'Web search is off. Turn it on in Settings → Web search.'
+          : `${SEARCH_ENGINE_LABELS[chosen]} isn't set up yet. Finish it in Settings → Web search, or pick Automatic for free search.`,
+        { retryable: false }
+      );
+    }
+    if (isFreeEngine(engine)) return this.free(engine, query, count, signal);
     let results: SearchResult[];
     if (isProviderEngine(engine)) {
       const access = await this.deps.access(engine, signal);

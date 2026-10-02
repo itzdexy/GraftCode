@@ -12,6 +12,8 @@ import { useToasts } from '../../stores/toasts';
 import { Group, saveSettings, SwitchRow } from './common';
 
 const ENGINE_LABEL: Record<Exclude<SearchEngineSetting, 'auto' | 'off'>, string> = {
+  exa: 'Exa',
+  duckduckgo: 'DuckDuckGo',
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -22,16 +24,25 @@ const ENGINE_LABEL: Record<Exclude<SearchEngineSetting, 'auto' | 'off'>, string>
 };
 
 const OPTIONS: Array<{ value: SearchEngineSetting; label: string; description: string }> = [
-  { value: 'auto', label: 'Automatic', description: 'A search key or SearXNG server you set up, else the search of the provider your default model uses.' },
-  { value: 'openrouter', label: 'OpenRouter', description: 'Its web plugin with your OpenRouter key: about a cent per search.' },
-  { value: 'anthropic', label: 'Anthropic', description: 'Claude’s web search with your Anthropic key: about a cent per search, plus tokens.' },
-  { value: 'openai', label: 'OpenAI', description: 'The Responses API’s web search with your OpenAI key, billed per search.' },
-  { value: 'gemini', label: 'Google Gemini', description: 'Grounding with Google Search with your Gemini key: a free daily allowance, then billed.' },
+  { value: 'auto', label: 'Automatic', description: 'Free search with Exa, and DuckDuckGo when Exa is busy. A Brave, Tavily or SearXNG setup takes over once you add one.' },
+  { value: 'exa', label: 'Exa', description: 'Free, with no key or account. Search built for AI, with excerpts from each page. Heavy use is rate-limited.' },
+  { value: 'duckduckgo', label: 'DuckDuckGo', description: 'Free, with no key or account. Private search that doesn’t track you.' },
   { value: 'brave', label: 'Brave Search', description: 'An independent search index. Needs a Brave Search API key.' },
   { value: 'tavily', label: 'Tavily', description: 'Search made for AI agents. Needs a Tavily API key.' },
   { value: 'searxng', label: 'SearXNG', description: 'Your own SearXNG server, with JSON output turned on.' },
-  { value: 'off', label: 'Off', description: 'Only models with a built-in search (Claude on Anthropic) can search.' }
+  { value: 'openrouter', label: 'OpenRouter', description: 'Its web plugin with your OpenRouter key: about two cents per search.' },
+  { value: 'anthropic', label: 'Anthropic', description: 'Claude’s web search with your Anthropic key: about a cent per search, plus tokens. Claude models on Anthropic search directly.' },
+  { value: 'openai', label: 'OpenAI', description: 'The Responses API’s web search with your OpenAI key, billed per search.' },
+  { value: 'gemini', label: 'Google Gemini', description: 'Grounding with Google Search with your Gemini key: a free daily allowance, then billed.' },
+  { value: 'off', label: 'Off', description: 'Models don’t search the web. They can still open pages you link.' }
 ];
+
+/** What the status line says about the engine in use. */
+function activeText(active: Exclude<SearchEngineSetting, 'auto' | 'off'>): string {
+  if (active === 'exa') return 'Searching for free with Exa; DuckDuckGo steps in when Exa is busy.';
+  if (active === 'duckduckgo') return 'Searching for free with DuckDuckGo; Exa steps in when it is busy.';
+  return `Searching with ${ENGINE_LABEL[active]}.`;
+}
 
 function isProviderOption(value: SearchEngineSetting): value is keyof SearchStatus['providers'] {
   return value === 'openrouter' || value === 'anthropic' || value === 'openai' || value === 'gemini';
@@ -140,7 +151,7 @@ export function WebSearchSection() {
 
       <Group
         title="Search engine"
-        description="Used when a model has no search of its own; Claude models on Anthropic use Anthropic's built-in search."
+        description="Every web search goes to the engine you pick. The free ones need no key; the others bill your account with that service."
         actions={
           <Button size="sm" variant="secondary" disabled={testing || current.active === null} onClick={() => void test()}>
             {testing ? 'Searching…' : 'Test search'}
@@ -178,7 +189,7 @@ export function WebSearchSection() {
           })}
         </div>
         <p className={cn('px-14 py-10 text-sm', current.active ? 'text-fg-secondary' : 'text-fg-muted')}>
-          {current.active ? `Searching with ${ENGINE_LABEL[current.active]}.` : engine === 'off' ? 'Search is off.' : 'No search engine is set up yet.'}
+          {current.active ? activeText(current.active) : engine === 'off' ? 'Search is off.' : `${ENGINE_LABEL[engine === 'auto' ? 'exa' : engine]} isn’t set up yet.`}
         </p>
       </Group>
     </div>

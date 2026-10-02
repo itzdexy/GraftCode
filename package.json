@@ -1,7 +1,7 @@
 {
   "name": "graft",
   "productName": "Graft",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Graft — a desktop coding agent.",
   "author": "Graft",
   "license": "MIT",
@@ -25,7 +25,8 @@
     "catalog": "node scripts/update-catalog.mjs",
     "dist:win": "electron-vite build && electron-builder --config electron-builder.config.cjs --win --x64 --publish never",
     "dist:mac": "electron-vite build && electron-builder --config electron-builder.config.cjs --mac --publish never",
-    "dist:linux": "electron-vite build && electron-builder --config electron-builder.config.cjs --linux --publish never"
+    "dist:linux": "electron-vite build && electron-builder --config electron-builder.config.cjs --linux --publish never",
+    "dist:linux:docker": "node scripts/dist-linux-docker.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.130.0",

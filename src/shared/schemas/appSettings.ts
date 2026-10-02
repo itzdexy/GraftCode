@@ -43,7 +43,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
 };
 
 /** Engines the WebSearch tool can use (Settings → Web search). */
-export const SEARCH_ENGINE_IDS = ['openrouter', 'anthropic', 'openai', 'gemini', 'brave', 'tavily', 'searxng'] as const;
+export const SEARCH_ENGINE_IDS = ['exa', 'duckduckgo', 'openrouter', 'anthropic', 'openai', 'gemini', 'brave', 'tavily', 'searxng'] as const;
 export type SearchEngineId = (typeof SEARCH_ENGINE_IDS)[number];
 export const SearchEngineSettingSchema = z.enum(['auto', ...SEARCH_ENGINE_IDS, 'off']);
 export type SearchEngineSetting = z.infer<typeof SearchEngineSettingSchema>;

@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.4.0",
+    "date": "2026-10-02",
+    "items": [
+      "Free web search with no key or account: Exa by default, and DuckDuckGo when Exa is busy. Searching no longer costs anything unless you pick a paid engine.",
+      "The engine you pick in Settings → Web search now decides every search; Claude’s built-in search runs only when you pick Anthropic.",
+      "Site icons load for far more sites, YouTube and npm among them, and a site without one shows a globe instead of a letter.",
+      "On Windows, the taskbar shows Graft’s own icon and name instead of Electron’s."
+    ]
+  },
+  {
     "version": "0.3.0",
     "date": "2026-10-01",
     "items": [

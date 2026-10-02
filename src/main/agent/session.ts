@@ -495,15 +495,18 @@ export class AgentSession {
   }
 
   /**
-   * Web access for this session and model: the provider's own search when it
-   * has one, else the WebSearch tool when an engine is set up; WebFetch reads
-   * pages. Incognito chats get none, so nothing goes to a search engine.
+   * Web access for this session and model. The search engine setting decides
+   * where searches go: the WebSearch tool runs them, except that a model's
+   * built-in search (Claude on Anthropic, the only adapter with one) runs when
+   * Anthropic is the engine. WebFetch reads pages. Incognito chats get none,
+   * so nothing goes to a search engine.
    */
   private webTools(model: ModelInfo): { native: boolean; clientSearch: boolean; fetch: boolean } {
     const summary = this.summary;
     const allowed = this.deps.preferences().webSearch && !summary.incognito && model.supportsTools;
-    const native = allowed && model.supportsWebSearch;
-    const clientSearch = allowed && !native && this.deps.search.active() !== null;
+    const engine = allowed ? this.deps.search.active() : null;
+    const native = engine === 'anthropic' && model.supportsWebSearch;
+    const clientSearch = engine !== null && !native;
     // Code sessions always had WebFetch (it asks first in Ask mode); chats get it with web access on.
     return { native, clientSearch, fetch: summary.kind === 'code' || allowed };
   }

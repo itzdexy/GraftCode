@@ -29,6 +29,31 @@ async function openSettings(w: Page, section: string): Promise<void> {
   await expect(w.getByRole('heading', { level: 2, name: section })).toBeVisible();
 }
 
+test('web search is free by default; picking an engine updates what Graft searches with', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+  await openSettings(w, 'Web search');
+
+  const engines = w.getByRole('radiogroup', { name: 'Search engine' });
+  await expect(engines.getByRole('radio', { name: /^Automatic/ })).toBeChecked();
+  await expect(w.getByText('Searching for free with Exa; DuckDuckGo steps in when Exa is busy.')).toBeVisible();
+  await shot(w, 'settings-web-search');
+
+  await engines.getByRole('radio', { name: /^DuckDuckGo/ }).check();
+  await expect(w.getByText('Searching for free with DuckDuckGo; Exa steps in when it is busy.')).toBeVisible();
+
+  // An engine that needs a key says so until one is saved.
+  await engines.getByRole('radio', { name: /^Brave Search/ }).check();
+  await expect(w.getByText('Brave Search isn’t set up yet.')).toBeVisible();
+  await expect(w.getByLabel('Brave Search API key')).toBeVisible();
+  await expect(w.getByRole('button', { name: 'Test search' })).toBeDisabled();
+
+  await engines.getByRole('radio', { name: /^Off/ }).check();
+  await expect(w.getByText('Search is off.')).toBeVisible();
+});
+
 test('settings: appearance, rebinding a shortcut, a second provider and permission rules', async () => {
   provider = await MockProvider.start();
   graft = await launchGraft();

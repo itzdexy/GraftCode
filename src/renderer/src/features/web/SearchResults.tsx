@@ -30,7 +30,7 @@ export function siteName(url: string, site?: string): string {
   return (site ?? hostname(url)).replace(/^www\./, '') || url;
 }
 
-/** A site's icon, or a letter tile in a color of its own while it loads or when the site has none. */
+/** A site's icon, or a muted globe (as browsers show) while it loads or when the site has none. */
 export function SiteIcon({ url, site, size = 14 }: { url: string; site?: string; size?: number }) {
   const host = site ?? hostname(url);
   const [src, setSrc] = useState<string | null>(null);
@@ -42,17 +42,7 @@ export function SiteIcon({ url, site, size = 14 }: { url: string; site?: string;
     };
   }, [host]);
   if (src) return <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-xs" />;
-  const name = siteName(url, site);
-  const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex shrink-0 items-center justify-center rounded-xs text-[9px] leading-none font-semibold text-white"
-      style={{ width: size, height: size, background: `hsl(${String(hue)} 42% 40%)` }}
-    >
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
+  return <Globe aria-hidden="true" width={size} height={size} strokeWidth={1.75} className="shrink-0 text-fg-muted" />;
 }
 
 function open(url: string): void {

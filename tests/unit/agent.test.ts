@@ -473,6 +473,24 @@ describe('agent tools that involve the user', () => {
     expect(withEngine.provider.requests[0]!.tools.map((t) => t.name)).toContain('WebSearch');
   });
 
+  it('runs a model’s built-in search only when its provider is the chosen engine; free search goes through WebSearch', async () => {
+    const run = async (active: 'exa' | 'anthropic' | null): Promise<{ native: boolean; tools: string[] }> => {
+      const h = harness({
+        kind: 'chat',
+        webSearch: true,
+        model: { supportsWebSearch: true },
+        search: { active: () => active, search: () => Promise.reject(new Error('unused')) },
+        script: [{ text: 'ok' }]
+      });
+      h.session.send('hi');
+      await h.session.idle();
+      return { native: h.provider.requests[0]!.webSearch, tools: h.provider.requests[0]!.tools.map((t) => t.name) };
+    };
+    expect(await run('exa')).toEqual({ native: false, tools: ['WebFetch', 'WebSearch'] });
+    expect(await run('anthropic')).toEqual({ native: true, tools: ['WebFetch'] });
+    expect(await run(null)).toEqual({ native: false, tools: ['WebFetch'] });
+  });
+
   it('runs a chat set to Taproot at the model’s strongest level, without the code-session review pass', async () => {
     const h = harness({ kind: 'chat', effort: 'taproot', script: [{ text: 'Sure.' }] });
     h.session.send('hi');

@@ -38,7 +38,7 @@ in a native desktop app for Windows, macOS and Linux.
 - **Your keys, your models.** Pick from a catalog of 200+ providers, or point Graft at any OpenAI-compatible endpoint or a local server such as Ollama or LM Studio.
 - **A real agent for code.** Graft reads, edits, searches and runs commands in your project, with five permission modes, git worktrees per session, checkpoints and rewind.
 - **Taproot.** A maximum-effort mode for long tasks. Graft investigates, plans with a task list it has to finish, verifies with your tests and builds, reviews its own diff, then reports with evidence.
-- **Search the web in chats and code sessions** through your provider's own search, or Brave, Tavily or a SearXNG server. Results show as site chips, and answers cite their sources.
+- **Search the web for free** in chats and code sessions with Exa or DuckDuckGo, no key needed, or with Brave, Tavily, a SearXNG server or your model provider's own search. Results show as site chips, and answers cite their sources.
 - **Private by design.** Graft can ask providers not to train on your data, and incognito chats never touch the disk. Keys stay in your system keyring.
 
 ## Install
@@ -91,11 +91,12 @@ You can add more providers at any time in **Settings → Providers**.
 
 | Engine | Needs |
 | --- | --- |
-| Anthropic, OpenAI, Google Gemini or OpenRouter | That provider's key in Graft. The search runs on its cheapest suitable model. |
+| Exa or DuckDuckGo | Nothing: free, with no key or account. Each stands in for the other when it's busy. |
 | Brave Search or Tavily | An API key from that service |
 | SearXNG | The address of your own instance |
+| Anthropic, OpenAI, Google Gemini or OpenRouter | That provider's key in Graft. Billed by the provider; the search runs on its cheapest suitable model, and Claude models on Anthropic search directly. |
 
-*Automatic* uses a search key you set up first, then the provider of your default model.
+*Automatic* uses Brave, Tavily or SearXNG once you set one up, and the free engines otherwise. A provider's paid search runs only when you pick it.
 
 ## Privacy and security
 
@@ -146,6 +147,7 @@ npm run dev        # run Graft with hot reload
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests that drive the built app (Playwright) |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds installers with electron-builder |
+| `npm run dist:linux:docker` | Builds and smoke-tests the Linux installers in a Docker container, from any OS |
 | `npm run icons` | Regenerates the app and tray icons from the mascot sprite |
 | `npm run catalog` | Refreshes the provider and model catalog from models.dev |
 
@@ -168,6 +170,8 @@ npm run dist:win
 node scripts/release-notes.mjs 0.3.0 > notes.md
 gh release create v0.3.0 dist/Graft-Setup-0.3.0.exe dist/Graft-Setup-0.3.0.exe.blockmap dist/latest.yml --title "Graft 0.3.0" --notes-file notes.md
 ```
+
+With Docker, `npm run dist:linux:docker` builds the Linux installers in a container on any OS and writes them to `dist/linux/`; add them with `gh release upload v0.3.0 dist/linux/*`. macOS installers have to be built on a Mac.
 
 > Installed apps read releases without signing in, so the releases must be public for updates to reach users. To ship from your own server instead, build with `GRAFT_UPDATE_URL` set to an HTTPS folder that holds `latest.yml` and the installers.
 
