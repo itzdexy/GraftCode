@@ -177,7 +177,8 @@ describe('paths and registry', () => {
     expect(isInside(dir, path.join(dir, 'a', '..', 'b'))).toBe(true);
     expect(isInside(dir, path.join(dir, '..', 'elsewhere'))).toBe(false);
     expect(isInside('C:\\Repo', 'c:\\repo\\src\\x.ts', 'win32')).toBe(true);
-    expect(resolvePath('~/notes.md', dir, 'C:\\Users\\me')).toBe(path.resolve('C:\\Users\\me', 'notes.md'));
+    const home = process.platform === 'win32' ? 'C:\\Users\\me' : '/home/me';
+    expect(resolvePath('~/notes.md', dir, home)).toBe(path.resolve(home, 'notes.md'));
     const outside = makeTempDir();
     try {
       fs.symlinkSync(outside, path.join(dir, 'link'), 'junction');
