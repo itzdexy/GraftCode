@@ -47,7 +47,7 @@ test('web search is free by default; picking an engine updates what Graft search
   // An engine that needs a key says so until one is saved.
   await engines.getByRole('radio', { name: /^Brave Search/ }).check();
   await expect(w.getByText('Brave Search isn’t set up yet.')).toBeVisible();
-  await expect(w.getByLabel('Brave Search API key')).toBeVisible();
+  await expect(w.getByRole('textbox', { name: 'Brave Search API key' })).toBeVisible();
   await expect(w.getByRole('button', { name: 'Test search' })).toBeDisabled();
 
   await engines.getByRole('radio', { name: /^Off/ }).check();
