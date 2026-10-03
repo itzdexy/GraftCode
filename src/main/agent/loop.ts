@@ -265,8 +265,8 @@ const FINISH_NOTICES: Partial<Record<FinishReason, { level: 'warning' | 'error';
   context_window: { level: 'warning', text: 'The conversation filled the model\'s context window. Use /compact or start a new session.' }
 };
 
-/** Tools that only look around; a Taproot turn that used nothing else has nothing to verify. */
-const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
+/** Tools that don't change the project's files; a turn that used nothing else has nothing to verify or check. */
+const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Browser', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
 
 function changesSomething(call: ToolUseBlock): boolean {
   if (call.name === 'Shell') {
