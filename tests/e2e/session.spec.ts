@@ -186,7 +186,7 @@ test('typing / lists commands and Enter runs one without arguments', async () =>
   await expect(list.getByRole('option', { name: /\/help/ })).toBeVisible();
   await shot(w, 'session-slash');
   await box.press('Enter');
-  await expect(w.getByText(/Shortcuts: Esc stops the agent/)).toBeVisible();
+  await expect(w.getByText(/In the message box: @ mentions a file/)).toBeVisible();
   // The help output is local: no extra model request.
   expect(provider.chatRequests()).toHaveLength(1);
 });

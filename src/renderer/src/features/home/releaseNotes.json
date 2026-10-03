@@ -3,13 +3,16 @@
     "version": "0.6.0",
     "date": "2026-10-03",
     "items": [
+      "Long tasks no longer stop at 150 steps: a turn runs until the work is done. You can still set a limit in Settings → Permissions, and a turn that reaches it pauses with a Continue button.",
       "A command palette: press Ctrl+Shift+P, or type > in search, to run almost anything. Start sessions, switch palettes and themes, open any settings page, export, compact or rewind.",
       "Settings → Personalization tells Graft about you and how you like answers, with a response style (balanced, concise, explanatory or learning) and your own instructions. Chats and code sessions use it; incognito chats never do.",
       "Rewritten instructions for chats and code sessions, and View system prompt (session menu or /system) shows exactly what Graft sends to the model.",
       "Six colour palettes, each light and dark (Graft, Midnight, Slate, Grove, Dune and High contrast), seven accent colours, and smoother motion throughout.",
       "Start a message with ! in a code session to run a shell command yourself, such as !npm test; Graft sees the output with your next message. ↑ and ↓ bring back messages you sent.",
       "Custom agents: make specialists such as a reviewer, a test writer or a debugger in Customize → Agents, and Graft hands them tasks.",
-      "New commands: /commit, /pr, /security-review, /explain, /test, /export, /system and /new. A command file of your own can replace any of the prompt commands."
+      "New commands: /commit, /pr, /security-review, /explain, /test, /export, /system and /new. A command file of your own can replace any of the prompt commands.",
+      "Messages you type while Graft works can go right away: Send now hands one over after the current step without stopping anything. Queued messages can also be edited or removed, in chats too.",
+      "Scion the sprout comes alive: it blinks, looks around and wiggles its leaves, flaps them while Graft works, and hops when you hover over it or click it."
     ]
   },
   {

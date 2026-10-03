@@ -40,6 +40,8 @@ in a native desktop app for Windows, macOS and Linux.
 - **Taproot.** A maximum-effort mode for long tasks. Graft investigates, plans with a task list it has to finish, verifies with your tests and builds, reviews its own diff, then reports with evidence.
 - **Search the web for free** in chats and code sessions with Exa or DuckDuckGo, no key needed, or with Brave, Tavily, a SearXNG server or your model provider's own search. Results show as site chips, and answers cite their sources.
 - **Private by design.** Graft can ask providers not to train on your data, and incognito chats never touch the disk. Keys stay in your system keyring.
+- **Made for the keyboard.** A command palette for everything (`Ctrl+Shift+P`), `!` to run a shell command right from the message box, `↑` for earlier messages, and commands such as `/commit`, `/pr` and `/review`.
+- **Yours to shape.** Tell Graft about yourself and how you like answers, add specialist agents, and pick from six colour palettes, each light and dark, with seven accent colours.
 
 ## Install
 
@@ -74,6 +76,10 @@ You can add more providers at any time in **Settings → Providers**.
 - **Panels:** an integrated terminal, a file browser with previews, changes and diffs, an embedded browser for local apps, and background tasks.
 - **Computer use (Windows, opt-in):** with a model that can see images, the agent can take screenshots and use the mouse and keyboard. Each action asks first unless you allow it for the session, a banner shows while it is in control, and `Ctrl+Alt+Esc` stops it.
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
+- **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
+- **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
+- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test` and `/init` send carefully written prompts; `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
+- **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
 
 ### Chats
 
@@ -90,6 +96,12 @@ You can add more providers at any time in **Settings → Providers**.
 - A catalog generated from [models.dev](https://models.dev) with 200+ providers, plus Ollama and custom endpoints. Each model's context window, tool use, vision, effort levels and prices come from the catalog and the provider's own model list.
 - **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions.
 - Reasoning carried across tool calls for models that need it. Prompt caching for Claude models, both on Anthropic and through OpenRouter. Cost tracking that counts cached tokens at their own rates and uses the charged amount when the provider reports it.
+
+### Personal and good-looking
+
+- **Personalization:** tell Graft what it should know about you and how to respond, and choose a response style: balanced, concise, explanatory or learning. Every chat and code session uses it; incognito chats never do.
+- **Command palette** (`Ctrl+Shift+P`, or `>` in search): start sessions, switch palettes and themes, open any settings page, export, compact, rewind and more, with fuzzy search and your recent commands first.
+- **Appearance:** six palettes (Graft, Midnight, Slate, Grove, Dune and High contrast), each in light and dark, seven accent colours, and calm motion that respects *Reduce motion*.
 
 ### Web search engines
 
@@ -131,6 +143,9 @@ You can add more providers at any time in **Settings → Providers**.
 | Stop the agent | `Esc` |
 | Cycle permission mode | `Shift+Tab` |
 | Settings | `Ctrl+,` |
+| Command palette | `Ctrl+Shift+P`, or `>` in search |
+
+In the message box, `/` lists commands, `@` mentions a file, `!` runs a shell command in a code session, and `↑`/`↓` bring back messages you sent.
 
 On macOS, `Ctrl` is `Cmd`. Every shortcut can be changed in **Settings → Shortcuts**.
 
@@ -153,6 +168,7 @@ npm run dev        # run Graft with hot reload
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds installers with electron-builder |
 | `npm run dist:linux:docker` | Builds and smoke-tests the Linux installers in a Docker container, from any OS |
 | `npm run icons` | Regenerates the app and tray icons from the mascot sprite |
+| `node scripts/generate-palettes.mjs` | Regenerates the colour palettes and accents from the neutral tokens |
 | `npm run catalog` | Refreshes the provider and model catalog from models.dev |
 
 ## Releases and updates
