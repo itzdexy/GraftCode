@@ -459,7 +459,6 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       return done('completed');
     }
 
-    if (calls.some(changesSomething)) changed = true;
     if (calls.some((c) => c.name === 'TodoWrite')) planned = true;
     const signature = JSON.stringify(calls.map((c) => [c.name, c.input]));
     recent.push(signature);
@@ -469,6 +468,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
 
     const results = await executeCalls(calls, config, host, signal);
     toolCalls += calls.length;
+    // A refused or failed edit changed nothing; a failed command may still have written files.
+    const failed = new Set(results.filter((r) => r.type === 'tool_result' && r.isError).map((r) => (r.type === 'tool_result' ? r.toolUseId : '')));
+    if (calls.some((c) => changesSomething(c) && (c.name === 'Shell' || !failed.has(c.id)))) changed = true;
     const userContent: ContentBlock[] = [...results];
     if (repeating) {
       userContent.push({

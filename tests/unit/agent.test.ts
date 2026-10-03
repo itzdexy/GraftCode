@@ -647,6 +647,21 @@ describe('agent tools that involve the user', () => {
     ]);
   });
 
+  it('does not run the project’s checks when the only edit failed', async () => {
+    const h = harness({
+      mode: 'auto-edit',
+      // An edit without a read first is refused, so nothing changed.
+      script: [{ toolCalls: [{ name: 'Edit', input: { file_path: 'notes.txt', old_string: 'a', new_string: 'b' } }] }, { text: 'Could not edit it.' }]
+    });
+    writeFile(h.projectDir, 'notes.txt', 'a\n');
+    writeFile(h.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['exit 1'], fix: true, timeoutSec: 60 } }));
+    h.session.send('edit it');
+    await h.session.idle();
+
+    expect(h.store.listMessages('session-1').some((m) => m.meta.kind === 'check')).toBe(false);
+    expect(h.provider.requests).toHaveLength(2);
+  });
+
   it('does not run the project’s checks after a turn that only looked around', async () => {
     const h = harness({
       mode: 'auto-edit',

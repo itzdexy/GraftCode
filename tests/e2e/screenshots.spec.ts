@@ -285,8 +285,12 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     provider.script(
       {
         text: 'I’ll make the health check report the database state in words.',
-        toolCalls: [{ name: 'Edit', input: { file_path: 'src/health.js', old_string: "ok ? 'up' : 'down'", new_string: "ok ? 'healthy' : 'down'" } }]
+        toolCalls: [
+          { name: 'Read', input: { file_path: 'src/health.js' } },
+          { name: 'Read', input: { file_path: 'test/health.test.js' } }
+        ]
       },
+      { toolCalls: [{ name: 'Edit', input: { file_path: 'src/health.js', old_string: "ok ? 'up' : 'down'", new_string: "ok ? 'healthy' : 'down'" } }] },
       { text: 'Done: the health check now says `healthy`.' },
       {
         text: 'The lint check found nothing, but a test still expects the old word. Updating it.',
