@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.3",
+    "date": "2026-10-03",
+    "items": [
+      "Sites: describe a website and Graft designs and builds it, then hosts it on your computer at its own address (like peach-palace.localhost) with a live preview that reloads as it changes. The Sites tab keeps a gallery of them with previews, and each is a folder in Documents › Graft Sites, ready to publish anywhere.",
+      "Connected apps work properly: Roblox Studio tools that appear after it connects now show up, servers that start empty are asked again, long jobs that report progress (a render, a download) are no longer cut off after two minutes, apps started with npx or uvx get your full environment, older HTTP servers work, and a server that crashes reconnects. When Blender, Roblox Studio or Unity isn’t ready, Graft says what to check.",
+      "Chats can use your connected apps too, asking before each action.",
+      "Taproot grows a root: picking the deepest effort turns the slider into a living leaf-to-gold gradient, draws a small root and says what it costs.",
+      "Computer use is easier to follow: a ring marks each click, the banner says what the agent is doing, each step shows its screenshot in the chat, and the agent can zoom in to read small text or open an app by name.",
+      "Fixes: a moved or deleted project folder no longer shows as “Git is not installed”, Git is found even when it isn’t on PATH, and session titles work for people using free models with no credits."
+    ]
+  },
+  {
     "version": "0.6.2",
     "date": "2026-10-03",
     "items": [
