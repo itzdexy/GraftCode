@@ -50,6 +50,10 @@ Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and
 <td><img src="docs/screenshots/agents.png" alt="Custom agents in Customize" /><br /><sub>Add specialists such as a reviewer or a test writer.</sub></td>
 <td><img src="docs/screenshots/appearance.png" alt="Palettes and accent colours in Appearance settings" /><br /><sub>Six palettes, each light and dark, and seven accent colours.</sub></td>
 </tr>
+<tr>
+<td><img src="docs/screenshots/checks.png" alt="A failed test check sent back to the agent, then passing after its fix" /><br /><sub>Your checks run after every change; a failure goes back to the agent to fix.</sub></td>
+<td><img src="docs/screenshots/browser.png" alt="The agent testing a storefront in the Browser panel" /><br /><sub>The agent opens your dev server in the browser and clicks through it.</sub></td>
+</tr>
 </table>
 
 ## Install
