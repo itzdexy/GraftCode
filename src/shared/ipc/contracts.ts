@@ -49,7 +49,9 @@ export const AppInfoSchema = z.object({
   isPackaged: z.boolean(),
   versions: z.object({ electron: z.string(), chrome: z.string(), node: z.string() }),
   /** Folder holding the database, logs and window state. */
-  dataDir: z.string()
+  dataDir: z.string(),
+  /** The page where installed builds can download releases by hand; null when the feed has none. */
+  releasesUrl: z.string().nullable()
 });
 export type AppInfo = z.infer<typeof AppInfoSchema>;
 

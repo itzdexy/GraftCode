@@ -86,6 +86,17 @@ export function AboutSection() {
             }
           />
         ) : null}
+        {update?.status === 'error' && info.status === 'ready' && info.data.releasesUrl ? (
+          <SettingRow
+            label="Download it yourself"
+            description="If updating keeps failing, get the newest installer from the releases page and run it. Your chats and settings stay."
+            control={
+              <Button size="sm" variant="secondary" onClick={() => void invoke('app:openExternal', { url: info.data.releasesUrl ?? '' }).catch((e: unknown) => reportError("Couldn't open the releases page", e))}>
+                Open releases
+              </Button>
+            }
+          />
+        ) : null}
       </Group>
 
       <Group title="Version">

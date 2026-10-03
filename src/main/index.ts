@@ -25,7 +25,7 @@ import { KeepAwake } from './app/keepAwake';
 import { DesktopComputer } from './computer/desktop';
 import { WindowsInput } from './computer/windowsInput';
 import { TrayController } from './app/tray';
-import { UpdateController } from './app/updater';
+import { loadUpdaterBackend, releasesPage, UpdateController } from './app/updater';
 
 // Test and E2E runs isolate all state before anything touches userData.
 if (process.env.GRAFT_USER_DATA_DIR) {
@@ -103,10 +103,20 @@ const updates = new UpdateController({
     if (!fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))) return { ok: false, reason: 'This build has no update feed configured.' };
     return { ok: true };
   },
-  loadBackend: async () => (await import('electron-updater')).autoUpdater,
+  loadBackend: () => loadUpdaterBackend(),
   emit: (state) => emit({ type: 'updates:state', state }),
   log: (level, message, fields) => log[level]('updates', message, fields)
 });
+
+/** Where installed builds can download releases by hand (when an automatic update fails). */
+function releasesUrl(): string | null {
+  if (!app.isPackaged) return null;
+  try {
+    return releasesPage(fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
 
 /** Tray and update checks follow their settings. */
 function applySystemSettings(settings: AppSettings): void {
@@ -373,7 +383,8 @@ if (!gotLock) {
       platform: platform(),
       isPackaged: app.isPackaged,
       versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
-      dataDir: paths.userData
+      dataDir: paths.userData,
+      releasesUrl: releasesUrl()
     }),
     'power:keepAwake': ({ sessionId, on }) => ({ on: keepAwake.set(sessionId, on) }),
     'power:keepAwakeList': () => keepAwake.list(),

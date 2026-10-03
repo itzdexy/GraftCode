@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateState } from '../../src/shared/schemas/system';
 import type { SessionSummary } from '../../src/shared/schemas/sessions';
 import type { StoredMessage } from '../../src/shared/schemas/messages';
-import { UpdateController, type UpdaterBackend } from '../../src/main/app/updater';
+import { loadUpdaterBackend, releasesPage, UpdateController, type UpdaterBackend } from '../../src/main/app/updater';
 import { writeExport } from '../../src/main/app/dataExport';
 import { cleanRuleLists } from '../../src/main/permissions/rules';
 
@@ -104,6 +104,11 @@ describe('update controller', () => {
     expect(current.backend.autoInstallOnAppQuit).toBe(false);
   });
 
+  it('says so when the updater answers null without any event, instead of staying on "Checking…"', async () => {
+    const silent = controller({ enabled: true, supported: true });
+    expect(await silent.updates.check()).toMatchObject({ status: 'unsupported', message: expect.stringContaining('releases page') as unknown });
+  });
+
   it('schedules the first background check and clears timers when disposed', () => {
     vi.useFakeTimers();
     const c = controller({ enabled: true, supported: true });
@@ -200,5 +205,22 @@ describe('keep computer awake', () => {
     keep.status('a', 'running');
     keep.dispose();
     expect(stopped).toEqual([1, 2]);
+  });
+});
+
+describe('loading the updater', () => {
+  it('finds autoUpdater on the CommonJS default export, where import() leaves it (regression: every check failed)', async () => {
+    const backend = { autoDownload: false } as unknown as UpdaterBackend;
+    expect(await loadUpdaterBackend(() => Promise.resolve({ default: { autoUpdater: backend } }))).toBe(backend);
+    expect(await loadUpdaterBackend(() => Promise.resolve({ autoUpdater: backend }))).toBe(backend);
+    await expect(loadUpdaterBackend(() => Promise.resolve({}))).rejects.toThrow('The updater could not be loaded.');
+  });
+
+  it('links GitHub update feeds to their releases page for downloading by hand', () => {
+    expect(releasesPage('owner: itzdexy\nrepo: GraftCode\nprovider: github\nreleaseType: release\nupdaterCacheDirName: graft-updater\n')).toBe(
+      'https://github.com/itzdexy/GraftCode/releases/latest'
+    );
+    expect(releasesPage('provider: generic\nurl: https://example.com/updates\n')).toBeNull();
+    expect(releasesPage('provider: github\nowner: a/../b\nrepo: x\n')).toBeNull();
   });
 });

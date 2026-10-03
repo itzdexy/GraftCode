@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.5.1",
+    "date": "2026-10-03",
+    "items": [
+      "Updates work again. Every earlier version failed its update check (“Cannot set properties of undefined”), so install this one by hand once; from here on Graft downloads new versions itself and asks to restart.",
+      "If an update check ever fails, Settings → About links straight to the releases page so you can download the newest installer yourself.",
+      "A copy of Graft that can’t update itself now says so instead of showing “Checking for updates…” forever."
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-10-02",
     "items": [

@@ -20,6 +20,29 @@ export interface UpdaterDeps {
   now?: () => number;
 }
 
+/**
+ * electron-updater's autoUpdater. The package is CommonJS and defines
+ * autoUpdater with a getter, which import() doesn't expose as a named
+ * export: it is on the default export (module.exports) instead. Reading
+ * only the named export left it undefined, so every check failed with
+ * "Cannot set properties of undefined".
+ */
+export async function loadUpdaterBackend(load: () => Promise<unknown> = () => import('electron-updater')): Promise<UpdaterBackend> {
+  const loaded = (await load()) as { autoUpdater?: UpdaterBackend; default?: { autoUpdater?: UpdaterBackend } } | null;
+  const backend = loaded?.autoUpdater ?? loaded?.default?.autoUpdater;
+  if (!backend) throw new Error('The updater could not be loaded.');
+  return backend;
+}
+
+/** The releases page behind a build's GitHub update feed (from app-update.yml), for downloading by hand; null for other feeds. */
+export function releasesPage(updateConfig: string): string | null {
+  const field = (name: string): string | null => new RegExp(`^${name}:\\s*['"]?([^'"\\s]+)`, 'm').exec(updateConfig)?.[1] ?? null;
+  const owner = field('owner');
+  const repo = field('repo');
+  if (field('provider') !== 'github' || !owner || !repo || !/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) return null;
+  return `https://github.com/${owner}/${repo}/releases/latest`;
+}
+
 const FIRST_CHECK_MS = 20_000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
@@ -121,7 +144,12 @@ export class UpdateController {
     try {
       this.set({ ...this.state, status: 'checking', message: null });
       const backend = await this.ensureBackend();
-      await backend.checkForUpdates();
+      const result = await backend.checkForUpdates();
+      // electron-updater answers null, with no events, when this copy can't update itself
+      // (e.g. a Linux build that isn't an AppImage); without this the status would stay "Checking…".
+      if (!result && this.get().status === 'checking') {
+        this.set({ ...this.state, status: 'unsupported', message: 'This copy of Graft can’t update itself. Download new versions from the releases page.' });
+      }
     } catch (error) {
       this.failed((error as Error).message);
     }
