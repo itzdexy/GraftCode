@@ -20,7 +20,7 @@ const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'commands', label: 'Commands' },
   { id: 'agents', label: 'Agents' },
   { id: 'skills', label: 'Skills' },
-  { id: 'mcp', label: 'MCP servers' },
+  { id: 'mcp', label: 'Integrations' },
   { id: 'hooks', label: 'Hooks' },
   { id: 'memory', label: 'Memory' }
 ];

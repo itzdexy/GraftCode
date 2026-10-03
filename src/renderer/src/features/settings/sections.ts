@@ -24,7 +24,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
   { id: 'search', label: 'Web search', description: 'How models search and read the web.', icon: Globe },
   { id: 'voice', label: 'Voice', description: 'How replies sound when they are read aloud.', icon: AudioLines },
-  { id: 'mcp', label: 'MCP servers', description: 'Tools and data from other apps.', icon: Plug },
+  { id: 'mcp', label: 'Integrations', description: 'Apps and services Graft can work with, connected through MCP.', icon: Plug },
   { id: 'hooks', label: 'Hooks', description: 'Commands that run around tool calls and turns.', icon: Webhook },
   { id: 'memory', label: 'Memory', description: 'Standing instructions every session reads.', icon: BookText },
   { id: 'appearance', label: 'Appearance', description: 'Theme, colors, text size and motion.', icon: Palette },

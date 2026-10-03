@@ -12,7 +12,7 @@ import type { SettingsStore } from '../permissions/settingsStore';
 import type { KeyStore } from '../secrets/keyStore';
 import type { ToolRegistry } from '../tools/registry';
 import type { ToolDefinition } from '../tools/types';
-import { serverKey } from './mcpConfig';
+import { resolveSecrets, serverKey } from './mcpConfig';
 import { McpOAuthProvider, startOAuthCallback } from './oauth';
 
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -162,17 +162,18 @@ export class McpManager implements McpToolSource {
 
   private transportFor(conn: Connection, authProvider: McpOAuthProvider | null): StdioClientTransport | StreamableHTTPClientTransport {
     const c = conn.config;
+    const secret = (id: string): string | null => this.deps.keys.get(id);
     if (c.type === 'stdio') {
       return new StdioClientTransport({
         command: c.command,
         args: c.args,
-        env: { ...getDefaultEnvironment(), ...c.env },
+        env: { ...getDefaultEnvironment(), ...resolveSecrets(c.env, this.serverKey(conn), secret) },
         ...(c.cwd ? { cwd: c.cwd } : conn.projectRoot ? { cwd: conn.projectRoot } : {}),
         stderr: 'pipe'
       });
     }
     return new StreamableHTTPClientTransport(new URL(c.url), {
-      requestInit: { headers: c.headers },
+      requestInit: { headers: resolveSecrets(c.headers, this.serverKey(conn), secret) },
       ...(authProvider ? { authProvider } : {})
     });
   }
@@ -181,7 +182,16 @@ export class McpManager implements McpToolSource {
     conn.state = 'connecting';
     conn.error = null;
     this.deps.onChange();
-    const transport = this.transportFor(conn, authProvider ?? this.storedAuth(conn));
+    let transport: StdioClientTransport | StreamableHTTPClientTransport;
+    try {
+      transport = this.transportFor(conn, authProvider ?? this.storedAuth(conn));
+    } catch (error) {
+      // A secret that is missing or belongs to another server: the server can't start.
+      conn.state = 'failed';
+      conn.error = (error as Error).message;
+      this.deps.onChange();
+      return;
+    }
     conn.stderr = '';
     if (transport instanceof StdioClientTransport) {
       transport.stderr?.on('data', (chunk: Buffer) => {

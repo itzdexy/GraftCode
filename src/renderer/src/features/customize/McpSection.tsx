@@ -11,8 +11,9 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { onChanged } from '../../lib/bus';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
-import { useLoad } from '../../lib/useLoad';
+import { useLoad, type Load } from '../../lib/useLoad';
 import { reportError } from '../../stores/toasts';
+import { IntegrationsGallery } from './IntegrationsGallery';
 import { MONO_AREA, parsePairs, Row, Section, SELECT } from './shared';
 
 const STATE_TEXT: Record<McpServerView['state'], string> = {
@@ -217,6 +218,28 @@ export function McpSection({ projectPath }: { projectPath: string | null }) {
   const { load, reload } = useLoad(() => invoke('mcp:list', { projectPath }), projectPath ?? '');
   const [editing, setEditing] = useState<McpServerView | 'new' | null>(null);
   useEffect(() => onChanged('mcp', reload), [reload]);
+  const installed = new Set(load.status === 'ready' ? load.data.filter((s) => s.scope === 'user').map((s) => s.name) : []);
+  return (
+    <div className="flex flex-col gap-28">
+      <IntegrationsGallery installed={installed} onAdded={reload} />
+      <McpServers projectPath={projectPath} load={load} reload={reload} editing={editing} setEditing={setEditing} />
+    </div>
+  );
+}
+
+function McpServers({
+  projectPath,
+  load,
+  reload,
+  editing,
+  setEditing
+}: {
+  projectPath: string | null;
+  load: Load<McpServerView[]>;
+  reload: () => void;
+  editing: McpServerView | 'new' | null;
+  setEditing: (editing: McpServerView | 'new' | null) => void;
+}) {
   return (
     <Section
       title="MCP servers"

@@ -40,9 +40,10 @@ import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
 import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
-import type { SettingsScope } from '@shared/schemas/config';
+import type { McpServerConfig, SettingsScope } from '@shared/schemas/config';
 import type { McpServerView } from '@shared/schemas/customize';
-import { maskConfig, mergeMcpConfig, serverKey } from '../mcp/mcpConfig';
+import { integrationSetup, integrationStatus } from '../mcp/integrations';
+import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
@@ -748,14 +749,32 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'mcp:remove': async ({ scope, projectPath, name }) => {
       const s = await ctx.services();
+      let removed: McpServerConfig | undefined;
       await s.settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
         const servers = { ...(settings.mcpServers ?? {}) };
+        removed = servers[name];
         delete servers[name];
         return { ...settings, mcpServers: servers };
       });
-      forgetOAuth(s.keys, serverKey(scope, scope === 'user' ? null : projectPath, name));
+      const key = serverKey(scope, scope === 'user' ? null : projectPath, name);
+      forgetOAuth(s.keys, key);
+      // Only this server's own secrets: a reference to anything else is never touched.
+      for (const ref of removed ? secretRefs(removed) : []) if (ref.startsWith(secretId(key, ''))) s.keys.delete(ref);
       await (await ctx.mcp()).sync();
       return { ok: true as const };
+    },
+    'integrations:status': () => integrationStatus(process.platform, process.env),
+    'integrations:add': async ({ id, values }) => {
+      const s = await ctx.services();
+      const setup = integrationSetup(id, values, process.platform, process.env);
+      for (const [ref, value] of Object.entries(setup.secrets)) s.keys.set(ref, value);
+      await s.settingsFiles.update('user', undefined, (settings) => {
+        const servers = { ...(settings.mcpServers ?? {}) };
+        servers[setup.name] = mergeMcpConfig(setup.config, undefined);
+        return { ...settings, mcpServers: servers };
+      });
+      await (await ctx.mcp()).sync();
+      return { name: setup.name };
     },
     'mcp:setEnabled': async ({ scope, projectPath, name, enabled }) => {
       await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => {

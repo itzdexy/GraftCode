@@ -18,7 +18,7 @@ test('connects a local MCP server from Customize and the agent uses its tools', 
 
     // Add the server.
     await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Customize' }).click();
-    await w.getByRole('tab', { name: 'MCP servers' }).click();
+    await w.getByRole('tab', { name: 'Integrations' }).click();
     await w.getByRole('button', { name: 'Add server' }).click();
     const dialog = w.getByRole('dialog', { name: 'Add MCP server' });
     await dialog.getByLabel('Name').fill('test');

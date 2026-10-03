@@ -16,6 +16,15 @@ describe('fuzzy matching for the command palette', () => {
     expect(fuzzyScore('xyz', 'Theme: Dark')).toBeNull();
   });
 
+  it('ignores letters scattered across a long text, but keeps initials', () => {
+    // "pal" spread over "toggle browser preview localhost" is noise.
+    expect(fuzzyScore('pal', 'Toggle browser preview localhost web')).toBeNull();
+    expect(fuzzyScore('tgsb', 'Toggle sidebar')).not.toBeNull();
+    expect(fuzzyScore('sb', 'Show or hide the sidebar')).not.toBeNull();
+    expect(fuzzyScore('ts', 'Theme: System')).not.toBeNull();
+    expect(fuzzyScore('thsy', 'Theme: System')).not.toBeNull();
+  });
+
   it('needs every word of the query, in any order, ignoring case', () => {
     expect(fuzzyScore('DARK theme', 'Theme: Dark')).not.toBeNull();
     expect(fuzzyScore('dark sidebar', 'Theme: Dark')).toBeNull();

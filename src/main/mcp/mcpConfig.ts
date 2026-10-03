@@ -23,3 +23,36 @@ export function mergeMcpConfig(input: McpServerInput, previous: McpServerConfig 
 export function serverKey(scope: string, projectRoot: string | null, name: string): string {
   return `${scope}:${projectRoot ?? ''}:${name}`;
 }
+
+/**
+ * Secret values of env vars and headers can live in the encrypted key store,
+ * with only a reference in the settings file: `graft-secret:<id>`. An id
+ * belongs to one server (its scope, project and name), and a reference
+ * resolves only for that server, so a settings file can't send another
+ * server's secret, or a provider key, anywhere else.
+ */
+export const SECRET_REF = 'graft-secret:';
+
+export function secretId(key: string, field: string): string {
+  return `mcp-secret:${key}:${field}`;
+}
+
+/** Replaces this server's secret references with their values; a missing or foreign one is an error. */
+export function resolveSecrets(values: Record<string, string>, key: string, get: (id: string) => string | null): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([name, value]) => {
+      if (!value.startsWith(SECRET_REF)) return [name, value];
+      const id = value.slice(SECRET_REF.length);
+      if (!id.startsWith(secretId(key, ''))) throw new Error(`${name} refers to a secret that belongs to another server.`);
+      const secret = get(id);
+      if (secret === null) throw new Error(`The saved value of ${name} is missing. Add the server again to enter it.`);
+      return [name, secret];
+    })
+  );
+}
+
+/** Ids of the secrets a server's config refers to (removed with the server). */
+export function secretRefs(config: McpServerConfig): string[] {
+  const values = config.type === 'stdio' ? Object.values(config.env) : Object.values(config.headers);
+  return values.filter((v) => v.startsWith(SECRET_REF)).map((v) => v.slice(SECRET_REF.length));
+}

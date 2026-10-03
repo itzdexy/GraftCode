@@ -32,6 +32,7 @@ import {
   Zap
 } from 'lucide-react';
 import type { AppSettings, AppSettingsPatch, ShortcutId } from '@shared/schemas/appSettings';
+import { INTEGRATIONS } from '@shared/integrations';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
@@ -168,7 +169,9 @@ export function paletteCommands(ctx: PaletteContext): PaletteCommand[] {
   }
 
   for (const section of SETTINGS_SECTIONS) {
-    commands.push({ id: `settings.${section.id}`, title: `Settings: ${section.label}`, group: 'Settings', keywords: section.description, icon: section.icon, shortcut: section.id === 'profile' ? 'openSettings' : undefined, run: () => openSettings(section.id) });
+    // The integrations page answers to the apps it connects, so "blender" or "unity" finds it.
+    const keywords = section.id === 'mcp' ? `${section.description} ${INTEGRATIONS.map((i) => i.name).join(' ')}` : section.description;
+    commands.push({ id: `settings.${section.id}`, title: `Settings: ${section.label}`, group: 'Settings', keywords, icon: section.icon, shortcut: section.id === 'profile' ? 'openSettings' : undefined, run: () => openSettings(section.id) });
   }
 
   commands.push(

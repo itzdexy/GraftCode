@@ -340,6 +340,27 @@ export const contracts = {
     Ok
   ),
   'mcp:remove': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema }), Ok),
+  /** What each one-step integration still needs on this computer (shared/integrations.ts). */
+  'integrations:status': channel(
+    Void,
+    z.array(
+      z.object({
+        id: z.string(),
+        blocker: z
+          .discriminatedUnion('kind', [
+            z.object({ kind: z.literal('platform') }),
+            z.object({ kind: z.literal('runtime'), runtime: z.enum(['uv', 'node']) }),
+            z.object({ kind: z.literal('app'), path: z.string() })
+          ])
+          .nullable()
+      })
+    )
+  ),
+  /** Adds an integration as an "all projects" MCP server; only its id and the values typed for it cross over. */
+  'integrations:add': channel(
+    z.object({ id: z.string().min(1).max(64), values: z.record(z.string().max(64), z.string().max(8000)) }),
+    z.object({ name: z.string() })
+  ),
   'mcp:setEnabled': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema, enabled: z.boolean() }), Ok),
   'mcp:reconnect': channel(z.object({ name: McpServerNameSchema }), Ok),
   'mcp:authorize': channel(z.object({ name: McpServerNameSchema }), Ok),

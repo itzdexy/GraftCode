@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { launchGraft, type LaunchedApp } from './support/launch';
+import { launchGraft, makeTempDir, type LaunchedApp } from './support/launch';
 import { MockProvider } from './support/mockProvider';
-import { completeOnboarding, makeGitProject } from './support/onboard';
+import { completeOnboarding } from './support/onboard';
 
 /**
  * Screenshots for the README, taken from the real app driving a scripted
@@ -40,6 +41,24 @@ async function approveUntil(w: Page, done: () => Promise<boolean>): Promise<void
   }
 }
 
+/** A git repository in a folder with a real project name (it shows in the sidebar and chips). */
+function makeProject(name: string, files: Record<string, string>): string {
+  const dir = path.join(makeTempDir('graft-shots-'), name);
+  for (const [file, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    fs.writeFileSync(path.join(dir, file), content);
+  }
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'dev@example.com');
+  git('config', 'user.name', 'Dev');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'Health check');
+  return dir;
+}
+
 async function palette(w: Page, query: string): Promise<void> {
   await w.keyboard.press('ControlOrMeta+Shift+P');
   await w.getByRole('combobox', { name: 'Command' }).fill(query);
@@ -65,7 +84,7 @@ test('reports the database as up', async () => {
 test('README screenshots', async () => {
   test.setTimeout(240_000);
   provider = await MockProvider.start({ models: ['qwen3-coder', 'qwen3-coder-flash'] });
-  const project = makeGitProject({
+  const project = makeProject('acme-api', {
     'package.json': '{\n  "name": "acme-api",\n  "type": "module",\n  "scripts": { "test": "node --test" }\n}\n',
     'src/health.js': HEALTH,
     'test/health.test.js': HEALTH_TEST,
@@ -79,6 +98,7 @@ test('README screenshots', async () => {
     win?.setContentSize(s.width, s.height);
   }, SIZE);
   await completeOnboarding(graft, provider, { project, model: /^Qwen3 Coder(?! Flash)/ });
+  await palette(w, 'theme dark');
 
   // A code session: read, fix, test, report.
   provider.titleText = 'Health check reports degraded';
@@ -127,10 +147,14 @@ test('README screenshots', async () => {
   await composer.press('Enter');
   await approveUntil(w, () => w.getByText('node --test: 2 passed.').isVisible());
   await expect(w.getByText('node --test: 2 passed.')).toBeVisible();
+  // Unfold the turn's work: each read, edit and command, with its diff or output.
+  await w.getByRole('button', { name: /^Ran a command/ }).click();
   await snap(w, 'code-session');
 
   await w.keyboard.press('ControlOrMeta+Shift+D');
-  await expect(w.getByRole('region', { name: /Changes/ })).toBeVisible();
+  const changes = w.getByRole('region', { name: /Changes/ });
+  await expect(changes).toBeVisible();
+  await changes.getByText('health.js', { exact: true }).click();
   await snap(w, 'code-session-changes');
   await w.keyboard.press('ControlOrMeta+Shift+D');
 
@@ -178,6 +202,11 @@ test('README screenshots', async () => {
   await palette(w, 'settings appearance');
   await expect(w.getByRole('heading', { name: 'Appearance', level: 2 })).toBeVisible();
   await snap(w, 'appearance');
+
+  // Settings → Integrations.
+  await palette(w, 'blender');
+  await expect(w.getByRole('heading', { name: 'Integrations', level: 2 }).first()).toBeVisible();
+  await snap(w, 'integrations');
 
   // Customize → Agents, from two templates.
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Customize' }).click();
