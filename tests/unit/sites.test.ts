@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { sitesDir } from '../../src/main/app/paths';
 import { resolveSitePath, SiteServer, siteFromHost, withReload } from '../../src/main/sites/siteServer';
 import { siteName, siteSlug, SitesStore, starterPage } from '../../src/main/sites/sites';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
@@ -65,6 +66,26 @@ describe('the sites store', () => {
     expect(store.thumbnail('peach-palace')).toBeNull();
     store.saveThumbnail('peach-palace', Buffer.from('png'));
     expect(store.thumbnail('peach-palace')).toBe(`data:image/png;base64,${Buffer.from('png').toString('base64')}`);
+  });
+
+  it('lives in the home folder, not Documents, unless an earlier version already made a Documents folder', () => {
+    vi.stubEnv('GRAFT_HOME', undefined);
+    vi.stubEnv('GRAFT_SITES_DIR', undefined);
+    cleanup.push(() => {
+      vi.unstubAllEnvs();
+    });
+    const home = makeTempDir();
+    cleanup.push(() => removeDir(home));
+    const graftHome = path.join(home, '.graft');
+    const documents = path.join(home, 'Documents');
+    expect(sitesDir(graftHome, documents, home)).toBe(path.join(home, 'Graft Sites'));
+    // Sites made by 0.6.3 stay where they are.
+    fs.mkdirSync(path.join(documents, 'Graft Sites'), { recursive: true });
+    expect(sitesDir(graftHome, documents, home)).toBe(path.join(documents, 'Graft Sites'));
+    vi.stubEnv('GRAFT_HOME', graftHome);
+    expect(sitesDir(graftHome, documents, home)).toBe(path.join(graftHome, 'sites'));
+    vi.stubEnv('GRAFT_SITES_DIR', path.join(home, 'elsewhere'));
+    expect(sitesDir(graftHome, documents, home)).toBe(path.join(home, 'elsewhere'));
   });
 });
 

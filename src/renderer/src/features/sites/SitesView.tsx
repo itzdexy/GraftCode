@@ -174,7 +174,7 @@ export function SitesView() {
     <PageLayout
       wide
       title="Sites"
-      description="Describe a website and Graft designs and builds it, then hosts it on this computer with a live preview. Each site is a folder in Documents › Graft Sites, ready to publish anywhere."
+      description="Describe a website and Graft designs and builds it, then hosts it on this computer with a live preview. Each site is a plain folder on this computer, ready to publish anywhere."
     >
       <NewSite onCreated={reload} />
       <section aria-label="Your sites" className="mt-28">

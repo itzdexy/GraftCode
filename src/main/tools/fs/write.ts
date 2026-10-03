@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { makeDir, refusedChange } from '../../files/makeDir';
 import { unifiedDiff } from '../diffUtil';
 import type { FileStateTracker } from '../fileState';
 import { displayPath, resolvePath } from '../paths';
@@ -15,9 +16,13 @@ export type WriteInput = z.infer<typeof WriteInput>;
 
 /** Writes via a temp file + rename so readers never see a half-written file. */
 export async function writeFileAtomic(abs: string, content: string): Promise<void> {
-  await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+  await makeDir(path.dirname(abs));
   const temp = path.join(path.dirname(abs), `.${path.basename(abs)}.${randomUUID().slice(0, 8)}.graft-tmp`);
-  await fs.promises.writeFile(temp, content, 'utf8');
+  try {
+    await fs.promises.writeFile(temp, content, 'utf8');
+  } catch (error) {
+    throw refusedChange(abs, error, 'write');
+  }
   try {
     await fs.promises.rename(temp, abs);
   } catch (error) {

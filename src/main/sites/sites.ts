@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { makeDirSync } from '../files/makeDir';
 
 /** What Graft keeps about a site, in its folder's .graft-site/site.json. */
 export interface SiteManifest {
@@ -79,7 +80,7 @@ export function starterPage(name: string): string {
 
 /**
  * The websites Graft builds and hosts on this computer, one folder each under
- * the sites root (Documents/Graft Sites). A folder is a site when it holds
+ * the sites root (Graft Sites in the home folder). A folder is a site when it holds
  * .graft-site/site.json; everything else in it is the site itself.
  */
 export class SitesStore {
@@ -113,7 +114,7 @@ export class SitesStore {
 
   private write(site: SiteRecord): void {
     const { name, description, createdAt, updatedAt, sessionId } = site;
-    fs.mkdirSync(path.join(site.folder, META_DIR), { recursive: true });
+    makeDirSync(path.join(site.folder, META_DIR));
     fs.writeFileSync(this.manifestPath(site.folder), `${JSON.stringify({ name, description, createdAt, updatedAt, sessionId }, null, 2)}\n`);
   }
 
@@ -144,12 +145,12 @@ export class SitesStore {
 
   /** A new site in a folder named after it; the server shows a starter page until it has an index.html. */
   create(name: string, description: string): SiteRecord {
-    fs.mkdirSync(this.root, { recursive: true });
+    makeDirSync(this.root);
     const base = siteSlug(name);
     let slug = base;
     for (let n = 2; fs.existsSync(path.join(this.root, slug)); n++) slug = `${base}-${n}`;
     const folder = path.join(this.root, slug);
-    fs.mkdirSync(folder, { recursive: true });
+    makeDirSync(folder);
     const at = this.now();
     const site: SiteRecord = { slug, folder, name: name.trim() || 'New site', description: description.trim(), createdAt: at, updatedAt: at, sessionId: null };
     this.write(site);
@@ -172,7 +173,7 @@ export class SitesStore {
   saveThumbnail(slug: string, png: Buffer): void {
     const site = this.get(slug);
     if (!site) return;
-    fs.mkdirSync(path.join(site.folder, META_DIR), { recursive: true });
+    makeDirSync(path.join(site.folder, META_DIR));
     fs.writeFileSync(path.join(site.folder, META_DIR, THUMBNAIL), png);
   }
 

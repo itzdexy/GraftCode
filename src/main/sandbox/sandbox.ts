@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { makeDirSync } from '../files/makeDir';
 import { runFile } from '../tools/run';
 import { engineProblem, probeEngine, type ContainerEngine, type EngineProbe } from './engine';
 
@@ -355,7 +356,7 @@ export class SandboxManager {
     fs.rmSync(path.join(stateDir, 'env.sh'), { force: true });
     // Mount points for the read-only folders have to exist, or the container could create them itself.
     const graftDir = path.join(target.workspace, '.graft');
-    if (!fs.existsSync(graftDir)) fs.mkdirSync(graftDir, { recursive: true });
+    makeDirSync(graftDir);
     const readOnly = READ_ONLY_DIRS.filter((rel) => fs.existsSync(path.join(target.workspace, rel)));
     const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
     const gid = typeof process.getgid === 'function' ? process.getgid() : -1;

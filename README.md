@@ -101,7 +101,7 @@ You can add more providers at any time in **Settings → Providers**, and connec
 
 ### Sites
 
-The Sites tab builds websites. Describe one (who it's for, the feel, the pages) or start from an idea, and Graft creates a folder for it in **Documents › Graft Sites**, starts a session that designs and builds it, and serves it on your computer at its own address, such as `http://peach-palace.localhost:4870/`. The preview sits beside the session in the Browser panel and reloads by itself whenever a file changes, so you watch the site take shape and ask for changes as you go.
+The Sites tab builds websites. Describe one (who it's for, the feel, the pages) or start from an idea, and Graft creates a folder for it in **Graft Sites** in your user folder (`C:\Users\you\Graft Sites` on Windows, `~/Graft Sites` elsewhere), starts a session that designs and builds it, and serves it on your computer at its own address, such as `http://peach-palace.localhost:4870/`. The preview sits beside the session in the Browser panel and reloads by itself whenever a file changes, so you watch the site take shape and ask for changes as you go.
 
 - The agent works from a design brief: a clear concept, a real type pairing and palette, a responsive layout from phones to wide screens, real copy instead of placeholder text, accessible details, and a check of its own work in the browser before it reports.
 - Sites are plain HTML, CSS and JavaScript unless you ask for a framework, so each folder can be published as is on any static host.

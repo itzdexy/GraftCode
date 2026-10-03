@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,7 +18,7 @@ export interface GraftPaths {
   checkpointsShadow: string;
   /** Files chats made for download, one folder per chat. */
   chatFiles: string;
-  /** Websites from the Sites tab, one folder each (Documents/Graft Sites, where people can find them). */
+  /** Websites from the Sites tab, one folder each (Graft Sites in the home folder). */
   sites: string;
 }
 
@@ -26,12 +27,18 @@ export function resolveGraftHome(): string {
   return override && override.length > 0 ? path.resolve(override) : path.join(os.homedir(), '.graft');
 }
 
-/** Where sites live: GRAFT_SITES_DIR, else beside an isolated GRAFT_HOME (tests), else Documents/Graft Sites. */
-function sitesDir(graftHome: string, documents: string): string {
+/**
+ * Where sites live: GRAFT_SITES_DIR, else beside an isolated GRAFT_HOME (tests), else
+ * Documents/Graft Sites when an earlier version made it, else Graft Sites in the home
+ * folder. Not Documents by default: Windows' Controlled folder access stops apps
+ * writing there, and Documents is often synced to OneDrive or iCloud.
+ */
+export function sitesDir(graftHome: string, documents: string, home: string = os.homedir()): string {
   const override = process.env.GRAFT_SITES_DIR;
   if (override && override.length > 0) return path.resolve(override);
   if (process.env.GRAFT_HOME) return path.join(graftHome, 'sites');
-  return path.join(documents, 'Graft Sites');
+  const earlier = path.join(documents, 'Graft Sites');
+  return fs.existsSync(earlier) ? earlier : path.join(home, 'Graft Sites');
 }
 
 export function buildPaths(userData: string, graftHome: string = resolveGraftHome(), documents: string = path.join(os.homedir(), 'Documents')): GraftPaths {
