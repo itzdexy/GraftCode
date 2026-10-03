@@ -297,6 +297,7 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     await snap(w, 'checks-tab');
     await w.getByRole('button', { name: 'Save checks' }).click();
     await expect(w.getByText('Shared checks apply')).toBeVisible();
+    await w.getByRole('status').filter({ hasText: 'Checks saved' }).getByRole('button', { name: 'Dismiss' }).click();
 
     // A turn whose change breaks a test: the checks catch it and the agent fixes it.
     provider.titleText = 'Report the database state';
