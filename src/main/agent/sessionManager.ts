@@ -22,6 +22,7 @@ import type { ToolRegistry } from '../tools/registry';
 import type { ShellSpec } from '../tools/shell/detect';
 import type { ShellManager } from '../tools/shell/shellManager';
 import type { GraftPaths } from '../app/paths';
+import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
@@ -49,6 +50,9 @@ export interface SessionManagerDeps {
   mcp: McpToolSource | null;
   search: SessionDeps['search'];
   computer: SessionDeps['computer'];
+  /** Files chats make for download; deleted with their chat. */
+  chatFiles: ChatFiles | null;
+  runCode: SessionDeps['runCode'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -123,6 +127,8 @@ export class SessionManager {
       providerName: (providerId) => d.registry.providerName(providerId),
       search: d.search,
       computer: d.computer,
+      chatFiles: d.chatFiles,
+      runCode: d.runCode,
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -438,6 +444,7 @@ export class SessionManager {
       this.incognito.remove(id);
     } else {
       await this.deps.checkpoints.deleteForSession(id);
+      this.deps.chatFiles?.deleteForSession(id);
       this.deps.repo.delete(id);
     }
     this.deps.emitRemoved(id);
@@ -458,6 +465,7 @@ export class SessionManager {
       }
       if (summary.worktreePath && fs.existsSync(summary.worktreePath)) worktreesKept++;
       await this.deps.checkpoints.deleteForSession(summary.id);
+      this.deps.chatFiles?.deleteForSession(summary.id);
       this.deps.repo.delete(summary.id);
       await this.deps.shells.disposeSession(summary.id);
       this.deps.emitRemoved(summary.id);

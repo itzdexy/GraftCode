@@ -3,6 +3,7 @@ import path from 'node:path';
 import { app, dialog, Notification, shell as electronShell, type BrowserWindow } from 'electron';
 import { GraftError } from '@shared/errors';
 import { fuzzyScore } from '@shared/fuzzy';
+import { dataHandling } from '@shared/privacy';
 import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
 import type { GraftEvent } from '@shared/ipc/events';
 import type { ProjectSummary, SearchResult } from '@shared/schemas/app';
@@ -33,6 +34,8 @@ import type { PtyManager } from '../pty/ptyManager';
 import { deleteCommand, deleteSkill, listCommands, listMemory, listSkills, saveCommand, saveMemory, saveSkill } from '../customize/customize';
 import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
+import { canOpen } from '../chat/chatFiles';
+import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
 import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
@@ -128,6 +131,26 @@ function verifyError(error: unknown): VerifyResult {
 }
 
 /** What Settings → Web search shows; key values never leave the main process. */
+/** The user's OpenRouter key on OpenRouter's own endpoint, for natural voices; null when there is none. */
+function openRouterAccess(s: Services): SpeechAccess | null {
+  const provider = s.registry.summaries().find((p) => p.kind === 'openrouter' && p.enabled && p.hasKey && dataHandling(p) !== 'unknown');
+  if (!provider) return null;
+  let apiKey: string | null;
+  try {
+    apiKey = s.keys.get(provider.id);
+  } catch {
+    apiKey = null;
+  }
+  return apiKey ? { apiKey, baseUrl: provider.baseUrl } : null;
+}
+
+/** Where a chat's file is stored; an error when the chat no longer has it. */
+function chatFile(s: Services, sessionId: string, name: string): string {
+  const file = s.chatFiles.find(sessionId, name);
+  if (!file) throw new GraftError('file_missing', `${name} is no longer in this chat.`);
+  return file;
+}
+
 function searchStatus(s: Services) {
   const providers = s.search.providers();
   return {
@@ -255,6 +278,20 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { engine: found.engine, count: found.results.length, first: first ? { title: first.title, url: first.url } : null };
     },
     'web:favicon': ({ host }) => favicon(host),
+    'voice:models': async () => {
+      const available = openRouterAccess(await ctx.services()) !== null;
+      try {
+        return { available, models: await speechModels() };
+      } catch {
+        return { available, models: [] };
+      }
+    },
+    'voice:speak': async ({ text, model, voice, speed }) => {
+      const access = openRouterAccess(await ctx.services());
+      if (!access) throw new GraftError('voice_unavailable', 'Natural voices need OpenRouter as a provider with its key.');
+      const audio = await synthesize(access, { text, model, voice, speed });
+      return { audio: audio.toString('base64'), mime: 'audio/mpeg' };
+    },
     'providers:verify': async ({ kind, preset, baseUrl, apiKey }) => {
       const s = await ctx.services();
       const target = resolveTarget(s, kind, preset, baseUrl);
@@ -482,6 +519,24 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if (result.canceled || !result.filePath) return null;
       fs.writeFileSync(result.filePath, manager.exportText(id, format), 'utf8');
       return result.filePath;
+    },
+    'chatFiles:save': async ({ sessionId, name }) => {
+      const file = chatFile(await ctx.services(), sessionId, name);
+      const win = ctx.window();
+      const options = { title: 'Save file', defaultPath: path.join(app.getPath('downloads'), name) };
+      const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) return null;
+      await fs.promises.copyFile(file, result.filePath);
+      return result.filePath;
+    },
+    'chatFiles:open': async ({ sessionId, name }) => {
+      const file = chatFile(await ctx.services(), sessionId, name);
+      if (!canOpen(name)) throw new GraftError('file_not_openable', 'Graft doesn’t open this kind of file directly, so a click can’t run it. Save it or show it in its folder.');
+      const failure = await electronShell.openPath(file);
+      if (failure) throw new GraftError('open_failed', failure);
+    },
+    'chatFiles:reveal': async ({ sessionId, name }) => {
+      electronShell.showItemInFolder(chatFile(await ctx.services(), sessionId, name));
     },
     'sessions:retry': async ({ id }) => {
       (await ctx.sessions()).retry(id);

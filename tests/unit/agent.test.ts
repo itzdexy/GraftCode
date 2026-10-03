@@ -473,6 +473,40 @@ describe('agent tools that involve the user', () => {
     expect(withEngine.provider.requests[0]!.tools.map((t) => t.name)).toContain('WebSearch');
   });
 
+  it('gives chats CreateFile and RunCode and the time each message was sent; incognito chats and code sessions get neither tool', async () => {
+    const saved: string[] = [];
+    const work = {
+      chatFiles: { save: (_id: string, name: string, data: Buffer) => (saved.push(name), { name, path: `/files/${name}`, size: data.length, mime: 'text/plain' }) },
+      runCode: () => Promise.resolve({ output: '', error: null, timedOut: false, durationMs: 1, files: [] })
+    };
+    const chat = harness({
+      kind: 'chat',
+      ...work,
+      script: [{ toolCalls: [{ name: 'CreateFile', input: { name: 'notes.txt', content: 'hi' } }] }, { text: 'Made notes.txt.' }]
+    });
+    chat.session.send('make me a notes file');
+    await chat.session.idle();
+    const first = chat.provider.requests[0]!;
+    expect(first.tools.map((t) => t.name).sort()).toEqual(['CreateFile', 'RunCode']);
+    expect(first.system).toContain('CreateFile saves a file');
+    expect(JSON.stringify(first.messages[0])).toMatch(/\[Sent \w{3}, \w{3} \d{1,2}, \d{4}, \d{1,2}:\d{2}/);
+    expect(saved).toEqual(['notes.txt']);
+    expect(chat.events.some((e) => e.type === 'permission')).toBe(false);
+
+    const incognito = harness({ kind: 'chat', incognito: true, ...work, script: [{ text: 'ok' }] });
+    incognito.session.send('hi');
+    await incognito.session.idle();
+    expect(incognito.provider.requests[0]!.tools).toEqual([]);
+
+    const code = harness({ ...work, script: [{ text: 'ok' }] });
+    code.session.send('hi');
+    await code.session.idle();
+    const names = code.provider.requests[0]!.tools.map((t) => t.name);
+    expect(names).not.toContain('CreateFile');
+    expect(names).not.toContain('RunCode');
+    expect(JSON.stringify(code.provider.requests[0]!.messages[0])).not.toContain('[Sent ');
+  });
+
   it('runs a model’s built-in search only when its provider is the chosen engine; free search goes through WebSearch', async () => {
     const run = async (active: 'exa' | 'anthropic' | null): Promise<{ native: boolean; tools: string[] }> => {
       const h = harness({
@@ -510,10 +544,11 @@ describe('agent tools that involve the user', () => {
     expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('no shells today');
   });
 
-  it('adds a verification pass in Taproot mode', async () => {
+  it('adds a verification pass in Taproot mode once the turn changed something', async () => {
     const h = harness({
       effort: 'taproot',
-      script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*' } }] }, { text: 'All done.' }, { text: 'Verified: tests pass.' }]
+      mode: 'auto-edit',
+      script: [{ toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on = true;\n' } }] }, { text: 'All done.' }, { text: 'Verified: tests pass.' }]
     });
     h.session.send('build it');
     await h.session.idle();
@@ -521,6 +556,21 @@ describe('agent tools that involve the user', () => {
     expect(JSON.stringify(h.provider.requests[0]!.messages[0])).toContain('[Taproot mode is on');
     expect(JSON.stringify(h.provider.requests[2]!.messages.at(-1))).toContain('Before you finish, verify the work end to end');
     expect(texts(h).at(-1)).toBe('assistant:Verified: tests pass.');
+  });
+
+  it('just answers a question in Taproot: no review pass after read-only commands, no nudges for older tasks', async () => {
+    const h = harness({
+      effort: 'taproot',
+      mode: 'bypass',
+      script: [{ toolCalls: [{ name: 'Shell', input: { command: 'date' } }] }, { text: 'It is 3:04 PM.' }, { text: 'never' }]
+    });
+    // Open tasks left from an earlier piece of work.
+    h.store.updateSession('session-1', { todos: [{ id: '1', content: 'Old unfinished task', status: 'pending' }] });
+    h.session.send('what time is it');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(texts(h).at(-1)).toBe('assistant:It is 3:04 PM.');
+    expect(h.provider.remaining).toBe(1);
   });
 
   it('sends a Taproot turn back to its open tasks before it may finish, once briefed', async () => {

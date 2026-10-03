@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Copy, FileText, Globe, Pencil, RotateCcw, RotateCw, ThumbsDown, ThumbsUp, Volume2, VolumeX } from 'lucide-react';
+import { Check, ChevronRight, Copy, FileText, Globe, Loader2, Pause, Pencil, Play, RotateCcw, RotateCw, Square, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { Badge } from '../../components/Badge';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
+import { pauseSpeech, resumeSpeech, startSpeech, stopSpeech, useSpeech } from '../../lib/speech';
+import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import { imageSrc } from '../composer/attachments';
 import { useCopy } from './CodeBlock';
@@ -16,54 +18,43 @@ type Item<K extends TranscriptItem['kind']> = Extract<TranscriptItem, { kind: K 
 
 const COLLAPSE_HEIGHT = 280;
 
-/** Plain text for speech: drops code fences and markdown punctuation. */
-export function speakableText(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?```/g, ' (code block) ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/[#*_>~|-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-let speakingKey: string | null = null;
-
-function useSpeech(key: string, text: string): [boolean, () => void] {
-  const [speaking, setSpeaking] = useState(false);
+/** Read aloud for one reply: start, then pause/resume and stop while it reads. */
+function SpeechButtons({ speechKey, text, incognito }: { speechKey: string; text: string; incognito: boolean }) {
+  const status = useSpeech((st) => (st.key === speechKey ? st.status : 'idle'));
+  const voice = useApp((st) => st.settings?.voice);
   useEffect(
     () => () => {
-      if (speakingKey === key) {
-        window.speechSynthesis.cancel();
-        speakingKey = null;
-      }
+      if (useSpeech.getState().key === speechKey) stopSpeech();
     },
-    [key]
+    [speechKey]
   );
-  const toggle = (): void => {
-    const synth = window.speechSynthesis;
-    if (speaking) {
-      synth.cancel();
-      speakingKey = null;
-      setSpeaking(false);
-      return;
-    }
-    synth.cancel();
-    const utterance = new SpeechSynthesisUtterance(speakableText(text));
-    utterance.onend = () => {
-      if (speakingKey === key) speakingKey = null;
-      setSpeaking(false);
-    };
-    utterance.onerror = (event) => {
-      setSpeaking(false);
-      if (event.error !== 'canceled' && event.error !== 'interrupted') reportError("Couldn't read the reply aloud", new Error(event.error));
-    };
-    speakingKey = key;
-    setSpeaking(true);
-    synth.speak(utterance);
-  };
-  return [speaking, toggle];
+  if (status === 'idle') {
+    return (
+      <ActionButton label="Read aloud" onClick={() => voice && void startSpeech(speechKey, text, voice, { incognito })}>
+        <Volume2 className="size-12" />
+      </ActionButton>
+    );
+  }
+  return (
+    <>
+      {status === 'loading' ? (
+        <ActionButton label="Preparing the voice" onClick={() => undefined} active>
+          <Loader2 className="size-12 animate-spin" />
+        </ActionButton>
+      ) : status === 'paused' ? (
+        <ActionButton label="Resume" onClick={resumeSpeech} active>
+          <Play className="size-12" />
+        </ActionButton>
+      ) : (
+        <ActionButton label="Pause" onClick={pauseSpeech} active>
+          <Pause className="size-12" />
+        </ActionButton>
+      )}
+      <ActionButton label="Stop reading" onClick={stopSpeech}>
+        <Square className="size-11" />
+      </ActionButton>
+    </>
+  );
 }
 
 function ActionButton({ label, onClick, children, active = false }: { label: string; onClick: () => void; children: ReactNode; active?: boolean }) {
@@ -170,6 +161,8 @@ export function UserMessage({
 }
 
 interface ReplyActions {
+  /** Incognito replies are read with this computer's voice, so their text goes nowhere. */
+  incognito: boolean;
   feedback: -1 | 0 | 1;
   onFeedback: (value: -1 | 0 | 1) => void;
   onRegenerate: (() => void) | null;
@@ -178,7 +171,6 @@ interface ReplyActions {
 /** Assistant prose; the last reply of a turn gets copy / read aloud / feedback / retry. */
 export function AssistantText({ item, variant, actions }: { item: Item<'text'>; variant: 'code' | 'chat'; actions: ReplyActions | null }) {
   const [copied, copy] = useCopy();
-  const [speaking, toggleSpeech] = useSpeech(item.key, item.text);
   return (
     <div className="flex flex-col gap-4">
       <Markdown text={item.text} variant={variant} live={item.live} />
@@ -187,9 +179,7 @@ export function AssistantText({ item, variant, actions }: { item: Item<'text'>; 
           <ActionButton label={copied ? 'Copied' : 'Copy'} onClick={() => copy(item.text)}>
             {copied ? <Check className="size-12" /> : <Copy className="size-12" />}
           </ActionButton>
-          <ActionButton label={speaking ? 'Stop reading' : 'Read aloud'} onClick={toggleSpeech} active={speaking}>
-            {speaking ? <VolumeX className="size-12" /> : <Volume2 className="size-12" />}
-          </ActionButton>
+          <SpeechButtons speechKey={item.key} text={item.text} incognito={actions.incognito} />
           <ActionButton label="Good reply" active={actions.feedback === 1} onClick={() => actions.onFeedback(actions.feedback === 1 ? 0 : 1)}>
             <ThumbsUp className="size-12" />
           </ActionButton>

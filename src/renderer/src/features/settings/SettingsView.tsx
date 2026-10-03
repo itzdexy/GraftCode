@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react';
-import { Bell, BookText, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, User, Webhook } from 'lucide-react';
+import { AudioLines, Bell, BookText, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, User, Webhook } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { useNav, type SettingsSection } from '../../stores/nav';
 import { HooksSection } from '../customize/HooksSection';
@@ -13,6 +13,7 @@ import { ModelsSection } from './ModelsSection';
 import { NotificationsSection } from './NotificationsSection';
 import { PermissionsSection } from './PermissionsSection';
 import { PrivacySection } from './PrivacySection';
+import { VoiceSection } from './VoiceSection';
 import { WebSearchSection } from './WebSearchSection';
 import { ProfileSection } from './ProfileSection';
 import { ProjectPicker } from './ProjectPicker';
@@ -33,6 +34,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'permissions', label: 'Permissions', description: 'What the agent may do without asking.', icon: ShieldCheck },
   { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
   { id: 'search', label: 'Web search', description: 'How models search and read the web.', icon: Globe },
+  { id: 'voice', label: 'Voice', description: 'How replies sound when they are read aloud.', icon: AudioLines },
   { id: 'mcp', label: 'MCP servers', description: 'Tools and data from other apps.', icon: Plug },
   { id: 'hooks', label: 'Hooks', description: 'Commands that run around tool calls and turns.', icon: Webhook },
   { id: 'memory', label: 'Memory', description: 'Standing instructions every session reads.', icon: BookText },
@@ -68,6 +70,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <PrivacySection />;
     case 'search':
       return <WebSearchSection />;
+    case 'voice':
+      return <VoiceSection />;
     case 'mcp':
       return <ScopedSection render={(projectPath) => <McpSection projectPath={projectPath} />} />;
     case 'hooks':

@@ -19,10 +19,12 @@ import { FileStateTracker } from '../tools/fileState';
 import type { ToolRegistry } from '../tools/registry';
 import type { ShellManager } from '../tools/shell/shellManager';
 import type { SubagentType, ToolContext } from '../tools/types';
-import { PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
+import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
+import type { ChatFile } from '../chat/chatFiles';
+import type { CodeRun } from '../chat/codeSandbox';
 import { summarizeSession, summaryMessageText } from './compaction';
 import type { HookRunner } from './hooks';
-import { toLlmHistory } from './history';
+import { toLlmHistory, withSentTimes } from './history';
 import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
 import { expandMentions } from './mentions';
 import { MemoryLoader } from './memory';
@@ -84,6 +86,10 @@ export interface SessionDeps {
     active(): SearchEngineId | null;
     search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
   };
+  /** Files chats make for the user to download (CreateFile, RunCode); null where unavailable. */
+  chatFiles: { save(sessionId: string, name: string, data: Buffer): ChatFile } | null;
+  /** RunCode's sandbox: JavaScript in an isolated page; null where unavailable. */
+  runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
   /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
   checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
@@ -511,6 +517,13 @@ export class AgentSession {
     return { native, clientSearch, fetch: summary.kind === 'code' || allowed };
   }
 
+  /** CreateFile and RunCode, for chats with a model that uses tools. Incognito chats get neither: they never write to disk. */
+  private chatWork(model: ModelInfo): { files: boolean; code: boolean } {
+    const summary = this.summary;
+    const files = summary.kind === 'chat' && !summary.incognito && model.supportsTools && this.deps.chatFiles !== null;
+    return { files, code: files && this.deps.runCode !== null };
+  }
+
   /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
   private privacy(): RequestPrivacy {
     const incognito = this.summary.incognito;
@@ -534,12 +547,14 @@ export class AgentSession {
     const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
     const summary = this.summary;
     const web = this.webTools(model);
+    const work = this.chatWork(model);
     const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
     const computer = summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
+    const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
     const builtins =
       summary.kind === 'code'
-        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
-        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : [])];
+        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && !chatOnly.has(n) && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
+        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : []), ...(work.files ? ['CreateFile'] : []), ...(work.code ? ['RunCode'] : [])];
     const toolNames = [...builtins, ...mcpTools];
     if (!this.system) {
       const root = this.projectRoot();
@@ -568,7 +583,8 @@ export class AgentSession {
           date: this.deps.now().toISOString().slice(0, 10),
           name,
           model: identity,
-          web: { search: web.native || web.clientSearch, fetch: web.fetch }
+          web: { search: web.native || web.clientSearch, fetch: web.fetch },
+          workspace: work
         });
       }
     }
@@ -589,7 +605,7 @@ export class AgentSession {
     const kept = messages.map((m) =>
       m.seq < floor && m.role === 'assistant' ? { ...m, content: m.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking') } : m
     );
-    return toLlmHistory(kept);
+    return toLlmHistory(this.summary.kind === 'chat' ? withSentTimes(kept) : kept);
   }
 
   private async runTurn(item: InternalQueued | null): Promise<void> {
@@ -857,6 +873,7 @@ export class AgentSession {
     trusted: boolean
   ): ToolContext {
     const cwd = this.workingDir();
+    const work = this.chatWork(model);
     return {
       sessionId: this.id,
       toolUseId,
@@ -915,7 +932,9 @@ export class AgentSession {
       runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
       notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
-      computer: this.deps.computer
+      computer: this.deps.computer,
+      chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
+      runCode: work.code ? this.deps.runCode : null
     };
   }
 

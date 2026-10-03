@@ -15,6 +15,8 @@ export interface GraftPaths {
   worktrees: string;
   shellLogs: string;
   checkpointsShadow: string;
+  /** Files chats made for download, one folder per chat. */
+  chatFiles: string;
 }
 
 export function resolveGraftHome(): string {
@@ -30,6 +32,7 @@ export function buildPaths(userData: string, graftHome: string = resolveGraftHom
     database: path.join(userData, 'graft.db'),
     worktrees: path.join(graftHome, 'worktrees'),
     shellLogs: path.join(userData, 'shell-logs'),
-    checkpointsShadow: path.join(userData, 'shadow-repos')
+    checkpointsShadow: path.join(userData, 'shadow-repos'),
+    chatFiles: path.join(userData, 'chat-files')
   };
 }

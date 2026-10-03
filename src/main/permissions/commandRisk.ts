@@ -11,7 +11,7 @@ const READ_ONLY_COMMANDS = new Set([
   'date', 'whoami', 'hostname', 'uname', 'basename', 'dirname', 'realpath', 'readlink', 'true', 'false', 'test',
   'get-childitem', 'gci', 'get-content', 'gc', 'get-location', 'gl', 'select-string', 'sls', 'test-path',
   'get-item', 'measure-object', 'get-command', 'resolve-path', 'jq', 'column', 'less', 'more', 'nl', 'od', 'xxd',
-  'sha256sum', 'md5sum', 'shasum', 'get-filehash', 'cd', 'set-location'
+  'sha256sum', 'md5sum', 'shasum', 'get-filehash', 'cd', 'set-location', 'get-date', 'get-timezone', 'cal'
 ]);
 const GIT_READ = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'blame', 'describe', 'shortlog', 'grep', 'ls-tree', 'cat-file', 'merge-base', 'rev-list', 'reflog', 'whatchanged', 'name-rev', 'for-each-ref']);
 // Local git operations only; push/clone/pull talk to remotes and are asked about.

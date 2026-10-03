@@ -5,6 +5,7 @@ import { openDatabase, type Db } from '../db/database';
 import { ProjectsRepo } from '../db/projectsRepo';
 import { ProvidersRepo } from '../db/providersRepo';
 import { SessionsRepo } from '../db/sessionsRepo';
+import { ChatFiles } from '../chat/chatFiles';
 import { CheckpointService } from '../git/checkpoints';
 import { DiffStatsCache } from '../git/diffStats';
 import { runGit } from '../git/git';
@@ -37,6 +38,7 @@ export interface Services {
   projects: ProjectsRepo;
   sessionsRepo: SessionsRepo;
   checkpoints: CheckpointService;
+  chatFiles: ChatFiles;
   diffStats: DiffStatsCache;
   shells: ShellManager;
   shell: ShellSpec;
@@ -169,6 +171,7 @@ export async function initServices(options: {
     projects: new ProjectsRepo(db),
     sessionsRepo: new SessionsRepo(db),
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),
+    chatFiles: new ChatFiles(paths.chatFiles),
     diffStats: new DiffStatsCache(),
     shells: new ShellManager(shell, paths.shellLogs),
     shell,

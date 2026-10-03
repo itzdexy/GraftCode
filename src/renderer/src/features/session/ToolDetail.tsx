@@ -9,6 +9,8 @@ import { invoke } from '../../lib/ipc';
 import { reportError } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { countChanges, parsePatch } from '../diff/diffModel';
+import { CodeBlock } from './CodeBlock';
+import { fileSize } from './FilesCard';
 import { Markdown } from './Markdown';
 import type { ToolCall } from './transcriptModel';
 
@@ -148,6 +150,28 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
       return <pre className={OUTPUT}>{display.text}</pre>;
     case 'web-search':
       return <SearchResultList results={display.results} />;
+    case 'file':
+      return (
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-fg-muted">
+            {display.name} · {fileSize(display.size)}
+          </p>
+          {display.preview ? <pre className={OUTPUT}>{display.preview}</pre> : null}
+        </div>
+      );
+    case 'code':
+      return (
+        <div className="flex flex-col gap-6">
+          <CodeBlock code={display.code} language="javascript" />
+          <div className="flex flex-wrap items-center gap-6 text-sm text-fg-muted">
+            {display.timedOut ? <Badge tone="warning">Timed out</Badge> : display.error ? <Badge tone="danger">Error</Badge> : null}
+            <span>{formatDuration(display.durationMs)} in the sandbox</span>
+            {display.files.length > 0 ? <span>· made {display.files.map((f) => f.name).join(', ')}</span> : null}
+          </div>
+          {display.output ? <pre className={OUTPUT}>{display.output}</pre> : !display.error ? <p className="text-sm text-fg-muted">No output.</p> : null}
+          {display.error ? <pre className={cn(OUTPUT, 'text-danger')}>{display.error}</pre> : null}
+        </div>
+      );
     case 'denied':
       return <p className="text-sm text-fg-muted">Not run: {display.reason}</p>;
     case 'error':

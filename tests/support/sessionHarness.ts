@@ -57,6 +57,9 @@ export interface HarnessOptions {
   webSearch?: boolean;
   /** Computer use switched on with this controller (default off). */
   computer?: SessionDeps['computer'];
+  /** Chat file store and code sandbox (default: none). */
+  chatFiles?: SessionDeps['chatFiles'];
+  runCode?: SessionDeps['runCode'];
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -110,6 +113,8 @@ export function makeHarness(options: HarnessOptions): Harness {
     providerName: () => 'Fake Provider',
     search: options.search ?? { active: () => null, search: () => Promise.reject(new Error('No web search engine in this test.')) },
     computer: options.computer ?? null,
+    chatFiles: options.chatFiles ?? null,
+    runCode: options.runCode ?? null,
     dataHandling: () => options.dataHandling ?? 'unknown',
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],

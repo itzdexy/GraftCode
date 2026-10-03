@@ -12,6 +12,10 @@ export const TodoItemSchema = z.object({
 });
 export type TodoItem = z.infer<typeof TodoItemSchema>;
 
+/** A file a chat made for the user to download (stored in the chat's folder under this name). */
+export const MadeFileSchema = z.object({ name: z.string(), size: z.number().int().nonnegative(), mime: z.string() });
+export type MadeFile = z.infer<typeof MadeFileSchema>;
+
 export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('read'),
@@ -66,6 +70,16 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     query: z.string(),
     /** `site` names the site when the URL is a redirect. */
     results: z.array(z.object({ title: z.string(), url: z.string(), site: z.string().optional() }))
+  }),
+  MadeFileSchema.extend({ kind: z.literal('file'), preview: z.string().nullable() }),
+  z.object({
+    kind: z.literal('code'),
+    code: z.string(),
+    output: z.string(),
+    error: z.string().nullable(),
+    timedOut: z.boolean(),
+    durationMs: z.number().int().nonnegative(),
+    files: z.array(MadeFileSchema)
   }),
   z.object({ kind: z.literal('denied'), reason: z.string() }),
   z.object({ kind: z.literal('error'), message: z.string() }),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
 import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
-import { activityTitle, buildTranscript, callParts, diffTotals, groupActivity, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
+import { activityTitle, buildTranscript, callParts, diffTotals, groupActivity, madeFiles, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
 import { evictViews, MAX_CACHED_VIEWS, viewOf } from '../../../src/renderer/src/stores/sessions';
 
 let seq = 0;
@@ -306,5 +306,21 @@ describe('cached session views', () => {
     ({ views, order } = evictViews(views, order, 's3'));
     expect(order.at(-1)).toBe('s3');
     expect(Object.keys(views)).toHaveLength(MAX_CACHED_VIEWS);
+  });
+});
+
+describe('chat files and code runs', () => {
+  it('collects the files a reply made and names CreateFile and RunCode calls', () => {
+    const created = call('CreateFile', { name: 'plan.md', content: '# Plan' }, { display: { kind: 'file', name: 'plan.md', size: 6, mime: 'text/markdown', preview: '# Plan' } });
+    const ran = call('RunCode', { code: 'graft.writeFile("out.csv", "a")' }, {
+      display: { kind: 'code', code: 'x', output: '', error: null, timedOut: false, durationMs: 5, files: [{ name: 'out.csv', size: 1, mime: 'text/csv' }] }
+    });
+    const failed = call('RunCode', { code: 'nope()' }, { isError: true, display: { kind: 'code', code: 'nope()', output: '', error: 'ReferenceError', timedOut: false, durationMs: 2, files: [] } });
+    expect(madeFiles([created, ran, failed]).map((f) => f.name)).toEqual(['plan.md', 'out.csv']);
+    expect(summarizeCalls([created, ran])).toBe('Created plan.md, ran code');
+    expect(callParts(created)).toMatchObject({ verb: 'Created', target: 'plan.md' });
+    expect(callParts(ran).verb).toBe('Ran code');
+    expect(callParts(failed).verb).toBe('Ran code (failed)');
+    expect(callParts(call('CreateFile', { name: 'x.txt', content: '' })).verb).toBe('Creating');
   });
 });

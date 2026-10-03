@@ -1,5 +1,5 @@
 import type { ImageBlock, StoredMessage, ToolResultBlock } from '@shared/schemas/messages';
-import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
+import type { MadeFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 
 /**
  * Turns stored messages into display items: consecutive tool calls collapse
@@ -30,6 +30,7 @@ export type TranscriptItem =
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
   | { kind: 'edits'; key: string; files: EditedFile[] }
+  | { kind: 'files'; key: string; files: MadeFile[] }
   | ActivityItem;
 
 /** A file a turn changed, with its line counts and the patches that did it. */
@@ -307,6 +308,9 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       const calls = segment.flatMap((item) => (item.kind === 'tools' ? item.calls : []));
       const files = editedFiles(calls);
       if (files.length > 0) out.push({ kind: 'edits', key: `edits:${segment[0]?.key ?? String(index)}`, files });
+      // …and, in chats, the files it made for the user to download.
+      const made = madeFiles(calls);
+      if (made.length > 0) out.push({ kind: 'files', key: `files:${segment[0]?.key ?? String(index)}`, files: made });
     }
     // The newest block of a turn in progress is still working, even while the answer streams after it.
     if (lastTurn && turnActive) {
@@ -351,6 +355,15 @@ export function editedFiles(calls: ToolCall[]): EditedFile[] {
     byPath.set(d.path, file);
   }
   return [...byPath.values()];
+}
+
+/** Files a chat's CreateFile and RunCode calls made, in order. */
+export function madeFiles(calls: ToolCall[]): MadeFile[] {
+  return calls.flatMap((call) => {
+    const d = call.result?.display;
+    if (d?.kind === 'file') return [{ name: d.name, size: d.size, mime: d.mime }];
+    return d?.kind === 'code' ? d.files : [];
+  });
 }
 
 /** Lines added and removed by a set of tool calls (edits that went through). */
@@ -499,9 +512,16 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
     const description = String(inputOf<{ description: string }>(tasks[0]!.input).description ?? '');
     push(tasks.length === 1 ? `Delegated: ${description}` : `Ran ${String(tasks.length)} sub-agents`, tasks.length);
   }
+  const made = byName(['CreateFile']).filter((c) => c.result?.display?.kind === 'file');
+  if (made.length > 0) {
+    const names = made.map((c) => (c.result?.display?.kind === 'file' ? c.result.display.name : ''));
+    push(names.length === 1 ? `Created ${names[0] ?? ''}` : `Created ${String(names.length)} files`, made.length);
+  }
+  const runs = byName(['RunCode']);
+  if (runs.length > 0) push(plural(runs.length, 'Ran code', 'Ran code # times'), runs.length);
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) push('Asked you a question', questions.length);
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Task', 'AskUserQuestion']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Task', 'AskUserQuestion', 'CreateFile', 'RunCode']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -555,6 +575,16 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
     }
     case 'Task':
       return { verb: 'Sub-agent', target: str('description'), mono: false, title: str('prompt') };
+    case 'CreateFile': {
+      const d = call.result?.display;
+      const name = d?.kind === 'file' ? d.name : str('name');
+      return { verb: d?.kind === 'file' ? 'Created' : done ? "Couldn't create" : 'Creating', target: name, mono: false, title: name };
+    }
+    case 'RunCode': {
+      const d = call.result?.display;
+      const verb = !done ? 'Running code' : d?.kind === 'code' && d.error === null ? 'Ran code' : 'Ran code (failed)';
+      return { verb, target: '', mono: false, title: 'JavaScript in the sandbox' };
+    }
     case 'Computer': {
       const d = call.result?.display;
       return { verb: d?.kind === 'text' ? d.text : computerVerb(str('action')), target: '', mono: false, title: 'Computer' };

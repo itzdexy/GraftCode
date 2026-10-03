@@ -8,6 +8,7 @@ import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
 import { BrowserPanel } from './browser/browserPanel';
 import { buildPaths } from './app/paths';
+import { disposeSandbox, runInSandbox } from './chat/codeSandbox';
 import { configureLogFile, log } from './app/log';
 import { createMainWindow, type MainWindowHandle } from './app/mainWindow';
 import { showSessionNotification } from './app/notifications';
@@ -279,6 +280,8 @@ async function sessions(): Promise<SessionManager> {
     mcp: m,
     search: s.search,
     computer: computer(),
+    chatFiles: s.chatFiles,
+    runCode: runInSandbox,
     emitEvent: (sessionId, event) => {
       emit({ type: 'session:event', sessionId, event });
       if (event.type === 'status') {
@@ -326,6 +329,8 @@ function openMainWindow(): void {
   win.on('closed', () => {
     mainWindow = null;
     browserPanel = null;
+    // The hidden code sandbox page must not keep the app open.
+    disposeSandbox();
   });
 }
 

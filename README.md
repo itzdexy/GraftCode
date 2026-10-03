@@ -79,6 +79,10 @@ You can add more providers at any time in **Settings → Providers**.
 
 - Conversations with attachments and images, and per-chat model and effort.
 - **Web search and page reading** without prompts, with sources cited inline as site pills.
+- **Files to download:** chats can create documents, data, code and pictures, shown as cards with Save, Open and Show in folder. Opening is limited to documents and pictures, so a click never runs a script.
+- **Code in a sandbox:** chats run JavaScript in a hidden page with no network or file access to calculate, process data and make files.
+- **They know the time:** each message carries when it was sent.
+- **Read aloud** with pause, resume and stop, in a natural voice from OpenRouter's speech models or your computer's own voice (Settings → Voice).
 - **Incognito chats** that are never saved. See [Privacy and security](#privacy-and-security).
 
 ### Models and providers

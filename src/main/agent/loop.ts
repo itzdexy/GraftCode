@@ -9,6 +9,7 @@ import { ProviderError, isAbortError } from '../providers/errors';
 import { streamWithRetry, type RetryPolicy } from '../providers/retry';
 import type { FinishReason, LLMProvider, RequestPrivacy, StreamRequest } from '../providers/types';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
+import { classifyCommand } from '../permissions/commandRisk';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
@@ -246,6 +247,17 @@ const FINISH_NOTICES: Partial<Record<FinishReason, { level: 'warning' | 'error';
   context_window: { level: 'warning', text: 'The conversation filled the model\'s context window. Use /compact or start a new session.' }
 };
 
+/** Tools that only look around; a Taproot turn that used nothing else has nothing to verify. */
+const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
+
+function changesSomething(call: ToolUseBlock): boolean {
+  if (call.name === 'Shell') {
+    const command = (call.input as { command?: unknown } | null)?.command;
+    return typeof command !== 'string' || classifyCommand(command) !== 'read-only';
+  }
+  return !LOOKING_TOOLS.has(call.name);
+}
+
 /**
  * Runs one user turn: stream a response, execute its tool calls, feed the
  * results back, and repeat until the model stops calling tools. Never
@@ -259,6 +271,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
   let finalText = '';
   let reviewed = false;
   let todoNudges = 0;
+  // Taproot verifies only real work: this turn changed something or planned with TodoWrite.
+  let changed = false;
+  let planned = false;
   let repeatStrikes = 0;
   const recent: string[] = [];
   const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText });
@@ -375,8 +390,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
           continue;
         }
       }
-      // Taproot keeps going while its own plan has open tasks (a few nudges at most), then verifies once.
-      const open = config.taproot && finish === 'stop' ? host.todos().filter((t) => t.status !== 'completed') : [];
+      // Taproot keeps going while the plan it made this turn has open tasks (a few nudges at most), then
+      // verifies once. A question or a look around (even with read-only commands) just gets its answer.
+      const open = config.taproot && planned && finish === 'stop' ? host.todos().filter((t) => t.status !== 'completed') : [];
       if (open.length > 0 && todoNudges < MAX_TODO_NUDGES) {
         todoNudges++;
         const text = taprootOpenTasks(open.map((t) => t.content));
@@ -385,7 +401,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         history.push({ role: 'user', content: [{ type: 'text', text }] });
         continue;
       }
-      if (config.taproot && !reviewed && toolCalls > 0 && finish === 'stop') {
+      if (config.taproot && !reviewed && (changed || planned) && finish === 'stop') {
         reviewed = true;
         const stored = host.append('user', [{ type: 'text', text: TAPROOT_REVIEW }], { turnId: config.turnId, kind: 'reminder' });
         host.emit({ type: 'message', message: stored });
@@ -395,6 +411,8 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       return done('completed');
     }
 
+    if (calls.some(changesSomething)) changed = true;
+    if (calls.some((c) => c.name === 'TodoWrite')) planned = true;
     const signature = JSON.stringify(calls.map((c) => [c.name, c.input]));
     recent.push(signature);
     if (recent.length > 3) recent.shift();

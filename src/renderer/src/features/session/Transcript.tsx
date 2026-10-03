@@ -18,6 +18,7 @@ import {
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
 import { EditsCard } from './EditsCard';
+import { FilesCard } from './FilesCard';
 import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
 import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
@@ -144,6 +145,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         const actions =
           item.endOfTurn && variant === 'chat' && message
             ? {
+                incognito: summary.incognito,
                 feedback: message.meta.feedback ?? 0,
                 onFeedback: (value: -1 | 0 | 1) => sendFeedback(summary.id, message.id, value),
                 onRegenerate: isLast && !view.turnActive ? onRegenerate : null
@@ -159,6 +161,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <ActivityGroup item={item} />;
       case 'edits':
         return <EditsCard files={item.files} />;
+      case 'files':
+        return <FilesCard sessionId={summary.id} files={item.files} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':

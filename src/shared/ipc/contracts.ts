@@ -67,6 +67,17 @@ export const SearchStatusSchema = z.object({
 });
 export type SearchStatus = z.infer<typeof SearchStatusSchema>;
 
+export const SpeechModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  voices: z.array(z.string()),
+  /** USD per 1,000 characters of text, when known. */
+  pricePer1kChars: z.number().nullable(),
+  /** Also bills the audio it makes. */
+  billsOutput: z.boolean()
+});
+export type SpeechModel = z.infer<typeof SpeechModelSchema>;
+
 export const ProviderModelsSchema = z.object({
   providerId: z.string(),
   models: z.array(ModelInfoSchema),
@@ -106,6 +117,13 @@ export const contracts = {
   'search:status': channel(Void, SearchStatusSchema),
   'search:setKey': channel(z.object({ engine: z.enum(['brave', 'tavily']), key: z.string().trim().min(8).max(300).nullable() }), SearchStatusSchema),
   'search:test': channel(Void, z.object({ engine: z.enum(SEARCH_ENGINE_IDS), count: z.number().int(), first: z.object({ title: z.string(), url: z.string() }).nullable() })),
+  /** Natural voices: whether an OpenRouter key is set up, and the speech models it offers. */
+  'voice:models': channel(Void, z.object({ available: z.boolean(), models: z.array(SpeechModelSchema) })),
+  /** MP3 audio (base64) for a piece of a reply; the OpenRouter key stays in the main process. */
+  'voice:speak': channel(
+    z.object({ text: z.string().min(1).max(5000), model: z.string().min(1).max(200), voice: z.string().min(1).max(200), speed: z.number().min(0.5).max(2) }),
+    z.object({ audio: z.string(), mime: z.string() })
+  ),
   'web:favicon': channel(z.object({ host: z.string().min(3).max(253) }), z.string().nullable()),
   'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
   'power:keepAwakeList': channel(Void, z.array(z.string())),
@@ -215,6 +233,10 @@ export const contracts = {
   'sessions:delete': channel(z.object({ id: IdSchema, force: z.boolean() }), Ok),
   'sessions:duplicate': channel(z.object({ id: IdSchema }), SessionSummarySchema),
   'sessions:export': channel(z.object({ id: IdSchema, format: z.enum(['markdown', 'json']) }), z.string().nullable()),
+  /** Files a chat made: save a copy (null when cancelled), open it in its viewer, or show it in its folder. */
+  'chatFiles:save': channel(z.object({ sessionId: IdSchema, name: z.string().min(1).max(200) }), z.string().nullable()),
+  'chatFiles:open': channel(z.object({ sessionId: IdSchema, name: z.string().min(1).max(200) }), Void),
+  'chatFiles:reveal': channel(z.object({ sessionId: IdSchema, name: z.string().min(1).max(200) }), Void),
   'sessions:retry': channel(z.object({ id: IdSchema }), Ok),
   'sessions:regenerate': channel(z.object({ id: IdSchema }), Ok),
   'sessions:compact': channel(z.object({ id: IdSchema, instructions: z.string().max(4000) }), Ok),

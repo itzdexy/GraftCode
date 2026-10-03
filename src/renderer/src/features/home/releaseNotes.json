@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.5.0",
+    "date": "2026-10-02",
+    "items": [
+      "Chats can make files for you to download (documents, data, code, pictures) and run JavaScript in a locked-down sandbox for calculations and data work.",
+      "Chats know the time: each message carries when it was sent, so “what time is it?” gets a real answer.",
+      "Read aloud can pause, resume and stop, and sounds far more natural with OpenRouter’s voices (Kokoro by default, about $0.0006 per 1,000 characters). Pick the voice and speed in Settings → Voice; incognito chats always use your computer’s voice.",
+      "Taproot answers questions and quick requests directly instead of planning and reviewing work that never happened."
+    ]
+  },
+  {
     "version": "0.4.0",
     "date": "2026-10-02",
     "items": [

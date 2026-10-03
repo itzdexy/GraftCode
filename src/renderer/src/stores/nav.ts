@@ -7,6 +7,7 @@ export type SettingsSection =
   | 'permissions'
   | 'privacy'
   | 'search'
+  | 'voice'
   | 'mcp'
   | 'hooks'
   | 'memory'

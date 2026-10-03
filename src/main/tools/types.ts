@@ -6,6 +6,8 @@ import type { FileStateTracker } from './fileState';
 import type { ShellManager } from './shell/shellManager';
 import type { SearchEngineId, SearchResult } from './web/search';
 import type { ComputerControl } from '../computer/desktop';
+import type { ChatFile } from '../chat/chatFiles';
+import type { CodeRun } from '../chat/codeSandbox';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 export type SubagentType = 'general' | 'explore';
@@ -50,6 +52,10 @@ export interface ToolContext extends DescribeContext {
   computer: ComputerControl | null;
   /** Searches the web with the engine chosen in Settings → Web search. */
   search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
+  /** Saves files the user can download from the chat; null outside chats and in incognito chats. */
+  chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
+  /** Runs JavaScript in an isolated page with no network or file access; null outside chats. */
+  runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
 }
 
 export interface ToolResult {

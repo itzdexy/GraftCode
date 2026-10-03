@@ -39,6 +39,8 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     notesForPaths: () => null,
     search: () => Promise.reject(new Error('No web search engine in this test.')),
     computer: null,
+    chatFiles: null,
+    runCode: null,
     todoList,
     progressChunks,
     ...overrides

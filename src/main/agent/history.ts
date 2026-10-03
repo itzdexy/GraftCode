@@ -44,6 +44,34 @@ export function toLlmHistory(messages: StoredMessage[]): LlmMessage[] {
   return mergeAdjacent(out);
 }
 
+/** When a message was sent, in this computer's time zone: "Fri, Oct 2, 2026, 3:04 PM EDT (America/New_York)". */
+export function sentStamp(ms: number, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  const when = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    timeZone
+  }).format(new Date(ms));
+  return `[Sent ${when} (${timeZone})]`;
+}
+
+/**
+ * Starts each message the user typed with the time it was sent, so a chat
+ * can answer "what time is it" without a tool. The stamp comes from the
+ * stored time, so replays (and provider caches) stay stable.
+ */
+export function withSentTimes(messages: StoredMessage[], timeZone?: string): StoredMessage[] {
+  return messages.map((m) =>
+    m.role === 'user' && (m.meta.kind === undefined || m.meta.kind === 'normal') && !m.content.some((b) => b.type === 'tool_result')
+      ? { ...m, content: [{ type: 'text', text: sentStamp(m.createdAt, timeZone) }, ...m.content] }
+      : m
+  );
+}
+
 /** Joins consecutive same-role messages (some providers reject them). */
 export function mergeAdjacent(messages: LlmMessage[]): LlmMessage[] {
   const out: LlmMessage[] = [];

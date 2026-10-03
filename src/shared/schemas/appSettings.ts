@@ -106,6 +106,16 @@ export const AppSettingsSchema = z.object({
     /** A SearXNG instance with its JSON API on. */
     searxngUrl: z.url({ protocol: /^https?$/ }).max(500).nullable()
   }),
+  /** Read aloud: a natural voice from OpenRouter's speech models, or this computer's own voices. */
+  voice: z.object({
+    engine: z.enum(['natural', 'system']),
+    /** OpenRouter speech model and one of its voices. */
+    model: z.string().min(1).max(200),
+    voice: z.string().min(1).max(200),
+    /** One of this computer's voices by name; null picks the best one available. */
+    systemVoice: z.string().max(200).nullable(),
+    speed: z.number().min(0.5).max(2)
+  }),
   shortcuts: z.record(ShortcutIdSchema, z.string().max(40)),
   ui: z.object({
     sidebarWidth: z.number().int().min(200).max(480),
@@ -127,6 +137,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },
   search: { engine: 'auto', searxngUrl: null },
+  voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
 };
@@ -146,6 +157,7 @@ export const AppSettingsPatchSchema = z.object({
   privacy: AppSettingsSchema.shape.privacy.partial().optional(),
   updates: AppSettingsSchema.shape.updates.partial().optional(),
   search: AppSettingsSchema.shape.search.partial().optional(),
+  voice: AppSettingsSchema.shape.voice.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()
 });
