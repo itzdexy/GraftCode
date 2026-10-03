@@ -338,6 +338,82 @@
   }
 }
 
+/*
+ * Taproot, the deepest effort, grows a root: the slider's fill turns into a
+ * leaf-to-gold gradient with a slow sheen, the thumb breathes, a small root
+ * draws itself under the track, and the composer's label shimmers. With
+ * reduced motion everything shows in its final, still state.
+ */
+@keyframes graft-taproot-sheen {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
+  }
+}
+@keyframes graft-taproot-breathe {
+  0%,
+  100% {
+    box-shadow:
+      var(--g-shadow-composer),
+      0 0 0 0 color-mix(in srgb, var(--g-accent) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      var(--g-shadow-composer),
+      0 0 0 5px color-mix(in srgb, var(--g-accent) 26%, transparent);
+  }
+}
+@keyframes graft-root-grow {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes graft-root-settle {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.taproot-fill {
+  background: linear-gradient(90deg, var(--g-accent), color-mix(in oklch, var(--g-accent) 45%, var(--g-amber)), var(--g-amber), var(--g-accent));
+  background-size: 200% 100%;
+  animation: graft-taproot-sheen 2.6s linear infinite;
+}
+.taproot-text {
+  background: linear-gradient(90deg, var(--g-accent), var(--g-amber), var(--g-accent));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: graft-taproot-sheen 3.2s linear infinite;
+}
+.taproot-thumb {
+  animation: graft-taproot-breathe 1.9s ease-in-out infinite;
+}
+.taproot-root path {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: graft-root-grow 820ms var(--g-ease-out) forwards;
+}
+.taproot-root path:nth-of-type(2) {
+  animation-delay: 260ms;
+}
+.taproot-root path:nth-of-type(3) {
+  animation-delay: 380ms;
+}
+.taproot-root path:nth-of-type(4) {
+  animation-delay: 520ms;
+}
+.taproot-note {
+  animation: graft-root-settle 420ms var(--g-ease-out) 300ms both;
+}
+
 /* The Browser panel's loading bar: an accent stripe running along a tinted track (just the track with reduced motion). */
 @keyframes graft-loadbar {
   from {
