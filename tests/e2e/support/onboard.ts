@@ -33,7 +33,7 @@ export async function stubFolderPicker(graft: LaunchedApp, folder: string): Prom
 }
 
 /** Completes onboarding against the mock provider, optionally choosing a first project folder. */
-export async function completeOnboarding(graft: LaunchedApp, provider: MockProvider, options: { name?: string; project?: string } = {}): Promise<void> {
+export async function completeOnboarding(graft: LaunchedApp, provider: MockProvider, options: { name?: string; project?: string; model?: RegExp } = {}): Promise<void> {
   const w = graft.window;
   await expect(w.getByRole('heading', { name: 'What should we call you?' })).toBeVisible();
   await w.getByLabel('Your name').fill(options.name ?? 'Robin');
@@ -45,7 +45,7 @@ export async function completeOnboarding(graft: LaunchedApp, provider: MockProvi
   await w.getByRole('button', { name: 'Verify' }).click();
   await expect(w.getByText(/Connected\./)).toBeVisible();
   await w.getByRole('button', { name: 'Continue' }).click();
-  await expect(w.getByRole('option', { name: /Graft Test Large/ })).toBeVisible();
+  await expect(w.getByRole('option', { name: options.model ?? /Graft Test Large/ })).toBeVisible();
   if (options.project) {
     await stubFolderPicker(graft, options.project);
     await w.getByRole('button', { name: 'Choose a folder' }).click();

@@ -29,8 +29,6 @@ export interface RecordedRequest {
 }
 
 export const MOCK_MODELS = ['graft-test-large', 'graft-test-mini'] as const;
-/** Model ids containing a small-tier word are used for titles; they get a fixed reply. */
-const TITLE_MODEL = 'graft-test-mini';
 
 function chunk(delta: Record<string, unknown>, finish: string | null = null): string {
   return `data: ${JSON.stringify({ id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: 'mock', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -46,17 +44,20 @@ export class MockProvider {
   readonly requests: RecordedRequest[] = [];
   private readonly turns: ScriptedTurn[] = [];
   private readonly apiKey: string | null;
+  /** The main model, then a small-tier one: Graft uses that for titles, and it gets a fixed reply. */
+  private readonly models: readonly [string, string];
   private server: http.Server | null = null;
   private origin = '';
   /** Resolves whenever a held stream is closed by the client. */
   private heldClosed: Array<() => void> = [];
 
-  private constructor(apiKey: string | null) {
+  private constructor(apiKey: string | null, models: readonly [string, string]) {
     this.apiKey = apiKey;
+    this.models = models;
   }
 
-  static async start(options: { apiKey?: string } = {}): Promise<MockProvider> {
-    const mock = new MockProvider(options.apiKey ?? null);
+  static async start(options: { apiKey?: string; models?: readonly [string, string] } = {}): Promise<MockProvider> {
+    const mock = new MockProvider(options.apiKey ?? null, options.models ?? MOCK_MODELS);
     await mock.listen();
     return mock;
   }
@@ -65,6 +66,9 @@ export class MockProvider {
   get url(): string {
     return `${this.origin}/v1`;
   }
+
+  /** What the title model answers (session titles). */
+  titleText = 'Scripted title';
 
   /** Queues assistant turns; each chat request (except title requests) consumes one. */
   script(...turns: ScriptedTurn[]): void {
@@ -77,7 +81,7 @@ export class MockProvider {
 
   /** Chat requests made with the main (non-title) model. */
   chatRequests(): RecordedRequest[] {
-    return this.requests.filter((r) => r.path.endsWith('/chat/completions') && (r.body as { model?: string }).model !== TITLE_MODEL);
+    return this.requests.filter((r) => r.path.endsWith('/chat/completions') && (r.body as { model?: string }).model !== this.models[1]);
   }
 
   waitForHeldStreamClosed(): Promise<void> {
@@ -126,12 +130,12 @@ export class MockProvider {
     }
     if (req.method === 'GET' && path === '/v1/models') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ object: 'list', data: MOCK_MODELS.map((id, i) => ({ id, object: 'model', created: 1_780_000_000 - i, owned_by: 'e2e' })) }));
+      res.end(JSON.stringify({ object: 'list', data: this.models.map((id, i) => ({ id, object: 'model', created: 1_780_000_000 - i, owned_by: 'e2e' })) }));
       return;
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') {
       const model = (body as { model?: string } | null)?.model;
-      const turn: ScriptedTurn = model === TITLE_MODEL ? { text: 'Scripted title' } : (this.turns.shift() ?? { text: 'Done.' });
+      const turn: ScriptedTurn = model === this.models[1] ? { text: this.titleText } : (this.turns.shift() ?? { text: 'Done.' });
       await this.stream(res, turn);
       return;
     }
