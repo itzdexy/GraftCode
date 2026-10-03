@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { engineProblem, probeEngine, type Runner } from '../../src/main/sandbox/engine';
 import {
@@ -17,6 +18,7 @@ import {
 import { decide, type PermissionEnv } from '../../src/main/permissions/engine';
 import { parseRule } from '../../src/main/permissions/rules';
 import { buildCodeSystemPrompt, type CodePromptContext } from '../../src/main/agent/systemPrompt';
+import { readContainerCwd } from '../../src/main/tools/shell/shellManager';
 import { makeTempDir, writeFile } from '../support/tmp';
 
 const plan = (overrides: Partial<RunPlan> = {}): RunPlan => ({
@@ -215,5 +217,25 @@ describe('sandbox system prompt', () => {
     // Port forwarding needs the network.
     expect(boxed).not.toContain('Ports 5173 are forwarded');
     expect(buildCodeSystemPrompt({ ...ctx, sandbox: { image: 'node:22-bookworm', network: true, ports: [5173] } })).toContain('Ports 5173 are forwarded');
+  });
+});
+
+describe('reading back the folder a sandboxed command left', () => {
+  const dir = makeTempDir();
+
+  it('takes one absolute container path from a small regular file', () => {
+    const file = writeFile(dir, 'a.cwd', '/workspace/src\n');
+    expect(readContainerCwd(file)).toBe('/workspace/src');
+    expect(readContainerCwd(writeFile(dir, 'b.cwd', 'relative/path'))).toBeNull();
+    expect(readContainerCwd(writeFile(dir, 'c.cwd', '/one\n/two'))).toBeNull();
+    expect(readContainerCwd(writeFile(dir, 'd.cwd', `/${'x'.repeat(5000)}`))).toBeNull();
+    expect(readContainerCwd(`${dir}/missing.cwd`)).toBeNull();
+  });
+
+  it.skipIf(process.platform === 'win32')('never follows a link the container planted', () => {
+    const secret = writeFile(dir, 'outside.txt', '/looks/like/a/path\n');
+    const link = `${dir}/planted.cwd`;
+    fs.symlinkSync(secret, link);
+    expect(readContainerCwd(link)).toBeNull();
   });
 });

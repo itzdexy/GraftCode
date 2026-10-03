@@ -204,6 +204,37 @@ export async function killProcessTree(
   await taskkill([pid], true);
 }
 
+/**
+ * The folder a sandboxed command left, from the file it wrote in the shared
+ * state folder. That folder is writable from the container, so the file may be
+ * a planted link to a file on this computer: links are never followed, and only
+ * a small regular file holding one absolute container path counts.
+ */
+export function readContainerCwd(file: string): string | null {
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  let fd: number;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ELOOP') return null;
+    throw error;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 4096) return null;
+    const text = fs.readFileSync(fd, 'utf8').trim();
+    return /^\/[^\r\n\0]*$/.test(text) ? text : null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function safeName(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
 }
@@ -369,14 +400,9 @@ export class ShellManager extends EventEmitter {
       },
       capture: () => {
         if (!run.save) return;
-        let raw = '';
-        try {
-          raw = fs.readFileSync(cwdFile, 'utf8').trim();
-        } catch (error) {
-          // The command exited the shell before state was written (e.g. `exit`); keep the previous folder.
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        }
-        if (!raw.startsWith('/')) return;
+        // Null when the command exited the shell before writing it (e.g. `exit`): keep the previous folder.
+        const raw = readContainerCwd(cwdFile);
+        if (!raw) return;
         state.boxCwd = raw;
         const host = toHostPath(raw, target.workspace, this.platform);
         if (host && fs.existsSync(host)) state.cwd = host;
