@@ -25,11 +25,33 @@ function firstLine(text: string): string {
   return text.trim().split('\n')[0]?.replace(/^#+\s*/, '').replace(/\*\*/g, '') ?? '';
 }
 
+/** One line of narration with its `code` spans set like Markdown's inline code. */
+function InlineCode({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/`([^`]+)`/).map((part, i) =>
+        i % 2 === 1 ? (
+          <code key={i} className="rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em] text-code-fg">
+            {part}
+          </code>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+}
+
 function NarrationStep({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const line = firstLine(text);
   const more = text.trim() !== line;
-  if (!more) return <p className="selectable px-4 py-2 text-md text-fg-secondary">{line}</p>;
+  if (!more)
+    return (
+      <p className="selectable px-4 py-2 text-md text-fg-secondary">
+        <InlineCode text={line} />
+      </p>
+    );
   return (
     <div className="flex flex-col">
       <button
@@ -38,7 +60,9 @@ function NarrationStep({ text }: { text: string }) {
         onClick={() => setOpen(!open)}
         className="flex min-h-24 items-center gap-6 rounded-sm px-4 text-left text-md text-fg-secondary transition-ui hover:text-fg"
       >
-        <span className="min-w-0 flex-1 truncate">{line}</span>
+        <span className="min-w-0 flex-1 truncate">
+          <InlineCode text={line} />
+        </span>
         <ChevronRight className={cn('size-14 shrink-0 text-icon-muted transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
       {open ? <Markdown text={text} variant="code" className="px-4 pt-2 pb-6 text-fg-secondary" /> : null}

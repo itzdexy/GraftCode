@@ -46,6 +46,8 @@ export default defineConfig({
     },
     plugins: [react(), tailwindcss(), devCsp()],
     build: {
+      // Smaller to load and parse at startup; stack traces in logs still name the files.
+      minify: 'esbuild',
       rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } }
     }
   }
