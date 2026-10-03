@@ -144,6 +144,7 @@ export class SessionManager {
       graftHome: d.paths.graftHome,
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
+      sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),
       trust: (root) => {
         const project = d.projects.findByPath(root) ?? d.projects.upsert(root);
         d.projects.update(project.id, { trusted: true });

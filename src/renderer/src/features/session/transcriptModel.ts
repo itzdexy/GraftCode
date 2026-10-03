@@ -1,4 +1,4 @@
-import type { ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
+import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 
 /**
@@ -27,6 +27,7 @@ export type TranscriptItem =
   | { kind: 'compaction'; key: string; text: string }
   | { kind: 'command-output'; key: string; text: string }
   | { kind: 'shell'; key: string; shell: UserShell }
+  | { kind: 'check'; key: string; check: CheckReport }
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
@@ -112,6 +113,11 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
     if (kind === 'shell') {
       flush();
       if (message.meta.shell) items.push({ kind: 'shell', key: message.id, shell: message.meta.shell });
+      continue;
+    }
+    if (kind === 'check') {
+      flush();
+      if (message.meta.check) items.push({ kind: 'check', key: message.id, check: message.meta.check });
       continue;
     }
 

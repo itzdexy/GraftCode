@@ -119,6 +119,18 @@ export const AppSettingsSchema = z.object({
     incognitoLocalOnly: z.boolean()
   }),
   updates: z.object({ enabled: z.boolean() }),
+  /** The container a project's commands run in when its sandbox is on. */
+  sandbox: z.object({
+    /** An image reference; never starting with "-" so it can't pass for a command-line flag. */
+    image: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9][a-z0-9._/:@-]{0,299}$/i, 'Use an image name like node:22-bookworm or ghcr.io/owner/image:tag'),
+    /** Internet access for installs and downloads; off cuts the container off from every network. */
+    network: z.boolean(),
+    memoryMb: z.number().int().min(512).max(131_072),
+    cpus: z.number().min(0.5).max(128)
+  }),
   search: z.object({
     /** Engine for the WebSearch tool; "auto" picks the first one that is set up. */
     engine: SearchEngineSettingSchema,
@@ -161,6 +173,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },
+  sandbox: { image: 'node:22-bookworm', network: true, memoryMb: 4096, cpus: 2 },
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   personalization: { about: '', instructions: '', style: 'default' },
@@ -182,6 +195,7 @@ export const AppSettingsPatchSchema = z.object({
   security: AppSettingsSchema.shape.security.partial().optional(),
   privacy: AppSettingsSchema.shape.privacy.partial().optional(),
   updates: AppSettingsSchema.shape.updates.partial().optional(),
+  sandbox: AppSettingsSchema.shape.sandbox.partial().optional(),
   search: AppSettingsSchema.shape.search.partial().optional(),
   voice: AppSettingsSchema.shape.voice.partial().optional(),
   personalization: AppSettingsSchema.shape.personalization.partial().optional(),

@@ -27,6 +27,8 @@ import {
 import { createPullRequest } from '../git/pr';
 import { listBranches, gitInfo } from '../git/repo';
 import { generateCommitMessage, titleModel } from '../agent/title';
+import { suggestChecks } from '../agent/checks';
+import { engineProblem } from '../sandbox/engine';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { listDirectory, readPreview } from '../files/fileTree';
@@ -697,6 +699,38 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'customize:saveHooks': async ({ scope, projectPath, hooks }) => {
       await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => ({ ...settings, hooks }));
+      return { ok: true as const };
+    },
+    'sandbox:status': async ({ refresh }) => {
+      const s = await ctx.services();
+      const probe = await s.sandbox.probe(refresh);
+      if (probe.status !== 'ready') return { engine: null, problem: engineProblem(probe, process.platform), imageReady: null };
+      const { kind, version, cpus, rootless } = probe.engine;
+      return { engine: { kind, version, cpus, rootless }, problem: null, imageReady: await s.sandbox.imageReady(s.settings.get().sandbox.image) };
+    },
+    'sandbox:pull': async () => {
+      const s = await ctx.services();
+      await s.sandbox.pullImage(s.settings.get().sandbox.image, new AbortController().signal);
+      return { ok: true as const };
+    },
+    'sandbox:freeSpace': async () => ({ removed: await (await ctx.services()).sandbox.removeVolumes() }),
+    'sandbox:ports': async ({ sessionId }) => {
+      const box = (await ctx.services()).sandbox.box(sessionId);
+      return box ? Object.entries(box.ports).map(([port, hostPort]) => ({ port: Number(port), hostPort })) : [];
+    },
+    'checks:get': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const files = (['project', 'local'] as const).map((scope) => {
+        const loaded = s.settingsFiles.load(scope, projectPath);
+        return { scope, path: loaded.path, error: loaded.error, checks: loaded.settings.checks ?? null };
+      });
+      return { files, suggestions: suggestChecks(projectPath), trusted: s.projects.findByPath(projectPath)?.trusted ?? false };
+    },
+    'checks:save': async ({ scope, projectPath, checks }) => {
+      await (await ctx.services()).settingsFiles.update(scope, projectPath, (settings) => {
+        const { checks: _old, ...rest } = settings;
+        return checks ? { ...rest, checks } : rest;
+      });
       return { ok: true as const };
     },
     'mcp:list': async ({ projectPath }) => {

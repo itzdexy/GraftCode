@@ -39,9 +39,21 @@ function installDirs(platform: Platform, env: NodeJS.ProcessEnv): string[] {
           path.join(home, '.cargo', 'bin'),
           env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : '',
           env.ProgramFiles ? path.join(env.ProgramFiles, 'nodejs') : '',
-          env.APPDATA ? path.join(env.APPDATA, 'npm') : ''
+          env.APPDATA ? path.join(env.APPDATA, 'npm') : '',
+          // Container engines for the sandbox, when their installer didn't touch PATH.
+          env.ProgramFiles ? path.join(env.ProgramFiles, 'Docker', 'Docker', 'resources', 'bin') : '',
+          env.ProgramFiles ? path.join(env.ProgramFiles, 'RedHat', 'Podman') : ''
         ]
-      : [path.join(home, '.local', 'bin'), path.join(home, '.cargo', 'bin'), path.join(home, '.volta', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
+      : [
+          path.join(home, '.local', 'bin'),
+          path.join(home, '.cargo', 'bin'),
+          path.join(home, '.volta', 'bin'),
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+          // Apps opened from the Finder get a short PATH; Docker Desktop and Podman keep their CLIs here.
+          '/Applications/Docker.app/Contents/Resources/bin',
+          '/opt/podman/bin'
+        ];
   return dirs.filter((d) => d.length > 0);
 }
 

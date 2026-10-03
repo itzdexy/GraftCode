@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { GraftError } from '@shared/errors';
-import { git, runGit } from './git';
+import { fromGitPath, git, runGit } from './git';
 import { currentBranch } from './repo';
 
 export type StagedStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'T';
@@ -68,9 +68,25 @@ export function parseStatus(out: string): ChangedFile[] {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * git prints porcelain paths relative to the repository root, never the cwd
+ * (status.relativePaths does not apply to porcelain). Callers work in the
+ * session's folder, which is not always the repo root, so rebase the paths
+ * onto it: otherwise `path.join(workDir, file)` and `git add -- <file>`
+ * address the wrong file, and reverting one would discard another.
+ */
+async function relativeTo(workDir: string, files: ChangedFile[]): Promise<ChangedFile[]> {
+  const top = await runGit(['rev-parse', '--show-toplevel'], { cwd: workDir, allowFail: true });
+  if (top.code !== 0) return files;
+  const root = fromGitPath(top.stdout);
+  if (path.resolve(root) === path.resolve(workDir)) return files;
+  const rebase = (p: string): string => path.relative(workDir, path.join(root, p)).split(path.sep).join('/');
+  return files.map((f) => ({ ...f, path: rebase(f.path), origPath: f.origPath === null ? null : rebase(f.origPath) }));
+}
+
 export async function listChanges(workDir: string): Promise<ChangedFile[]> {
   const out = await git(['status', '--porcelain=v2', '-z', '--untracked-files=all'], { cwd: workDir });
-  return parseStatus(out);
+  return relativeTo(workDir, parseStatus(out));
 }
 
 /** Splits a unified diff for one file into its header and hunks. */

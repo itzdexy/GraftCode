@@ -6,6 +6,7 @@ export type SettingsSection =
   | 'providers'
   | 'models'
   | 'permissions'
+  | 'sandbox'
   | 'privacy'
   | 'search'
   | 'voice'

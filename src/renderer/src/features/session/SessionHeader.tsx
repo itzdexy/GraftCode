@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FileText, FolderOpen, History, Laptop, ListChecks, Shrink } from 'lucide-react';
+import { Box, ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FileText, FolderOpen, History, Laptop, ListChecks, Settings2, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuSwitchItem, MenuTrigger } from '../../components/Menu';
+import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
+import { setProjectSandbox } from '../../lib/sandbox';
 import { useShortcutLabel } from '../../lib/shortcuts';
+import { useApp } from '../../stores/app';
+import { useNav } from '../../stores/nav';
 import { usePower } from '../../stores/power';
 import { reportError, useToasts } from '../../stores/toasts';
 import { IncognitoBadge } from '../privacy/IncognitoBadge';
@@ -91,6 +95,44 @@ export function TitleMenu({ summary, size = 'md' }: { summary: SessionSummary; s
             setRenaming(true);
           }}
         />
+      </MenuContent>
+    </Menu>
+  );
+}
+
+/** Where the session's commands run: this computer, or the project's sandbox. Clicking switches it. */
+function EnvironmentMenu({ summary }: { summary: SessionSummary }) {
+  const project = useApp((s) => s.projects.find((p) => p.id === summary.projectId) ?? null);
+  const sandboxed = project?.settings.sandbox === true;
+  const where = sandboxed ? 'Commands run in a sandbox' : 'Commands run on this computer';
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={where}
+          title={where}
+          className="inline-flex size-24 shrink-0 items-center justify-center rounded-sm transition-ui hover:bg-hover data-[state=open]:bg-hover"
+        >
+          {sandboxed ? <Box className="size-16 text-accent" aria-hidden="true" /> : <Laptop className="size-16 text-icon" aria-hidden="true" />}
+        </button>
+      </MenuTrigger>
+      <MenuContent align="start" className="min-w-[260px]">
+        <MenuSwitchItem
+          icon={<Box className={cn('size-14', sandboxed && 'text-accent')} />}
+          checked={sandboxed}
+          disabled={!project}
+          onCheckedChange={(on) => {
+            if (project) setProjectSandbox(project, on).catch((e: unknown) => reportError("Couldn't change the sandbox", e));
+          }}
+          description={project ? 'For this project, from the next message' : 'Needs a project folder'}
+        >
+          Run commands in a sandbox
+        </MenuSwitchItem>
+        <MenuSeparator />
+        <MenuItem icon={<Settings2 className="size-14" />} onSelect={() => useNav.getState().go({ name: 'settings', section: 'sandbox' })}>
+          Sandbox settings…
+        </MenuItem>
       </MenuContent>
     </Menu>
   );
@@ -185,7 +227,7 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, o
         </>
       }
     >
-      <Laptop className="size-16 shrink-0 text-icon" aria-label="Runs on this computer" role="img" />
+      <EnvironmentMenu summary={summary} />
       <TitleMenu summary={summary} />
       {summary.projectName ? (
         <Badge className="h-20 max-w-[200px] truncate bg-control px-6 text-xs text-fg-secondary">

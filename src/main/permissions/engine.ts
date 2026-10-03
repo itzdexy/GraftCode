@@ -32,6 +32,8 @@ export interface PermissionEnv {
   bypassKeepsChecks?: boolean;
   /** Chats search and read the web without asking (deny and ask rules still apply). */
   allowNetwork?: boolean;
+  /** Commands run in the session's sandbox container, which reaches nothing outside the project folder. */
+  sandboxed?: boolean;
 }
 
 export interface Decision {
@@ -163,6 +165,9 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
       const risk = d.command !== undefined ? classifyCommand(d.command) : 'unknown';
       if (risk === 'read-only' && !outsideProject) return result('allow', 'Read-only command.');
       if (mode === 'bypass') return result('allow', 'Bypass mode.');
+      // In the sandbox a command reaches the project folder and nothing else, like an edit does. Paths
+      // outside the project name the container's own files there. Dangerous commands still asked above.
+      if (env.sandboxed && (mode === 'auto-edit' || mode === 'auto')) return result('allow', 'Runs in the sandbox, which only reaches the project folder.');
       if (mode === 'auto' && risk === 'low' && !outsideProject) return result('allow', 'Low-risk command allowed in Auto mode.');
       return result('ask', outsideProject ? 'The command refers to paths outside the project.' : 'Runs a command.');
     }

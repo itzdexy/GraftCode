@@ -10,7 +10,10 @@ import type { ContentBlock, LlmMessage, StoredMessage } from '@shared/schemas/me
  * Messages are never edited after they are sent: replay stays append-only.
  */
 export function toLlmHistory(messages: StoredMessage[]): LlmMessage[] {
-  const visible = messages.filter((m) => !m.meta.compacted && m.meta.kind !== 'notice' && m.meta.kind !== 'command-output');
+  // 'check' is a record of what the repository's own checks said. The agent gets
+  // the failure during the turn that caused it; replaying it forever would only
+  // spend context on output it has already acted on.
+  const visible = messages.filter((m) => !m.meta.compacted && m.meta.kind !== 'notice' && m.meta.kind !== 'command-output' && m.meta.kind !== 'check');
   const out: LlmMessage[] = [];
   for (let i = 0; i < visible.length; i++) {
     const message = visible[i]!;

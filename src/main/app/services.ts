@@ -22,6 +22,7 @@ import type { ToolRegistry } from '../tools/registry';
 import { runFile } from '../tools/run';
 import { detectShell, type ShellSpec } from '../tools/shell/detect';
 import { ShellManager } from '../tools/shell/shellManager';
+import { SandboxManager } from '../sandbox/sandbox';
 import { log } from './log';
 import type { GraftPaths } from './paths';
 
@@ -42,6 +43,8 @@ export interface Services {
   diffStats: DiffStatsCache;
   shells: ShellManager;
   shell: ShellSpec;
+  /** Containers that run sandboxed projects' commands. */
+  sandbox: SandboxManager;
   tools: ToolRegistry;
   settingsFiles: SettingsStore;
   rgPath: string;
@@ -159,6 +162,7 @@ export async function initServices(options: {
   const catalog = new ProviderCatalog(options.catalogFile ?? null, (message) => log.warn('providers', message));
   const providers = new ProvidersRepo(db);
   const registry = new ProviderRegistry(providers, keys, catalog);
+  const sandbox = new SandboxManager({ log: (level, message, fields) => log[level]('sandbox', message, fields) });
   const services: Services = {
     paths,
     db,
@@ -173,8 +177,9 @@ export async function initServices(options: {
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),
     chatFiles: new ChatFiles(paths.chatFiles),
     diffStats: new DiffStatsCache(),
-    shells: new ShellManager(shell, paths.shellLogs),
+    shells: new ShellManager(shell, paths.shellLogs, process.env, process.platform, sandbox),
     shell,
+    sandbox,
     tools: createBuiltinRegistry(),
     settingsFiles: new SettingsStore(paths.graftHome),
     rgPath,

@@ -7,6 +7,7 @@ import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import { PageLayout } from '../shell/PageLayout';
 import { AgentsSection } from './AgentsSection';
+import { ChecksSection } from './ChecksSection';
 import { CommandsSection } from './CommandsSection';
 import { HooksSection } from './HooksSection';
 import { McpSection } from './McpSection';
@@ -14,13 +15,14 @@ import { MemorySection } from './MemorySection';
 import { SELECT } from './shared';
 import { SkillsSection } from './SkillsSection';
 
-export type CustomizeTab = 'commands' | 'agents' | 'skills' | 'mcp' | 'hooks' | 'memory';
+export type CustomizeTab = 'commands' | 'agents' | 'skills' | 'mcp' | 'checks' | 'hooks' | 'memory';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'commands', label: 'Commands' },
   { id: 'agents', label: 'Agents' },
   { id: 'skills', label: 'Skills' },
   { id: 'mcp', label: 'Integrations' },
+  { id: 'checks', label: 'Checks' },
   { id: 'hooks', label: 'Hooks' },
   { id: 'memory', label: 'Memory' }
 ];
@@ -43,7 +45,7 @@ export function CustomizeView({ initialTab = 'commands' }: { initialTab?: Custom
   return (
     <PageLayout
       title="Customize"
-      description="Shape how Graft works: reusable prompts, specialist agents, skills, tools from MCP servers, hooks and standing instructions."
+      description="Shape how Graft works: reusable prompts, specialist agents, skills, tools from MCP servers, checks, hooks and standing instructions."
       actions={
         <label className="flex items-center gap-8 text-sm text-fg-muted">
           Project
@@ -72,10 +74,13 @@ export function CustomizeView({ initialTab = 'commands' }: { initialTab?: Custom
           </button>
         ))}
       </div>
-      {project && !project.trusted && (tab === 'mcp' || tab === 'hooks') ? (
+      {project && !project.trusted && (tab === 'mcp' || tab === 'hooks' || tab === 'checks') ? (
         <div className="mb-16 flex items-center gap-10 rounded-md border border-border bg-warning-bg px-12 py-8 text-sm text-warning-fg">
           <ShieldAlert className="size-16 shrink-0" aria-hidden="true" />
-          <p className="flex-1">{project.name} isn’t trusted, so its own hooks, MCP servers and allow rules are off. Your “all projects” items still apply.</p>
+          <p className="flex-1">
+            {project.name} isn’t trusted, so its own checks, hooks, MCP servers and allow rules are off.
+            {tab === 'checks' ? '' : ' Your “all projects” items still apply.'}
+          </p>
           <Button size="sm" variant="secondary" onClick={trust}>
             Trust project
           </Button>
@@ -86,6 +91,7 @@ export function CustomizeView({ initialTab = 'commands' }: { initialTab?: Custom
         {tab === 'agents' ? <AgentsSection projectPath={projectPath} /> : null}
         {tab === 'skills' ? <SkillsSection projectPath={projectPath} /> : null}
         {tab === 'mcp' ? <McpSection projectPath={projectPath} /> : null}
+        {tab === 'checks' ? <ChecksSection projectPath={projectPath} /> : null}
         {tab === 'hooks' ? <HooksSection projectPath={projectPath} /> : null}
         {tab === 'memory' ? <MemorySection projectPath={projectPath} /> : null}
       </div>

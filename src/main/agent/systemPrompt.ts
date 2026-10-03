@@ -36,6 +36,8 @@ export interface CodePromptContext {
   /** Custom sub-agents from ~/.graft/agents and the project's .graft/agents. */
   agents?: Array<{ name: string; description: string }>;
   personalization?: Personalization | null;
+  /** Commands run in a sandbox container instead of on this computer. */
+  sandbox?: { image: string; network: boolean; ports: number[] } | null;
 }
 
 const MODE_LABEL: Record<PermissionMode, string> = {
@@ -75,6 +77,25 @@ function skillsSection(skills: SkillInfo[]): string {
     'Skills are instruction files for specialized tasks. When a task matches a skill, Read its SKILL.md first and follow it.',
     ...skills.map((s) => `- ${s.name}: ${s.description} (${s.path})`)
   ].join('\n');
+}
+
+function sandboxSection(ctx: CodePromptContext): string {
+  const box = ctx.sandbox;
+  if (!box) return '';
+  const sep = ctx.platform === 'win32' ? '\\' : '/';
+  return lines(
+    '# Sandbox',
+    `Shell commands run in an isolated Linux container (image ${box.image}), not on the user's computer. The project folder ${ctx.projectRoot} is mounted in it at /workspace, and the shell starts there: /workspace/src/app.ts in a command is ${ctx.projectRoot}${sep}src${sep}app.ts for the file tools, which keep working on the computer's own paths.`,
+    "- Write Linux shell commands. Nothing outside the project exists in the container: not the user's home folder, credentials, SSH keys, git identity or environment variables.",
+    "- .git and .graft are read-only there. Use git to inspect (status, diff, log), but don't commit, stash or switch branches in the sandbox; when the work should be committed, say so and the user commits from the Changes panel.",
+    '- node_modules in the sandbox is its own copy, separate from the one on the computer: install dependencies there before running the project.',
+    box.network
+      ? '- The container has internet access, so installs and downloads work.'
+      : '- The container has no network at all: installs and downloads fail. Work with what is installed, and say what needs the network instead of retrying.',
+    box.network && box.ports.length > 0
+      ? `- To preview a server, bind it to 0.0.0.0 (for example npm run dev -- --host 0.0.0.0). Ports ${box.ports.join(', ')} are forwarded, and the Browser tool reaches them at http://localhost:<port>.`
+      : null
+  );
 }
 
 function agentsSection(agents: Array<{ name: string; description: string }> | undefined): string {
@@ -133,7 +154,9 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
     `- Model: ${ctx.model.label} (${ctx.model.id}) via ${ctx.model.provider}`,
     `- Working directory: ${ctx.cwd}`,
     ctx.projectRoot !== ctx.cwd ? `- Project root: ${ctx.projectRoot}` : null,
-    `- Operating system: ${platformName(ctx.platform)}; the Shell tool runs ${ctx.shellLabel}`,
+    ctx.sandbox
+      ? `- Operating system: ${platformName(ctx.platform)}; the Shell tool runs bash in a Linux sandbox (see Sandbox below)`
+      : `- Operating system: ${platformName(ctx.platform)}; the Shell tool runs ${ctx.shellLabel}`,
     `- Git: ${ctx.git.isRepo ? `repository${ctx.git.branch ? ` on branch ${ctx.git.branch}` : ''}` : 'not a git repository'}`,
     `- Date: ${ctx.date}`,
     `- Permission mode at session start: ${MODE_LABEL[ctx.mode]}. Mode changes arrive later as notes in the conversation.`,
@@ -196,6 +219,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
       '# Plan mode',
       'In Plan mode you may only read and research. When you have a concrete plan (the files to change, the approach, how you will verify it), present it with ExitPlanMode. Start changing things only after the user approves.'
     ),
+    sandboxSection(ctx),
     notesSection(ctx.memory),
     skillsSection(ctx.skills),
     agentsSection(ctx.agents),

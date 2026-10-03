@@ -7,6 +7,7 @@ import path from 'node:path';
 import type { ShellSpec } from './detect';
 import { OutputBuffer, stripAnsi } from './outputBuffer';
 import { runFile } from '../run';
+import { execArgs, SANDBOX_WRAPPER, toContainerPath, toHostPath, type SandboxManager, type SandboxTarget } from '../../sandbox/sandbox';
 
 export interface ShellRunOptions {
   cwd: string;
@@ -43,15 +44,33 @@ interface SessionShellState {
   cwd: string;
   /** Variables set/changed by earlier commands (null = unset). */
   env: Map<string, string | null>;
+  /** In the sandbox: the folder inside the container, which may have no counterpart here (e.g. /tmp). */
+  boxCwd?: string;
 }
 
 interface Background extends BackgroundShellInfo {
   child: ChildProcess;
-  pidFile: string;
   closed: Promise<void>;
   text: string;
   dropped: number;
   readOffset: number;
+  /** Stops the job and everything it started (inside the container for sandboxed jobs). */
+  halt: () => Promise<void>;
+}
+
+/** How one command is started, stopped, and read back. */
+interface Launch {
+  file: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  pidFile: string | null;
+  /** Files to delete once the command is over. */
+  files: string[];
+  /** Stops the command (and what it started) after `child` was spawned. */
+  stop: (child: ChildProcess) => Promise<void>;
+  /** Reads the folder (and on this computer, the variables) the command left behind. */
+  capture: () => void;
 }
 
 const MAX_BACKGROUND_TEXT = 1_000_000;
@@ -191,27 +210,30 @@ function safeName(value: string): string {
 
 /**
  * Runs agent shell commands with per-session persistent cwd and environment,
- * streamed output, timeouts, full logs on disk and background jobs.
+ * streamed output, timeouts, full logs on disk and background jobs. A session
+ * with a sandbox target runs them in its container instead (see sandbox.ts).
  */
 export class ShellManager extends EventEmitter {
   private readonly states = new Map<string, SessionShellState>();
   private readonly background = new Map<string, Background>();
   private readonly running = new Map<ChildProcess, string | null>();
+  private readonly targets = new Map<string, SandboxTarget>();
   private readonly msysTools: string | null;
 
   constructor(
     readonly shell: ShellSpec,
     private readonly logDir: string,
     private readonly baseEnv: NodeJS.ProcessEnv = process.env,
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    readonly sandbox: SandboxManager | null = null
   ) {
     super();
     this.msysTools = platform === 'win32' && shell.kind === 'bash' ? msysToolsDir(shell.path) : null;
   }
 
   /** Kills a child and everything it started; failures are reported as error-log events. */
-  private stop(child: ChildProcess, pidFile: string | null): void {
-    killProcessTree(child, { platform: this.platform, msysTools: this.msysTools, pidFile }).catch((error: unknown) => {
+  private stop(child: ChildProcess, pidFile: string | null): Promise<void> {
+    return killProcessTree(child, { platform: this.platform, msysTools: this.msysTools, pidFile }).catch((error: unknown) => {
       this.emit('error-log', `Failed to stop process ${String(child.pid)}: ${(error as Error).message}`);
     });
   }
@@ -224,6 +246,27 @@ export class ShellManager extends EventEmitter {
 
   resetSession(sessionId: string, cwd: string): void {
     this.states.set(sessionId, { cwd, env: new Map() });
+  }
+
+  /**
+   * Runs a session's commands in a sandbox container (a target) or on this
+   * computer (null). Switching between the two starts the shell over, since they
+   * keep separate folders and variables. Turning the sandbox off removes the
+   * container; changed settings get a fresh one with the next command.
+   */
+  async setSandbox(sessionId: string, target: SandboxTarget | null): Promise<void> {
+    const next = target && this.sandbox ? target : null;
+    const current = this.targets.get(sessionId) ?? null;
+    if (JSON.stringify(current) === JSON.stringify(next)) return;
+    if (next) this.targets.set(sessionId, next);
+    else this.targets.delete(sessionId);
+    if ((current === null) !== (next === null)) this.states.delete(sessionId);
+    if (!next) await this.sandbox?.remove(sessionId);
+  }
+
+  /** The sandbox a session's commands run in, or null when they run on this computer. */
+  sandboxFor(sessionId: string): SandboxTarget | null {
+    return this.targets.get(sessionId) ?? null;
   }
 
   private state(sessionId: string, fallbackCwd: string): SessionShellState {
@@ -275,36 +318,128 @@ export class ShellManager extends EventEmitter {
     };
   }
 
-  /** Runs one foreground command and resolves when it exits, times out or is interrupted. */
-  async run(sessionId: string, command: string, options: ShellRunOptions): Promise<ShellRunResult> {
-    const state = this.state(sessionId, options.cwd);
-    const id = `${Date.now()}-${randomUUID().slice(0, 6)}`;
-    const dir = path.join(this.logDir, safeName(sessionId));
-    await fs.promises.mkdir(dir, { recursive: true });
+  /** A command on this computer, through the user's shell. `save` keeps the folder and variables it leaves. */
+  private hostLaunch(state: SessionShellState, command: string, dir: string, id: string, save: boolean): Launch {
     const files = {
       cwd: path.join(dir, `${id}.cwd`),
       env: path.join(dir, `${id}.env`),
       script: path.join(dir, `${id}.ps1`),
       pid: path.join(dir, `${id}.pid`)
     };
-    const logPath = path.join(dir, `${id}.log`);
     const { file, args, extra } = this.invocation(command, state.cwd, files);
-    const launchEnv = this.launchEnv(state, extra);
+    const env = this.launchEnv(state, extra);
+    return {
+      file,
+      args,
+      env,
+      cwd: state.cwd,
+      pidFile: files.pid,
+      files: Object.values(files),
+      stop: (child) => this.stop(child, files.pid),
+      capture: () => {
+        if (save) this.captureState(state, files, env);
+      }
+    };
+  }
+
+  /** A command in the session's sandbox container, which is created (and its image downloaded) first when needed. */
+  private async sandboxLaunch(
+    sandbox: SandboxManager,
+    sessionId: string,
+    target: SandboxTarget,
+    state: SessionShellState,
+    command: string,
+    run: { dir: string; id: string; save: boolean; progress: (text: string) => void; signal: AbortSignal }
+  ): Promise<Launch> {
+    const stateDir = path.join(run.dir, 'sandbox');
+    const box = await sandbox.ensure(sessionId, target, stateDir, run.progress, run.signal);
+    const boxCwd = state.boxCwd ?? toContainerPath(state.cwd, target.workspace, this.platform);
+    const cwdFile = path.join(stateDir, `${run.id}.cwd`);
+    return {
+      file: box.engine.path,
+      args: execArgs(box.name, ['GRAFT_CMD', 'GRAFT_CWD', 'GRAFT_ID', 'GRAFT_SAVE'], SANDBOX_WRAPPER),
+      env: sandbox.cliEnv({ GRAFT_CMD: command, GRAFT_CWD: boxCwd, GRAFT_ID: run.id, GRAFT_SAVE: run.save ? '1' : '0' }),
+      cwd: fs.existsSync(state.cwd) ? state.cwd : os.homedir(),
+      pidFile: null,
+      files: [cwdFile, path.join(stateDir, `${run.id}.pid`)],
+      // Killing the CLI would leave the command running in the container: stop it there first.
+      stop: async (child) => {
+        await sandbox.kill(sessionId, run.id);
+        await this.stop(child, null);
+      },
+      capture: () => {
+        if (!run.save) return;
+        let raw = '';
+        try {
+          raw = fs.readFileSync(cwdFile, 'utf8').trim();
+        } catch (error) {
+          // The command exited the shell before state was written (e.g. `exit`); keep the previous folder.
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        if (!raw.startsWith('/')) return;
+        state.boxCwd = raw;
+        const host = toHostPath(raw, target.workspace, this.platform);
+        if (host && fs.existsSync(host)) state.cwd = host;
+      }
+    };
+  }
+
+  /** Where the session's shell is now, as a folder on this computer when it has one (e.g. not /tmp in the sandbox). */
+  private shownCwd(state: SessionShellState, target: SandboxTarget | undefined): string {
+    if (!target || !state.boxCwd) return state.cwd;
+    return toHostPath(state.boxCwd, target.workspace, this.platform) ?? state.boxCwd;
+  }
+
+  /** Runs one foreground command and resolves when it exits, times out or is interrupted. */
+  async run(sessionId: string, command: string, options: ShellRunOptions): Promise<ShellRunResult> {
+    const state = this.state(sessionId, options.cwd);
+    const id = `${Date.now()}-${randomUUID().slice(0, 6)}`;
+    const dir = path.join(this.logDir, safeName(sessionId));
+    await fs.promises.mkdir(dir, { recursive: true });
+    const logPath = path.join(dir, `${id}.log`);
+    const target = this.sandbox ? this.targets.get(sessionId) : undefined;
     const started = Date.now();
+    let launch: Launch;
+    try {
+      launch =
+        target && this.sandbox
+          ? await this.sandboxLaunch(this.sandbox, sessionId, target, state, command, {
+              dir,
+              id,
+              save: true,
+              progress: (text) => options.onOutput?.(text),
+              signal: options.signal
+            })
+          : this.hostLaunch(state, command, dir, id, true);
+    } catch (error) {
+      // The sandbox couldn't start (no engine, a failed download…): report it like a command that failed.
+      const message = `${(error as Error).message}\n`;
+      await fs.promises.writeFile(logPath, `$ ${command}\n${message}`);
+      return {
+        exitCode: null,
+        output: message,
+        truncated: false,
+        logPath,
+        durationMs: Date.now() - started,
+        timedOut: false,
+        interrupted: options.signal.aborted,
+        cwd: this.shownCwd(state, target)
+      };
+    }
     const log = fs.createWriteStream(logPath);
     log.write(`$ ${command}\n`);
     const buffer = new OutputBuffer();
     let timedOut = false;
     let interrupted = false;
 
-    const child = spawn(file, args, {
-      cwd: state.cwd,
-      env: launchEnv,
+    const child = spawn(launch.file, launch.args, {
+      cwd: launch.cwd,
+      env: launch.env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: this.platform !== 'win32'
     });
-    this.running.set(child, files.pid);
+    this.running.set(child, launch.pidFile);
     const decoders = { out: new TextDecoder(), err: new TextDecoder() };
     let pending = '';
     let flushTimer: NodeJS.Timeout | undefined;
@@ -325,18 +460,18 @@ export class ShellManager extends EventEmitter {
 
     const timer = setTimeout(() => {
       timedOut = true;
-      this.stop(child, files.pid);
+      void launch.stop(child);
     }, options.timeoutMs);
     const onAbort = (): void => {
       interrupted = true;
-      this.stop(child, files.pid);
+      void launch.stop(child);
     };
     if (options.signal.aborted) onAbort();
     else options.signal.addEventListener('abort', onAbort, { once: true });
 
     const exitCode = await new Promise<number | null>((resolve) => {
       child.on('error', (error) => {
-        buffer.append(`\nFailed to start ${this.shell.label}: ${error.message}\n`);
+        buffer.append(`\nFailed to start ${target ? 'the sandbox' : this.shell.label}: ${error.message}\n`);
         resolve(null);
       });
       // A background child can keep the output pipes open after the command
@@ -362,8 +497,8 @@ export class ShellManager extends EventEmitter {
     flush();
     await new Promise<void>((resolve) => log.end(resolve));
 
-    this.captureState(state, files, launchEnv);
-    for (const f of Object.values(files)) await fs.promises.rm(f, { force: true });
+    launch.capture();
+    for (const f of launch.files) await fs.promises.rm(f, { force: true });
 
     return {
       exitCode,
@@ -373,7 +508,7 @@ export class ShellManager extends EventEmitter {
       durationMs: Date.now() - started,
       timedOut,
       interrupted,
-      cwd: state.cwd
+      cwd: this.shownCwd(state, target)
     };
   }
 
@@ -418,23 +553,35 @@ export class ShellManager extends EventEmitter {
     }
   }
 
-  /** Starts a command without waiting; poll with readOutput. */
-  startBackground(sessionId: string, command: string, cwdFallback: string): BackgroundShellInfo {
+  /**
+   * Starts a command without waiting; poll with readOutput. In the sandbox this
+   * waits for the container first (`progress` hears about a first download).
+   */
+  async startBackground(
+    sessionId: string,
+    command: string,
+    cwdFallback: string,
+    options: { progress?: (text: string) => void; signal?: AbortSignal } = {}
+  ): Promise<BackgroundShellInfo> {
     const state = this.state(sessionId, cwdFallback);
     const id = `bg-${randomUUID().slice(0, 8)}`;
     const dir = path.join(this.logDir, safeName(sessionId));
     fs.mkdirSync(dir, { recursive: true });
-    const files = {
-      cwd: path.join(dir, `${id}.cwd`),
-      env: path.join(dir, `${id}.env`),
-      script: path.join(dir, `${id}.ps1`),
-      pid: path.join(dir, `${id}.pid`)
-    };
     const logPath = path.join(dir, `${id}.log`);
-    const { file, args, extra } = this.invocation(command, state.cwd, files);
-    const child = spawn(file, args, {
-      cwd: state.cwd,
-      env: this.launchEnv(state, extra),
+    const target = this.sandbox ? this.targets.get(sessionId) : undefined;
+    const launch =
+      target && this.sandbox
+        ? await this.sandboxLaunch(this.sandbox, sessionId, target, state, command, {
+            dir,
+            id,
+            save: false,
+            progress: options.progress ?? (() => undefined),
+            signal: options.signal ?? new AbortController().signal
+          })
+        : this.hostLaunch(state, command, dir, id, false);
+    const child = spawn(launch.file, launch.args, {
+      cwd: launch.cwd,
+      env: launch.env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: this.platform !== 'win32'
@@ -455,11 +602,11 @@ export class ShellManager extends EventEmitter {
       endedAt: null,
       logPath,
       child,
-      pidFile: files.pid,
       closed,
       text: '',
       dropped: 0,
-      readOffset: 0
+      readOffset: 0,
+      halt: () => launch.stop(child)
     };
     this.background.set(id, job);
     const decoder = new TextDecoder();
@@ -483,7 +630,7 @@ export class ShellManager extends EventEmitter {
     });
     child.on('close', (code) => {
       log.end();
-      for (const f of Object.values(files)) {
+      for (const f of launch.files) {
         fs.rm(f, { force: true }, (error) => {
           if (error) this.emit('error-log', `Could not remove ${f}: ${error.message}`);
         });
@@ -522,11 +669,7 @@ export class ShellManager extends EventEmitter {
     if (!job || job.status !== 'running') return false;
     job.status = 'killed';
     this.emit('change', job.sessionId);
-    try {
-      await killProcessTree(job.child, { platform: this.platform, msysTools: this.msysTools, pidFile: job.pidFile });
-    } catch (error) {
-      this.emit('error-log', `Failed to stop ${id}: ${(error as Error).message}`);
-    }
+    await job.halt();
     await Promise.race([job.closed, new Promise<void>((resolve) => setTimeout(resolve, 5000).unref())]);
     return true;
   }
@@ -550,20 +693,19 @@ export class ShellManager extends EventEmitter {
     return removed;
   }
 
-  /** Kills everything a session started (session closed or deleted). */
+  /** Kills everything a session started (session closed or deleted), its sandbox container included. */
   async disposeSession(sessionId: string): Promise<void> {
     const jobs = [...this.background.values()].filter((j) => j.sessionId === sessionId);
     await Promise.all(jobs.map((j) => this.kill(j.id)));
     this.states.delete(sessionId);
+    this.targets.delete(sessionId);
+    await this.sandbox?.remove(sessionId);
   }
 
   async disposeAll(): Promise<void> {
     const jobs = [...this.background.values()].map((j) => this.kill(j.id));
-    const foreground = [...this.running].map(([child, pidFile]) =>
-      killProcessTree(child, { platform: this.platform, msysTools: this.msysTools, pidFile }).catch((error: unknown) => {
-        this.emit('error-log', `Failed to stop process ${String(child.pid)}: ${(error as Error).message}`);
-      })
-    );
+    const foreground = [...this.running].map(([child, pidFile]) => this.stop(child, pidFile));
     await Promise.all([...jobs, ...foreground]);
+    await this.sandbox?.removeAll();
   }
 }

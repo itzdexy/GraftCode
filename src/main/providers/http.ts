@@ -56,7 +56,9 @@ export async function request(req: HttpRequest): Promise<Response> {
     throw errorFromNetwork(error, where);
   }
   clearTimeout(timer);
-  // Keep forwarding caller aborts to the body stream; detach once the body ends.
+  // The abort listener stays on the caller's signal so a Stop still reaches the body
+  // after this returns. It cannot be detached here (the body is not read yet) and it
+  // dies with the signal, which is thrown away when the turn ends.
   if (!response.ok) {
     req.signal?.removeEventListener('abort', onAbort);
     const text = await response.text().catch(() => '');

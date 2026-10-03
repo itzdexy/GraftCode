@@ -33,6 +33,8 @@ export interface SessionView {
   turnStartedAt: number | null;
   /** The "!" command running now, when the active "turn" is one (no model is working). */
   shellCommand: string | null;
+  /** The project's checks running now, after the turn changed files. */
+  checking: { commands: string[]; round: number; startedAt: number } | null;
 }
 
 const EMPTY_VIEW: SessionView = {
@@ -49,7 +51,8 @@ const EMPTY_VIEW: SessionView = {
   retrying: null,
   turnActive: false,
   turnStartedAt: null,
-  shellCommand: null
+  shellCommand: null,
+  checking: null
 };
 
 let noticeSeq = 0;
@@ -68,6 +71,8 @@ export function evictViews(views: Record<string, SessionView>, order: string[], 
 interface SessionsState {
   summaries: Record<string, SessionSummary>;
   loaded: boolean;
+  /** Why the session list could not be loaded, so the view can offer a retry. */
+  loadError: string | null;
   views: Record<string, SessionView>;
   /** Opened session ids, least recent first (for evicting cached views). */
   viewOrder: string[];
@@ -101,9 +106,11 @@ function mergeNewer(snapshot: StoredMessage[], local: StoredMessage[]): StoredMe
 function reduce(view: SessionView, event: AgentEvent): SessionView {
   switch (event.type) {
     case 'turn-start':
-      return { ...view, turnActive: true, turnStartedAt: Date.now(), notices: [], retrying: null, shellCommand: event.shell ?? null };
+      return { ...view, turnActive: true, turnStartedAt: Date.now(), notices: [], retrying: null, shellCommand: event.shell ?? null, checking: null };
     case 'turn-end':
-      return { ...view, turnActive: false, turnStartedAt: null, streaming: null, running: {}, retrying: null, shellCommand: null };
+      return { ...view, turnActive: false, turnStartedAt: null, streaming: null, running: {}, retrying: null, shellCommand: null, checking: null };
+    case 'checks':
+      return { ...view, checking: { commands: event.commands, round: event.round, startedAt: Date.now() } };
     case 'assistant-start':
       return { ...view, streaming: { messageId: event.messageId, text: '', thinking: '' }, retrying: null };
     case 'assistant-delta': {
@@ -124,7 +131,8 @@ function reduce(view: SessionView, event: AgentEvent): SessionView {
           for (const id of done) delete running[id];
         }
       }
-      return { ...view, messages: upsertMessage(view.messages, event.message), streaming, running };
+      const checking = event.message.meta.kind === 'check' ? null : view.checking;
+      return { ...view, messages: upsertMessage(view.messages, event.message), streaming, running, checking };
     }
     case 'tool-start':
       return { ...view, running: { ...view.running, [event.toolUseId]: { name: event.name, summary: event.summary, output: '' } } };
@@ -178,12 +186,19 @@ function applyToSummary(summary: SessionSummary | undefined, event: AgentEvent):
 export const useSessions = create<SessionsState>((set, get) => ({
   summaries: {},
   loaded: false,
+  loadError: null,
   views: {},
   viewOrder: [],
 
+  // Records the failure instead of throwing: a rejected list left `loaded` false for
+  // good, which blanked the session view and the sidebar for the rest of the run.
   async loadList() {
-    const list = await invoke('sessions:list', { includeArchived: true });
-    set({ summaries: Object.fromEntries(list.map((s) => [s.id, s])), loaded: true });
+    try {
+      const list = await invoke('sessions:list', { includeArchived: true });
+      set({ summaries: Object.fromEntries(list.map((s) => [s.id, s])), loaded: true, loadError: null });
+    } catch (error) {
+      set({ loadError: errorText(error) });
+    }
   },
 
   async open(id, options = {}) {

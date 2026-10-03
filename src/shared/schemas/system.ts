@@ -39,3 +39,13 @@ export type UpdateState = z.infer<typeof UpdateStateSchema>;
 
 export const ClearHistoryResultSchema = z.object({ removed: z.number().int().nonnegative(), worktreesKept: z.number().int().nonnegative() });
 export type ClearHistoryResult = z.infer<typeof ClearHistoryResultSchema>;
+
+/** Settings → Sandbox: the container engine, and whether the image is downloaded yet. */
+export const SandboxStatusSchema = z.object({
+  engine: z.object({ kind: z.enum(['docker', 'podman']), version: z.string(), cpus: z.number(), rootless: z.boolean() }).nullable(),
+  /** Why the sandbox can't run (no engine, or it isn't started); null when it can. */
+  problem: z.string().nullable(),
+  /** The configured image is on this computer already; null when there is no engine to ask. */
+  imageReady: z.boolean().nullable()
+});
+export type SandboxStatus = z.infer<typeof SandboxStatusSchema>;

@@ -38,7 +38,13 @@ export const shellTool: ToolDefinition<ShellInput> = {
   async execute(input, ctx) {
     const cwd = ctx.shells.cwdFor(ctx.sessionId, ctx.cwd);
     if (input.run_in_background) {
-      const job = ctx.shells.startBackground(ctx.sessionId, input.command, cwd);
+      let job;
+      try {
+        job = await ctx.shells.startBackground(ctx.sessionId, input.command, cwd, { progress: (chunk) => ctx.progress(chunk), signal: ctx.signal });
+      } catch (error) {
+        // The sandbox couldn't start (no engine running, a failed download…).
+        return errorResult((error as Error).message);
+      }
       return textResult(`Started background shell ${job.id}. Read its output with ShellOutput (shell_id "${job.id}"); stop it with KillShell.`, {
         kind: 'shell',
         command: input.command,

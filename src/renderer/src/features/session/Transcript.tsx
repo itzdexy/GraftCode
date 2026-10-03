@@ -17,6 +17,7 @@ import {
   UserMessage
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
+import { CheckItem, RunningChecks } from './CheckItem';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
 import { RunningShell, ShellItem } from './ShellItem';
@@ -76,8 +77,8 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
 export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, className }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
-  // While a "!" command runs no model is working, so the last turn stays as it finished.
-  const modelWorking = view.turnActive && view.shellCommand === null;
+  // While a "!" command or the project's checks run no model is working, so the last turn stays as it finished.
+  const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
   const items = useMemo(
     () => groupActivity(buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), modelWorking),
     [view.messages, view.streaming, view.running, modelWorking]
@@ -188,6 +189,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <pre className="selectable rounded-md bg-sunken px-12 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] whitespace-pre-wrap text-fg-secondary">{item.text}</pre>;
       case 'shell':
         return <ShellItem shell={item.shell} />;
+      case 'check':
+        return <CheckItem check={item.check} />;
       case 'notice':
         return <p className="text-md text-fg-muted">{item.text}</p>;
       case 'error':
@@ -246,6 +249,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
             </div>
           ) : null}
           {view.shellCommand !== null ? <RunningShell command={view.shellCommand} startedAt={view.turnStartedAt} /> : null}
+          {view.checking ? <RunningChecks commands={view.checking.commands} round={view.checking.round} startedAt={view.checking.startedAt} /> : null}
           {showStatus ? (
             <StatusLine sessionId={summary.id} startedAt={view.turnStartedAt} contextTokens={summary.usage.contextTokens} tasks={summary.kind === 'code'} />
           ) : null}

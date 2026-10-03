@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import { addUsage, EMPTY_USAGE, type EffortLevel, type Usage } from '@shared/schemas/common';
-import { textOf, type ContentBlock, type LlmMessage, type MessageMeta, type StoredMessage, type ToolResultBlock, type ToolUseBlock } from '@shared/schemas/messages';
+import { textOf, type CheckReport, type ContentBlock, type LlmMessage, type MessageMeta, type StoredMessage, type ToolResultBlock, type ToolUseBlock } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { PermissionDecision, PermissionDetail } from '@shared/schemas/permissions';
@@ -13,6 +13,7 @@ import { classifyCommand } from '../permissions/commandRisk';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
+import { checksFailurePrompt, checksSummary, MAX_CHECK_ROUNDS } from './checks';
 import type { HookRunner } from './hooks';
 import { withoutThinking } from './history';
 import { TAPROOT_REVIEW, taprootOpenTasks } from './systemPrompt';
@@ -51,6 +52,12 @@ export interface LoopHost {
   /** The session's task list (Taproot won't finish with tasks open). */
   todos(): TodoItem[];
   /**
+   * The project's own checks, run after a turn changed something. Absent when the
+   * project defines none, or when it is not trusted (checks run its commands).
+   * Returns the report to show, or null when the turn was interrupted.
+   */
+  checks?(round: number, signal: AbortSignal): Promise<CheckReport | null>;
+  /**
    * Messages the user sent with "Send now" while the turn ran: stored as
    * user messages after the latest tool results and returned for the
    * history, so the agent reads them at its next step.
@@ -77,6 +84,8 @@ export interface LoopConfig {
   agentLabel: string | null;
   /** Taproot: one forced verification pass before the turn may end. */
   taproot: boolean;
+  /** Send a failed check back to the model to fix, instead of only reporting it. */
+  checksFix: boolean;
   /** Drop replayed thinking (after a model or history change). */
   stripThinking: boolean;
   sessionId: string;
@@ -88,6 +97,8 @@ export interface LoopResult {
   usage: Usage;
   toolCalls: number;
   finalText: string;
+  /** The turn changed something (an edit, a write or a command): the project's checks should run. */
+  changed: boolean;
 }
 
 interface Prepared {
@@ -281,9 +292,11 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
   // Taproot verifies only real work: this turn changed something or planned with TodoWrite.
   let changed = false;
   let planned = false;
+  // The project's checks run after the turn's work; a failure is sent back for a fix.
+  let checkRounds = 0;
   let repeatStrikes = 0;
   const recent: string[] = [];
-  const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText });
+  const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText, changed });
 
   for (let iteration = 0; ; iteration++) {
     if (signal.aborted) return done('interrupted');
@@ -362,7 +375,10 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
     if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
 
-    if (responseUsage) {
+    // Some servers send no usage at all, or zeros (an OpenAI-compatible endpoint that
+    // rejects stream_options reports nothing). Counting that as a real reading would
+    // blank the context meter and store 0 in the session, so keep the last one instead.
+    if (responseUsage && contextTokens(responseUsage) > 0) {
       usage = addUsage(usage, responseUsage);
       lastContext = contextTokens(responseUsage);
       host.onUsage(responseUsage, lastContext, responseCost ?? usageCost(config.model.pricing, responseUsage));
@@ -419,6 +435,26 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         host.emit({ type: 'message', message: stored });
         history.push({ role: 'user', content: [{ type: 'text', text: TAPROOT_REVIEW }] });
         continue;
+      }
+      // The turn changed files, so the project's own checks decide whether the work
+      // actually holds up. A failure goes back to the model a few times, then stands.
+      if (changed && finish === 'stop' && host.checks) {
+        const report = await host.checks(checkRounds + 1, signal);
+        // No report: the turn was stopped, or the checks couldn't run (the host said why).
+        if (report === null) return done(signal.aborted ? 'interrupted' : 'completed');
+        const summary = checksSummary(report);
+        const stored = host.append('user', [{ type: 'text', text: summary }], { turnId: config.turnId, kind: 'check', check: report });
+        host.emit({ type: 'message', message: stored });
+        if (!report.passed) {
+          const text = checksFailurePrompt(report);
+          if (config.checksFix && checkRounds < MAX_CHECK_ROUNDS) {
+            checkRounds++;
+            history.push({ role: 'user', content: [{ type: 'text', text }] });
+            host.append('user', [{ type: 'text', text }], { turnId: config.turnId, kind: 'reminder' });
+            continue;
+          }
+          host.emit({ type: 'notice', level: 'warning', text: `${summary} Fix them before committing.` });
+        }
       }
       return done('completed');
     }

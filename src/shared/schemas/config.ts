@@ -68,9 +68,23 @@ export const McpServerConfigSchema = z.discriminatedUnion('type', [
 ]);
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+/**
+ * A project's checks: commands Graft runs after a turn changes files, such
+ * as a type check, a linter or the tests. A failure goes back to the agent
+ * to fix when `fix` is on.
+ */
+export const ChecksConfigSchema = z.object({
+  commands: z.array(z.string().trim().min(1).max(2000)).min(1).max(10),
+  fix: z.boolean().default(true),
+  /** Per command. The ceiling is the shell runner's own limit; a check that needs longer belongs in a background job. */
+  timeoutSec: z.number().int().min(10).max(600).default(300)
+});
+export type ChecksConfig = z.infer<typeof ChecksConfigSchema>;
+
 export const SettingsFileSchema = z.looseObject({
   permissions: PermissionRulesSchema.optional(),
   hooks: HooksConfigSchema.optional(),
-  mcpServers: z.record(McpServerNameSchema, McpServerConfigSchema).optional()
+  mcpServers: z.record(McpServerNameSchema, McpServerConfigSchema).optional(),
+  checks: ChecksConfigSchema.optional()
 });
 export type SettingsFile = z.infer<typeof SettingsFileSchema>;

@@ -34,7 +34,8 @@ export const ProjectSummarySchema = z.object({
     model: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
-    useWorktree: z.boolean().optional()
+    useWorktree: z.boolean().optional(),
+    sandbox: z.boolean().optional()
   })
 });
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;

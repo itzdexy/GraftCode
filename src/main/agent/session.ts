@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode, type Usage } from '@shared/schemas/common';
-import { type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
+import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
+import type { ChecksConfig } from '@shared/schemas/config';
+import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -23,6 +25,7 @@ import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/bu
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
 import { summarizeSession, summaryMessageText } from './compaction';
+import { runChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { toLlmHistory, withSentTimes } from './history';
 import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
@@ -93,6 +96,8 @@ export interface SessionDeps {
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   trust(projectRoot: string): void;
+  /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
+  sandbox?(projectRoot: string): SandboxSettings | null;
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;
@@ -318,6 +323,7 @@ export class AgentSession {
     this.emit({ type: 'turn-start', turnId, shell: command });
     let reason: 'completed' | 'interrupted' | 'error' = 'completed';
     try {
+      await this.syncSandbox();
       const cwd = this.deps.shells.cwdFor(this.id, this.workingDir());
       const result = await this.deps.shells.run(this.id, command, { cwd, timeoutMs: USER_SHELL_TIMEOUT_MS, signal: controller.signal });
       if (result.interrupted) reason = 'interrupted';
@@ -362,13 +368,20 @@ export class AgentSession {
   interrupt(): void {
     if (!this.controller) return;
     this.controller.abort();
+    // Stop also answers whatever the turn is waiting on. The matching *-resolved
+    // events matter: without them the prompt card stays on screen with no way to
+    // answer it, because the request it refers to is already gone.
     if (this.pendingPermission) {
+      const { request } = this.pendingPermission;
       this.pendingPermission.resolve({ decision: 'deny' });
       this.pendingPermission = null;
+      this.emit({ type: 'permission-resolved', requestId: request.id });
     }
     if (this.pendingQuestion) {
+      const { request } = this.pendingQuestion;
       this.pendingQuestion.resolve(null);
       this.pendingQuestion = null;
+      this.emit({ type: 'question-resolved', requestId: request.id });
     }
   }
 
@@ -475,10 +488,13 @@ export class AgentSession {
   }
 
   async dispose(): Promise<void> {
-    this.interrupt();
-    await this.running?.catch(() => undefined);
-    this.flushDeltas();
+    // Mark closed before awaiting: the turn that is running ends during the wait,
+    // and without this its successor would pick up the next queued message and
+    // keep writing to a session that is being removed.
     this.disposed = true;
+    this.interrupt();
+    await this.idle();
+    this.flushDeltas();
     await this.deps.shells.disposeSession(this.id);
   }
 
@@ -504,9 +520,9 @@ export class AgentSession {
     }
   }
 
-  /** Waits for the current turn (tests and shutdown). */
+  /** Waits for the current turn, and for any turn it hands off to (tests and shutdown). */
   async idle(): Promise<void> {
-    while (this.running) await this.running;
+    while (this.running) await this.running.catch(() => undefined);
   }
 
   /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
@@ -527,6 +543,65 @@ export class AgentSession {
   private workingDir(): string {
     const s = this.summary;
     return s.worktreePath ?? s.cwd ?? s.projectPath ?? process.cwd();
+  }
+
+  /** The sandbox this session's commands run in, when its project turned one on. */
+  private sandboxTarget(): SandboxTarget | null {
+    if (this.summary.kind !== 'code' || !this.deps.sandbox) return null;
+    const workspace = this.projectRoot();
+    const root = this.settingsRoot();
+    const settings = workspace && root ? this.deps.sandbox(root) : null;
+    return workspace && settings ? { workspace, settings } : null;
+  }
+
+  /** What the system prompt says about the sandbox the next turn runs in. */
+  private sandboxPrompt(): { image: string; network: boolean; ports: number[] } | null {
+    const target = this.sandboxTarget();
+    return target ? { image: target.settings.image, network: target.settings.network, ports: FORWARDED_PORTS } : null;
+  }
+
+  /**
+   * Points the session's shell at its sandbox, or back at this computer. Runs
+   * before each turn and "!" command, so a change made in the meantime applies
+   * to the next one. The system prompt says where commands run, so a change
+   * rebuilds it.
+   */
+  private async syncSandbox(): Promise<void> {
+    const target = this.sandboxTarget();
+    const before = JSON.stringify(this.deps.shells.sandboxFor(this.id));
+    await this.deps.shells.setSandbox(this.id, target);
+    if (JSON.stringify(this.deps.shells.sandboxFor(this.id)) !== before) this.system = null;
+  }
+
+  /**
+   * The project's checks, when it defines any. They run commands from the
+   * repository, so — like hooks and allow rules — they need the project trusted.
+   */
+  private checksConfig(): ChecksConfig | null {
+    if (this.summary.kind !== 'code') return null;
+    const root = this.settingsRoot();
+    return root ? this.deps.settings.checks(root, this.deps.isTrusted(root)) : null;
+  }
+
+  /** Runs the checks; null when the turn was stopped or they couldn't run. */
+  private async runChecks(root: string | null, round: number, signal: AbortSignal): Promise<CheckReport | null> {
+    const config = this.checksConfig();
+    if (!config || !root) return null;
+    this.emit({ type: 'checks', commands: config.commands, round });
+    try {
+      const report = await runChecks(config, round, {
+        sessionId: this.id,
+        cwd: this.workingDir(),
+        signal,
+        shells: this.deps.shells
+      });
+      if (signal.aborted) return null;
+      this.deps.log('info', 'Checks finished', { session: this.id, passed: report.passed, round });
+      return report;
+    } catch (error) {
+      this.notice('warning', `Couldn't run the project's checks: ${(error as Error).message}`);
+      return null;
+    }
   }
 
   private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null } | null> {
@@ -708,7 +783,8 @@ export class AgentSession {
         computer: this.computerFor(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
-        personalization: prefs.personalization
+        personalization: prefs.personalization,
+        sandbox: this.sandboxPrompt()
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -826,9 +902,15 @@ export class AgentSession {
       if (summary.kind === 'code' && !model.supportsTools) {
         throw new GraftError('model_no_tools', `${model.label} can't use tools, so it can't work on code. Pick a different model.`);
       }
+      // Before the prompt: it says whether commands run in the sandbox.
+      if (summary.kind === 'code') await this.syncSandbox();
       const { system, toolNames } = await this.ensurePrompt(model);
       const effort = this.effortFor(model);
-      const host: LoopHost = { ...this.makeHost(model, provider, hooks, root, trusted), takeSteering: (s) => this.deliverSteering(turnId, hooks, s) };
+      const host: LoopHost = {
+        ...this.makeHost(model, provider, hooks, root, trusted),
+        takeSteering: (s) => this.deliverSteering(turnId, hooks, s),
+        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined
+      };
       const result = await runAgentLoop(
         this.history(),
         {
@@ -847,6 +929,7 @@ export class AgentSession {
           agentLabel: null,
           ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {}),
           taproot: effort === 'taproot',
+          checksFix: this.checksConfig()?.fix ?? false,
           stripThinking: false,
           sessionId: this.id
         },
@@ -995,7 +1078,8 @@ export class AgentSession {
       platform: this.deps.platform,
       rules,
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
-      allowNetwork: this.summary.kind === 'chat'
+      allowNetwork: this.summary.kind === 'chat',
+      sandboxed: this.deps.shells.sandboxFor(this.id) !== null
     };
   }
 
@@ -1192,6 +1276,9 @@ export class AgentSession {
         maxIterations: this.deps.preferences().maxSteps ?? SUBAGENT_ITERATIONS,
         agentLabel: input.description,
         taproot: false,
+        // The main turn runs the project's checks; a sub-agent's work is one task
+        // inside that turn and is covered by the same run.
+        checksFix: false,
         stripThinking: false,
         sessionId: this.id
       },

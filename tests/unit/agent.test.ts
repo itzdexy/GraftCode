@@ -325,6 +325,68 @@ describe('compaction', () => {
 });
 
 describe('agent tools that involve the user', () => {
+  it('clears a pending permission when the turn is stopped', async () => {
+    // Stop answers whatever the turn was waiting on; the cards are only cleared by
+    // the matching *-resolved events, so without them they stayed on screen forever.
+    const h = harness({
+      script: [{ toolCalls: [{ name: 'Write', input: { file_path: 'a.ts', content: 'x' } }] }, { text: 'never reached' }]
+    });
+    h.session.send('write a file');
+    const prompt = await h.waitFor((e) => e.type === 'permission');
+    if (prompt.type !== 'permission') throw new Error('unreachable');
+    expect(h.session.detail().pendingPermission?.id).toBe(prompt.request.id);
+
+    h.session.interrupt();
+    expect(h.events.some((e) => e.type === 'permission-resolved' && e.requestId === prompt.request.id)).toBe(true);
+    expect(h.session.detail().pendingPermission).toBeNull();
+    await h.session.idle();
+    expect(h.events.find((e) => e.type === 'turn-end')).toMatchObject({ reason: 'interrupted' });
+  });
+
+  it('clears a pending question when the turn is stopped', async () => {
+    const h = harness({
+      script: [{ toolCalls: [{ name: 'AskUserQuestion', input: { questions: [{ question: 'Which DB?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] }] } }] }, { text: 'never reached' }]
+    });
+    h.session.send('set up storage');
+    const q = await h.waitFor((e) => e.type === 'question');
+    if (q.type !== 'question') throw new Error('unreachable');
+    expect(h.session.detail().pendingQuestion?.questions[0]?.question).toBe('Which DB?');
+
+    h.session.interrupt();
+    expect(h.events.some((e) => e.type === 'question-resolved' && e.requestId === q.request.id)).toBe(true);
+    expect(h.session.detail().pendingQuestion).toBeNull();
+    await h.session.idle();
+    expect(h.events.find((e) => e.type === 'turn-end')).toMatchObject({ reason: 'interrupted' });
+  });
+
+  it('does not start a queued message after the session is disposed', async () => {
+    // The reply streams slowly so the turn is certainly still running when we close.
+    const h = harness({ script: [{ text: 'the first answer takes a while to stream out', chunkDelayMs: 20 }] });
+    h.session.send('one');
+    expect(h.session.send('two')).toEqual({ queued: true });
+    await h.waitFor((e) => e.type === 'assistant-delta');
+    // Disposing while the first turn runs used to let it hand off to the queued
+    // message, which then wrote to a session that was being removed.
+    await h.session.dispose();
+    expect(h.provider.requests).toHaveLength(1);
+    expect(texts(h).filter((t) => t.startsWith('user:'))).toEqual(['user:one']);
+    // send() throws before returning a promise once the session is closed.
+    expect(() => h.session.send('three')).toThrowError(expect.objectContaining({ code: 'session_closed' }));
+  });
+
+  it('keeps the last known context when a provider reports no usage', async () => {
+    const h = harness({ script: [{ text: 'first', usage: { inputTokens: 5000, outputTokens: 100 } }, { text: 'second', usage: { inputTokens: 0, outputTokens: 0 } }] });
+    h.session.send('hi');
+    await h.session.idle();
+    h.session.send('again');
+    await h.session.idle();
+    const meters = h.events.flatMap((e) => (e.type === 'usage' ? [e.usage.contextTokens] : []));
+    expect(meters[0]).toBe(5100);
+    // A zero report must not blank the meter or the stored session usage.
+    expect(meters.every((m) => m === 5100)).toBe(true);
+    expect(h.session.summary.usage.contextTokens).toBe(5100);
+  });
+
   it('asks questions and returns the answers to the model', async () => {
     const h = harness({
       script: [
@@ -542,6 +604,91 @@ describe('agent tools that involve the user', () => {
     h.session.send('run something');
     await h.session.idle();
     expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('no shells today');
+  });
+
+  it('runs the project’s checks after a turn that changed files, and sends a failure back to fix', async () => {
+    const h = harness({
+      mode: 'auto-edit',
+      script: [
+        { toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on = true;\n' } }] },
+        { text: 'Added it.' },
+        { toolCalls: [{ name: 'Write', input: { file_path: 'notes.txt', content: 'ok\n' } }] },
+        { text: 'That satisfies the check.' }
+      ]
+    });
+    writeFile(h.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['grep -q ok notes.txt'], fix: true, timeoutSec: 60 } }));
+    h.session.send('build it');
+    await h.session.idle();
+
+    const checks = h.store.listMessages('session-1').filter((m) => m.meta.kind === 'check');
+    // The first round runs before notes.txt exists and fails; the second passes.
+    expect(checks).toHaveLength(2);
+    expect(checks[0]!.meta.check).toMatchObject({ passed: false, round: 1 });
+    expect(checks[0]!.meta.check?.runs[0]).toMatchObject({ command: 'grep -q ok notes.txt', passed: false });
+    expect(checks[0]!.meta.check?.runs[0]?.exitCode).not.toBe(0);
+    expect(checks[1]!.meta.check).toMatchObject({ passed: true, round: 2 });
+    // The failure reached the model before it made the second change.
+    const asked = h.provider.requests.findIndex((r) => JSON.stringify(r.messages).includes('checks did not pass'));
+    expect(asked).toBeGreaterThan(-1);
+    expect(JSON.stringify(h.provider.requests[asked]!.messages)).toContain('grep -q ok notes.txt');
+    // The check report is the last thing stored: it runs once the model has stopped.
+    expect(texts(h).at(-1)).toBe('user:Checks passed (1 check).');
+    expect(texts(h).at(-2)).toBe('assistant:That satisfies the check.');
+    // The transcript keeps the checks; later turns don't replay them to the model.
+    expect(checks.map((m) => m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))).toEqual([
+      'Checks failed (1 of 1 check).',
+      'Checks passed (1 check).'
+    ]);
+    expect(toLlmHistory(h.store.listMessages('session-1')).some((m) => JSON.stringify(m).includes('Checks failed'))).toBe(false);
+    // The transcript shows each round while it runs.
+    expect(h.events.filter((e) => e.type === 'checks').map((e) => (e.type === 'checks' ? [e.round, e.commands] : null))).toEqual([
+      [1, ['grep -q ok notes.txt']],
+      [2, ['grep -q ok notes.txt']]
+    ]);
+  });
+
+  it('does not run the project’s checks after a turn that only looked around', async () => {
+    const h = harness({
+      mode: 'auto-edit',
+      script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*' } }] }, { text: 'Nothing to change.' }]
+    });
+    writeFile(h.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['exit 1'], fix: true, timeoutSec: 60 } }));
+    h.session.send('look around');
+    await h.session.idle();
+
+    expect(h.store.listMessages('session-1').some((m) => m.meta.kind === 'check')).toBe(false);
+    expect(h.provider.requests).toHaveLength(2);
+  });
+
+  it('only reports a failed check when the project asks not to fix it', async () => {
+    const h = harness({
+      mode: 'auto-edit',
+      script: [{ toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on = true;\n' } }] }, { text: 'Added it.' }]
+    });
+    writeFile(h.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['exit 3'], fix: false, timeoutSec: 60 } }));
+    h.session.send('build it');
+    await h.session.idle();
+
+    const checks = h.store.listMessages('session-1').filter((m) => m.meta.kind === 'check');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.meta.check).toMatchObject({ passed: false });
+    // Reported, never handed back: the turn is over after the model stops.
+    expect(h.provider.requests).toHaveLength(2);
+    expect(h.events.some((e) => e.type === 'notice' && /Checks failed/.test(e.text))).toBe(true);
+  });
+
+  it('never runs the project’s checks in a folder that is not trusted', async () => {
+    const h = harness({
+      mode: 'auto-edit',
+      trusted: () => false,
+      script: [{ toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on = true;\n' } }] }, { text: 'Added it.' }]
+    });
+    writeFile(h.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['exit 1'], fix: true, timeoutSec: 60 } }));
+    h.session.send('build it');
+    await h.session.idle();
+
+    expect(h.store.listMessages('session-1').some((m) => m.meta.kind === 'check')).toBe(false);
+    expect(h.provider.requests).toHaveLength(2);
   });
 
   it('adds a verification pass in Taproot mode once the turn changed something', async () => {

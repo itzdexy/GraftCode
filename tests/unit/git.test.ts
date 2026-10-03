@@ -294,6 +294,35 @@ describe('changes: stage, unstage, revert, commit', () => {
     expect(await listChanges(repo)).toEqual([]);
   });
 
+  it('addresses files by their path from the session folder, not the repo root', async () => {
+    // git prints porcelain paths relative to the repo root even when the session
+    // works in a nested folder. Reverting here used to delete the wrong file.
+    const repo = track(makeRepo({ 'notes.txt': 'repo root\n', 'apps/web/index.js': 'export default 1;\n' }));
+    const work = path.join(repo, 'apps', 'web');
+    writeFile(repo, 'notes.txt', 'changed at the root\n');
+    writeFile(repo, 'apps/web/notes.txt', 'the nested one\n');
+    writeFile(work, 'fresh.js', 'new\n');
+
+    // The root file and the nested one must not both be called "notes.txt":
+    // that collision is what made a revert delete the wrong file.
+    expect((await listChanges(work)).map((f) => f.path).sort()).toEqual(['../../notes.txt', 'fresh.js', 'notes.txt']);
+
+    await revertFiles(work, ['../../notes.txt']);
+    expect(read(repo, 'notes.txt')).toBe('repo root\n');
+    expect(read(work, 'notes.txt')).toBe('the nested one\n');
+
+    expect((await fileDiff(work, 'fresh.js', false)).added).toBe(1);
+    await stageFiles(work, ['fresh.js']);
+    expect((await listChanges(work)).find((f) => f.path === 'fresh.js')).toMatchObject({ untracked: false, staged: 'A' });
+    await unstageFiles(work, ['fresh.js']);
+    expect((await listChanges(work)).find((f) => f.path === 'fresh.js')).toMatchObject({ untracked: true });
+    await revertFiles(work, ['fresh.js']);
+    expect(exists(work, 'fresh.js')).toBe(false);
+    // Reverting the nested file leaves both root and nested content alone.
+    expect(read(repo, 'notes.txt')).toBe('repo root\n');
+    expect(read(work, 'notes.txt')).toBe('the nested one\n');
+  });
+
   it('shows new files as additions and commits staged or all changes', async () => {
     const repo = track(makeRepo());
     writeFile(repo, 'new.md', 'hello\nworld\n');

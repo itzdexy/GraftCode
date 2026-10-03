@@ -4,6 +4,7 @@ import { GraftError } from '@shared/errors';
 import type { PermissionMode } from '@shared/schemas/common';
 import {
   SettingsFileSchema,
+  type ChecksConfig,
   type HookEvent,
   type HookMatcher,
   type McpServerConfig,
@@ -140,6 +141,19 @@ export class SettingsStore {
       }
     }
     return [...byName.values()];
+  }
+
+  /**
+   * The project's checks: this computer's (local) over the shared ones. They
+   * come from the repository and run commands, so like hooks they apply only
+   * once the project is trusted; there are no user-wide checks.
+   */
+  checks(projectRoot: string | null, trusted: boolean): ChecksConfig | null {
+    if (!projectRoot || !trusted) return null;
+    const local = this.load('local', projectRoot);
+    if (!local.error && local.settings.checks) return local.settings.checks;
+    const shared = this.load('project', projectRoot);
+    return !shared.error && shared.settings.checks ? shared.settings.checks : null;
   }
 
   async addRule(scope: SettingsScope, projectRoot: string | undefined, kind: 'allow' | 'ask' | 'deny', raw: string): Promise<void> {

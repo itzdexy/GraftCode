@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HooksConfigSchema, McpServerNameSchema, SettingsScopeSchema } from './config';
+import { ChecksConfigSchema, HooksConfigSchema, McpServerNameSchema, SettingsScopeSchema } from './config';
 
 /** Customize screen: commands, skills, memory files, hooks and MCP servers. */
 
@@ -52,6 +52,18 @@ export const ScopedHooksSchema = z.object({
   hooks: HooksConfigSchema
 });
 export type ScopedHooksView = z.infer<typeof ScopedHooksSchema>;
+
+/** Where a project's checks can be saved: shared with the repository, or this computer only (wins). */
+export const ChecksScopeSchema = z.enum(['project', 'local']);
+export type ChecksScope = z.infer<typeof ChecksScopeSchema>;
+
+export const ChecksViewSchema = z.object({
+  files: z.array(z.object({ scope: ChecksScopeSchema, path: z.string(), error: z.string().nullable(), checks: ChecksConfigSchema.nullable() })),
+  /** Commands that look right for this project (its scripts, manifest and lockfile). */
+  suggestions: z.array(z.string()),
+  trusted: z.boolean()
+});
+export type ChecksView = z.infer<typeof ChecksViewSchema>;
 
 export const McpStateSchema = z.enum(['connecting', 'connected', 'failed', 'disabled', 'needs-auth', 'idle', 'untrusted']);
 export type McpStateView = z.infer<typeof McpStateSchema>;

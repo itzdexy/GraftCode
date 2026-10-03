@@ -9,7 +9,9 @@ export const ProjectSettingsSchema = z.object({
   model: ModelRefSchema.optional(),
   effort: EffortLevelSchema.optional(),
   permissionMode: PermissionModeSchema.optional(),
-  useWorktree: z.boolean().optional()
+  useWorktree: z.boolean().optional(),
+  /** Run this project's commands in a sandbox container. */
+  sandbox: z.boolean().optional()
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 

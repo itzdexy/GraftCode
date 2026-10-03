@@ -11,10 +11,12 @@ import {
 } from '../schemas/app';
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
-import { HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
+import { ChecksConfigSchema, HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
 import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
 import {
   AgentFileSchema,
+  ChecksScopeSchema,
+  ChecksViewSchema,
   CommandFileSchema,
   CustomScopeSchema,
   McpServerInputSchema,
@@ -30,7 +32,7 @@ import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSumma
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
-import { ClearHistoryResultSchema, RuleListsSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
+import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
 
 /**
  * Every renderer → main request, with Zod schemas for input and output.
@@ -334,6 +336,16 @@ export const contracts = {
   'customize:saveMemory': channel(z.object({ scope: CustomScopeSchema, projectPath: PathSchema.nullable(), content: z.string().max(200_000) }), z.object({ path: z.string() })),
   'customize:hooks': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(ScopedHooksSchema)),
   'customize:saveHooks': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), hooks: HooksConfigSchema }), Ok),
+  'sandbox:status': channel(z.object({ refresh: z.boolean() }), SandboxStatusSchema),
+  /** Downloads the configured image now, so a session's first command doesn't wait for it. */
+  'sandbox:pull': channel(Void, Ok),
+  /** Removes the node_modules volumes sandboxes keep between sessions. */
+  'sandbox:freeSpace': channel(Void, z.object({ removed: z.number().int() })),
+  /** Dev-server ports a session's sandbox forwards: container port → port on this computer. */
+  'sandbox:ports': channel(z.object({ sessionId: IdSchema }), z.array(z.object({ port: z.number().int(), hostPort: z.number().int() }))),
+  'checks:get': channel(z.object({ projectPath: PathSchema }), ChecksViewSchema),
+  /** `checks: null` removes them from that file. */
+  'checks:save': channel(z.object({ scope: ChecksScopeSchema, projectPath: PathSchema, checks: ChecksConfigSchema.nullable() }), Ok),
   'mcp:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(McpServerViewSchema)),
   'mcp:save': channel(
     z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema, previousName: McpServerNameSchema.nullable(), config: McpServerInputSchema }),

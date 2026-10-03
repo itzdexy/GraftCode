@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AudioLines, Bell, BookText, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
+import { AudioLines, Bell, BookText, Box, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
 import type { AccentId, PaletteId } from '@shared/schemas/appSettings';
 import type { SettingsSection } from '../../stores/nav';
 
@@ -21,6 +21,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'providers', label: 'Providers', description: 'Keys and endpoints for model providers.', icon: KeyRound },
   { id: 'models', label: 'Models', description: 'Defaults for new sessions and extra model IDs.', icon: Cpu },
   { id: 'permissions', label: 'Permissions', description: 'What the agent may do without asking.', icon: ShieldCheck },
+  { id: 'sandbox', label: 'Sandbox', description: 'Run a project’s commands in an isolated container.', icon: Box },
   { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
   { id: 'search', label: 'Web search', description: 'How models search and read the web.', icon: Globe },
   { id: 'voice', label: 'Voice', description: 'How replies sound when they are read aloud.', icon: AudioLines },

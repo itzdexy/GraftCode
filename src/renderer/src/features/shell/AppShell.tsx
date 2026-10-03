@@ -1,13 +1,12 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { LoadingState } from '../../components/States';
+import { ErrorState, LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useNav, type Route } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
-import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
@@ -63,12 +62,10 @@ export function AppShell() {
   const collapsed = useApp((s) => s.settings?.ui.sidebarCollapsed ?? false);
   const route = useNav((s) => s.route);
   const loaded = useSessions((s) => s.loaded);
+  const loadError = useSessions((s) => s.loadError);
 
   useEffect(() => {
-    useSessions
-      .getState()
-      .loadList()
-      .catch((e: unknown) => reportError("Couldn't load your sessions", e));
+    void useSessions.getState().loadList();
   }, []);
 
   const activeSession = route.name === 'session' ? route.id : null;
@@ -88,7 +85,11 @@ export function AppShell() {
       {collapsed ? null : <Sidebar />}
       <main className="flex min-w-0 flex-1 flex-col">
         <ErrorBoundary label="This view" resetKey={routeKey(route)}>
-          {loaded || route.name !== 'session' ? <RouteView route={route} /> : null}
+          {loadError ? (
+            <ErrorState title="Couldn't load your sessions" message={loadError} onRetry={() => void useSessions.getState().loadList()} />
+          ) : loaded || route.name !== 'session' ? (
+            <RouteView route={route} />
+          ) : null}
         </ErrorBoundary>
       </main>
       <SearchDialog />

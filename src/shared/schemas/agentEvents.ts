@@ -33,6 +33,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('notice'), level: z.enum(['info', 'warning', 'error']), text: z.string(), action: z.literal('continue').optional() }),
   z.object({ type: z.literal('queue'), queue: z.array(QueuedInputSchema) }),
   z.object({ type: z.literal('retrying'), attempt: z.number().int(), delayMs: z.number().int(), reason: z.string() }),
+  /** The project's checks started; their report arrives as a "check" message. */
+  z.object({ type: z.literal('checks'), commands: z.array(z.string()), round: z.number().int() }),
   z.object({ type: z.literal('compacted'), summaryMessageId: z.string() }),
   z.object({ type: z.literal('mode'), permissionMode: PermissionModeSchema }),
   z.object({ type: z.literal('title'), title: z.string() }),

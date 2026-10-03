@@ -13,6 +13,7 @@ import { NotificationsSection } from './NotificationsSection';
 import { PersonalizationSection } from './PersonalizationSection';
 import { PermissionsSection } from './PermissionsSection';
 import { PrivacySection } from './PrivacySection';
+import { SandboxSection } from './SandboxSection';
 import { VoiceSection } from './VoiceSection';
 import { WebSearchSection } from './WebSearchSection';
 import { ProfileSection } from './ProfileSection';
@@ -44,6 +45,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <ModelsSection />;
     case 'permissions':
       return <PermissionsSection />;
+    case 'sandbox':
+      return <SandboxSection />;
     case 'privacy':
       return <PrivacySection />;
     case 'search':
