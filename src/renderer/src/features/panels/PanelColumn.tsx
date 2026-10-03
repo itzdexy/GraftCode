@@ -78,7 +78,7 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
   };
 
   return (
-    <aside aria-label="Panels" className="relative flex shrink-0 flex-col gap-8 py-8 pr-8" style={{ width }}>
+    <aside aria-label="Panels" className="motion-slide-left relative flex shrink-0 flex-col gap-8 py-8 pr-8" style={{ width }}>
       <div
         role="separator"
         aria-orientation="vertical"

@@ -45,7 +45,8 @@ describe('recording shortcuts', () => {
     expect(lib.shortcutProblem('search', 'K', current)).toMatch(/Add Ctrl or Alt/);
     expect(lib.shortcutProblem('search', 'Ctrl+C', current)).toMatch(/reserved/);
     expect(lib.shortcutProblem('search', 'Ctrl+N', current)).toMatch(/New session or chat/);
-    expect(lib.shortcutProblem('search', 'Ctrl+Shift+P', current)).toBeNull();
+    expect(lib.shortcutProblem('search', 'Ctrl+Shift+P', current)).toMatch(/command palette/);
+    expect(lib.shortcutProblem('search', 'Ctrl+Shift+O', current)).toBeNull();
     expect(lib.shortcutProblem('search', 'F6', current)).toBeNull();
     // Message-box shortcuts may be bare keys, but not single characters.
     expect(lib.shortcutProblem('interrupt', 'Escape', current)).toBeNull();

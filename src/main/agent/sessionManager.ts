@@ -160,7 +160,8 @@ export class SessionManager {
           defaultEffort: s.defaults.effort,
           noTraining: s.privacy.noTraining,
           incognitoLocalOnly: s.privacy.incognitoLocalOnly,
-          computerUse: s.behavior.computerUse
+          computerUse: s.behavior.computerUse,
+          personalization: s.personalization
         };
       },
       gitInfo: async (cwd) => {
@@ -515,6 +516,16 @@ export class SessionManager {
     this.get(id).compactNow(instructions);
   }
 
+  /** Runs a "!" command from the message box in the session's shell. */
+  runShell(id: string, command: string): void {
+    this.get(id).runShell(command);
+  }
+
+  /** The system prompt and tools this session's next turn sends. */
+  promptPreview(id: string): Promise<{ system: string; tools: string[]; model: string }> {
+    return this.get(id).promptPreview();
+  }
+
   removeQueued(id: string, queueId: string): void {
     this.get(id).removeQueued(queueId);
   }
@@ -558,6 +569,15 @@ function renderMarkdown(summary: SessionSummary, messages: StoredMessage[]): str
   const lines = [`# ${summary.title}`, '', `Exported from Graft on ${new Date().toISOString().slice(0, 10)}.`, ''];
   for (const m of messages) {
     if (m.meta.kind === 'notice') continue;
+    if (m.meta.kind === 'shell' && m.meta.shell) {
+      const s = m.meta.shell;
+      const status = s.timedOut ? 'timed out' : s.interrupted ? 'stopped' : `exit code ${s.exitCode ?? '—'}`;
+      const body = `$ ${s.command}\n${s.output}`;
+      // A fence longer than any run of backticks in the output, so the output can't end the block.
+      const fence = '`'.repeat(Math.max(3, ...[...body.matchAll(/`+/g)].map((r) => r[0].length + 1)));
+      lines.push('## You ran', '', `${fence}console`, body, fence, '', `> ${status}`, '');
+      continue;
+    }
     const who = m.role === 'user' ? (m.meta.kind === 'compaction-summary' ? 'Summary' : 'You') : 'Graft';
     const parts: string[] = [];
     const text = textOf(m.content);

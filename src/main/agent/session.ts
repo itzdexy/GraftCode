@@ -29,8 +29,22 @@ import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionProm
 import { expandMentions } from './mentions';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
-import { BUILTIN_COMMANDS, INIT_PROMPT, expandCommand, loadCustomCommands, parseSlash, reviewPrompt } from './slashCommands';
-import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE } from './systemPrompt';
+import {
+  commitPrompt,
+  expandCommand,
+  explainPrompt,
+  INIT_PROMPT,
+  listCommands,
+  loadCustomCommands,
+  parseSlash,
+  prPrompt,
+  PROMPT_COMMANDS,
+  reviewPrompt,
+  securityReviewPrompt,
+  testPrompt,
+  UI_COMMANDS
+} from './slashCommands';
+import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
 import { shouldCompact } from './tokens';
 
@@ -54,6 +68,8 @@ export interface SessionPreferences {
   incognitoLocalOnly: boolean;
   /** Settings → Permissions: code sessions may use the screen, mouse and keyboard. */
   computerUse: boolean;
+  /** Settings → Personalization, added to system prompts (never to incognito chats). */
+  personalization: Personalization;
 }
 
 export interface SessionDeps {
@@ -112,6 +128,9 @@ const MAX_ITERATIONS = 150;
 const TAPROOT_ITERATIONS = 500;
 const SUBAGENT_ITERATIONS = 80;
 const DELTA_FLUSH_MS = 40;
+/** "!" commands from the message box: how long they may run, and how much of their output the transcript keeps. */
+const USER_SHELL_TIMEOUT_MS = 300_000;
+const USER_SHELL_SHOWN = 20_000;
 const MODE_CYCLE: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
 const DEFAULT_TITLES = new Set(['New session', 'New chat']);
 
@@ -247,6 +266,71 @@ export class AgentSession {
   removeQueued(id: string): void {
     this.queue = this.queue.filter((q) => q.id !== id);
     this.emit({ type: 'queue', queue: this.publicQueue() });
+  }
+
+  /**
+   * Runs a command the user typed after "!" in the message box, in this
+   * session's shell (so a cd carries over to the agent's Shell tool). The
+   * command and its output join the conversation as context for the next
+   * message; no model turn runs. It holds the session like a turn: input
+   * sent meanwhile queues, and Stop ends the command.
+   */
+  runShell(command: string): void {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    if (this.summary.kind !== 'code') throw new GraftError('shell_unavailable', 'Shell commands run in code sessions.');
+    const trimmed = command.trim();
+    if (trimmed.length === 0) throw new GraftError('empty_message', 'Type a command after the !.');
+    if (this.running) throw new GraftError('session_busy', 'Graft is working. Wait for it to finish, or stop it, then run the command.');
+    this.running = this.execShell(trimmed).finally(() => this.afterTurn());
+  }
+
+  private async execShell(command: string): Promise<void> {
+    const controller = new AbortController();
+    this.controller = controller;
+    const turnId = randomUUID();
+    this.setStatus('running');
+    this.emit({ type: 'turn-start', turnId, shell: command });
+    let reason: 'completed' | 'interrupted' | 'error' = 'completed';
+    try {
+      const cwd = this.deps.shells.cwdFor(this.id, this.workingDir());
+      const result = await this.deps.shells.run(this.id, command, { cwd, timeoutMs: USER_SHELL_TIMEOUT_MS, signal: controller.signal });
+      if (result.interrupted) reason = 'interrupted';
+      const output = result.output.replace(/\s+$/, '');
+      const status = result.timedOut
+        ? `timed out after ${USER_SHELL_TIMEOUT_MS / 1000}s`
+        : result.interrupted
+          ? 'stopped by the user'
+          : `exit code ${result.exitCode ?? 'unknown'}`;
+      const text = [
+        `<user-shell-command cwd="${cwd}" status="${status}">`,
+        `$ ${command}`,
+        output.length > 0 ? output : '(no output)',
+        '</user-shell-command>',
+        "The user ran this command in the session's shell themselves. Its output is context for their next message, not a request."
+      ].join('\n');
+      const shown = output.slice(-USER_SHELL_SHOWN);
+      const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text }], {
+        kind: 'shell',
+        turnId,
+        shell: {
+          command,
+          cwd,
+          exitCode: result.exitCode,
+          output: shown,
+          truncated: result.truncated || shown.length < output.length,
+          durationMs: result.durationMs,
+          timedOut: result.timedOut,
+          interrupted: result.interrupted
+        }
+      });
+      this.emit({ type: 'message', message: stored });
+    } catch (error) {
+      reason = 'error';
+      this.notice('error', `Couldn't run the command: ${(error as Error).message}`);
+    } finally {
+      this.setStatus('idle');
+      this.emit({ type: 'turn-end', turnId, reason });
+    }
   }
 
   interrupt(): void {
@@ -418,6 +502,14 @@ export class AgentSession {
     const slash = parseSlash(item.text);
     if (!slash) return { text: item.text, typed: null };
     const summary = this.summary;
+    if (PROMPT_COMMANDS.has(slash.name)) {
+      const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
+      if (custom) return { text: expandCommand(custom, slash.args), typed: item.text };
+    }
+    if (UI_COMMANDS.has(slash.name)) {
+      this.commandOutput(`/${slash.name} opens in the app: type it on its own, or use the command palette (Ctrl+Shift+P).`);
+      return null;
+    }
     switch (slash.name) {
       case 'clear': {
         const ids = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted).map((m) => m.id);
@@ -440,15 +532,26 @@ export class AgentSession {
         return null;
       }
       case 'help': {
-        const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot());
-        const lines = [...BUILTIN_COMMANDS, ...custom].map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`);
-        this.commandOutput(`Commands:\n${lines.join('\n')}\n\nShortcuts: Esc stops the agent, Shift+Tab cycles the permission mode, @ mentions a file.`);
+        const lines = listCommands(this.deps.graftHome, this.projectRoot()).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`);
+        this.commandOutput(
+          `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
+        );
         return null;
       }
       case 'init':
         return { text: INIT_PROMPT, typed: item.text };
       case 'review':
         return { text: reviewPrompt(slash.args), typed: item.text };
+      case 'security-review':
+        return { text: securityReviewPrompt(slash.args), typed: item.text };
+      case 'explain':
+        return { text: explainPrompt(slash.args), typed: item.text };
+      case 'test':
+        return { text: testPrompt(slash.args), typed: item.text };
+      case 'commit':
+        return { text: commitPrompt(slash.args), typed: item.text };
+      case 'pr':
+        return { text: prPrompt(slash.args), typed: item.text };
       case 'permissions': {
         const mode = slash.args as PermissionMode;
         if ([...MODE_CYCLE, ...(this.deps.preferences().bypassEnabled ? ['bypass'] : [])].includes(mode)) {
@@ -469,13 +572,6 @@ export class AgentSession {
         }
         return null;
       }
-      case 'model':
-      case 'mcp':
-      case 'resume':
-      case 'rewind':
-      case 'config':
-        this.commandOutput(`/${slash.name} opens in the app — use the menu next to the composer.`);
-        return null;
       default: {
         const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
         if (!custom) {
@@ -538,55 +634,91 @@ export class AgentSession {
     return model.effort.levels.includes(wanted) ? wanted : model.effort.default;
   }
 
+  /** Computer use: code sessions with it switched on, on a model that can see screenshots. */
+  private computerFor(model: ModelInfo): boolean {
+    return this.summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
+  }
+
+  /** Tools a turn on this model offers: built-ins for the session kind, plus MCP tools in code sessions. */
+  private toolsFor(model: ModelInfo): string[] {
+    const summary = this.summary;
+    const web = this.webTools(model);
+    const work = this.chatWork(model);
+    const computer = this.computerFor(model);
+    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
+    const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
+    const builtins =
+      summary.kind === 'code'
+        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && !chatOnly.has(n) && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
+        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : []), ...(work.files ? ['CreateFile'] : []), ...(work.code ? ['RunCode'] : [])];
+    return [...builtins, ...mcpTools];
+  }
+
+  /** Builds the system prompt for this model; code sessions read project notes through the given loader. */
+  private async composePrompt(model: ModelInfo, memory: MemoryLoader | null): Promise<string> {
+    const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
+    const summary = this.summary;
+    const web = this.webTools(model);
+    const prefs = this.deps.preferences();
+    const root = this.projectRoot();
+    if (summary.kind === 'code' && root && memory) {
+      return buildCodeSystemPrompt({
+        model: identity,
+        cwd: this.workingDir(),
+        projectRoot: root,
+        platform: this.deps.platform,
+        shellLabel: this.deps.shellLabel,
+        git: await this.deps.gitInfo(this.workingDir()),
+        date: this.deps.now().toISOString().slice(0, 10),
+        mode: summary.permissionMode,
+        memory: memory.initial(this.workingDir()),
+        skills: loadSkills(this.deps.graftHome, root),
+        webSearch: web.native || web.clientSearch,
+        computer: this.computerFor(model),
+        mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
+        personalization: prefs.personalization
+      });
+    }
+    // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
+    return buildChatSystemPrompt({
+      date: this.deps.now().toISOString().slice(0, 10),
+      name: summary.incognito ? null : prefs.userName,
+      model: identity,
+      web: { search: web.native || web.clientSearch, fetch: web.fetch },
+      workspace: this.chatWork(model),
+      personalization: summary.incognito ? null : prefs.personalization
+    });
+  }
+
+  private memoryLoader(): MemoryLoader | null {
+    const root = this.projectRoot();
+    return this.summary.kind === 'code' && root ? new MemoryLoader(this.deps.graftHome, root, this.deps.platform) : null;
+  }
+
+  /**
+   * What the next turn sends as its system prompt and tools, for Session →
+   * View system prompt. Reuses the session's prompt when it was built for the
+   * current model; otherwise builds one without keeping it, so a preview
+   * never changes what a turn sends.
+   */
+  async promptPreview(): Promise<{ system: string; tools: string[]; model: string }> {
+    const { model, ref } = await this.resolveModel(new AbortController().signal);
+    const tools = this.toolsFor(model);
+    const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
+    if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
+    return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
+  }
+
   /**
    * System prompt and tool list are built once and then kept stable; a model
    * switch rebuilds them (the provider cache is lost then anyway) so the
    * prompt always names the model that is answering.
    */
   private async ensurePrompt(model: ModelInfo): Promise<{ system: string; toolNames: string[] }> {
-    const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
-    const summary = this.summary;
-    const web = this.webTools(model);
-    const work = this.chatWork(model);
-    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
-    const computer = summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
-    const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
-    const builtins =
-      summary.kind === 'code'
-        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && !chatOnly.has(n) && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
-        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : []), ...(work.files ? ['CreateFile'] : []), ...(work.code ? ['RunCode'] : [])];
-    const toolNames = [...builtins, ...mcpTools];
+    const toolNames = this.toolsFor(model);
     if (!this.system) {
-      const root = this.projectRoot();
-      if (summary.kind === 'code' && root) {
-        this.memory = new MemoryLoader(this.deps.graftHome, root, this.deps.platform);
-        const git = await this.deps.gitInfo(this.workingDir());
-        this.system = buildCodeSystemPrompt({
-          model: identity,
-          cwd: this.workingDir(),
-          projectRoot: root,
-          platform: this.deps.platform,
-          shellLabel: this.deps.shellLabel,
-          git,
-          date: this.deps.now().toISOString().slice(0, 10),
-          mode: summary.permissionMode,
-          memory: this.memory.initial(this.workingDir()),
-          skills: loadSkills(this.deps.graftHome, root),
-          webSearch: web.native || web.clientSearch,
-          computer,
-          mcpServers: this.deps.mcpServerNames(this.settingsRoot())
-        });
-      } else {
-        // An incognito chat doesn't tell the provider who is asking.
-        const name = summary.incognito ? null : this.deps.preferences().userName;
-        this.system = buildChatSystemPrompt({
-          date: this.deps.now().toISOString().slice(0, 10),
-          name,
-          model: identity,
-          web: { search: web.native || web.clientSearch, fetch: web.fetch },
-          workspace: work
-        });
-      }
+      this.memory = this.memoryLoader();
+      this.system = await this.composePrompt(model, this.memory);
     }
     const key = `${this.system.length}:${toolNames.join(',')}`;
     if (this.promptKey !== null && this.promptKey !== key) this.markThinkingStale();

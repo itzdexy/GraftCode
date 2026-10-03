@@ -33,7 +33,7 @@ function Root() {
 
   useEffect(() => applyTheme(theme, (error) => logError('Could not sync the titlebar theme', error)), [theme]);
   useEffect(() => {
-    if (appearance) applyAppearance(appearance);
+    if (appearance) applyAppearance(appearance, (error) => logError('Could not sync the titlebar colours', error));
   }, [appearance]);
 
   if (phase === 'error') {

@@ -1,5 +1,4 @@
-import { useState, type ComponentType } from 'react';
-import { AudioLines, Bell, BookText, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, User, Webhook } from 'lucide-react';
+import { useState } from 'react';
 import { cn } from '../../lib/cn';
 import { useNav, type SettingsSection } from '../../stores/nav';
 import { HooksSection } from '../customize/HooksSection';
@@ -11,6 +10,7 @@ import { AppearanceSection } from './AppearanceSection';
 import { DataSection } from './DataSection';
 import { ModelsSection } from './ModelsSection';
 import { NotificationsSection } from './NotificationsSection';
+import { PersonalizationSection } from './PersonalizationSection';
 import { PermissionsSection } from './PermissionsSection';
 import { PrivacySection } from './PrivacySection';
 import { VoiceSection } from './VoiceSection';
@@ -18,32 +18,8 @@ import { WebSearchSection } from './WebSearchSection';
 import { ProfileSection } from './ProfileSection';
 import { ProjectPicker } from './ProjectPicker';
 import { ProvidersSection } from './ProvidersSection';
+import { SETTINGS_SECTIONS } from './sections';
 import { ShortcutsSection } from './ShortcutsSection';
-
-interface SectionInfo {
-  id: SettingsSection;
-  label: string;
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-}
-
-export const SETTINGS_SECTIONS: SectionInfo[] = [
-  { id: 'profile', label: 'Profile', description: 'How Graft greets you.', icon: User },
-  { id: 'providers', label: 'Providers', description: 'Keys and endpoints for model providers.', icon: KeyRound },
-  { id: 'models', label: 'Models', description: 'Defaults for new sessions and extra model IDs.', icon: Cpu },
-  { id: 'permissions', label: 'Permissions', description: 'What the agent may do without asking.', icon: ShieldCheck },
-  { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
-  { id: 'search', label: 'Web search', description: 'How models search and read the web.', icon: Globe },
-  { id: 'voice', label: 'Voice', description: 'How replies sound when they are read aloud.', icon: AudioLines },
-  { id: 'mcp', label: 'MCP servers', description: 'Tools and data from other apps.', icon: Plug },
-  { id: 'hooks', label: 'Hooks', description: 'Commands that run around tool calls and turns.', icon: Webhook },
-  { id: 'memory', label: 'Memory', description: 'Standing instructions every session reads.', icon: BookText },
-  { id: 'appearance', label: 'Appearance', description: 'Theme, text size and motion.', icon: Palette },
-  { id: 'shortcuts', label: 'Shortcuts', description: 'Keyboard shortcuts.', icon: Keyboard },
-  { id: 'notifications', label: 'Notifications', description: 'Desktop notifications and running in the background.', icon: Bell },
-  { id: 'data', label: 'Data', description: 'Export, clear and reset.', icon: Database },
-  { id: 'about', label: 'About', description: 'Version and updates.', icon: Info }
-];
 
 /** MCP, hooks and memory exist per scope; these reuse the Customize editors with a project picker. */
 function ScopedSection({ render }: { render: (projectPath: string | null) => JSX.Element }) {
@@ -60,6 +36,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
   switch (section) {
     case 'profile':
       return <ProfileSection />;
+    case 'personalization':
+      return <PersonalizationSection />;
     case 'providers':
       return <ProvidersSection />;
     case 'models':
@@ -127,7 +105,9 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               <h2 className="text-xl font-medium text-fg-strong">{info.label}</h2>
               <p className="mt-4 text-base text-fg-muted">{info.description}</p>
             </header>
-            <SectionBody key={info.id} section={info.id} />
+            <div key={info.id} className="motion-rise">
+              <SectionBody section={info.id} />
+            </div>
           </div>
         </div>
       </div>

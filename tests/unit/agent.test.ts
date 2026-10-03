@@ -692,6 +692,52 @@ describe('commands, memory and history', () => {
     expect(h.provider.requests[0]!.system).toMatch(/assistant in the Graft desktop app/);
     expect(h.provider.requests[0]!.system).toContain("The user's name is Tester");
   });
+
+  it('adds Settings → Personalization to chat and code prompts, and leaves it out of incognito chats', async () => {
+    const personalization = { about: 'I am a data engineer who writes Python.', instructions: 'Use British spelling.', style: 'concise' as const };
+    const chat = harness({ kind: 'chat', personalization, script: [{ text: 'ok' }] });
+    chat.session.send('hello');
+    await chat.session.idle();
+    const chatSystem = chat.provider.requests[0]!.system;
+    expect(chatSystem).toContain("# The user's preferences");
+    expect(chatSystem).toContain('<about-the-user>\nI am a data engineer who writes Python.\n</about-the-user>');
+    expect(chatSystem).toContain('<how-to-respond>\nUse British spelling.\n</how-to-respond>');
+    expect(chatSystem).toContain('Response style: concise.');
+
+    const code = harness({ personalization: { ...personalization, style: 'learning' }, script: [{ text: 'ok' }] });
+    code.session.send('hello');
+    await code.session.idle();
+    expect(code.provider.requests[0]!.system).toContain('Use British spelling.');
+    expect(code.provider.requests[0]!.system).toContain('Response style: learning.');
+
+    const incognito = harness({ kind: 'chat', incognito: true, personalization, script: [{ text: 'ok' }] });
+    incognito.session.send('hello');
+    await incognito.session.idle();
+    expect(incognito.provider.requests[0]!.system).not.toContain('data engineer');
+    expect(incognito.provider.requests[0]!.system).not.toContain("The user's preferences");
+
+    // Nothing set: no section at all.
+    const plain = harness({ kind: 'chat', script: [{ text: 'ok' }] });
+    plain.session.send('hello');
+    await plain.session.idle();
+    expect(plain.provider.requests[0]!.system).not.toContain("The user's preferences");
+  });
+
+  it('previews the exact system prompt and tools of the next turn without changing what turns send', async () => {
+    const h = harness({ script: [{ text: 'one' }, { text: 'two' }] });
+    const before = await h.session.promptPreview();
+    expect(before.model).toBe('Fake Model via Fake Provider');
+    h.session.send('first');
+    await h.session.idle();
+    const sent = h.provider.requests[0]!;
+    expect(sent.system).toBe(before.system);
+    expect(sent.tools.map((t) => t.name).sort()).toEqual([...before.tools].sort());
+    const after = await h.session.promptPreview();
+    expect(after.system).toBe(sent.system);
+    h.session.send('second');
+    await h.session.idle();
+    expect(h.provider.requests[1]!.system).toBe(sent.system);
+  });
 });
 
 describe('auto-titling', () => {
@@ -712,5 +758,80 @@ describe('auto-titling', () => {
     );
     expect(provider.requests[0]!.tools).toEqual([]);
     expect(provider.requests[0]!.privacy).toEqual({ noTraining: true, zeroRetention: false });
+  });
+});
+
+describe('shell commands from the message box', () => {
+  it('runs a "!" command in the session shell without a model turn, and the next turn sees its output', async () => {
+    const h = harness({ script: [{ text: 'It printed the marker.' }] });
+    h.session.runShell('echo graft-shell-marker');
+    await h.session.idle();
+    const ran = h.store.listMessages('session-1').find((m) => m.meta.kind === 'shell');
+    expect(ran?.role).toBe('user');
+    expect(ran?.meta.shell).toMatchObject({ command: 'echo graft-shell-marker', exitCode: 0, timedOut: false, interrupted: false });
+    expect(ran?.meta.shell?.output).toContain('graft-shell-marker');
+    expect(h.provider.requests).toHaveLength(0);
+    expect(h.events.map((e) => e.type)).toEqual(expect.arrayContaining(['turn-start', 'message', 'turn-end']));
+    expect(h.session.summary.status).toBe('idle');
+
+    h.session.send('what did it print?');
+    await h.session.idle();
+    const sent = JSON.stringify(h.provider.requests[0]!.messages);
+    expect(sent).toContain('<user-shell-command');
+    expect(sent).toContain('graft-shell-marker');
+    expect(sent).toContain('what did it print?');
+  });
+
+  it('refuses in chats, without a command, and while a turn is running', async () => {
+    const chat = harness({ kind: 'chat', script: [] });
+    expect(() => chat.session.runShell('echo hi')).toThrow(/code sessions/);
+    const h = harness({ script: [{ text: Array.from({ length: 40 }, (_, i) => `word${i}`).join(' '), chunkDelayMs: 15 }] });
+    expect(() => h.session.runShell('   ')).toThrow(/command after the !/);
+    h.session.send('start working');
+    await h.waitFor((e) => e.type === 'assistant-delta');
+    expect(() => h.session.runShell('echo hi')).toThrow(/Graft is working/);
+    await h.session.idle();
+    expect(h.store.listMessages('session-1').some((m) => m.meta.kind === 'shell')).toBe(false);
+  });
+});
+
+describe('prompt commands', () => {
+  it('expands /commit, /pr, /security-review, /explain and /test into prepared prompts that show as typed', async () => {
+    const h = harness({ script: [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }] });
+    for (const typed of ['/commit fix the login typo', '/pr', '/security-review auth', '/explain the session queue', '/test']) {
+      h.session.send(typed);
+      await h.session.idle();
+    }
+    const sent = h.provider.requests.map((r) => JSON.stringify(r.messages.at(-1)));
+    expect(sent[0]).toContain('Commit the current changes.');
+    expect(sent[0]).toContain('Notes for the message: fix the login typo');
+    expect(sent[1]).toContain('gh pr create');
+    expect(sent[2]).toContain('security review');
+    expect(sent[2]).toContain('Focus especially on: auth');
+    expect(sent[3]).toContain('Explain how the session queue works.');
+    expect(sent[4]).toContain('never skip, delete or weaken a test');
+    const typed = h.store.listMessages('session-1').filter((m) => m.role === 'user').map((m) => m.meta.typed);
+    expect(typed).toEqual(['/commit fix the login typo', '/pr', '/security-review auth', '/explain the session queue', '/test']);
+  });
+
+  it('lets a project command replace a prompt built-in, but never a session control', async () => {
+    const h = harness({ script: [{ text: 'ok' }] });
+    writeFile(h.projectDir, '.graft/commands/commit.md', 'Commit with a Conventional Commits message. $ARGUMENTS');
+    writeFile(h.projectDir, '.graft/commands/clear.md', 'This must never replace /clear.');
+    const { listCommands } = await import('../../src/main/agent/slashCommands');
+    const listed = listCommands(h.home, h.projectDir);
+    expect(listed.filter((c) => c.name === 'commit')).toEqual([expect.objectContaining({ source: 'project' })]);
+    expect(listed.filter((c) => c.name === 'clear')).toEqual([expect.objectContaining({ source: 'builtin' })]);
+    h.session.send('/commit now');
+    await h.session.idle();
+    expect(JSON.stringify(h.provider.requests[0]!.messages.at(-1))).toContain('Conventional Commits message. now');
+  });
+
+  it('answers UI-only commands that reach the session instead of sending them to the model', async () => {
+    const h = harness({ script: [] });
+    h.session.send('/export notes.md');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(0);
+    expect(texts(h).at(-1)).toMatch(/opens in the app/);
   });
 });

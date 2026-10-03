@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FolderOpen, History, Laptop, ListChecks, Shrink } from 'lucide-react';
+import { ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FileText, FolderOpen, History, Laptop, ListChecks, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
@@ -12,6 +12,7 @@ import { IncognitoBadge } from '../privacy/IncognitoBadge';
 import { exportSession, renameSession } from '../shell/sessionActions';
 import { SessionMenuItems } from '../shell/SessionMenu';
 import { ViewHeader } from '../shell/ViewHeader';
+import { useSystemPrompt } from './SystemPromptDialog';
 
 /** Title with a dropdown of session actions; Rename edits in place. */
 export function TitleMenu({ summary, size = 'md' }: { summary: SessionSummary; size?: 'md' | 'lg' }) {
@@ -176,6 +177,9 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, o
               <MenuItem icon={<FileDown className="size-14" />} onSelect={() => void exportSession(summary, 'markdown')}>
                 Export as Markdown…
               </MenuItem>
+              <MenuItem icon={<FileText className="size-14" />} onSelect={() => useSystemPrompt.getState().open(summary.id)}>
+                View system prompt
+              </MenuItem>
             </MenuContent>
           </Menu>
         </>
@@ -211,6 +215,10 @@ export function ChatSessionHeader({ summary }: { summary: SessionSummary }) {
           <MenuContent align="end">
             <MenuItem onSelect={() => void exportSession(summary, 'markdown')}>Export as Markdown…</MenuItem>
             <MenuItem onSelect={() => void exportSession(summary, 'json')}>Export as JSON…</MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={<FileText className="size-14" />} onSelect={() => useSystemPrompt.getState().open(summary.id)}>
+              View system prompt
+            </MenuItem>
           </MenuContent>
         </Menu>
       </div>

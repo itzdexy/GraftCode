@@ -1,4 +1,4 @@
-import type { ImageBlock, StoredMessage, ToolResultBlock } from '@shared/schemas/messages';
+import type { ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 
 /**
@@ -26,6 +26,7 @@ export type TranscriptItem =
   | { kind: 'provider'; key: string; summary: string; at: number; search: SearchInfo | null }
   | { kind: 'compaction'; key: string; text: string }
   | { kind: 'command-output'; key: string; text: string }
+  | { kind: 'shell'; key: string; shell: UserShell }
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
@@ -106,6 +107,11 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
     if (kind === 'notice') {
       flush();
       items.push({ kind: 'notice', key: message.id, text: textFrom(message) });
+      continue;
+    }
+    if (kind === 'shell') {
+      flush();
+      if (message.meta.shell) items.push({ kind: 'shell', key: message.id, shell: message.meta.shell });
       continue;
     }
 
@@ -263,7 +269,8 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
   const out: TranscriptItem[] = [];
   const turns: TranscriptItem[][] = [[]];
   for (const item of items) {
-    if (item.kind === 'user') turns.push([item]);
+    // A "!" command stands apart from the turn before it, so that turn's file card stays with it.
+    if (item.kind === 'user' || item.kind === 'shell') turns.push([item]);
     else turns.at(-1)?.push(item);
   }
   turns.forEach((segment, index) => {

@@ -5,6 +5,7 @@ import type { ToolResultBlock } from '@shared/schemas/messages';
 import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import { Badge } from '../../components/Badge';
 import { cn } from '../../lib/cn';
+import { formatDuration } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
 import { reportError } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
@@ -21,12 +22,6 @@ function resultText(result: ToolResultBlock): string {
     .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
     .map((b) => b.text)
     .join('\n');
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
 }
 
 function revealLog(path: string): void {

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export type SettingsSection =
   | 'profile'
+  | 'personalization'
   | 'providers'
   | 'models'
   | 'permissions'

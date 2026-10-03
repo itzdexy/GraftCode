@@ -20,8 +20,7 @@ export function Toaster() {
           key={toast.id}
           role={toast.tone === 'error' ? 'alert' : 'status'}
           className={cn(
-            'pointer-events-auto flex items-start gap-10 rounded-lg border border-border bg-surface px-12 py-10 shadow-popover',
-            'animate-[graft-menu-in_var(--g-duration-base)_var(--g-ease)]'
+            'motion-slide-up pointer-events-auto flex items-start gap-10 rounded-lg border border-border bg-surface px-12 py-10 shadow-popover'
           )}
         >
           <span className="mt-1">{ICONS[toast.tone]}</span>

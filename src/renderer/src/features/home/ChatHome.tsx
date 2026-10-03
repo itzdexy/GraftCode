@@ -57,7 +57,7 @@ export function ChatHome() {
           </IconButton>
         }
       />
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-24 pb-[14vh]">
+      <div className="motion-stagger flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-24 pb-[14vh]">
         {incognito ? (
           <div className="flex flex-col items-center gap-8 text-center">
             <h1 className="flex items-center gap-12 font-serif text-greeting font-normal text-fg-strong">
@@ -83,6 +83,7 @@ export function ChatHome() {
           supportsImages={defaults.model?.supportsVision ?? false}
           blockedReason={defaults.blockedReason}
           onSubmit={submit}
+          history={!incognito}
           autoFocus
           className="mt-28 w-full max-w-[var(--g-home-composer-width)]"
           rightControls={

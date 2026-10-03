@@ -13,6 +13,8 @@ import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
 import { RewindDialog } from '../session/RewindDialog';
 import { SessionView } from '../session/SessionView';
+import { SystemPromptDialog } from '../session/SystemPromptDialog';
+import { CommandPalette } from './CommandPalette';
 import { InfoDialogs } from './InfoDialogs';
 import { SearchDialog } from './SearchDialog';
 import { SessionDialogs } from './SessionDialogs';
@@ -79,6 +81,7 @@ export function AppShell() {
   useShortcut('toggleSidebar', () => void toggleSidebar());
   useShortcut('focusComposer', () => useUi.getState().focusComposer?.());
   useShortcut('openSettings', () => openSettings());
+  useShortcut('commandPalette', () => useUi.getState().setPaletteOpen(true));
 
   return (
     <div className="flex h-full bg-bg">
@@ -89,8 +92,10 @@ export function AppShell() {
         </ErrorBoundary>
       </main>
       <SearchDialog />
+      <CommandPalette />
       <SessionDialogs />
       <RewindDialog />
+      <SystemPromptDialog />
       <InfoDialogs />
     </div>
   );

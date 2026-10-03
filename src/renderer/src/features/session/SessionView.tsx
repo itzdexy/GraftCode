@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FileDiff, Globe, SquareTerminal, X } from 'lucide-react';
-import type { FileAttachment, ImageBlock, StoredMessage } from '@shared/schemas/messages';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import type { QueuedInput, SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
@@ -23,17 +23,11 @@ import { AskUserCard } from './AskUserCard';
 import { PermissionCard } from './PermissionCard';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
-import { compact, cycleMode, interrupt, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
+import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
 import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
 
 export const DISCLAIMER = 'Graft can make mistakes. Review changes before shipping.';
-
-function lastTypedMessage(messages: StoredMessage[]): StoredMessage | null {
-  return (
-    messages.findLast((m) => m.role === 'user' && (m.meta.kind ?? 'normal') === 'normal' && m.content.some((b) => b.type === 'text' || b.type === 'image')) ?? null
-  );
-}
 
 function QueueList({ sessionId, queue }: { sessionId: string; queue: QueuedInput[] }) {
   if (queue.length === 0) return null;
@@ -162,7 +156,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             <Composer
               draftKey={summary.id}
               variant="code"
-              placeholder={busy ? 'Queue a message, or press Esc to stop' : 'Type / for commands'}
+              placeholder={busy ? 'Queue a message, or press Esc to stop' : folder ? 'Ask anything · / commands · @ files · ! shell' : 'Type / for commands'}
               supportsImages={model?.supportsVision ?? false}
               busy={busy}
               blockedReason={blockedReason}
@@ -171,6 +165,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
               onCyclePermission={() => cycleMode(summary)}
               commands={commands}
               mentionRoot={folder}
+              shell={folder !== null}
               autoFocus
               leftControls={<PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />}
               rightControls={
@@ -237,6 +232,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
             blockedReason={blockedReason}
             onSubmit={send}
             onInterrupt={() => interrupt(summary.id)}
+            history={!summary.incognito}
             autoFocus
             leftControls={<span className="min-w-0 truncate pl-4 text-sm text-fg-faint">{DISCLAIMER}</span>}
             rightControls={

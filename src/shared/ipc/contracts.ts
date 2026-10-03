@@ -129,7 +129,14 @@ export const contracts = {
   'web:favicon': channel(z.object({ host: z.string().min(3).max(253) }), z.string().nullable()),
   'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
   'power:keepAwakeList': channel(Void, z.array(z.string())),
-  'window:setTitlebarTheme': channel(z.object({ theme: ResolvedThemeSchema }), Void),
+  /** Colours are the palette's --g-bg and --g-icon; without them the theme's default colours apply. */
+  'window:setTitlebarTheme': channel(
+    z.object({
+      theme: ResolvedThemeSchema,
+      colors: z.object({ background: z.string().regex(/^#[0-9a-f]{6}$/i), symbol: z.string().regex(/^#[0-9a-f]{6}$/i) }).optional()
+    }),
+    Void
+  ),
   'dialog:pickFolder': channel(z.object({ title: z.string().max(200).optional() }), z.string().nullable()),
   'app:openInEditor': channel(z.object({ path: PathSchema }), z.object({ via: z.enum(['editor', 'folder']) })),
 
@@ -221,6 +228,8 @@ export const contracts = {
     z.object({ queued: z.boolean() })
   ),
   'sessions:interrupt': channel(z.object({ id: IdSchema }), Ok),
+  /** A command typed after "!" in a code session's message box; it runs in the session's shell. */
+  'sessions:shell': channel(z.object({ id: IdSchema, command: z.string().min(1).max(20_000) }), Ok),
   'sessions:respondPermission': channel(PermissionResponseSchema.extend({ sessionId: IdSchema }), Ok),
   'sessions:answerQuestion': channel(QuestionResponseSchema.extend({ sessionId: IdSchema }), Ok),
   'sessions:setMode': channel(z.object({ id: IdSchema, mode: PermissionModeSchema }), Ok),
@@ -242,6 +251,8 @@ export const contracts = {
   'sessions:retry': channel(z.object({ id: IdSchema }), Ok),
   'sessions:regenerate': channel(z.object({ id: IdSchema }), Ok),
   'sessions:compact': channel(z.object({ id: IdSchema, instructions: z.string().max(4000) }), Ok),
+  /** The system prompt and tool names the session's next turn sends (Session → View system prompt). */
+  'sessions:systemPrompt': channel(z.object({ id: IdSchema }), z.object({ system: z.string(), tools: z.array(z.string()), model: z.string() })),
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),

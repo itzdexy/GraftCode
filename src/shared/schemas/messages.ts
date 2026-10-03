@@ -83,8 +83,22 @@ export const FileAttachmentSchema = z.object({
 });
 export type FileAttachment = z.infer<typeof FileAttachmentSchema>;
 
-export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice']);
+export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice', 'shell']);
 export type MessageKind = z.infer<typeof MessageKindSchema>;
+
+/** A command the user ran with "!" in the message box, and what it printed (meta of a "shell" message). */
+export const UserShellSchema = z.object({
+  command: z.string(),
+  cwd: z.string(),
+  exitCode: z.number().int().nullable(),
+  /** The end of the output (the model gets the same text, cut in the middle when long). */
+  output: z.string(),
+  truncated: z.boolean(),
+  durationMs: z.number(),
+  timedOut: z.boolean(),
+  interrupted: z.boolean()
+});
+export type UserShell = z.infer<typeof UserShellSchema>;
 
 export const MessageMetaSchema = z.object({
   turnId: z.string().optional(),
@@ -100,7 +114,8 @@ export const MessageMetaSchema = z.object({
   /** Queued text or slash command as typed, when the stored content was expanded. */
   typed: z.string().optional(),
   /** Names of text files attached to this message. */
-  attachments: z.array(z.string()).optional()
+  attachments: z.array(z.string()).optional(),
+  shell: UserShellSchema.optional()
 });
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;
 

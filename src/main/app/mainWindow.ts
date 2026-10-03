@@ -22,11 +22,17 @@ export interface MainWindowOptions {
   iconPath: string;
 }
 
+/** The palette's background and icon colours (validated #rrggbb from the renderer). */
+export interface TitlebarColors {
+  background: string;
+  symbol: string;
+}
+
 export interface MainWindowHandle {
   window: BrowserWindow;
   /** True when a frame URL belongs to this app's renderer. */
   isAppUrl(url: string): boolean;
-  setTheme(theme: ResolvedTheme): void;
+  setTheme(theme: ResolvedTheme, colors?: TitlebarColors): void;
 }
 
 export function createMainWindow(options: MainWindowOptions): MainWindowHandle {
@@ -104,10 +110,10 @@ export function createMainWindow(options: MainWindowOptions): MainWindowHandle {
       }
       return url.split('#')[0]?.split('?')[0] === indexUrl;
     },
-    setTheme(theme: ResolvedTheme): void {
+    setTheme(theme: ResolvedTheme, colors?: TitlebarColors): void {
       if (window.isDestroyed()) return;
-      window.setBackgroundColor(BACKGROUND[theme]);
-      if (!isMac) window.setTitleBarOverlay(OVERLAY[theme]);
+      window.setBackgroundColor(colors?.background ?? BACKGROUND[theme]);
+      if (!isMac) window.setTitleBarOverlay(colors ? { ...OVERLAY[theme], color: colors.background, symbolColor: colors.symbol } : OVERLAY[theme]);
     }
   };
 }

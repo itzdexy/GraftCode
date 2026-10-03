@@ -29,6 +29,8 @@ export interface SessionView {
   turnActive: boolean;
   /** When the running turn started (for the elapsed time next to the thinking indicator). */
   turnStartedAt: number | null;
+  /** The "!" command running now, when the active "turn" is one (no model is working). */
+  shellCommand: string | null;
 }
 
 const EMPTY_VIEW: SessionView = {
@@ -44,7 +46,8 @@ const EMPTY_VIEW: SessionView = {
   notices: [],
   retrying: null,
   turnActive: false,
-  turnStartedAt: null
+  turnStartedAt: null,
+  shellCommand: null
 };
 
 let noticeSeq = 0;
@@ -96,9 +99,9 @@ function mergeNewer(snapshot: StoredMessage[], local: StoredMessage[]): StoredMe
 function reduce(view: SessionView, event: AgentEvent): SessionView {
   switch (event.type) {
     case 'turn-start':
-      return { ...view, turnActive: true, turnStartedAt: Date.now(), notices: [], retrying: null };
+      return { ...view, turnActive: true, turnStartedAt: Date.now(), notices: [], retrying: null, shellCommand: event.shell ?? null };
     case 'turn-end':
-      return { ...view, turnActive: false, turnStartedAt: null, streaming: null, running: {}, retrying: null };
+      return { ...view, turnActive: false, turnStartedAt: null, streaming: null, running: {}, retrying: null, shellCommand: null };
     case 'assistant-start':
       return { ...view, streaming: { messageId: event.messageId, text: '', thinking: '' }, retrying: null };
     case 'assistant-delta': {

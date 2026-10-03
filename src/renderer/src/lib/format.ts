@@ -26,6 +26,13 @@ export function partOfDay(date: Date): 'morning' | 'afternoon' | 'evening' {
   return 'evening';
 }
 
+/** How long something ran: "850 ms", "4.2 s", "3 min 5 s". */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
+}
+
 export function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
   if (n >= 10_000) return `${Math.round(n / 1000)}K`;

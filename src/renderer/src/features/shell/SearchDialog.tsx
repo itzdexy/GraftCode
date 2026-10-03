@@ -119,11 +119,16 @@ function SearchPanel() {
           aria-label="Search"
           value={query}
           onChange={(e) => {
+            // ">" switches to the command palette, as in code editors.
+            if (e.target.value.startsWith('>')) {
+              useUi.getState().setPaletteOpen(true, e.target.value.slice(1).trimStart());
+              return;
+            }
             setQuery(e.target.value);
             setActive(0);
           }}
           onKeyDown={onKeyDown}
-          placeholder="Search chats and sessions"
+          placeholder="Search chats and sessions, or type > for commands"
           spellCheck={false}
           className="h-44 min-w-0 flex-1 bg-transparent text-md text-fg outline-none"
         />

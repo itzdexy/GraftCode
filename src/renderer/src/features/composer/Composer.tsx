@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { CornerDownLeft, FileText, Plus, Square, X } from 'lucide-react';
+import { CornerDownLeft, FileText, Plus, Square, SquareTerminal, X } from 'lucide-react';
 import type { SlashCommand } from '@shared/schemas/app';
 import { DEFAULT_SHORTCUTS } from '@shared/schemas/appSettings';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
+import { loadHistory, pushHistory } from '../../lib/promptHistory';
 import { matchesAccelerator } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
@@ -35,6 +36,10 @@ export interface ComposerProps {
   commands?: SlashCommand[] | null;
   /** Project folder for "@" file mentions; null disables them. */
   mentionRoot?: string | null;
+  /** Text starting with "!" is a shell command for the session (code sessions with a folder). */
+  shell?: boolean;
+  /** Remember sent messages for ↑ and ↓ (off in incognito chats). */
+  history?: boolean;
   autoFocus?: boolean;
   className?: string;
 }
@@ -61,6 +66,8 @@ export function Composer({
   perch,
   commands = null,
   mentionRoot = null,
+  shell = false,
+  history = true,
   autoFocus = false,
   className
 }: ComposerProps) {
@@ -79,8 +86,12 @@ export function Composer({
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const pendingCaret = useRef<number | null>(null);
+  /** Position in the sent-message history while ↑/↓ browse it, and the draft to come back to. */
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const stash = useRef('');
+  const shellActive = shell && text.startsWith('!');
 
-  const rawToken = commands || mentionRoot ? detectToken(text, caret) : null;
+  const rawToken = !shellActive && (commands || mentionRoot) ? detectToken(text, caret) : null;
   const tokenKey = rawToken ? `${rawToken.kind}:${rawToken.start}:${rawToken.query}` : null;
   const token = rawToken && tokenKey !== dismissed ? rawToken : null;
   const suggestions = useSuggestions(token, commands, mentionRoot);
@@ -140,6 +151,8 @@ export function Composer({
     try {
       const sent = await onSubmit(message, images, files);
       if (sent) {
+        if (history) pushHistory(message);
+        setHistoryIndex(null);
         setDraft(draftKey, '');
         setImages([]);
         setFiles([]);
@@ -164,8 +177,38 @@ export function Composer({
     setDraft(draftKey, next);
   };
 
+  /** ↑ on the first line and ↓ on the last line browse sent messages, as in a shell. True when the key was used. */
+  const browseHistory = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!history || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+    const el = event.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) return false;
+    const recall = (entry: string, index: number | null): void => {
+      event.preventDefault();
+      setHistoryIndex(index);
+      pendingCaret.current = entry.length;
+      setCaret(entry.length);
+      setDraft(draftKey, entry);
+    };
+    if (event.key === 'ArrowUp' && !el.value.slice(0, el.selectionStart).includes('\n')) {
+      const entries = loadHistory();
+      const next = historyIndex === null ? 0 : historyIndex + 1;
+      const entry = entries[next];
+      if (entry === undefined) return false;
+      if (historyIndex === null) stash.current = text;
+      recall(entry, next);
+      return true;
+    }
+    if (event.key === 'ArrowDown' && historyIndex !== null && !el.value.slice(el.selectionEnd).includes('\n')) {
+      const next = historyIndex - 1;
+      recall(next < 0 ? stash.current : (loadHistory()[next] ?? stash.current), next < 0 ? null : next);
+      return true;
+    }
+    return false;
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.nativeEvent.isComposing) return;
+    if (!popupOpen && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && browseHistory(event)) return;
     if (popupOpen) {
       const count = suggestions.items.length;
       if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && count > 0) {
@@ -226,15 +269,22 @@ export function Composer({
     </IconButton>
   ) : (
     <IconButton
-      label={blockedReason ?? (busy ? 'Queue message' : 'Send')}
+      label={blockedReason ?? (shellActive ? 'Run command' : busy ? 'Queue message' : 'Send')}
       size="sm"
       disabled={!canSend}
       onClick={() => void submit()}
-      className={cn(canSend && 'text-icon-strong')}
+      className={cn('send-button', canSend && (shellActive ? 'text-accent' : 'text-icon-strong'))}
     >
       <CornerDownLeft className="size-16" />
     </IconButton>
   );
+
+  const shellBanner = shellActive ? (
+    <p className="flex items-center gap-6 px-10 pt-6 text-xs text-accent" aria-live="polite">
+      <SquareTerminal className="size-12 shrink-0" aria-hidden="true" />
+      Shell command: runs in this session’s folder, and Graft sees the output with your next message
+    </p>
+  ) : null;
 
   const removeClass =
     'absolute -top-5 -right-5 flex size-16 items-center justify-center rounded-full border border-border bg-surface text-icon opacity-0 transition-ui group-hover:opacity-100 focus-visible:opacity-100';
@@ -274,6 +324,7 @@ export function Composer({
         setDraft(draftKey, e.target.value);
         setCaret(e.target.selectionStart);
         setActive(0);
+        setHistoryIndex(null);
       }}
       onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
       onKeyDown={onKeyDown}
@@ -337,8 +388,8 @@ export function Composer({
   );
 
   const boxClass = cn(
-    'relative border bg-surface shadow-composer transition-ui',
-    dragOver ? 'border-blue' : 'border-border focus-within:border-border-strong'
+    'composer-box relative border bg-surface shadow-composer transition-ui',
+    dragOver ? 'border-blue' : shellActive ? 'border-accent' : 'border-border focus-within:border-border-strong'
   );
 
   const dropProps = {
@@ -380,6 +431,7 @@ export function Composer({
       <div className={cn(boxClass, 'rounded-lg')} {...dropProps}>
         {perch}
         {thumbnails}
+        {shellBanner}
         <div className="flex items-end">
           <div className="min-w-0 flex-1">{textarea}</div>
           <div className="flex shrink-0 items-center py-5 pr-5">{actionButton}</div>

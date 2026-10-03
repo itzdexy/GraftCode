@@ -12,6 +12,9 @@ export type InfoDialog = 'shortcuts' | 'about' | null;
 
 interface UiState {
   searchOpen: boolean;
+  /** The command palette (Ctrl+Shift+P, or ">" in search) and the text it opens with. */
+  paletteOpen: boolean;
+  paletteQuery: string;
   moreOpen: boolean;
   chatListExpanded: boolean;
   /** The next chat started from Chat home is incognito (not saved). */
@@ -26,6 +29,7 @@ interface UiState {
   /** Focus callback registered by the composer currently on screen (Ctrl+L). */
   focusComposer: (() => void) | null;
   setSearchOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean, query?: string) => void;
   setMoreOpen: (open: boolean) => void;
   setChatListExpanded: (expanded: boolean) => void;
   setIncognito: (incognito: boolean) => void;
@@ -40,6 +44,8 @@ interface UiState {
 
 export const useUi = create<UiState>((set, get) => ({
   searchOpen: false,
+  paletteOpen: false,
+  paletteQuery: '',
   moreOpen: false,
   chatListExpanded: false,
   incognito: false,
@@ -50,6 +56,7 @@ export const useUi = create<UiState>((set, get) => ({
   hiddenStatusBars: {},
   focusComposer: null,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
+  setPaletteOpen: (paletteOpen, paletteQuery = '') => set(paletteOpen ? { paletteOpen, paletteQuery, searchOpen: false } : { paletteOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
   setChatListExpanded: (chatListExpanded) => set({ chatListExpanded }),
   setIncognito: (incognito) => set({ incognito }),

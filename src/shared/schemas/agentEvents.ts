@@ -10,7 +10,8 @@ import { TodoItemSchema } from './toolDisplay';
  * arrive as `message`; the in-flight assistant reply streams as deltas first.
  */
 export const AgentEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('turn-start'), turnId: z.string() }),
+  /** `shell` is set when the "turn" is a "!" command from the message box rather than a model turn. */
+  z.object({ type: z.literal('turn-start'), turnId: z.string(), shell: z.string().optional() }),
   z.object({ type: z.literal('message'), message: StoredMessageSchema }),
   z.object({ type: z.literal('assistant-start'), messageId: z.string() }),
   z.object({

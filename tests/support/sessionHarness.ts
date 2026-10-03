@@ -7,7 +7,7 @@ import type { SessionSummary } from '../../src/shared/schemas/sessions';
 import type { HookEvent } from '../../src/shared/schemas/config';
 import { MemorySessionStore } from '../../src/main/db/memorySessionStore';
 import { EMPTY_SESSION_USAGE } from '../../src/main/db/sessionsRepo';
-import { AgentSession, type SessionDeps } from '../../src/main/agent/session';
+import { AgentSession, type SessionDeps, type SessionPreferences } from '../../src/main/agent/session';
 import { HookRunner } from '../../src/main/agent/hooks';
 import { SettingsStore, type ScopedHook } from '../../src/main/permissions/settingsStore';
 import { createBuiltinRegistry } from '../../src/main/tools/builtin';
@@ -60,6 +60,8 @@ export interface HarnessOptions {
   /** Chat file store and code sandbox (default: none). */
   chatFiles?: SessionDeps['chatFiles'];
   runCode?: SessionDeps['runCode'];
+  /** Settings → Personalization (default: empty). */
+  personalization?: SessionPreferences['personalization'];
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -138,7 +140,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       defaultEffort: 'medium',
       noTraining: options.noTraining ?? false,
       incognitoLocalOnly: options.incognitoLocalOnly ?? false,
-      computerUse: options.computer !== undefined
+      computerUse: options.computer !== undefined,
+      personalization: options.personalization ?? { about: '', instructions: '', style: 'default' }
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),

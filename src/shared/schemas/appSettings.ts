@@ -24,7 +24,8 @@ export const SHORTCUT_IDS = [
   'interrupt',
   'cyclePermissionMode',
   'openSettings',
-  'toggleFiles'
+  'toggleFiles',
+  'commandPalette'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -39,8 +40,22 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   interrupt: 'Escape',
   cyclePermissionMode: 'Shift+Tab',
   openSettings: 'Ctrl+,',
-  toggleFiles: 'Ctrl+Shift+F'
+  toggleFiles: 'Ctrl+Shift+F',
+  commandPalette: 'Ctrl+Shift+P'
 };
+
+/** Settings → Appearance: colour palettes (generated in styles/palettes.css) and accent colours. */
+export const PALETTE_IDS = ['graft', 'midnight', 'slate', 'grove', 'dune', 'contrast'] as const;
+export type PaletteId = (typeof PALETTE_IDS)[number];
+export const ACCENT_IDS = ['leaf', 'ocean', 'iris', 'rose', 'gold', 'teal', 'mono'] as const;
+export type AccentId = (typeof ACCENT_IDS)[number];
+
+/** Settings → Personalization: how answers are written, in chats and code sessions. */
+export const RESPONSE_STYLES = ['default', 'concise', 'explanatory', 'learning'] as const;
+export const ResponseStyleSchema = z.enum(RESPONSE_STYLES);
+export type ResponseStyle = z.infer<typeof ResponseStyleSchema>;
+/** Longest "about you" and "how to respond" text. */
+export const PERSONALIZATION_MAX = 3000;
 
 /** Engines the WebSearch tool can use (Settings → Web search). */
 export const SEARCH_ENGINE_IDS = ['exa', 'duckduckgo', 'openrouter', 'anthropic', 'openai', 'gemini', 'brave', 'tavily', 'searxng'] as const;
@@ -63,6 +78,8 @@ export const AppSettingsSchema = z.object({
   }),
   appearance: z.object({
     theme: z.enum(['system', 'dark', 'light']),
+    palette: z.enum(PALETTE_IDS),
+    accent: z.enum(ACCENT_IDS),
     uiFontSize: z.number().int().min(11).max(18),
     codeFontSize: z.number().int().min(10).max(20),
     reducedMotion: z.boolean(),
@@ -116,6 +133,12 @@ export const AppSettingsSchema = z.object({
     systemVoice: z.string().max(200).nullable(),
     speed: z.number().min(0.5).max(2)
   }),
+  /** Sent to models in the system prompt (never in incognito chats). */
+  personalization: z.object({
+    about: z.string().max(PERSONALIZATION_MAX),
+    instructions: z.string().max(PERSONALIZATION_MAX),
+    style: ResponseStyleSchema
+  }),
   shortcuts: z.record(ShortcutIdSchema, z.string().max(40)),
   ui: z.object({
     sidebarWidth: z.number().int().min(200).max(480),
@@ -129,7 +152,7 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false },
@@ -138,6 +161,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   updates: { enabled: true },
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
+  personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
 };
@@ -158,6 +182,7 @@ export const AppSettingsPatchSchema = z.object({
   updates: AppSettingsSchema.shape.updates.partial().optional(),
   search: AppSettingsSchema.shape.search.partial().optional(),
   voice: AppSettingsSchema.shape.voice.partial().optional(),
+  personalization: AppSettingsSchema.shape.personalization.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()
 });

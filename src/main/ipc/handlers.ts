@@ -44,7 +44,7 @@ import type { McpServerView } from '@shared/schemas/customize';
 import { maskConfig, mergeMcpConfig, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
-import { BUILTIN_COMMANDS, loadCustomCommands } from '../agent/slashCommands';
+import { listCommands as listSlashCommands } from '../agent/slashCommands';
 import type { SessionManager } from '../agent/sessionManager';
 import { writeExport } from '../app/dataExport';
 import { log } from '../app/log';
@@ -550,6 +550,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).compact(id, instructions);
       return { ok: true as const };
     },
+    'sessions:systemPrompt': async ({ id }) => (await ctx.sessions()).promptPreview(id),
+    'sessions:shell': async ({ id, command }) => {
+      (await ctx.sessions()).runShell(id, command);
+      return { ok: true as const };
+    },
     'sessions:removeQueued': async ({ id, queueId }) => {
       (await ctx.sessions()).removeQueued(id, queueId);
       return { ok: true as const };
@@ -600,7 +605,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'commands:list': async ({ projectPath }) => {
       const s = await ctx.services();
-      return [...BUILTIN_COMMANDS, ...loadCustomCommands(s.paths.graftHome, projectPath)].map(({ name, description, argumentHint, source, path }) => ({
+      return listSlashCommands(s.paths.graftHome, projectPath).map(({ name, description, argumentHint, source, path }) => ({
         name,
         description,
         argumentHint,

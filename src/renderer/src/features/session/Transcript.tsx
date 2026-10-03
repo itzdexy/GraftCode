@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -19,11 +19,22 @@ import {
 import { ActivityGroup } from './ActivityGroup';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
+import { RunningShell, ShellItem } from './ShellItem';
 import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
 import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
 
 const STICK_THRESHOLD = 80;
+
+/**
+ * One transcript item. Items that appear while a turn runs (the message just
+ * sent, the reply, tool work) rise in; what is already there when a session
+ * opens just appears. The choice is made once, when the item mounts.
+ */
+function Arrival({ live, children }: { live: boolean; children: ReactNode }) {
+  const [rise] = useState(live);
+  return <div className={rise ? 'motion-rise' : undefined}>{children}</div>;
+}
 
 interface TranscriptProps {
   summary: SessionSummary;
@@ -65,9 +76,11 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
 export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, className }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
+  // While a "!" command runs no model is working, so the last turn stays as it finished.
+  const modelWorking = view.turnActive && view.shellCommand === null;
   const items = useMemo(
-    () => groupActivity(buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), view.turnActive),
-    [view.messages, view.streaming, view.running, view.turnActive]
+    () => groupActivity(buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), modelWorking),
+    [view.messages, view.streaming, view.running, modelWorking]
   );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -132,7 +145,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
 
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
   const lastItem = items.at(-1);
-  const showStatus = view.turnActive && view.permission === null && view.question === null;
+  const showStatus = modelWorking && view.permission === null && view.question === null;
   const failed = summary.status === 'error' && summary.lastError && !view.turnActive;
 
   const render = (item: TranscriptItem): JSX.Element | null => {
@@ -173,6 +186,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <CompactionItem item={item} />;
       case 'command-output':
         return <pre className="selectable rounded-md bg-sunken px-12 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] whitespace-pre-wrap text-fg-secondary">{item.text}</pre>;
+      case 'shell':
+        return <ShellItem shell={item.shell} />;
       case 'notice':
         return <p className="text-md text-fg-muted">{item.text}</p>;
       case 'error':
@@ -200,7 +215,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
           {items.map((item) => (
-            <div key={item.key}>{render(item)}</div>
+            <Arrival key={item.key} live={view.turnActive}>
+              {render(item)}
+            </Arrival>
           ))}
           {view.retrying ? (
             <p className="text-md text-fg-muted">
@@ -223,6 +240,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
               </div>
             </div>
           ) : null}
+          {view.shellCommand !== null ? <RunningShell command={view.shellCommand} startedAt={view.turnStartedAt} /> : null}
           {showStatus ? (
             <StatusLine sessionId={summary.id} startedAt={view.turnStartedAt} contextTokens={summary.usage.contextTokens} tasks={summary.kind === 'code'} />
           ) : null}

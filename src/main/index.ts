@@ -388,8 +388,8 @@ if (!gotLock) {
     }),
     'power:keepAwake': ({ sessionId, on }) => ({ on: keepAwake.set(sessionId, on) }),
     'power:keepAwakeList': () => keepAwake.list(),
-    'window:setTitlebarTheme': ({ theme }) => {
-      mainWindow?.setTheme(theme);
+    'window:setTitlebarTheme': ({ theme, colors }) => {
+      mainWindow?.setTheme(theme, colors);
     },
     ...buildHandlers({
       services,
