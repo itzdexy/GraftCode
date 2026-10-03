@@ -78,7 +78,7 @@ test('README screenshots', async () => {
     win?.unmaximize();
     win?.setContentSize(s.width, s.height);
   }, SIZE);
-  await completeOnboarding(graft, provider, { project, model: /Qwen3 Coder/ });
+  await completeOnboarding(graft, provider, { project, model: /^Qwen3 Coder(?! Flash)/ });
 
   // A code session: read, fix, test, report.
   provider.titleText = 'Health check reports degraded';
