@@ -1,61 +1,65 @@
 <div align="center">
 
-<img src="build/icon.png" width="112" alt="Scion, Graft's pixel sprout mascot" />
+<img src="build/icon.png" width="96" alt="Scion, Graft's pixel sprout" />
 
 # Graft
 
-**A desktop coding agent that works with your own model provider keys.**
+**An open-source desktop coding agent and AI chat that runs on your own keys.**
 
-Chat, code, search the web and run long tasks with the models you already pay for,
-from Anthropic, OpenAI, Google, OpenRouter, local servers and 200+ other providers,
-in a native desktop app for Windows, macOS and Linux.
+Write and fix code, chat, research the web and run long tasks with the models you choose:
+Anthropic, OpenAI, Google, OpenRouter, local models through Ollama or LM Studio, and 200+ other providers.
+Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and Linux.
 
-[![CI](https://github.com/itzdexy/GraftCode/actions/workflows/ci.yml/badge.svg)](https://github.com/itzdexy/GraftCode/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/itzdexy/GraftCode?display_name=tag&sort=semver)](https://github.com/itzdexy/GraftCode/releases)
+**[Download the latest release](https://github.com/itzdexy/GraftCode/releases/latest)** · [What it does](#what-graft-does) · [Build from source](#build-from-source)
+
+[![Release](https://img.shields.io/github/v/release/itzdexy/GraftCode?display_name=tag&sort=semver)](https://github.com/itzdexy/GraftCode/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/itzdexy/GraftCode/total)](https://github.com/itzdexy/GraftCode/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-3f6b35)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-3f6b35)
-![Electron](https://img.shields.io/badge/Electron-44-47848f)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+
+<img src="docs/screenshots/code-session.png" width="900" alt="A Graft code session: the agent read the code, fixed the bug, added a test and ran the tests" />
 
 </div>
 
----
+## What Graft does
 
-## Contents
+- **Works in your project.** It reads the code, edits files, runs your tests and commands, and reports what it changed and how it checked. Every turn is checkpointed, so you can rewind the files, the conversation or both.
+- **Runs on your keys and your models.** No subscription and no lock-in: pick any of 200+ providers, point it at an OpenAI-compatible endpoint, or use models running on your own computer.
+- **Asks before it acts, until you say otherwise.** Five permission modes, from approving each edit to running on its own, with allow, ask and deny rules per project.
+- **Finishes long tasks.** Turns run until the work is done. Taproot mode plans with a task list it has to complete, verifies with your tests and builds, and reviews its own diff before it reports.
+- **Works with the apps you build with.** One-click integrations for Blender, Roblox Studio, Unity, Godot, Figma, a Playwright browser, GitHub, Sentry, Linear, Notion and Context7, plus any MCP server.
+- **Stays out of your way.** A command palette for everything, `!` to run a shell command from the message box, `↑` for earlier messages, and `/commit`, `/pr` and `/review` when you want them.
+- **Chats too.** Web search with cited sources, files to download, a JavaScript sandbox for calculations, read aloud, and incognito chats that never touch the disk.
+- **Keeps your data yours.** Keys are encrypted with your system keyring, and Graft asks providers not to train on your conversations.
 
-- [Highlights](#highlights)
-- [Install](#install)
-- [First run](#first-run)
-- [Features](#features)
-- [Privacy and security](#privacy-and-security)
-- [Keyboard shortcuts](#keyboard-shortcuts)
-- [Build from source](#build-from-source)
-- [Releases and updates](#releases-and-updates)
-- [Architecture](#architecture)
-- [Acknowledgements](#acknowledgements)
+## A look around
 
-## Highlights
-
-- **Your keys, your models.** Pick from a catalog of 200+ providers, or point Graft at any OpenAI-compatible endpoint or a local server such as Ollama or LM Studio.
-- **A real agent for code.** Graft reads, edits, searches and runs commands in your project, with five permission modes, git worktrees per session, checkpoints and rewind.
-- **Taproot.** A maximum-effort mode for long tasks. Graft investigates, plans with a task list it has to finish, verifies with your tests and builds, reviews its own diff, then reports with evidence.
-- **Search the web for free** in chats and code sessions with Exa or DuckDuckGo, no key needed, or with Brave, Tavily, a SearXNG server or your model provider's own search. Results show as site chips, and answers cite their sources.
-- **Private by design.** Graft can ask providers not to train on your data, and incognito chats never touch the disk. Keys stay in your system keyring.
-- **Made for the keyboard.** A command palette for everything (`Ctrl+Shift+P`), `!` to run a shell command right from the message box, `↑` for earlier messages, and commands such as `/commit`, `/pr` and `/review`.
-- **Yours to shape.** Tell Graft about yourself and how you like answers, add specialist agents, and pick from six colour palettes, each light and dark, with seven accent colours.
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/code-session-changes.png" alt="The changes panel showing the diff of a fix" /><br /><sub>Review each change as a diff, then commit or open a pull request.</sub></td>
+<td width="50%"><img src="docs/screenshots/integrations.png" alt="The integrations gallery in Settings" /><br /><sub>Connect Blender, Unity, Roblox Studio, GitHub and more. (Roblox Studio and Figma need Windows or macOS.)</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/command-palette.png" alt="The command palette" /><br /><sub>Every action is a few keystrokes away in the command palette.</sub></td>
+<td><img src="docs/screenshots/chat.png" alt="A chat explaining hash maps with a TypeScript example" /><br /><sub>Chats for everything else, with web search, files and a code sandbox.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/agents.png" alt="Custom agents in Customize" /><br /><sub>Add specialists such as a reviewer or a test writer.</sub></td>
+<td><img src="docs/screenshots/appearance.png" alt="Palettes and accent colours in Appearance settings" /><br /><sub>Six palettes, each light and dark, and seven accent colours.</sub></td>
+</tr>
+</table>
 
 ## Install
 
-Download the latest installer from the [Releases](https://github.com/itzdexy/GraftCode/releases) page:
-
-| Platform | File |
+| Platform | Download |
 | --- | --- |
-| Windows (x64) | `Graft-Setup-<version>.exe` |
-| macOS (Apple silicon) | `.dmg` or `.zip` |
-| Linux (x64) | `.AppImage` or `.deb` |
+| Windows 10 and 11 (x64) | `Graft-Setup-<version>.exe` from the [latest release](https://github.com/itzdexy/GraftCode/releases/latest) |
+| Linux (x64) | The `.AppImage` (mark it executable) or the `.deb` from the [latest release](https://github.com/itzdexy/GraftCode/releases/latest) |
+| macOS (Apple silicon) | [Build it from source](#build-from-source) for now with `npm run dist:mac`; ready-made builds return when the release workflow runs again. |
 
-The installers aren't code-signed yet. On Windows, SmartScreen may warn the first time: choose **More info → Run anyway**. On macOS, if the app won't open, choose **Open Anyway** in System Settings → Privacy & Security.
+The installers aren't code-signed yet. On Windows, SmartScreen may warn the first time: choose **More info → Run anyway**.
 
-Installed copies check for new releases in the background. When an update has downloaded, Graft asks to restart, or installs it the next time you quit.
+Graft keeps itself up to date: it downloads new versions in the background and asks to restart, or installs them the next time you quit.
 
 ## First run
 
@@ -63,7 +67,7 @@ Installed copies check for new releases in the background. When an update has do
 2. **Pick a provider** from the searchable catalog and paste its API key. Graft checks the key before saving it.
 3. **Choose a default model and effort,** then start a chat or open a folder for a code session.
 
-You can add more providers at any time in **Settings → Providers**.
+You can add more providers at any time in **Settings → Providers**, and connect other apps in **Settings → Integrations**.
 
 ## Features
 
@@ -80,6 +84,22 @@ You can add more providers at any time in **Settings → Providers**.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
 - **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test` and `/init` send carefully written prompts; `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
+
+### Integrations
+
+Settings → Integrations adds well-known MCP servers in one step. Graft checks what each one needs, shows the setup steps from the project's own documentation, and keeps any token encrypted.
+
+| Integration | What the agent can do | Needs |
+| --- | --- | --- |
+| Blender | Build and change scenes, materials and lighting, and run Python in Blender | [uv](https://docs.astral.sh/uv/) and the MCP for Blender add-on |
+| Roblox Studio | Explore the place, write and run Luau, playtest | Roblox Studio with its MCP server turned on (Windows, macOS) |
+| Unity | Manage scenes, GameObjects, scripts and assets; read the console | uv and the MCP for Unity package |
+| Godot | Run and debug projects, read their output, create scenes and nodes | Node.js and Godot 4 |
+| Figma | Read frames, components and design tokens | The Figma desktop app with its MCP server on (Windows, macOS) |
+| Playwright browser | Drive a real browser: open, click, type, read and screenshot pages | Node.js |
+| GitHub, Context7, Sentry, Linear, Notion | Work with issues, pull requests, docs and pages | A token or a sign-in |
+
+Any other MCP server can be added by hand, for all projects or for one.
 
 ### Chats
 
