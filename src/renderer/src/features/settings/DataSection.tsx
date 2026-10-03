@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '../../components/Button';
 import { Switch } from '../../components/Field';
 import { invoke } from '../../lib/ipc';
+import { clearHistory } from '../../lib/promptHistory';
 import { useLoad } from '../../lib/useLoad';
 import { useApp } from '../../stores/app';
 import { useNav } from '../../stores/nav';
@@ -58,6 +59,22 @@ export function DataSection() {
             </Button>
           }
         />
+        <SettingRow
+          label="Message history"
+          description="Messages you sent, kept on this computer so ↑ and ↓ in the message box can bring them back. Incognito chats are never added."
+          control={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                clearHistory();
+                useToasts.getState().push({ tone: 'success', title: 'Message history cleared' });
+              }}
+            >
+              Clear
+            </Button>
+          }
+        />
       </Group>
 
       <Group title="API keys">
@@ -85,7 +102,7 @@ export function DataSection() {
       <Group title="Reset">
         <SettingRow
           label="Clear session history"
-          description="Deletes every saved chat and session. Worktree folders stay on disk so no uncommitted work is lost."
+          description="Deletes every saved chat and session, and the message history. Worktree folders stay on disk so no uncommitted work is lost."
           control={
             <Button size="sm" variant="secondary" onClick={() => setConfirm('clear')}>
               Clear history…
@@ -112,6 +129,7 @@ export function DataSection() {
         danger
         onConfirm={async () => {
           const result = await invoke('data:clearHistory');
+          clearHistory();
           useNav.getState().go({ name: 'settings', section: 'data' });
           useToasts.getState().push({
             tone: 'success',

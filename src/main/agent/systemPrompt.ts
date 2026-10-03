@@ -33,6 +33,8 @@ export interface CodePromptContext {
   /** The Computer tool is available (screen, mouse and keyboard). */
   computer?: boolean;
   mcpServers: string[];
+  /** Custom sub-agents from ~/.graft/agents and the project's .graft/agents. */
+  agents?: Array<{ name: string; description: string }>;
   personalization?: Personalization | null;
 }
 
@@ -72,6 +74,15 @@ function skillsSection(skills: SkillInfo[]): string {
     '# Skills',
     'Skills are instruction files for specialized tasks. When a task matches a skill, Read its SKILL.md first and follow it.',
     ...skills.map((s) => `- ${s.name}: ${s.description} (${s.path})`)
+  ].join('\n');
+}
+
+function agentsSection(agents: Array<{ name: string; description: string }> | undefined): string {
+  if (!agents || agents.length === 0) return '';
+  return [
+    '# Agents',
+    'Besides "general" and "explore", these sub-agents are set up for this work. When a task matches one, delegate it with Task, setting subagent_type to the agent\'s name.',
+    ...agents.map((a) => `- ${a.name}: ${a.description}`)
   ].join('\n');
 }
 
@@ -187,6 +198,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
     ),
     notesSection(ctx.memory),
     skillsSection(ctx.skills),
+    agentsSection(ctx.agents),
     personalizationSection(ctx.personalization, CODE_STYLE)
   ];
   return sections.filter((s) => s.length > 0).join('\n\n');

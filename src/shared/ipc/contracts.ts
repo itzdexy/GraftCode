@@ -14,6 +14,7 @@ import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../sch
 import { HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
 import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
 import {
+  AgentFileSchema,
   CommandFileSchema,
   CustomScopeSchema,
   McpServerInputSchema,
@@ -298,6 +299,22 @@ export const contracts = {
     z.object({ path: z.string() })
   ),
   'customize:deleteCommand': channel(z.object({ projectPath: PathSchema.nullable(), path: PathSchema }), Ok),
+  'customize:agents': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(AgentFileSchema)),
+  'customize:saveAgent': channel(
+    z.object({
+      scope: CustomScopeSchema,
+      projectPath: PathSchema.nullable(),
+      name: z.string().min(1).max(64),
+      description: z.string().max(300),
+      tools: z.array(z.string().min(1).max(128)).max(64).nullable(),
+      body: z.string().max(200_000),
+      previousPath: PathSchema.nullable()
+    }),
+    z.object({ path: z.string() })
+  ),
+  'customize:deleteAgent': channel(z.object({ projectPath: PathSchema.nullable(), path: PathSchema }), Ok),
+  /** Tool names a custom agent can choose from (built-ins of code sessions). */
+  'customize:agentTools': channel(Void, z.array(z.string())),
   'customize:skills': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SkillFileSchema)),
   'customize:saveSkill': channel(
     z.object({

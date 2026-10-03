@@ -73,3 +73,64 @@ describe('customize files', () => {
     removeDir(project);
   });
 });
+
+describe('custom agents', () => {
+  it('saves agents that the loader reads back, narrows their tools and refuses built-in names', async () => {
+    const { saveAgent, listAgents, deleteAgent } = await import('../../src/main/customize/customize');
+    const { loadAgents, parseToolList, subagentTools } = await import('../../src/main/agent/agents');
+    const home = makeTempDir();
+    const project = makeTempDir();
+    const file = await saveAgent(home, {
+      scope: 'project',
+      projectRoot: project,
+      name: 'reviewer',
+      description: 'Reviews diffs: bugs first',
+      tools: ['Read', 'Grep', 'Read', 'not a tool!'],
+      body: 'You review code.',
+      previousPath: null
+    });
+    expect(file).toBe(path.join(project, '.graft', 'agents', 'reviewer.md'));
+    expect(listAgents(home, project)).toEqual([
+      expect.objectContaining({ name: 'reviewer', description: 'Reviews diffs: bugs first', tools: ['Read', 'Grep'], scope: 'project', body: 'You review code.' })
+    ]);
+    await expect(saveAgent(home, { scope: 'user', projectRoot: null, name: 'explore', description: '', tools: null, body: 'x', previousPath: null })).rejects.toMatchObject({
+      code: 'reserved_name'
+    });
+    await expect(saveAgent(home, { scope: 'user', projectRoot: null, name: 'empty', description: '', tools: null, body: '  ', previousPath: null })).rejects.toMatchObject({
+      code: 'empty_agent'
+    });
+
+    // A user agent with the same name gives way to the project's; files without instructions are skipped.
+    writeFile(home, 'agents/reviewer.md', '---\ndescription: user copy\n---\nUser reviewer.');
+    writeFile(home, 'agents/blank.md', '---\ndescription: nothing\n---\n');
+    expect(loadAgents(home, project).map((a) => [a.name, a.source])).toEqual([['reviewer', 'project']]);
+
+    expect(parseToolList('[Read, "Grep"]  Glob')).toEqual(['Read', 'Grep', 'Glob']);
+    expect(parseToolList('')).toBeNull();
+    const available = ['Read', 'Glob', 'Grep', 'Edit', 'Shell', 'Task', 'TodoWrite'];
+    const agent = loadAgents(home, project)[0]!;
+    expect(subagentTools(available, ['Read', 'Glob', 'Grep'], ['Task', 'TodoWrite'], 'reviewer', agent)).toEqual(['Read', 'Grep']);
+    expect(subagentTools(available, ['Read', 'Glob', 'Grep'], ['Task', 'TodoWrite'], 'explore', null)).toEqual(['Read', 'Glob', 'Grep']);
+    expect(subagentTools(available, ['Read', 'Glob', 'Grep'], ['Task', 'TodoWrite'], 'general', null)).toEqual(['Read', 'Glob', 'Grep', 'Edit', 'Shell']);
+    // An agent can't ask for a tool the session doesn't offer.
+    expect(subagentTools(['Read'], ['Read'], [], 'x', { ...agent, tools: ['Read', 'Shell'] })).toEqual(['Read']);
+
+    // Without the project's reviewer, the user's own comes back.
+    await deleteAgent(home, project, file);
+    expect(listAgents(home, project).map((a) => [a.name, a.scope])).toEqual([['reviewer', 'user']]);
+    await expect(deleteAgent(home, project, writeFile(makeTempDir(), 'x.md', 'keep'))).rejects.toMatchObject({ code: 'outside_folder' });
+    removeDir(home);
+    removeDir(project);
+  });
+
+  it('lets a command file replace a prompt built-in like /commit, but not /compact', async () => {
+    const home = makeTempDir();
+    await expect(saveCommand(home, { scope: 'user', projectRoot: null, name: 'commit', description: 'Conventional commits', argumentHint: null, body: 'Commit.', previousPath: null })).resolves.toBe(
+      path.join(home, 'commands', 'commit.md')
+    );
+    await expect(saveCommand(home, { scope: 'user', projectRoot: null, name: 'compact', description: '', argumentHint: null, body: 'x', previousPath: null })).rejects.toMatchObject({
+      code: 'reserved_name'
+    });
+    removeDir(home);
+  });
+});

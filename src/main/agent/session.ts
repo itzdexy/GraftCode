@@ -27,6 +27,7 @@ import type { HookRunner } from './hooks';
 import { toLlmHistory, withSentTimes } from './history';
 import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
 import { expandMentions } from './mentions';
+import { BUILTIN_AGENTS, loadAgents, subagentTools } from './agents';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import {
@@ -676,6 +677,7 @@ export class AgentSession {
         webSearch: web.native || web.clientSearch,
         computer: this.computerFor(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
+        agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization
       });
     }
@@ -1080,12 +1082,17 @@ export class AgentSession {
     root: string | null,
     trusted: boolean
   ): Promise<{ text: string; toolCalls: number }> {
-    const parentOnly = new Set<string>(PARENT_ONLY_TOOLS);
+    const builtin = (BUILTIN_AGENTS as readonly string[]).includes(input.type);
+    const agent = builtin ? null : (loadAgents(this.deps.graftHome, this.projectRoot()).find((a) => a.name === input.type) ?? null);
+    if (!builtin && !agent) {
+      const custom = loadAgents(this.deps.graftHome, this.projectRoot()).map((a) => a.name);
+      throw new GraftError('unknown_agent', `There is no agent named "${input.type}". Use ${[...BUILTIN_AGENTS, ...custom].map((n) => `"${n}"`).join(', ')}.`);
+    }
     // A sub-agent never gets more than the session has (e.g. no WebSearch without a search engine).
-    const available = this.toolNames ?? this.deps.tools.names();
-    const toolNames =
-      input.type === 'explore' ? READ_ONLY_TOOLS.filter((n) => available.includes(n)) : available.filter((n) => !parentOnly.has(n));
-    const system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${input.type === 'explore' ? ' You are read-only: research and report; do not try to change anything.' : ''}`;
+    const toolNames = subagentTools(this.toolNames ?? this.deps.tools.names(), READ_ONLY_TOOLS, PARENT_ONLY_TOOLS, input.type, agent);
+    const readOnly = toolNames.every((n) => (READ_ONLY_TOOLS as readonly string[]).includes(n));
+    const role = agent ? `\n\n# Your role: ${agent.name}\n${agent.instructions}` : '';
+    const system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${readOnly ? ' You are read-only: research and report; do not try to change anything.' : ''}${role}`;
     const scratch: StoredMessage[] = [];
     const parent = this.makeHost(model, provider, hooks, root, trusted);
     const host: LoopHost = {

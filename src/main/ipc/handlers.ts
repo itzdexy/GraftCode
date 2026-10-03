@@ -31,7 +31,8 @@ import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { listDirectory, readPreview } from '../files/fileTree';
 import type { PtyManager } from '../pty/ptyManager';
-import { deleteCommand, deleteSkill, listCommands, listMemory, listSkills, saveCommand, saveMemory, saveSkill } from '../customize/customize';
+import { deleteAgent, deleteCommand, deleteSkill, listAgents, listCommands, listMemory, listSkills, saveAgent, saveCommand, saveMemory, saveSkill } from '../customize/customize';
+import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS } from '../tools/builtin';
 import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
 import { canOpen } from '../chat/chatFiles';
@@ -656,6 +657,20 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'customize:deleteCommand': async ({ projectPath, path }) => {
       await deleteCommand((await ctx.services()).paths.graftHome, projectPath, path);
       return { ok: true as const };
+    },
+    'customize:agents': async ({ projectPath }) => listAgents((await ctx.services()).paths.graftHome, projectPath),
+    'customize:saveAgent': async ({ scope, projectPath, name, description, tools, body, previousPath }) => ({
+      path: await saveAgent((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, tools, body, previousPath })
+    }),
+    'customize:deleteAgent': async ({ projectPath, path }) => {
+      await deleteAgent((await ctx.services()).paths.graftHome, projectPath, path);
+      return { ok: true as const };
+    },
+    'customize:agentTools': async () => {
+      const s = await ctx.services();
+      const parentOnly = new Set<string>(PARENT_ONLY_TOOLS);
+      const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
+      return s.tools.names().filter((n) => !n.startsWith('mcp__') && !parentOnly.has(n) && !chatOnly.has(n));
     },
     'customize:skills': async ({ projectPath }) => listSkills((await ctx.services()).paths.graftHome, projectPath),
     'customize:saveSkill': async ({ scope, projectPath, name, description, body, previousPath }) => ({

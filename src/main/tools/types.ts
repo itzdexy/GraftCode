@@ -10,7 +10,8 @@ import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
-export type SubagentType = 'general' | 'explore';
+/** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
+export type SubagentType = string;
 
 /** What a pending call touches; drives permission checks, prompts and summary lines. */
 export interface ToolCallDescriptor {

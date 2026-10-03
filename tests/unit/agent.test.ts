@@ -835,3 +835,35 @@ describe('prompt commands', () => {
     expect(texts(h).at(-1)).toMatch(/opens in the app/);
   });
 });
+
+describe('custom agents in sessions', () => {
+  it('lists custom agents in the code prompt and runs one with its role and only its tools', async () => {
+    const h = harness({
+      script: [
+        { toolCalls: [{ name: 'Task', input: { description: 'Review the change', prompt: 'Review src/a.ts', subagent_type: 'reviewer' } }] },
+        { text: 'No problems found in src/a.ts.' },
+        { text: 'The reviewer found nothing.' }
+      ]
+    });
+    writeFile(h.projectDir, '.graft/agents/reviewer.md', '---\ndescription: Reviews diffs for bugs\ntools: Read, Grep\n---\nYou are a meticulous reviewer.');
+    h.session.send('review it');
+    await h.session.idle();
+    const [main, child] = h.provider.requests;
+    expect(main!.system).toContain('# Agents');
+    expect(main!.system).toContain('- reviewer: Reviews diffs for bugs');
+    expect(child!.system).toContain('# Your role: reviewer\nYou are a meticulous reviewer.');
+    expect(child!.system).toContain('You are read-only');
+    expect(child!.tools.map((t) => t.name).sort()).toEqual(['Grep', 'Read']);
+  });
+
+  it('answers an unknown agent name with the names that exist', async () => {
+    const h = harness({
+      script: [{ toolCalls: [{ name: 'Task', input: { description: 'x', prompt: 'y', subagent_type: 'ghost' } }] }, { text: 'ok' }]
+    });
+    h.session.send('go');
+    await h.session.idle();
+    const result = JSON.stringify(h.provider.requests[1]!.messages.at(-1));
+    expect(result).toContain('There is no agent named \\"ghost\\"');
+    expect(result).toContain('\\"general\\", \\"explore\\"');
+  });
+});

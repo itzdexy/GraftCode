@@ -132,9 +132,13 @@ export const TaskInput = z.object({
   description: z.string().min(1).max(120).describe('Three to eight words naming the sub-task.'),
   prompt: z.string().min(1).max(20_000).describe('Complete, self-contained instructions; the sub-agent sees nothing else.'),
   subagent_type: z
-    .enum(['general', 'explore'])
+    .string()
+    .min(1)
+    .max(64)
     .optional()
-    .describe('"explore" is read-only research (fast, parallel-safe); "general" (default) can also edit and run commands.')
+    .describe(
+      '"explore" is read-only research (fast, parallel-safe); "general" (default) can also edit and run commands; or the name of a custom agent from the system prompt.'
+    )
 });
 export type TaskInput = z.infer<typeof TaskInput>;
 
@@ -150,7 +154,7 @@ export const taskTool: ToolDefinition<TaskInput> = {
   timeoutMs: 60 * 60_000,
   describe: (input) => Promise.resolve({ summary: `Delegated: ${input.description}` }),
   async execute(input, ctx) {
-    const type = input.subagent_type ?? 'general';
+    const type = (input.subagent_type ?? 'general').trim().toLowerCase();
     const { text, toolCalls } = await ctx.runSubagent({ description: input.description, prompt: input.prompt, type });
     if (text.trim().length === 0) return errorResult('The sub-agent finished without a report.');
     return textResult(text, {

@@ -6,6 +6,7 @@ import { invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import { PageLayout } from '../shell/PageLayout';
+import { AgentsSection } from './AgentsSection';
 import { CommandsSection } from './CommandsSection';
 import { HooksSection } from './HooksSection';
 import { McpSection } from './McpSection';
@@ -13,10 +14,11 @@ import { MemorySection } from './MemorySection';
 import { SELECT } from './shared';
 import { SkillsSection } from './SkillsSection';
 
-export type CustomizeTab = 'commands' | 'skills' | 'mcp' | 'hooks' | 'memory';
+export type CustomizeTab = 'commands' | 'agents' | 'skills' | 'mcp' | 'hooks' | 'memory';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'commands', label: 'Commands' },
+  { id: 'agents', label: 'Agents' },
   { id: 'skills', label: 'Skills' },
   { id: 'mcp', label: 'MCP servers' },
   { id: 'hooks', label: 'Hooks' },
@@ -41,7 +43,7 @@ export function CustomizeView({ initialTab = 'commands' }: { initialTab?: Custom
   return (
     <PageLayout
       title="Customize"
-      description="Shape how Graft works: reusable prompts, skills, tools from MCP servers, hooks and standing instructions."
+      description="Shape how Graft works: reusable prompts, specialist agents, skills, tools from MCP servers, hooks and standing instructions."
       actions={
         <label className="flex items-center gap-8 text-sm text-fg-muted">
           Project
@@ -81,6 +83,7 @@ export function CustomizeView({ initialTab = 'commands' }: { initialTab?: Custom
       ) : null}
       <div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label}>
         {tab === 'commands' ? <CommandsSection projectPath={projectPath} /> : null}
+        {tab === 'agents' ? <AgentsSection projectPath={projectPath} /> : null}
         {tab === 'skills' ? <SkillsSection projectPath={projectPath} /> : null}
         {tab === 'mcp' ? <McpSection projectPath={projectPath} /> : null}
         {tab === 'hooks' ? <HooksSection projectPath={projectPath} /> : null}

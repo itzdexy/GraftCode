@@ -16,6 +16,17 @@ export const CommandFileSchema = z.object({
 });
 export type CommandFileView = z.infer<typeof CommandFileSchema>;
 
+/** A custom sub-agent: tools null means it gets the general sub-agent's tools. */
+export const AgentFileSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  tools: z.array(z.string()).nullable(),
+  scope: CustomScopeSchema,
+  path: z.string(),
+  body: z.string()
+});
+export type AgentFileView = z.infer<typeof AgentFileSchema>;
+
 export const SkillFileSchema = z.object({
   name: z.string(),
   description: z.string(),
