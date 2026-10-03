@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.1",
+    "date": "2026-10-03",
+    "items": [
+      "Integrations: connect Blender, Roblox Studio, Unity, Godot, Figma, a Playwright browser, GitHub, Context7, Sentry, Linear and Notion from Settings → Integrations. Graft checks what each one needs on your computer, shows the setup steps and adds it in one click.",
+      "Tokens you give an integration are kept encrypted with your system keyring, not in a settings file.",
+      "The command palette matches what you type more precisely: letters scattered across a long command no longer count as a match."
+    ]
+  },
+  {
     "version": "0.6.0",
     "date": "2026-10-03",
     "items": [
