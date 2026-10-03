@@ -1,7 +1,7 @@
 import { session, WebContentsView, type BrowserWindow, type WebContents } from 'electron';
 import { log } from '../app/log';
 import { openExternalSafely } from '../app/security';
-import { CANCEL_PICK, fill, GRAFT_WORLD, hasText, locate, PICK_ELEMENT, SNAPSHOT } from './pageScripts';
+import { CANCEL_PICK, fill, GRAFT_WORLD, hasText, locate, PICK_ELEMENT, scrollBy, SNAPSHOT } from './pageScripts';
 import { registerBrowserPanel } from './registry';
 
 /**
@@ -194,6 +194,8 @@ export class BrowserPanel {
       publish();
     });
     contents.on('console-message', (details) => {
+      // Electron's own advice to app developers (development builds only); not the page's.
+      if (details.message.includes('Electron Security Warning')) return;
       const entry: ConsoleEntry = { level: details.level, message: details.message.slice(0, 4000), source: details.sourceId, line: details.lineNumber, at: Date.now() };
       this.consoleEntries.push(entry);
       if (this.consoleEntries.length > MAX_CONSOLE) this.consoleEntries.splice(0, this.consoleEntries.length - MAX_CONSOLE);
@@ -493,7 +495,7 @@ export class BrowserPanel {
   async scroll(direction: 'up' | 'down'): Promise<void> {
     const contents = this.contents();
     if (!contents) throw new Error('No page is open. Use action "open" first.');
-    await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: `window.scrollBy(0, ${direction === 'down' ? 1 : -1} * window.innerHeight * 0.8); true` }], true);
+    await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: scrollBy(direction) }], true);
   }
 
   /** Waits until the page shows some text; true when it did before the time ran out. */

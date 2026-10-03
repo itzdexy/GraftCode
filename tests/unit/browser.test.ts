@@ -1,9 +1,10 @@
 import http from 'node:http';
+import vm from 'node:vm';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nextZoom, type PageSnapshot } from '../../src/main/browser/browserPanel';
 import { localServers, portOpen } from '../../src/main/browser/servers';
-import { locate } from '../../src/main/browser/pageScripts';
+import { hasText, locate, SNAPSHOT } from '../../src/main/browser/pageScripts';
 import { decide, isLocalUrl, type PermissionEnv } from '../../src/main/permissions/engine';
 import { sandboxUrl } from '../../src/main/sandbox/sandbox';
 import { browserTool, formatSnapshot } from '../../src/main/tools/browserTool';
@@ -50,6 +51,23 @@ describe('browser panel helpers', () => {
     expect(sandboxUrl('http://0.0.0.0:5173', ports)).toBe('http://127.0.0.1:49153/');
     expect(sandboxUrl('http://localhost:3000', ports)).toBe('http://localhost:3000');
     expect(sandboxUrl('https://example.com:5173', ports)).toBe('https://example.com:5173');
+  });
+
+  it('runs its page scripts again and again in the same world', () => {
+    // The isolated world outlives each script, like this context: helpers declared at the top
+    // level would clash on the second run ("Identifier has already been declared").
+    const context: Record<string, unknown> = {
+      document: { querySelectorAll: () => [], body: { innerText: 'Hello there' }, title: 'Test' },
+      location: { href: 'http://localhost:5173/' },
+      getComputedStyle: () => ({})
+    };
+    context.window = context;
+    vm.createContext(context);
+    for (let i = 0; i < 3; i++) {
+      expect(vm.runInContext(SNAPSHOT, context)).toMatchObject({ title: 'Test', text: 'Hello there', items: [] });
+      expect(vm.runInContext(locate({ ref: 1 }), context)).toMatchObject({ ok: false });
+      expect(vm.runInContext(hasText('hello'), context)).toBe(true);
+    }
   });
 
   it('embeds what the agent typed as data, never as code', () => {
