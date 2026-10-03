@@ -64,6 +64,10 @@ export interface HarnessOptions {
   personalization?: SessionPreferences['personalization'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
   maxSteps?: number | null;
+  /** The project's sandbox settings (default: no sandbox). */
+  sandbox?: SessionDeps['sandbox'];
+  /** A shell manager of the test's own (default: a plain one). */
+  shells?: SessionDeps['shells'];
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -123,7 +127,8 @@ export function makeHarness(options: HarnessOptions): Harness {
     tools: createBuiltinRegistry(),
     mcpToolNames: () => [],
     mcpServerNames: () => [],
-    shells: makeShellManager(path.join(home, 'shell-logs')),
+    shells: options.shells ?? makeShellManager(path.join(home, 'shell-logs')),
+    ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     shellLabel: shell.label,
     settings,
     hooks: () => (options.hooks ? new HookRunner(() => options.hooks ?? {}, shell, () => projectDir) : null),

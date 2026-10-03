@@ -6,6 +6,7 @@ import { nodeModulesVolume, SandboxManager } from '../../src/main/sandbox/sandbo
 import { runFile } from '../../src/main/tools/run';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
+import { makeHarness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 /**
@@ -177,5 +178,37 @@ describe.skipIf(!enabled)('sandbox images with bash, git and the network', () =>
       body = await fetch(`http://127.0.0.1:${hostPort}/`).then((res) => res.text(), () => '');
     }
     expect(body).toContain('served-from-sandbox');
+  }, LONG);
+});
+
+describe.skipIf(!enabled)('a session whose project runs in the sandbox', () => {
+  it('runs the agent’s commands in the container, without asking in Auto-edit', async () => {
+    const sandbox = new SandboxManager({ log: () => undefined });
+    const logs = makeTempDir();
+    const shells = new ShellManager(detectShell(process.platform, process.env), logs, process.env, process.platform, sandbox);
+    const settings = { image: 'alpine:3.20', network: false, memoryMb: 512, cpus: 1 };
+    const h = makeHarness({
+      mode: 'auto-edit',
+      shells,
+      sandbox: () => settings,
+      script: [{ toolCalls: [{ name: 'Shell', input: { command: 'head -1 /etc/os-release; pwd; ls' } }] }, { text: 'Ran it in the sandbox.' }]
+    });
+    writeFile(h.projectDir, 'marker.txt', 'here\n');
+    try {
+      h.session.send('where do commands run?');
+      await h.session.idle();
+      // No permission prompt: the second request carries the command's output straight back.
+      expect(h.events.some((e) => e.type === 'permission')).toBe(false);
+      const result = JSON.stringify(h.provider.requests[1]!.messages.at(-1));
+      expect(result).toContain('Alpine');
+      expect(result).toContain('/workspace');
+      expect(result).toContain('marker.txt');
+      expect(h.provider.requests[0]!.system).toContain('# Sandbox');
+    } finally {
+      await shells.disposeAll();
+      removeDir(logs);
+      const probe = await sandbox.probe();
+      if (probe.status === 'ready') await runFile(probe.engine.path, ['volume', 'rm', nodeModulesVolume(h.projectDir)], { cwd: os.homedir() });
+    }
   }, LONG);
 });

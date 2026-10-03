@@ -7,6 +7,9 @@ import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
 import { renderTranscript } from '../../src/main/agent/compaction';
 import type { StoredMessage } from '../../src/shared/schemas/messages';
+import type { SandboxManager } from '../../src/main/sandbox/sandbox';
+import { detectShell } from '../../src/main/tools/shell/detect';
+import { ShellManager } from '../../src/main/tools/shell/shellManager';
 import { fakeModel } from '../support/fakeProvider';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
@@ -645,6 +648,30 @@ describe('agent tools that involve the user', () => {
       [1, ['grep -q ok notes.txt']],
       [2, ['grep -q ok notes.txt']]
     ]);
+  });
+
+  it('points the shell at the project’s sandbox before a turn, and tells the model where commands run', async () => {
+    const removed: string[] = [];
+    // The container itself is covered by the sandbox tests; here only the switching matters.
+    const box = { remove: (id: string) => Promise.resolve(void removed.push(id)) } as unknown as SandboxManager;
+    const shells = new ShellManager(detectShell(process.platform, process.env), makeTempDir(), process.env, process.platform, box);
+    const settings = { image: 'node:22-bookworm', network: false, memoryMb: 1024, cpus: 1 };
+    let on = true;
+    const h = harness({ mode: 'auto-edit', shells, sandbox: () => (on ? settings : null), script: [{ text: 'In the sandbox.' }, { text: 'Back on the computer.' }] });
+
+    h.session.send('hi');
+    await h.session.idle();
+    expect(shells.sandboxFor('session-1')).toEqual({ workspace: h.projectDir, settings });
+    expect(h.provider.requests[0]!.system).toContain('# Sandbox');
+    expect(h.provider.requests[0]!.system).toContain('no network at all');
+
+    // Turned off between turns: the container goes, and the next prompt says commands run here.
+    on = false;
+    h.session.send('and now?');
+    await h.session.idle();
+    expect(shells.sandboxFor('session-1')).toBeNull();
+    expect(removed).toEqual(['session-1']);
+    expect(h.provider.requests[1]!.system).not.toContain('# Sandbox');
   });
 
   it('does not run the project’s checks when the only edit failed', async () => {
