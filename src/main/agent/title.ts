@@ -23,7 +23,18 @@ export function cleanTitle(raw: string): string | null {
 }
 
 /** Picks the model for background titling: the provider's fast tier when listed, else the session's model. */
+/** A model the provider serves at no charge (OpenRouter's free models, for one). */
+export function isFree(model: ModelInfo): boolean {
+  return model.pricing !== null && model.pricing.input === 0 && model.pricing.output === 0;
+}
+
+/**
+ * The model for titles and other small jobs: the provider's cheap tier. Someone
+ * working on a free model may have no credits at all, so they get a free model
+ * (or their own) instead of a cheap one that would be refused.
+ */
 export function titleModel(current: ModelInfo, available: ModelInfo[]): ModelInfo {
+  if (isFree(current)) return available.find((m) => isFree(m) && m.cheap) ?? current;
   return available.find((m) => m.cheap && m.featured && m.supportsTools) ?? available.find((m) => m.cheap) ?? current;
 }
 

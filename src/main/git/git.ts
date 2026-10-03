@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { GraftError } from '@shared/errors';
+import { findCommand } from '../mcp/integrations';
 
 export interface GitOptions {
   cwd: string;
@@ -31,13 +33,44 @@ function gitEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv {
   };
 }
 
+let gitPath: string | null = null;
+
+/** Forgets the git program found earlier (tests). */
+export function resetGitBinary(): void {
+  gitPath = null;
+}
+
+/**
+ * The git program: from PATH, or from where Git's installers put it when PATH
+ * doesn't have it (Git for Windows offers to leave PATH alone, and apps opened
+ * from the macOS Finder get a short PATH).
+ */
+export function gitBinary(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = fs.existsSync): string {
+  if (gitPath) return gitPath;
+  const onPath = findCommand('git', platform, env, exists);
+  const programFiles = [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs') : undefined].filter(
+    (d): d is string => typeof d === 'string' && d.length > 0
+  );
+  const known =
+    platform === 'win32'
+      ? programFiles.flatMap((d) => [path.win32.join(d, 'Git', 'cmd', 'git.exe'), path.win32.join(d, 'Git', 'bin', 'git.exe')])
+      : ['/usr/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
+  gitPath = onPath ?? known.find((p) => exists(p)) ?? 'git';
+  return gitPath;
+}
+
 /**
  * Runs git with an argv array (never a shell). Failures throw a GraftError
  * that names the command and includes git's own message.
  */
 export function runGit(args: string[], options: GitOptions): Promise<GitResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, {
+    // spawn reports a missing working folder as ENOENT too, which would read as "git is missing".
+    if (!fs.existsSync(options.cwd)) {
+      reject(new GraftError('folder_missing', `The folder ${options.cwd} doesn't exist anymore.`));
+      return;
+    }
+    const child = spawn(gitBinary(), args, {
       cwd: options.cwd,
       env: gitEnv(options.env),
       windowsHide: true,

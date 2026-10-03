@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase, type Db } from '../../src/main/db/database';
 import { CheckpointService } from '../../src/main/git/checkpoints';
 import { computeDiffStats, DiffStatsCache } from '../../src/main/git/diffStats';
+import { gitBinary, resetGitBinary, runGit } from '../../src/main/git/git';
 import {
   commit,
   fileDiff,
@@ -411,5 +412,20 @@ describe('rewind (files, conversation, both)', () => {
     const assistant = store.listMessages('s1')[1]!;
     await expect(previewRewind(deps, 's1', assistant.id)).rejects.toMatchObject({ code: 'rewind_not_user' });
     db.close();
+  });
+});
+
+describe('finding and running git', () => {
+  it('says a folder is gone instead of claiming git is missing', async () => {
+    await expect(runGit(['status'], { cwd: path.join(makeTempDir(), 'deleted-project') })).rejects.toMatchObject({ code: 'folder_missing' });
+  });
+
+  it('finds git where its installer puts it when PATH has no git', () => {
+    const exists = (p: string): boolean => p === 'C:\\Program Files\\Git\\cmd\\git.exe';
+    resetGitBinary();
+    expect(gitBinary('win32', { PATH: 'C:\\Windows', ProgramFiles: 'C:\\Program Files', PATHEXT: '.EXE' }, exists)).toBe('C:\\Program Files\\Git\\cmd\\git.exe');
+    resetGitBinary();
+    expect(gitBinary('darwin', { PATH: '/usr/bin' }, (p) => p === '/opt/homebrew/bin/git')).toBe('/opt/homebrew/bin/git');
+    resetGitBinary();
   });
 });

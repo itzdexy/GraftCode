@@ -39,6 +39,11 @@ export interface Integration {
   fields?: IntegrationField[];
   /** The remote server signs in with OAuth on first use. */
   signIn?: boolean;
+  /**
+   * What to check when the app doesn't answer, or connects without offering
+   * tools: usually that the other app is open with its side of the bridge on.
+   */
+  troubleshoot?: string;
   docs: string;
 }
 
@@ -53,6 +58,7 @@ export const INTEGRATIONS: readonly Integration[] = [
     category: 'Game engines and 3D',
     description: 'Build and change scenes: objects, materials, lighting and Python scripts in a running Blender.',
     serverName: 'blender',
+    troubleshoot: 'Check that Blender is open and its add-on server is running: in the 3D viewport press N, open the MCP tab and start the server.',
     launch: everywhere(uvx('mcp-for-blender')),
     runtime: 'uv',
     steps: [
@@ -68,6 +74,7 @@ export const INTEGRATIONS: readonly Integration[] = [
     category: 'Game engines and 3D',
     description: 'Explore the place, write and run Luau, and playtest in the Studio you have open.',
     serverName: 'roblox_studio',
+    troubleshoot: 'Studio shares its tools only while it is open with Enable Studio as MCP server turned on (Assistant → … → Manage MCP Servers). Studio may also be serving the MCP client of another app; close that one, then click Reconnect.',
     launch: {
       win32: { type: 'stdio', command: 'cmd.exe', args: ['/c', '{LOCALAPPDATA}\\Roblox\\mcp.bat'] },
       darwin: { type: 'stdio', command: '/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP', args: [] }
@@ -85,6 +92,7 @@ export const INTEGRATIONS: readonly Integration[] = [
     category: 'Game engines and 3D',
     description: 'Manage scenes, GameObjects, scripts and assets, and read the console of the open Unity Editor.',
     serverName: 'unity',
+    troubleshoot: 'Check that the Unity Editor is open and Window → MCP for Unity shows the bridge running.',
     launch: everywhere(uvx('--from', 'mcpforunityserver', 'mcp-for-unity', '--transport', 'stdio')),
     runtime: 'uv',
     steps: [
@@ -99,6 +107,7 @@ export const INTEGRATIONS: readonly Integration[] = [
     category: 'Game engines and 3D',
     description: 'Run and debug Godot projects, read their output, and create scenes and nodes.',
     serverName: 'godot',
+    troubleshoot: 'Check that Godot 4 is installed and your project folder is the one the server was set up with.',
     launch: everywhere(npx('@coding-solo/godot-mcp')),
     runtime: 'node',
     steps: ['Install Godot 4. Graft finds it on its own in most setups; if it doesn’t, give the path to the Godot executable below.'],
@@ -111,6 +120,7 @@ export const INTEGRATIONS: readonly Integration[] = [
     category: 'Design and browser',
     description: 'Read frames, components and design tokens from the file open in the Figma desktop app.',
     serverName: 'figma',
+    troubleshoot: 'Check that the Figma desktop app is open, with the MCP server turned on in its preferences.',
     launch: { win32: { type: 'http', url: 'http://127.0.0.1:3845/mcp' }, darwin: { type: 'http', url: 'http://127.0.0.1:3845/mcp' } },
     steps: [
       'Open the Figma desktop app and a design file.',

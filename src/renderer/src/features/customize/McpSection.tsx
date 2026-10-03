@@ -165,7 +165,11 @@ function ServerRow({ server, projectPath, onEdit, onChange }: { server: McpServe
       .finally(() => setBusy(false));
   };
   const summary =
-    server.state === 'connected' ? `${STATE_TEXT.connected} · ${server.tools.length} ${server.tools.length === 1 ? 'tool' : 'tools'}` : STATE_TEXT[server.state];
+    server.state === 'connected'
+      ? server.tools.length === 0
+        ? `${STATE_TEXT.connected} · waiting for tools`
+        : `${STATE_TEXT.connected} · ${server.tools.length} ${server.tools.length === 1 ? 'tool' : 'tools'}`
+      : STATE_TEXT[server.state];
   return (
     <Row className="flex-wrap">
       <StateDot state={server.state} />
@@ -199,6 +203,7 @@ function ServerRow({ server, projectPath, onEdit, onChange }: { server: McpServe
           {server.error}
         </p>
       ) : null}
+      {server.hint ? <p className="selectable basis-full pl-14 text-sm break-words text-fg-muted">{server.hint}</p> : null}
       {open ? (
         <ul className="basis-full pl-14">
           {server.tools.map((t) => (

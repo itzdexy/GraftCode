@@ -756,7 +756,8 @@ export class AgentSession {
     const web = this.webTools(model);
     const work = this.chatWork(model);
     const computer = this.computerFor(model);
-    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : [];
+    // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
+    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : summary.incognito || !model.supportsTools ? [] : this.deps.mcpToolNames(null);
     const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
     const builtins =
       summary.kind === 'code'
@@ -808,7 +809,8 @@ export class AgentSession {
       model: identity,
       web: { search: web.native || web.clientSearch, fetch: web.fetch },
       workspace: this.chatWork(model),
-      personalization: summary.incognito ? null : prefs.personalization
+      personalization: summary.incognito ? null : prefs.personalization,
+      mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null)
     });
   }
 

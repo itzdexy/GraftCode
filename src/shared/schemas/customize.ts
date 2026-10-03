@@ -81,6 +81,8 @@ export const McpServerViewSchema = z.object({
   config: McpConfigViewSchema,
   state: McpStateSchema,
   error: z.string().nullable(),
+  /** What to do when the server is connected but offers no tools yet. */
+  hint: z.string().nullable(),
   tools: z.array(z.object({ name: z.string(), description: z.string(), readOnly: z.boolean() }))
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;

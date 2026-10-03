@@ -200,6 +200,8 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
               This chat's model ({summary.model?.modelId}) is no longer available. Pick another one below.
             </p>
           ) : null}
+          {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
+          {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
           <QueueBar sessionId={summary.id} queue={view.queue} />
           <Composer
             draftKey={summary.id}

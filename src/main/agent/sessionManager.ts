@@ -224,7 +224,16 @@ export class SessionManager {
     if (!current) return;
     const chosen = titleModel(current, models);
     const privacy = { noTraining: this.deps.settings.get().privacy.noTraining, zeroRetention: false };
-    const title = await generateTitle(this.deps.registry.get(ref.providerId), chosen, firstText, AbortSignal.timeout(30_000), privacy);
+    const provider = this.deps.registry.get(ref.providerId);
+    let title: string | null;
+    try {
+      title = await generateTitle(provider, chosen, firstText, AbortSignal.timeout(30_000), privacy);
+    } catch (error) {
+      // The small model can be refused (no credits for it, gone from the account) while the
+      // session's own model works: that one already answered this message.
+      if (chosen.ref.modelId === current.ref.modelId) throw error;
+      title = await generateTitle(provider, current, firstText, AbortSignal.timeout(30_000), privacy);
+    }
     if (!title) return;
     const store = this.storeFor(summary.id);
     if (!['New session', 'New chat'].includes(store.getSummary(summary.id).title)) return;

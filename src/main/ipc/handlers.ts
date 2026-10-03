@@ -404,7 +404,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const s = await ctx.services();
       const summary = (await ctx.sessions()).summary(sessionId);
       const dir = summary.worktreePath ?? summary.cwd;
-      if (!dir) return { added: 0, removed: 0, files: 0, base: null, branch: null };
+      // A session whose folder was moved or deleted simply has nothing to count.
+      if (!dir || !fs.existsSync(dir)) return { added: 0, removed: 0, files: 0, base: null, branch: null };
       return s.diffStats.get(dir);
     },
     'git:status': async ({ sessionId }) => {
@@ -759,6 +760,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
             config: maskConfig(config),
             state,
             error: matches ? st.error : null,
+            hint: matches ? st.hint : null,
             tools: matches ? st.tools.map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly })) : []
           });
         }

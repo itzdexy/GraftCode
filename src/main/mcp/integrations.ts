@@ -32,22 +32,24 @@ function platformOf(platform: NodeJS.Platform): Platform | null {
 /** Folders installers put uv and Node in, which a GUI app's PATH may not have picked up yet. */
 function installDirs(platform: Platform, env: NodeJS.ProcessEnv): string[] {
   const home = env.USERPROFILE ?? env.HOME ?? os.homedir();
+  // The target platform's path rules, so the list is right even when computed elsewhere (tests).
+  const p = platform === 'win32' ? path.win32 : path.posix;
   const dirs =
     platform === 'win32'
       ? [
-          path.join(home, '.local', 'bin'),
-          path.join(home, '.cargo', 'bin'),
-          env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : '',
-          env.ProgramFiles ? path.join(env.ProgramFiles, 'nodejs') : '',
-          env.APPDATA ? path.join(env.APPDATA, 'npm') : '',
+          p.join(home, '.local', 'bin'),
+          p.join(home, '.cargo', 'bin'),
+          env.LOCALAPPDATA ? p.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : '',
+          env.ProgramFiles ? p.join(env.ProgramFiles, 'nodejs') : '',
+          env.APPDATA ? p.join(env.APPDATA, 'npm') : '',
           // Container engines for the sandbox, when their installer didn't touch PATH.
-          env.ProgramFiles ? path.join(env.ProgramFiles, 'Docker', 'Docker', 'resources', 'bin') : '',
-          env.ProgramFiles ? path.join(env.ProgramFiles, 'RedHat', 'Podman') : ''
+          env.ProgramFiles ? p.join(env.ProgramFiles, 'Docker', 'Docker', 'resources', 'bin') : '',
+          env.ProgramFiles ? p.join(env.ProgramFiles, 'RedHat', 'Podman') : ''
         ]
       : [
-          path.join(home, '.local', 'bin'),
-          path.join(home, '.cargo', 'bin'),
-          path.join(home, '.volta', 'bin'),
+          p.join(home, '.local', 'bin'),
+          p.join(home, '.cargo', 'bin'),
+          p.join(home, '.volta', 'bin'),
           '/opt/homebrew/bin',
           '/usr/local/bin',
           // Apps opened from the Finder get a short PATH; Docker Desktop and Podman keep their CLIs here.
@@ -55,6 +57,12 @@ function installDirs(platform: Platform, env: NodeJS.ProcessEnv): string[] {
           '/opt/podman/bin'
         ];
   return dirs.filter((d) => d.length > 0);
+}
+
+/** Folders runtimes usually install into, besides PATH (for servers started from an app with a short PATH). */
+export function searchDirs(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
+  const system = platformOf(platform);
+  return system ? installDirs(system, env) : [];
 }
 
 /** The full path of a command on PATH or in the usual install folders, or null. */

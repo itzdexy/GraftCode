@@ -238,6 +238,8 @@ export function buildChatSystemPrompt(ctx: {
   workspace?: { files: boolean; code: boolean };
   /** Incognito chats pass null: they don't tell the provider about the user. */
   personalization?: Personalization | null;
+  /** Apps connected through MCP (Blender, Roblox Studio…) whose tools the chat can use. */
+  mcpServers?: string[];
 }): string {
   const web = ctx.web ?? { search: false, fetch: false };
   const work = ctx.workspace ?? { files: false, code: false };
@@ -255,6 +257,12 @@ export function buildChatSystemPrompt(ctx: {
   if (work.code) {
     tools.push(
       'RunCode runs JavaScript in an isolated sandbox with no network or file access and returns what it prints. Use it for calculations, data processing, generating data and checking that code works, rather than working things out in your head. Inside it, graft.writeFile(name, data) creates a file the user can download (text, or bytes as a Uint8Array).'
+    );
+  }
+  const apps = ctx.mcpServers ?? [];
+  if (apps.length > 0) {
+    tools.push(
+      `Connected apps: ${apps.join(', ')}. Their tools are named mcp__<app>__<tool>; use them when the user asks you to work in one of these apps, and say what you did there. The user approves each action unless they allowed it for the chat.`
     );
   }
   const reach =
