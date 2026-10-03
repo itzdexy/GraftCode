@@ -57,6 +57,15 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('kill-shell'), shellId: z.string(), killed: z.boolean() }),
   z.object({ kind: z.literal('fetch'), url: z.string(), status: z.number().int(), bytes: z.number().int(), title: z.string().nullable() }),
+  /** A computer-use step; the screenshot rides along in the result's content, the point is where it acted (screenshot pixels). */
+  z.object({
+    kind: z.literal('computer'),
+    action: z.string(),
+    summary: z.string(),
+    point: z.object({ x: z.number(), y: z.number() }).nullable(),
+    width: z.number(),
+    height: z.number()
+  }),
   /** The agent drove the Browser panel; a screenshot rides along in the result's content. */
   z.object({ kind: z.literal('browser'), action: z.string(), url: z.string(), title: z.string(), detail: z.string() }),
   z.object({ kind: z.literal('todos'), todos: z.array(TodoItemSchema) }),

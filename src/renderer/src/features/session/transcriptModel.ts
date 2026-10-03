@@ -606,7 +606,7 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
     }
     case 'Computer': {
       const d = call.result?.display;
-      return { verb: d?.kind === 'text' ? d.text : computerVerb(str('action')), target: '', mono: false, title: 'Computer' };
+      return { verb: d?.kind === 'computer' ? d.summary : d?.kind === 'text' ? d.text : computerVerb(str('action')), target: '', mono: false, title: 'Computer' };
     }
     case 'Browser': {
       const action = str('action');
@@ -656,6 +656,8 @@ function computerVerb(action: string): string {
     double_click: 'Double-clicking',
     right_click: 'Right-clicking',
     move: 'Moving the pointer',
+    zoom: 'Looking closer',
+    open: 'Opening an app',
     drag: 'Dragging',
     scroll: 'Scrolling',
     type: 'Typing',

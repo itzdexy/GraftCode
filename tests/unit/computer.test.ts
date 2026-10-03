@@ -50,9 +50,14 @@ describe('the Computer tool', () => {
         actions.push(action);
         return Promise.resolve();
       },
-      screenshot: () => Promise.resolve({ mediaType: 'image/jpeg', data: 'AAAA', width: 1280, height: 720 })
+      screenshot: () => Promise.resolve({ mediaType: 'image/jpeg', data: 'AAAA', width: 1280, height: 720 }),
+      zoom: (_id, region) => {
+        zooms.push(region);
+        return Promise.resolve({ mediaType: 'image/jpeg', data: 'ZZZZ', width: 640, height: 400 });
+      }
     };
   }
+  const zooms: Array<{ x: number; y: number; toX: number; toY: number }> = [];
 
   it('acts, then answers with a fresh screenshot', async () => {
     const computer = fake();
@@ -64,7 +69,22 @@ describe('the Computer tool', () => {
       { type: 'text', text: 'Clicked at 100, 200. Screenshot (1280×720):' },
       { type: 'image', mediaType: 'image/jpeg', data: 'AAAA' }
     ]);
-    expect(result.display).toEqual({ kind: 'text', text: 'Clicked at 100, 200' });
+    // The transcript shows the screenshot with the click marked on it.
+    expect(result.display).toEqual({ kind: 'computer', action: 'click', summary: 'Clicked at 100, 200', point: { x: 100, y: 200 }, width: 1280, height: 720 });
+  });
+
+  it('opens an app by name and zooms in without moving the coordinate space', async () => {
+    const computer = fake();
+    const ctx = makeToolContext(process.cwd(), { computer, modelSupportsVision: true });
+    const opened = await computerTool.execute({ action: 'open', text: 'Blender' }, ctx);
+    expect(computer.actions).toEqual([{ kind: 'open', name: 'Blender' }]);
+    expect(opened.display).toMatchObject({ kind: 'computer', summary: 'Opened Blender', point: null });
+    const close = await computerTool.execute({ action: 'zoom', x: 10, y: 20, to_x: 300, to_y: 200 }, ctx);
+    expect(zooms.at(-1)).toEqual({ x: 10, y: 20, toX: 300, toY: 200 });
+    expect(JSON.stringify(close.content[0])).toContain("keep using the full screenshot's coordinates");
+    expect(close.content[1]).toEqual({ type: 'image', mediaType: 'image/jpeg', data: 'ZZZZ' });
+    expect((await computerTool.execute({ action: 'zoom', x: 10, y: 20 }, ctx)).isError).toBe(true);
+    expect((await computerTool.execute({ action: 'open' }, ctx)).isError).toBe(true);
   });
 
   it('refuses when computer use is off, the model is blind, or input is missing', async () => {

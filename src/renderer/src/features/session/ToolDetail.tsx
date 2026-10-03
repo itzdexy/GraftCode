@@ -118,6 +118,26 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
           {display.status} · {Math.round(display.bytes / 1024)} KB{display.title ? ` · ${display.title}` : ''}
         </p>
       );
+    case 'computer': {
+      const shot = result.content.find((b) => b.type === 'image');
+      return (
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-fg-muted">{display.summary}</p>
+          {shot && shot.type === 'image' ? (
+            <div className="relative self-start overflow-hidden rounded-sm border border-border-card">
+              <img src={`data:${shot.mediaType};base64,${shot.data}`} alt={`The screen after: ${display.summary}`} className="block max-h-[320px] w-auto" />
+              {display.point ? (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute size-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-accent shadow-[0_0_0_2px_rgba(0,0,0,0.35)]"
+                  style={{ left: `${(display.point.x / display.width) * 100}%`, top: `${(display.point.y / display.height) * 100}%` }}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
     case 'browser': {
       const shot = result.content.find((b) => b.type === 'image');
       return (
