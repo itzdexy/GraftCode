@@ -3,7 +3,8 @@ import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode, type Usage } from '@shared/schemas/common';
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import type { ChecksConfig } from '@shared/schemas/config';
-import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
+import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
+import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -20,7 +21,7 @@ import type { SettingsStore } from '../permissions/settingsStore';
 import { FileStateTracker } from '../tools/fileState';
 import type { ToolRegistry } from '../tools/registry';
 import type { ShellManager } from '../tools/shell/shellManager';
-import type { SubagentType, ToolContext } from '../tools/types';
+import type { AgentBrowser, SubagentType, ToolContext } from '../tools/types';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
@@ -114,6 +115,10 @@ export interface SessionDeps {
   chatFiles: { save(sessionId: string, name: string, data: Buffer): ChatFile } | null;
   /** RunCode's sandbox: JavaScript in an isolated page; null where unavailable. */
   runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
+  /** The Browser panel for the Browser tool (null while there's no window). Absent: no Browser tool. */
+  browser?(): BrowserPanel | null;
+  /** Shows the Browser panel in a session's view, when the agent opens a page there. */
+  revealBrowser?(sessionId: string): void;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
   /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
   checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
@@ -755,7 +760,16 @@ export class AgentSession {
     const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
     const builtins =
       summary.kind === 'code'
-        ? this.deps.tools.names().filter((n) => !n.startsWith('mcp__') && !chatOnly.has(n) && (n !== 'WebSearch' || web.clientSearch) && (n !== 'Computer' || computer))
+        ? this.deps.tools
+            .names()
+            .filter(
+              (n) =>
+                !n.startsWith('mcp__') &&
+                !chatOnly.has(n) &&
+                (n !== 'WebSearch' || web.clientSearch) &&
+                (n !== 'Computer' || computer) &&
+                (n !== 'Browser' || this.deps.browser !== undefined)
+            )
         : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : []), ...(work.files ? ['CreateFile'] : []), ...(work.code ? ['RunCode'] : [])];
     return [...builtins, ...mcpTools];
   }
@@ -1144,6 +1158,48 @@ export class AgentSession {
     return host;
   }
 
+  /**
+   * The Browser panel for this session's Browser tool. In a sandboxed session,
+   * localhost addresses go to the port the sandbox forwards, so a dev server the
+   * agent started in the container opens like one running on this computer.
+   */
+  private agentBrowser(): AgentBrowser | null {
+    if (!this.deps.browser) return null;
+    const panel = (): BrowserPanel => {
+      const p = this.deps.browser?.();
+      if (!p) throw new Error('The browser needs the Graft window open.');
+      return p;
+    };
+    return {
+      open: async (url) => {
+        const p = panel();
+        this.deps.revealBrowser?.(this.id);
+        const opened = await p.navigate(sandboxUrl(url, this.deps.shells.sandbox?.box(this.id)?.ports ?? {}));
+        await p.settle();
+        return opened;
+      },
+      snapshot: () => panel().snapshot(),
+      capture: () => panel().capture(),
+      click: (target) => panel().click(target),
+      type: (target, text, submit) => panel().type(target, text, submit),
+      press: (key) => panel().press(key),
+      scroll: (direction) => panel().scroll(direction),
+      back: async () => {
+        const p = panel();
+        p.back();
+        await p.settle();
+      },
+      reload: async () => {
+        const p = panel();
+        p.reload();
+        await p.settle();
+      },
+      waitForText: (text, ms) => panel().waitForText(text, ms),
+      console: () => this.deps.browser?.()?.consoleLog() ?? [],
+      currentUrl: () => this.deps.browser?.()?.currentUrl() ?? null
+    };
+  }
+
   private toolContext(
     toolUseId: string,
     signal: AbortSignal,
@@ -1215,7 +1271,8 @@ export class AgentSession {
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
       computer: this.deps.computer,
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
-      runCode: work.code ? this.deps.runCode : null
+      runCode: work.code ? this.deps.runCode : null,
+      browser: this.summary.kind === 'code' ? this.agentBrowser() : null
     };
   }
 

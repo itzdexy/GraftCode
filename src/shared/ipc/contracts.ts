@@ -26,7 +26,16 @@ import {
   ScopedHooksSchema,
   SkillFileSchema
 } from '../schemas/customize';
-import { BackgroundShellSchema, BoundsSchema, FilePreviewSchema, TerminalInfoSchema, TreeEntrySchema } from '../schemas/panels';
+import {
+  BackgroundShellSchema,
+  BoundsSchema,
+  BROWSER_COMMANDS,
+  ConsoleEntrySchema,
+  FilePreviewSchema,
+  PickedElementSchema,
+  TerminalInfoSchema,
+  TreeEntrySchema
+} from '../schemas/panels';
 import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
 import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
@@ -286,7 +295,15 @@ export const contracts = {
   'shells:clear': channel(z.object({ sessionId: IdSchema }), z.object({ removed: z.number().int() })),
   'browser:navigate': channel(z.object({ url: z.string().min(1).max(4096) }), z.object({ url: z.string() })),
   'browser:bounds': channel(z.object({ bounds: BoundsSchema.nullable() }), Void),
-  'browser:command': channel(z.object({ command: z.enum(['back', 'forward', 'reload', 'stop', 'close', 'external']) }), Void),
+  'browser:command': channel(z.object({ command: z.enum(BROWSER_COMMANDS) }), Void),
+  'browser:find': channel(z.object({ text: z.string().max(500), forward: z.boolean(), next: z.boolean() }), Void),
+  'browser:console': channel(Void, z.array(ConsoleEntrySchema)),
+  /** The page as an image, for a message. */
+  'browser:capture': channel(Void, ImageBlockSchema),
+  /** Waits for the user to click an element in the page; null when they cancel. */
+  'browser:pick': channel(Void, PickedElementSchema.nullable()),
+  /** Dev servers answering on this computer's usual ports. */
+  'browser:servers': channel(Void, z.array(z.object({ url: z.string(), port: z.number().int() }))),
 
   // Customize
   'customize:commands': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(CommandFileSchema)),

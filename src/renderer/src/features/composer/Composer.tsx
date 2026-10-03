@@ -116,6 +116,28 @@ export function Composer({
     if (autoFocus) focus();
   }, [autoFocus, focus]);
 
+  // Attachments sent from elsewhere: the Browser panel's screenshots, picked elements and console logs.
+  useEffect(() => {
+    const take = (): void => {
+      const got = useUi.getState().takeInbox(draftKey);
+      if (!got) return;
+      if (got.images.length > 0) {
+        if (supportsImages) setImages((current) => [...current, ...got.images].slice(0, MAX_IMAGES));
+        else useToasts.getState().push({ tone: 'error', title: 'This model can’t read images', description: 'Pick a model that can see images to send a screenshot.' });
+      }
+      if (got.files.length > 0) setFiles((current) => [...current, ...got.files].slice(0, MAX_TEXT_FILES));
+      focus();
+    };
+    const timer = setTimeout(take, 0);
+    const unsubscribe = useUi.subscribe((state) => {
+      if (state.inbox?.key === draftKey) take();
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [draftKey, focus, supportsImages]);
+
   // Autogrow: reset to one line, then fit the content (capped; beyond that it scrolls).
   useEffect(() => {
     const el = textareaRef.current;

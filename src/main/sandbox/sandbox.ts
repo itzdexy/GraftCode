@@ -235,6 +235,28 @@ export function parsePorts(output: string): Record<number, number> {
   return out;
 }
 
+/**
+ * A localhost address as seen from inside the sandbox, rewritten to the port
+ * this computer forwards to it. Addresses for other hosts, or ports the
+ * sandbox doesn't forward, come back unchanged.
+ */
+export function sandboxUrl(raw: string, ports: Record<number, number>): string {
+  const input = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `http://${raw.trim()}`;
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return raw;
+  }
+  if (!['localhost', '127.0.0.1', '0.0.0.0', '[::1]'].includes(url.hostname)) return raw;
+  const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+  const hostPort = ports[port];
+  if (!hostPort) return raw;
+  url.hostname = '127.0.0.1';
+  url.port = String(hostPort);
+  return url.toString();
+}
+
 export class SandboxError extends Error {}
 
 interface Box {

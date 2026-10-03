@@ -510,6 +510,12 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   if (searches.length > 0) push(searchedPhrase(searches.map(searchOfCall)), searches.length);
   const computer = byName(['Computer']);
   if (computer.length > 0) push(plural(computer.length, 'Used the computer once', 'Used the computer # times'), computer.length);
+  const browsing = byName(['Browser']);
+  if (browsing.length > 0) {
+    const opened = browsing.find((c) => inputOf<{ action: string }>(c.input).action === 'open');
+    const host = opened ? hostOf(String(inputOf<{ url: string }>(opened.input).url ?? '')) : null;
+    push(host ? `Tested ${host} in the browser` : plural(browsing.length, 'Used the browser', 'Used the browser # times'), browsing.length);
+  }
   const fetches = byName(['WebFetch']);
   if (fetches.length > 0) {
     let host: string;
@@ -534,7 +540,7 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   if (runs.length > 0) push(plural(runs.length, 'Ran code', 'Ran code # times'), runs.length);
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) push('Asked you a question', questions.length);
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Task', 'AskUserQuestion', 'CreateFile', 'RunCode']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'AskUserQuestion', 'CreateFile', 'RunCode']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -602,9 +608,44 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       const d = call.result?.display;
       return { verb: d?.kind === 'text' ? d.text : computerVerb(str('action')), target: '', mono: false, title: 'Computer' };
     }
+    case 'Browser': {
+      const action = str('action');
+      const d = call.result?.display;
+      const target = action === 'open' ? (hostOf(str('url')) ?? str('url')) : d?.kind === 'browser' && d.title ? d.title : '';
+      return { verb: browserVerb(action, done), target, mono: false, title: d?.kind === 'browser' ? d.url : str('url') };
+    }
     default:
       return { verb: describeCall(call), target: '', mono: false, title: call.name };
   }
+}
+
+/** Host and port of an address, for short labels ("localhost:5173"); null when it isn't one. */
+function hostOf(url: string): string | null {
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `http://${url}`);
+    return u.host.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+/** What a Browser call did, or is doing. */
+function browserVerb(action: string, done: boolean): string {
+  const verbs: Record<string, [string, string]> = {
+    open: ['Opening', 'Opened'],
+    read: ['Reading the page', 'Read the page'],
+    screenshot: ['Taking a screenshot', 'Took a screenshot'],
+    click: ['Clicking', 'Clicked'],
+    type: ['Typing', 'Typed'],
+    press: ['Pressing a key', 'Pressed a key'],
+    scroll: ['Scrolling', 'Scrolled'],
+    wait: ['Waiting for the page', 'Waited for the page'],
+    back: ['Going back', 'Went back'],
+    reload: ['Reloading', 'Reloaded'],
+    console: ['Reading the console', 'Read the console']
+  };
+  const pair = verbs[action] ?? ['Using the browser', 'Used the browser'];
+  return done ? pair[1] : pair[0];
 }
 
 /** A computer action before its result names it. */
@@ -659,6 +700,8 @@ export function describeCall(call: ToolCall): string {
       return `Stop background command ${str('shell_id')}`;
     case 'WebFetch':
       return `${call.result ? 'Read' : 'Reading'} ${str('url')}`;
+    case 'Browser':
+      return `${browserVerb(str('action'), call.result !== null)}${str('url') ? ` ${str('url')}` : ''}`;
     case 'WebSearch':
       return `${call.result ? 'Searched' : 'Searching'} the web for “${str('query')}”`;
     case 'Task':

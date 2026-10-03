@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { DEFAULT_FILTER, type SessionFilter } from '../features/shell/sessionLists';
 
 export interface CodeContext {
@@ -28,6 +29,8 @@ interface UiState {
   hiddenStatusBars: Record<string, true>;
   /** Focus callback registered by the composer currently on screen (Ctrl+L). */
   focusComposer: (() => void) | null;
+  /** Attachments sent to a composer from elsewhere (the Browser panel), waiting for the composer with that draft key. */
+  inbox: { key: string; images: ImageBlock[]; files: FileAttachment[] } | null;
   setSearchOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean, query?: string) => void;
   setMoreOpen: (open: boolean) => void;
@@ -40,6 +43,9 @@ interface UiState {
   setDialog: (dialog: InfoDialog) => void;
   hideStatusBar: (sessionId: string) => void;
   registerComposer: (focus: (() => void) | null) => void;
+  sendToComposer: (key: string, add: { images?: ImageBlock[]; files?: FileAttachment[] }) => void;
+  /** Hands the waiting attachments to the composer with this key (once). */
+  takeInbox: (key: string) => { images: ImageBlock[]; files: FileAttachment[] } | null;
 }
 
 export const useUi = create<UiState>((set, get) => ({
@@ -55,6 +61,7 @@ export const useUi = create<UiState>((set, get) => ({
   dialog: null,
   hiddenStatusBars: {},
   focusComposer: null,
+  inbox: null,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setPaletteOpen: (paletteOpen, paletteQuery = '') => set(paletteOpen ? { paletteOpen, paletteQuery, searchOpen: false } : { paletteOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
@@ -71,5 +78,15 @@ export const useUi = create<UiState>((set, get) => ({
   setCodeContext: (codeContext) => set({ codeContext }),
   setDialog: (dialog) => set({ dialog }),
   hideStatusBar: (sessionId) => set({ hiddenStatusBars: { ...get().hiddenStatusBars, [sessionId]: true } }),
-  registerComposer: (focusComposer) => set({ focusComposer })
+  registerComposer: (focusComposer) => set({ focusComposer }),
+  sendToComposer: (key, add) => {
+    const current = get().inbox?.key === key ? get().inbox : null;
+    set({ inbox: { key, images: [...(current?.images ?? []), ...(add.images ?? [])], files: [...(current?.files ?? []), ...(add.files ?? [])] } });
+  },
+  takeInbox: (key) => {
+    const inbox = get().inbox;
+    if (!inbox || inbox.key !== key) return null;
+    set({ inbox: null });
+    return { images: inbox.images, files: inbox.files };
+  }
 }));

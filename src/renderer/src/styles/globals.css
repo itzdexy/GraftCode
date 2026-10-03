@@ -338,6 +338,29 @@
   }
 }
 
+/* The Browser panel's loading bar: an accent stripe running along a tinted track (just the track with reduced motion). */
+@keyframes graft-loadbar {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.graft-loadbar {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--g-accent) 14%, transparent);
+}
+.graft-loadbar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: var(--g-accent);
+  animation: graft-loadbar 1100ms var(--g-ease-out) infinite;
+}
+
 /* The message box: a soft accent ring while it has focus, and the send button gives under a click. */
 .composer-box:focus-within {
   box-shadow:

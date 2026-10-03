@@ -53,6 +53,9 @@ export interface SessionManagerDeps {
   /** Files chats make for download; deleted with their chat. */
   chatFiles: ChatFiles | null;
   runCode: SessionDeps['runCode'];
+  /** The Browser panel for the agent's Browser tool; absent where there is none. */
+  browser?: SessionDeps['browser'];
+  revealBrowser?: SessionDeps['revealBrowser'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -129,6 +132,8 @@ export class SessionManager {
       computer: d.computer,
       chatFiles: d.chatFiles,
       runCode: d.runCode,
+      ...(d.browser ? { browser: d.browser } : {}),
+      ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';

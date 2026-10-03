@@ -48,6 +48,17 @@ export interface Decision {
 const PROTECTED_IN_PROJECT = ['.graft/settings.json', '.graft/settings.local.json', '.graft/hooks', '.git/hooks', '.git/config'];
 const PROTECTED_MENTION = /(\.graft[\\/](settings(\.local)?\.json|hooks)|\.git[\\/](hooks|config)\b)/i;
 
+/** An address served from this computer (a dev server), as typed or with a scheme. */
+export function isLocalUrl(raw: string): boolean {
+  const input = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `http://${raw.trim()}`;
+  try {
+    const host = new URL(input).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '0.0.0.0' || host.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+}
+
 function isProtected(p: string, root: string, platform: NodeJS.Platform): boolean {
   return PROTECTED_IN_PROJECT.some((rel) => {
     const target = path.join(root, rel);
@@ -69,7 +80,7 @@ export function suggestRule(query: PermissionQuery, env: PermissionEnv): string 
   }
   if (d.url !== undefined) {
     try {
-      return `WebFetch(domain:${new URL(d.url).hostname})`;
+      return `${query.toolName}(domain:${new URL(d.url).hostname})`;
     } catch {
       return null;
     }
@@ -131,6 +142,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
     }
     if (query.mcp && !mcpReadOnly) return result('deny', planBlock);
     if (cls === 'computer') return result('deny', planBlock);
+    // Clicking and typing in a page can change the app behind it; reading it can't.
+    if (d.page === 'act') return result('deny', planBlock);
   }
 
   // Bypass runs everything without prompts (deny rules above still apply), unless the user kept the safety checks on.
@@ -144,6 +157,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
   if (ask) return result('ask', `The rule ${ask.raw} requires approval.`);
   const allow = env.rules.allow.find((r) => ruleMatches(r, target, matchEnv, 'allow'));
   if (allow) return result('allow', `Allowed by the rule ${allow.raw}.`);
+  // The page was opened with permission (or is local); working with it stays inside that page.
+  if (d.page) return result('allow', 'Works on the page already open in the browser.');
 
   const mode = env.mode;
   if (query.mcp) {
@@ -176,6 +191,10 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
     case 'network':
       if (env.allowNetwork) return result('allow', 'Chats may search and read the web.');
       if (mode === 'auto' || mode === 'bypass') return result('allow', 'Network reads are allowed in this mode.');
-      return result('ask', 'Fetches from the network.');
+      // The user's own dev server: opening it in the browser has the reach of an edit.
+      if (mode === 'auto-edit' && query.toolName === 'Browser' && d.url !== undefined && isLocalUrl(d.url)) {
+        return result('allow', 'Opens a page served from this computer.');
+      }
+      return result('ask', query.toolName === 'Browser' ? 'Opens a web page.' : 'Fetches from the network.');
   }
 }

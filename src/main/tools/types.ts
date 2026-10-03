@@ -8,6 +8,7 @@ import type { SearchEngineId, SearchResult } from './web/search';
 import type { ComputerControl } from '../computer/desktop';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
+import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 /** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
@@ -23,6 +24,8 @@ export interface ToolCallDescriptor {
   url?: string;
   /** What a permission prompt shows (command, diff, URL…). */
   preview?: PermissionDetail;
+  /** Works on the page already open in the Browser panel: "look" only reads it, "act" clicks or types. */
+  page?: 'look' | 'act';
 }
 
 export interface DescribeContext {
@@ -57,6 +60,31 @@ export interface ToolContext extends DescribeContext {
   chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
   /** Runs JavaScript in an isolated page with no network or file access; null outside chats. */
   runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
+  /** The Browser panel, for the Browser tool; null outside code sessions or without a window. */
+  browser: AgentBrowser | null;
+}
+
+/** The Browser panel as the agent drives it. Pages are isolated from the user's files and accounts. */
+export interface AgentBrowser {
+  /** Opens a page (showing the panel) and waits for it to load; returns the address it opened. */
+  open(url: string): Promise<string>;
+  snapshot(): Promise<PageSnapshot>;
+  capture(): Promise<{ mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }>;
+  click(target: PageTarget): Promise<string>;
+  type(target: PageTarget, text: string, submit: boolean): Promise<string>;
+  press(key: string): Promise<void>;
+  scroll(direction: 'up' | 'down'): Promise<void>;
+  back(): Promise<void>;
+  reload(): Promise<void>;
+  waitForText(text: string, timeoutMs: number): Promise<boolean>;
+  console(): ConsoleEntry[];
+  currentUrl(): string | null;
+}
+
+export interface PageTarget {
+  ref?: number;
+  selector?: string;
+  text?: string;
 }
 
 export interface ToolResult {

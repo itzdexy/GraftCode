@@ -118,6 +118,25 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
           {display.status} · {Math.round(display.bytes / 1024)} KB{display.title ? ` · ${display.title}` : ''}
         </p>
       );
+    case 'browser': {
+      const shot = result.content.find((b) => b.type === 'image');
+      return (
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-fg-muted">
+            {display.detail}
+            {display.title ? ` · ${display.title}` : ''}
+          </p>
+          {display.url ? <p className="selectable truncate font-mono text-xs text-fg-faint">{display.url}</p> : null}
+          {shot && shot.type === 'image' ? (
+            <img
+              src={`data:${shot.mediaType};base64,${shot.data}`}
+              alt={`Screenshot of ${display.url || 'the page'}`}
+              className="max-h-[320px] self-start rounded-sm border border-border-card object-contain"
+            />
+          ) : null}
+        </div>
+      );
+    }
     case 'todos':
       return <TodoList todos={display.todos} />;
     case 'task':

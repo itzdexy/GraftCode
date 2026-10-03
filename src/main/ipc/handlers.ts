@@ -29,6 +29,7 @@ import { listBranches, gitInfo } from '../git/repo';
 import { generateCommitMessage, titleModel } from '../agent/title';
 import { suggestChecks } from '../agent/checks';
 import { engineProblem } from '../sandbox/engine';
+import { localServers } from '../browser/servers';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { listDirectory, readPreview } from '../files/fileTree';
@@ -926,15 +927,49 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'browser:command': async ({ command }) => {
       const panel = ctx.browser();
-      if (command === 'back') panel.back();
-      else if (command === 'forward') panel.forward();
-      else if (command === 'reload') panel.reload();
-      else if (command === 'stop') panel.stop();
-      else if (command === 'close') panel.close();
-      else {
-        const url = panel.currentUrl();
-        if (url) await openExternalSafely(url);
+      switch (command) {
+        case 'back':
+          return panel.back();
+        case 'forward':
+          return panel.forward();
+        case 'reload':
+          return panel.reload();
+        case 'hardReload':
+          return panel.hardReload();
+        case 'stop':
+          return panel.stop();
+        case 'close':
+          return panel.close();
+        case 'devtools':
+          return panel.toggleDevTools();
+        case 'zoomIn':
+          return panel.zoom('in');
+        case 'zoomOut':
+          return panel.zoom('out');
+        case 'zoomReset':
+          return panel.zoom('reset');
+        case 'stopFind':
+          return panel.stopFind();
+        case 'clearConsole':
+          return panel.clearConsole();
+        case 'clearData':
+          return panel.clearSiteData();
+        case 'cancelPick':
+          return panel.cancelPick();
+        case 'external': {
+          const url = panel.currentUrl();
+          if (url) await openExternalSafely(url);
+          return;
+        }
       }
-    }
+    },
+    'browser:find': ({ text, forward, next }) => ctx.browser().findInPage(text, forward, next),
+    'browser:console': () => ctx.browser().consoleLog(),
+    'browser:capture': async () => {
+      const shot = await ctx.browser().capture();
+      return { type: 'image' as const, mediaType: shot.mediaType, data: shot.data };
+    },
+    'browser:pick': () => ctx.browser().pickElement(),
+    'browser:servers': () => localServers()
   };
 }

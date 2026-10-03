@@ -22,6 +22,8 @@ interface PanelsState {
   /** Panels widened to most of the window (the Background tasks expand button). */
   wide: boolean;
   browser: BrowserStateView | null;
+  /** The last browser key the page passed on (find, the address bar); seq tells repeats apart. */
+  browserShortcut: { name: 'find' | 'address'; seq: number } | null;
   toggle: (sessionId: string, panel: PanelId) => void;
   show: (sessionId: string, panel: PanelId) => void;
   close: (sessionId: string, panel: PanelId) => void;
@@ -32,6 +34,7 @@ interface PanelsState {
   setWidth: (width: number) => void;
   toggleWide: () => void;
   setBrowser: (state: BrowserStateView | null) => void;
+  browserKey: (name: 'find' | 'address') => void;
 }
 
 export const usePanels = create<PanelsState>((set, get) => {
@@ -44,6 +47,7 @@ export const usePanels = create<PanelsState>((set, get) => {
     width: PANEL_DEFAULT_WIDTH,
     wide: false,
     browser: null,
+    browserShortcut: null,
     toggle: (sessionId, panel) =>
       update(sessionId, (p) => ({ ...p, open: p.open.includes(panel) ? p.open.filter((x) => x !== panel) : [...p.open, panel] })),
     show: (sessionId, panel) => update(sessionId, (p) => (p.open.includes(panel) ? p : { ...p, open: [...p.open, panel] })),
@@ -58,7 +62,8 @@ export const usePanels = create<PanelsState>((set, get) => {
     markTasksAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, tasksAutoOpened: true })),
     setWidth: (width) => set({ width, wide: false }),
     toggleWide: () => set({ wide: !get().wide }),
-    setBrowser: (browser) => set({ browser })
+    setBrowser: (browser) => set({ browser }),
+    browserKey: (name) => set({ browserShortcut: { name, seq: (get().browserShortcut?.seq ?? 0) + 1 } })
   };
 });
 

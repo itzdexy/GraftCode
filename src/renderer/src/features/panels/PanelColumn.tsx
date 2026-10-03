@@ -71,7 +71,7 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
       case 'changes':
         return <ChangesPanel key={id} sessionId={sessionId} refreshKey={refreshKey} onClose={onClose} />;
       case 'browser':
-        return <BrowserPanelView key={id} onClose={onClose} />;
+        return <BrowserPanelView key={id} sessionId={sessionId} onClose={onClose} />;
       case 'tasks':
         return <TasksPanel key={id} sessionId={sessionId} wide={wide} onToggleWide={() => usePanels.getState().toggleWide()} onClose={onClose} />;
     }

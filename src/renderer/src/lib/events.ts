@@ -47,6 +47,12 @@ export function useGraftEvents(): void {
           case 'browser:state':
             usePanels.getState().setBrowser(event.state);
             break;
+          case 'browser:shortcut':
+            usePanels.getState().browserKey(event.shortcut);
+            break;
+          case 'browser:reveal':
+            usePanels.getState().show(event.sessionId, 'browser');
+            break;
           case 'mcp:changed':
             emitChanged('mcp');
             break;

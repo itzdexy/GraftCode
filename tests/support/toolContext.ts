@@ -41,6 +41,7 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     computer: null,
     chatFiles: null,
     runCode: null,
+    browser: null,
     todoList,
     progressChunks,
     ...overrides

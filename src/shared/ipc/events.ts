@@ -28,6 +28,10 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pty:exit'), id: z.string(), exitCode: z.number().int() }),
   z.object({ type: z.literal('shells:changed'), sessionId: z.string() }),
   z.object({ type: z.literal('browser:state'), state: BrowserStateSchema }),
+  /** A key the page swallowed that belongs to the panel (find, the address bar). */
+  z.object({ type: z.literal('browser:shortcut'), shortcut: z.enum(['find', 'address']) }),
+  /** The agent opened a page for a session: show the Browser panel there. */
+  z.object({ type: z.literal('browser:reveal'), sessionId: z.string() }),
   z.object({ type: z.literal('mcp:changed') }),
   z.object({ type: z.literal('schedules:changed') }),
   z.object({ type: z.literal('updates:state'), state: UpdateStateSchema })

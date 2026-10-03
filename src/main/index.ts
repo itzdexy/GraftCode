@@ -248,7 +248,11 @@ async function schedules(): Promise<Scheduler> {
 function browser(): BrowserPanel {
   const win = mainWindow?.window;
   if (!win) throw new Error('The window is closed.');
-  browserPanel ??= new BrowserPanel(win, (state) => emit({ type: 'browser:state', state }));
+  browserPanel ??= new BrowserPanel(
+    win,
+    (state) => emit({ type: 'browser:state', state }),
+    (shortcut) => emit({ type: 'browser:shortcut', shortcut })
+  );
   return browserPanel;
 }
 
@@ -290,6 +294,8 @@ async function sessions(): Promise<SessionManager> {
     mcp: m,
     search: s.search,
     computer: computer(),
+    browser: () => (mainWindow ? browser() : null),
+    revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     chatFiles: s.chatFiles,
     runCode: runInSandbox,
     emitEvent: (sessionId, event) => {
