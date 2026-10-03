@@ -47,7 +47,7 @@ function RouteView({ route }: { route: Route }) {
     case 'scheduled':
       return <Later>{<ScheduledView />}</Later>;
     case 'customize':
-      return <Later>{<CustomizeView />}</Later>;
+      return <Later>{<CustomizeView key={route.tab ?? 'commands'} initialTab={route.tab ?? 'commands'} />}</Later>;
     case 'settings':
       return <Later>{<SettingsView section={route.section} />}</Later>;
   }

@@ -27,7 +27,9 @@ import {
   Sun,
   Terminal,
   Files,
+  FlaskConical,
   GitCompare,
+  Box,
   Wrench,
   Zap
 } from 'lucide-react';
@@ -35,6 +37,7 @@ import type { AppSettings, AppSettingsPatch, ShortcutId } from '@shared/schemas/
 import { INTEGRATIONS } from '@shared/integrations';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { invoke } from '../../lib/ipc';
+import { setProjectSandbox } from '../../lib/sandbox';
 import { useApp } from '../../stores/app';
 import { useNav, type Route } from '../../stores/nav';
 import { usePanels } from '../../stores/panels';
@@ -85,6 +88,23 @@ async function startIn(mode: 'chat' | 'code', incognito = false): Promise<void> 
   startNew();
 }
 
+/** Switches the session's project in or out of the sandbox. */
+function sandboxCommand(session: SessionSummary, group: string): PaletteCommand[] {
+  const project = useApp.getState().projects.find((p) => p.id === session.projectId);
+  if (!project) return [];
+  const on = project.settings.sandbox === true;
+  return [
+    {
+      id: 'session.sandbox',
+      title: on ? 'Run commands on this computer' : 'Run commands in a sandbox',
+      group,
+      keywords: 'sandbox container docker podman isolate vm safe',
+      icon: Box,
+      run: () => setProjectSandbox(project, !on).catch((e: unknown) => reportError("Couldn't change the sandbox", e))
+    }
+  ];
+}
+
 function sessionCommands(session: SessionSummary, ctx: PaletteContext): PaletteCommand[] {
   const group = session.kind === 'code' ? 'This session' : 'This chat';
   const folder = session.worktreePath ?? session.cwd;
@@ -110,6 +130,7 @@ function sessionCommands(session: SessionSummary, ctx: PaletteContext): PaletteC
       { id: 'panel.changes', title: 'Toggle changes', group, keywords: 'diff git', icon: GitCompare, shortcut: 'toggleChanges', run: () => panels.toggle(session.id, 'changes') },
       { id: 'panel.files', title: 'Toggle files', group, keywords: 'explorer tree', icon: Files, shortcut: 'toggleFiles', run: () => panels.toggleFiles(session.id) },
       { id: 'panel.browser', title: 'Toggle browser', group, keywords: 'preview localhost web', icon: Globe, run: () => panels.toggle(session.id, 'browser') },
+      ...sandboxCommand(session, group),
       { id: 'panel.tasks', title: 'Background tasks', group, keywords: 'shells processes', icon: ListChecks, run: () => panels.toggle(session.id, 'tasks') },
       {
         id: 'session.editor',
@@ -138,6 +159,14 @@ export function paletteCommands(ctx: PaletteContext): PaletteCommand[] {
     { id: 'go.scheduled', title: 'Scheduled tasks', group: 'Go to', keywords: 'cron automation recurring', icon: Calendar, run: () => useNav.getState().go({ name: 'scheduled' }) },
     { id: 'go.artifacts', title: 'Artifacts', group: 'Go to', keywords: 'files outputs', icon: Zap, run: () => useNav.getState().go({ name: 'artifacts' }) },
     { id: 'go.customize', title: 'Customize: commands, skills, hooks and MCP', group: 'Go to', keywords: 'agents plugins', icon: Wrench, run: () => useNav.getState().go({ name: 'customize' }) },
+    {
+      id: 'go.checks',
+      title: 'Checks: commands to run after the agent changes files',
+      group: 'Go to',
+      keywords: 'lint test typecheck verify ci',
+      icon: FlaskConical,
+      run: () => useNav.getState().go({ name: 'customize', tab: 'checks' })
+    },
     { id: 'view.sidebar', title: 'Show or hide the sidebar', group: 'View', icon: PanelLeft, shortcut: 'toggleSidebar', run: () => toggleSidebar() },
     mode === 'code'
       ? { id: 'view.mode', title: 'Switch to Chat', group: 'View', keywords: 'mode', icon: MessagesSquare, run: () => setMode('chat') }

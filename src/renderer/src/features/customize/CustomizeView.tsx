@@ -4,6 +4,7 @@ import { Button } from '../../components/Button';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
+import type { CustomizeTabId } from '../../stores/nav';
 import { reportError } from '../../stores/toasts';
 import { PageLayout } from '../shell/PageLayout';
 import { AgentsSection } from './AgentsSection';
@@ -15,7 +16,7 @@ import { MemorySection } from './MemorySection';
 import { SELECT } from './shared';
 import { SkillsSection } from './SkillsSection';
 
-export type CustomizeTab = 'commands' | 'agents' | 'skills' | 'mcp' | 'checks' | 'hooks' | 'memory';
+export type CustomizeTab = CustomizeTabId;
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'commands', label: 'Commands' },

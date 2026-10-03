@@ -483,7 +483,12 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
       {state?.picking ? <p className="shrink-0 border-b border-border-panel bg-accent/10 px-10 py-4 text-sm text-fg-secondary">Click an element in the page to add it to your message. Esc cancels.</p> : null}
       {hasPage ? (
         <div className="flex min-h-0 flex-1 justify-center overflow-hidden bg-surface">
-          <div ref={hostRef} className={cn('h-full min-w-0', width ? 'border-x border-border-subtle' : 'w-full')} style={width ? { width: `min(100%, ${width}px)` } : undefined} />
+          <div
+            ref={hostRef}
+            data-browser-host=""
+            className={cn('h-full min-w-0', width ? 'border-x border-border-subtle' : 'w-full')}
+            style={width ? { width: `min(100%, ${width}px)` } : undefined}
+          />
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-10 px-16 text-center">

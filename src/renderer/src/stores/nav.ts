@@ -1,5 +1,8 @@
 import { create } from 'zustand';
 
+/** The tabs of Customize (a route can open one directly). */
+export type CustomizeTabId = 'commands' | 'agents' | 'skills' | 'mcp' | 'checks' | 'hooks' | 'memory';
+
 export type SettingsSection =
   | 'profile'
   | 'personalization'
@@ -25,7 +28,7 @@ export type Route =
   | { name: 'projects' }
   | { name: 'artifacts' }
   | { name: 'scheduled' }
-  | { name: 'customize' }
+  | { name: 'customize'; tab?: CustomizeTabId }
   | { name: 'settings'; section: SettingsSection };
 
 const MAX_HISTORY = 50;

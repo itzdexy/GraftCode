@@ -59,6 +59,24 @@ function makeProject(name: string, files: Record<string, string>): string {
   return dir;
 }
 
+/**
+ * Window screenshots can't see the Browser panel's page (a native view over the
+ * window), so lay the page's own capture over that spot before taking one.
+ */
+async function showBrowserPage(w: Page): Promise<void> {
+  await w.evaluate(async () => {
+    const host = document.querySelector('[data-browser-host]');
+    const bridge = (window as unknown as { graft: { invoke(channel: string): Promise<{ ok: boolean; value?: { mediaType: string; data: string } }> } }).graft;
+    const shot = await bridge.invoke('browser:capture');
+    if (!host || !shot.ok || !shot.value) throw new Error('No page to show');
+    const img = document.createElement('img');
+    img.src = `data:${shot.value.mediaType};base64,${shot.value.data}`;
+    img.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover;object-position:top left';
+    host.append(img);
+    await img.decode();
+  });
+}
+
 async function palette(w: Page, query: string): Promise<void> {
   await w.keyboard.press('ControlOrMeta+Shift+P');
   await w.getByRole('combobox', { name: 'Command' }).fill(query);
@@ -317,6 +335,7 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     await w.keyboard.press('Enter');
     await approveUntil(w, () => w.getByText(/Add to cart works/).isVisible());
     await expect(w.getByRole('region', { name: 'Browser' })).toBeVisible();
+    await showBrowserPage(w);
     await snap(w, 'browser-panel');
 
     // The environment menu in the header, and Settings → Sandbox.

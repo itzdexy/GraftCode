@@ -27,6 +27,9 @@ Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and
 - **Runs on your keys and your models.** No subscription and no lock-in: pick any of 200+ providers, point it at an OpenAI-compatible endpoint, or use models running on your own computer.
 - **Asks before it acts, until you say otherwise.** Five permission modes, from approving each edit to running on its own, with allow, ask and deny rules per project.
 - **Finishes long tasks.** Turns run until the work is done. Taproot mode plans with a task list it has to complete, verifies with your tests and builds, and reviews its own diff before it reports.
+- **Checks its own work.** Tell Graft your project's checks (type check, lint, tests) and it runs them after every change. When one fails, the agent reads the output and fixes the cause, up to two rounds.
+- **Runs untrusted code in a sandbox.** Turn on the sandbox for a project and its commands run in a Docker or Podman container: only the project folder is shared, and your files, keys and credentials stay out of reach.
+- **Tests what it builds.** The agent opens your dev server in the built-in browser, clicks through it like a person, reads the console and takes screenshots.
 - **Works with the apps you build with.** One-click integrations for Blender, Roblox Studio, Unity, Godot, Figma, a Playwright browser, GitHub, Sentry, Linear, Notion and Context7, plus any MCP server.
 - **Stays out of your way.** A command palette for everything, `!` to run a shell command from the message box, `↑` for earlier messages, and `/commit`, `/pr` and `/review` when you want them.
 - **Chats too.** Web search with cited sources, files to download, a JavaScript sandbox for calculations, read aloud, and incognito chats that never touch the disk.
@@ -77,13 +80,31 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Permission modes:** *Ask* (approve edits and commands), *Auto-edit* (edit project files freely), *Plan* (read and plan until you approve), *Auto* (approve low-risk actions) and *Bypass* (no prompts; only deny rules still block). Bypass has to be switched on in Settings first. Allow, ask and deny rules can be set per user and per project.
 - **Git:** an optional worktree per session, hidden checkpoints before every turn, and rewind for files, the conversation or both. Diff and commit from the app, and open a pull request.
 - **A transcript in the style of a terminal agent.** Each turn's work folds into one line, such as "Ran 3 commands, created a.ts, edited 2 files +75 −4 · 2m 50s". A card lists the files the turn changed, each opening to its diff. While a turn runs, a live status line shows elapsed time, context size and background tasks.
-- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, an embedded browser for local apps, and background tasks.
+- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, a browser for local apps, and background tasks.
+- **Checks after changes:** in **Customize → Checks**, list the commands that tell whether the project still works; Graft suggests them from `package.json` scripts (with your package manager), Cargo, Go and Python config. They run after any turn that changed files, show live in the transcript, and a failure goes back to the agent with its output and a reminder to fix the cause rather than weaken the check. Checks only run in projects you trust.
+- **A browser for developers:** the Browser panel has a console with an error badge, find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Pick an element, take a screenshot or grab the console and it lands in your message. With no page open, it lists dev servers running on your computer and in the session's sandbox.
+- **The agent tests in the browser:** the Browser tool opens a page, reads it as text plus numbered links, buttons and fields, clicks with real mouse events, types the way frameworks expect, waits for text, reads the console and takes screenshots. Opening a local dev server needs no approval in Auto-edit; other sites ask.
 - **Computer use (Windows, opt-in):** with a model that can see images, the agent can take screenshots and use the mouse and keyboard. Each action asks first unless you allow it for the session, a banner shows while it is in control, and `Ctrl+Alt+Esc` stops it.
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
 - **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test` and `/init` send carefully written prompts; `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
+
+### Sandbox
+
+A project's commands can run in a container instead of on your computer: the agent's shell commands, its background servers, the project's checks and your own `!` commands. Turn it on from the computer icon in a session's header, the command palette or **Settings → Sandbox**. It needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker on Linux) or [Podman](https://podman.io/); on Windows and macOS both run Linux containers in a small virtual machine.
+
+| | |
+| --- | --- |
+| Shared with the container | The project folder only, at `/workspace` |
+| Read-only inside it | `.git` and `.graft`, so nothing can plant a git hook, an fsmonitor command or a Graft hook that would run outside the sandbox |
+| Out of reach | Your home folder, other projects, SSH keys, credentials, Graft's keys and your environment variables |
+| Network | On by default so installs work, with common dev-server ports forwarded to `localhost`; one switch cuts it off entirely |
+| Limits | Memory, CPUs and process count, no extra privileges, dangerous capabilities dropped |
+| Dependencies | `node_modules` lives in a per-project volume, so installs in the sandbox never touch your own copy |
+
+In Auto-edit and Auto, sandboxed commands run without asking, because they can only reach the project folder; commands that look dangerous still ask, and your deny rules still apply. The sandbox protects your computer, not the project itself: code in it can still change the project's files, which you review as diffs and can rewind.
 
 ### Integrations
 
@@ -148,6 +169,8 @@ Any other MCP server can be added by hand, for all projects or for one.
 - **The renderer is sandboxed:** `contextIsolation` is on, `nodeIntegration` is off, a strict content security policy applies, and a typed preload bridge is the only way in. Filesystem, shell, git, network and keys all live in the main process.
 - File contents, tool output, web pages and MCP output are treated as untrusted and can never change permission rules.
 - Destructive commands, such as force pushes, hard resets and recursive deletes, always ask first. The one exception is Bypass mode, which you have to switch on yourself and which can keep these checks ("Keep safety checks in Bypass").
+- **The sandbox** (optional, per project) runs commands in a container that sees only the project folder, with `.git` and `.graft` read-only. See [Sandbox](#sandbox).
+- **The Browser panel** runs pages in their own in-memory session with no preload script, every permission denied, downloads blocked and only `http` and `https` allowed. Graft's own page scripts run in an isolated world the page can't see.
 
 ## Keyboard shortcuts
 

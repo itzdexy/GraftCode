@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.2",
+    "date": "2026-10-03",
+    "items": [
+      "Checks after changes: list your project’s checks (type check, lint, tests) in Customize → Checks and Graft runs them after every turn that changed files. When one fails, the agent gets the output and fixes the cause, up to two rounds. Graft suggests the commands from your package.json, Cargo, Go or Python setup.",
+      "A sandbox for code you don’t trust: turn it on for a project and its commands run in a Docker or Podman container that sees only the project folder. Your other files, keys, credentials and environment variables stay out of reach, .git and .graft are read-only inside it, and one switch cuts off the network. In Auto-edit and Auto, sandboxed commands run without asking.",
+      "A better Browser panel: a console with an error badge, find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Send a screenshot, a picked element or the console straight into your message. With no page open it lists the dev servers running on your computer.",
+      "The agent can test web apps: it opens your dev server in the Browser panel, clicks and types like a person, reads the console and takes screenshots.",
+      "Fixes: Stop now clears a waiting approval or question, the changes panel works for sessions in a subfolder of a repository, and a session list that fails to load offers a retry."
+    ]
+  },
+  {
     "version": "0.6.1",
     "date": "2026-10-03",
     "items": [
