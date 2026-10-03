@@ -26,6 +26,8 @@ const CALL_TIMEOUT_MS = 120_000;
 /** How long a call that keeps reporting progress may run in all. */
 const CALL_MAX_MS = 15 * 60_000;
 const MAX_RESULT_CHARS = 100_000;
+/** The SDK's code for a request that got no answer in time. */
+const REQUEST_TIMEOUT: number = ErrorCode.RequestTimeout;
 const MAX_TOOL_PAGES = 50;
 /** A server that connects without tools is asked again this often, this many times (some never announce them). */
 const TOOL_POLL_MS = 20_000;
@@ -432,7 +434,7 @@ export class McpManager implements McpToolSource {
               onprogress: (p) => ctx.progress(progressLine(p))
             });
           } catch (error) {
-            if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) {
+            if (error instanceof McpError && error.code === REQUEST_TIMEOUT) {
               const hint = troubleshootFor(conn.name);
               throw new GraftError('mcp_timeout', `${conn.name} didn't answer within ${Math.round(CALL_TIMEOUT_MS / 1000)} seconds.${hint ? ` ${hint}` : ''}`);
             }
