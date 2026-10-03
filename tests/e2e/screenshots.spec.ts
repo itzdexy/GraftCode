@@ -343,8 +343,7 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     // The environment menu in the header, and Settings → Sandbox.
     await w.getByRole('button', { name: 'Commands run on this computer' }).click();
     await snap(w, 'environment-menu');
-    await w.keyboard.press('Escape');
-    await palette(w, 'settings sandbox');
+    await w.getByRole('menuitem', { name: 'Sandbox settings…' }).click();
     await expect(w.getByRole('heading', { name: 'Sandbox', level: 2 })).toBeVisible();
     await snap(w, 'sandbox-settings');
   } finally {
