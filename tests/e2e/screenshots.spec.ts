@@ -321,8 +321,9 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
     await composer.fill('Make /health say healthy instead of up.');
     await composer.press('Enter');
-    await approveUntil(w, () => w.getByText('Both checks pass now.').isVisible());
-    await expect(w.getByText('Both checks pass now.')).toBeVisible();
+    // .first(): while a reply finishes streaming, its text briefly exists twice.
+    await approveUntil(w, () => w.getByText('Both checks pass now.').first().isVisible());
+    await expect(w.getByText('Both checks pass now.').first()).toBeVisible();
     await snap(w, 'checks-run');
 
     // The Browser panel, driven by the agent.
@@ -333,7 +334,7 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     );
     await w.getByRole('textbox', { name: /^Ask anything/ }).fill('Does add to cart work on the storefront?');
     await w.keyboard.press('Enter');
-    await approveUntil(w, () => w.getByText(/Add to cart works/).isVisible());
+    await approveUntil(w, () => w.getByText(/Add to cart works/).first().isVisible());
     await expect(w.getByRole('region', { name: 'Browser' })).toBeVisible();
     await showBrowserPage(w);
     await snap(w, 'browser-panel');
