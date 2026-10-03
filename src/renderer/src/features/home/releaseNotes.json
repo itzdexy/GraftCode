@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.6.4",
+    "date": "2026-10-03",
+    "items": [
+      "Building a site no longer freezes Graft. On PCs where Windows Security’s Controlled folder access protects Documents, Windows blocked the new site’s folder and Graft waited forever. New sites now go in a Graft Sites folder in your user folder, which Windows doesn’t lock and OneDrive doesn’t sync; sites already in Documents › Graft Sites stay there.",
+      "When Windows won’t let Graft create or change a file, Graft and the agent now say so and how to allow it, instead of hanging or reporting “no such file or directory”."
+    ]
+  },
+  {
     "version": "0.6.3",
     "date": "2026-10-03",
     "items": [
