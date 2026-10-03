@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileDiff, Globe, SquareTerminal, X } from 'lucide-react';
+import { FileDiff, Globe, SquareTerminal } from 'lucide-react';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
-import type { QueuedInput, SessionSummary } from '@shared/schemas/sessions';
+import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
@@ -21,6 +21,7 @@ import { PanelColumn } from '../panels/PanelColumn';
 import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
 import { PermissionCard } from './PermissionCard';
+import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
 import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
@@ -28,30 +29,6 @@ import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
 
 export const DISCLAIMER = 'Graft can make mistakes. Review changes before shipping.';
-
-function QueueList({ sessionId, queue }: { sessionId: string; queue: QueuedInput[] }) {
-  if (queue.length === 0) return null;
-  return (
-    <ul aria-label="Queued messages" className="flex flex-col gap-4">
-      {queue.map((q) => (
-        <li key={q.id} className="flex h-28 items-center gap-8 rounded-md border border-dashed border-border pr-4 pl-10 text-base">
-          <span className="shrink-0 text-fg-muted">Queued</span>
-          <span className="min-w-0 flex-1 truncate text-fg-secondary">
-            {q.text}
-            {q.attachmentCount > 0 ? ` (+${q.attachmentCount} attachment${q.attachmentCount === 1 ? '' : 's'})` : ''}
-          </span>
-          <IconButton
-            label="Remove from queue"
-            size="xs"
-            onClick={() => invoke('sessions:removeQueued', { id: sessionId, queueId: q.id }).catch((e: unknown) => reportError("Couldn't remove it", e))}
-          >
-            <X className="size-14" />
-          </IconButton>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 function useSessionModel(summary: SessionSummary) {
   const groups = useApp((s) => s.models);
@@ -146,7 +123,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
           <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
-            <QueueList sessionId={summary.id} queue={view.queue} />
+            <QueueBar sessionId={summary.id} queue={view.queue} />
             <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
             {missing ? (
               <p role="alert" className="text-sm text-amber-fg">
@@ -223,6 +200,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
               This chat's model ({summary.model?.modelId}) is no longer available. Pick another one below.
             </p>
           ) : null}
+          <QueueBar sessionId={summary.id} queue={view.queue} />
           <Composer
             draftKey={summary.id}
             variant="code"

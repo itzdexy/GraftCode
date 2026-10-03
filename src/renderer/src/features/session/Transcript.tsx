@@ -225,9 +225,14 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
             </p>
           ) : null}
           {view.notices.map((n) => (
-            <p key={n.id} className={cn('text-md', n.level === 'error' ? 'text-danger' : n.level === 'warning' ? 'text-amber-fg' : 'text-fg-muted')}>
-              {n.text}
-            </p>
+            <div key={n.id} className="flex flex-wrap items-center gap-8">
+              <p className={cn('text-md', n.level === 'error' ? 'text-danger' : n.level === 'warning' ? 'text-amber-fg' : 'text-fg-muted')}>{n.text}</p>
+              {n.action === 'continue' && !view.turnActive ? (
+                <Button size="sm" variant="secondary" onClick={onRetry}>
+                  Continue
+                </Button>
+              ) : null}
+            </div>
           ))}
           {failed && lastItem?.kind !== 'error' ? (
             <div role="alert" className="flex items-start gap-8 text-md">

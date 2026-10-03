@@ -107,7 +107,9 @@ export const AppSettingsSchema = z.object({
     autoCompact: z.boolean(),
     webSearch: z.boolean(),
     /** Code sessions may see the screen and use the mouse and keyboard (asks before each action). */
-    computerUse: z.boolean()
+    computerUse: z.boolean(),
+    /** Pause a turn after this many model steps; null lets turns run until the work is done. */
+    maxSteps: z.number().int().min(10).max(10_000).nullable()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -155,7 +157,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },

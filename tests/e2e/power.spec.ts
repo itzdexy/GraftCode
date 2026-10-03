@@ -65,7 +65,8 @@ test('personalization reaches the model, and /system shows the prompt a session 
   expect(system).toContain('I maintain a Rust command-line tool.');
   expect(system).toContain('Response style: concise.');
 
-  const box = w.getByRole('textbox', { name: /Ask anything/ });
+  // Typing "/" opens the command list, which turns the box into a combobox.
+  const box = w.getByRole('combobox', { name: /Ask anything/ }).or(w.getByRole('textbox', { name: /Ask anything/ }));
   await box.fill('/system');
   await box.press('Enter');
   const dialog = w.getByRole('dialog', { name: 'System prompt' });

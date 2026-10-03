@@ -71,6 +71,8 @@ export interface SessionPreferences {
   computerUse: boolean;
   /** Settings → Personalization, added to system prompts (never to incognito chats). */
   personalization: Personalization;
+  /** Settings → Permissions → Steps per turn; null means no limit. */
+  maxSteps: number | null;
 }
 
 export interface SessionDeps {
@@ -125,9 +127,8 @@ interface InternalQueued {
   createdAt: number;
 }
 
-const MAX_ITERATIONS = 150;
-const TAPROOT_ITERATIONS = 500;
-const SUBAGENT_ITERATIONS = 80;
+/** A sub-agent's steps when Settings sets no limit: it reports back on one delegated task, so it stays bounded. */
+const SUBAGENT_ITERATIONS = 200;
 const DELTA_FLUSH_MS = 40;
 /** "!" commands from the message box: how long they may run, and how much of their output the transcript keeps. */
 const USER_SHELL_TIMEOUT_MS = 300_000;
@@ -146,6 +147,8 @@ export class AgentSession {
   private controller: AbortController | null = null;
   private running: Promise<void> | null = null;
   private queue: InternalQueued[] = [];
+  /** Queued messages sent with "Send now": they join the running turn after its next tool step. */
+  private steering: InternalQueued[] = [];
   private pendingPermission: { request: PermissionRequest; resolve: (a: PermissionAnswer) => void } | null = null;
   private pendingQuestion: { request: QuestionRequest; resolve: (a: QuestionAnswer[] | null) => void } | null = null;
   private readonly sessionAllow: string[] = [];
@@ -197,7 +200,8 @@ export class AgentSession {
   }
 
   private publicQueue(): QueuedInput[] {
-    return this.queue.map((q) => ({ id: q.id, text: q.text, attachmentCount: q.images.length + q.files.length, createdAt: q.createdAt }));
+    const view = (q: InternalQueued, steer: boolean): QueuedInput => ({ id: q.id, text: q.text, attachmentCount: q.images.length + q.files.length, createdAt: q.createdAt, steer });
+    return [...this.steering.map((q) => view(q, true)), ...this.queue.map((q) => view(q, false))];
   }
 
   // ---- events -------------------------------------------------------------
@@ -266,6 +270,27 @@ export class AgentSession {
 
   removeQueued(id: string): void {
     this.queue = this.queue.filter((q) => q.id !== id);
+    this.steering = this.steering.filter((q) => q.id !== id);
+    this.emit({ type: 'queue', queue: this.publicQueue() });
+  }
+
+  /**
+   * "Send now" for a queued message: instead of waiting for the turn to end,
+   * it reaches the agent right after its next tool step, without stopping
+   * any work. With no turn running it is simply sent.
+   */
+  steer(id: string): void {
+    const index = this.queue.findIndex((q) => q.id === id);
+    if (index < 0) throw new GraftError('not_queued', 'That message is no longer waiting.');
+    const item = this.queue[index]!;
+    if (parseSlash(item.text)) throw new GraftError('cannot_steer', 'Commands run once the current turn ends.');
+    this.queue.splice(index, 1);
+    if (!this.running) {
+      this.emit({ type: 'queue', queue: this.publicQueue() });
+      this.start(item);
+      return;
+    }
+    this.steering.push(item);
     this.emit({ type: 'queue', queue: this.publicQueue() });
   }
 
@@ -466,7 +491,12 @@ export class AgentSession {
   private afterTurn(): void {
     this.running = null;
     this.controller = null;
-    if (this.disposed || this.status === 'error') return;
+    // "Send now" messages the turn ended before reading go first in line.
+    if (this.steering.length > 0) this.queue.unshift(...this.steering.splice(0));
+    if (this.disposed || this.status === 'error') {
+      this.emit({ type: 'queue', queue: this.publicQueue() });
+      return;
+    }
     const next = this.queue.shift();
     if (next) {
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -764,15 +794,7 @@ export class AgentSession {
         userText = handled.text;
         // A session that starts in Taproot (or reopens in it) gets the briefing with its first message.
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
-        if (hooks?.has('UserPromptSubmit')) {
-          const verdict = await hooks.run('UserPromptSubmit', { session_id: this.id, prompt: userText }, signal);
-          for (const e of verdict.errors) this.notice('warning', e);
-          if (verdict.decision === 'block') {
-            this.notice('error', `Your message was blocked by a UserPromptSubmit hook: ${verdict.reason ?? 'no reason given'}`);
-            return;
-          }
-          if (verdict.context) this.notes.push(verdict.context);
-        }
+        if (!(await this.promptAllowed(hooks, userText, signal))) return;
         const userMessageId = randomUUID();
         let checkpointId: string | null = null;
         if (summary.kind === 'code') {
@@ -782,17 +804,7 @@ export class AgentSession {
             this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);
           }
         }
-        const content: ContentBlock[] = [...this.notes.map((text) => ({ type: 'text' as const, text })), ...item.images];
-        if (userText.length > 0) content.push({ type: 'text', text: userText });
-        for (const file of item.files) {
-          content.push({ type: 'text', text: `<attached-file name="${file.name.replace(/"/g, "'")}">\n${file.content}\n</attached-file>` });
-        }
-        if (summary.kind === 'code' && root && userText.includes('@')) {
-          const mentions = expandMentions(userText, this.workingDir(), root, this.deps.platform);
-          for (const block of mentions.blocks) content.push({ type: 'text', text: block });
-          for (const file of mentions.files) this.files.record(file);
-        }
-        this.notes = [];
+        const content = this.userContent(item, userText);
         // The transcript shows what was typed; notes and attachments travel only to the model.
         const meta: MessageMeta = {
           turnId,
@@ -816,7 +828,7 @@ export class AgentSession {
       }
       const { system, toolNames } = await this.ensurePrompt(model);
       const effort = this.effortFor(model);
-      const host = this.makeHost(model, provider, hooks, root, trusted);
+      const host: LoopHost = { ...this.makeHost(model, provider, hooks, root, trusted), takeSteering: (s) => this.deliverSteering(turnId, hooks, s) };
       const result = await runAgentLoop(
         this.history(),
         {
@@ -830,7 +842,8 @@ export class AgentSession {
           cacheKey: this.id,
           privacy: this.privacy(),
           turnId,
-          maxIterations: effort === 'taproot' ? TAPROOT_ITERATIONS : MAX_ITERATIONS,
+          // No step cap unless Settings sets one: a long task runs until it's done (the repeat guard still stops loops).
+          maxIterations: this.deps.preferences().maxSteps,
           agentLabel: null,
           ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {}),
           taproot: effort === 'taproot',
@@ -865,6 +878,56 @@ export class AgentSession {
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
     }
+  }
+
+  /** Runs the UserPromptSubmit hook: false when it blocks the message; context it returns joins the notes. */
+  private async promptAllowed(hooks: HookRunner | null, text: string, signal: AbortSignal): Promise<boolean> {
+    if (!hooks?.has('UserPromptSubmit')) return true;
+    const verdict = await hooks.run('UserPromptSubmit', { session_id: this.id, prompt: text }, signal);
+    for (const e of verdict.errors) this.notice('warning', e);
+    if (verdict.decision === 'block') {
+      this.notice('error', `Your message was blocked by a UserPromptSubmit hook: ${verdict.reason ?? 'no reason given'}`);
+      return false;
+    }
+    if (verdict.context) this.notes.push(verdict.context);
+    return true;
+  }
+
+  /** What the model gets for a typed message: pending notes, images, the text, attached files and @-mentioned files. */
+  private userContent(item: InternalQueued, text: string): ContentBlock[] {
+    const root = this.projectRoot();
+    const content: ContentBlock[] = [...this.notes.map((note) => ({ type: 'text' as const, text: note })), ...item.images];
+    if (text.length > 0) content.push({ type: 'text', text });
+    for (const file of item.files) {
+      content.push({ type: 'text', text: `<attached-file name="${file.name.replace(/"/g, "'")}">\n${file.content}\n</attached-file>` });
+    }
+    if (this.summary.kind === 'code' && root && text.includes('@')) {
+      const mentions = expandMentions(text, this.workingDir(), root, this.deps.platform);
+      for (const block of mentions.blocks) content.push({ type: 'text', text: block });
+      for (const file of mentions.files) this.files.record(file);
+    }
+    this.notes = [];
+    return content;
+  }
+
+  /**
+   * Delivers messages sent with "Send now": each is stored as a user message
+   * after the latest tool results and returned for the running loop's history.
+   */
+  private async deliverSteering(turnId: string, hooks: HookRunner | null, signal: AbortSignal): Promise<ContentBlock[][]> {
+    const items = this.steering.splice(0);
+    if (items.length === 0) return [];
+    this.emit({ type: 'queue', queue: this.publicQueue() });
+    const delivered: ContentBlock[][] = [];
+    for (const item of items) {
+      if (!(await this.promptAllowed(hooks, item.text, signal))) continue;
+      const content = this.userContent(item, item.text);
+      const meta: MessageMeta = { turnId, typed: item.text, ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}) };
+      const stored = this.deps.store.appendMessage(this.id, 'user', content, meta);
+      this.emit({ type: 'message', message: stored });
+      delivered.push(content);
+    }
+    return delivered;
   }
 
   private maybeTitle(firstText: string): void {
@@ -1108,6 +1171,8 @@ export class AgentSession {
       },
       maybeCompact: () => Promise.resolve(null),
       todos: () => [],
+      // "Send now" messages are for the main agent; a sub-agent never takes them.
+      takeSteering: () => Promise.resolve([]),
       // A subagent's spend counts toward the session; its context size isn't the conversation's.
       onUsage: (usage, _tokens, costUsd) => parent.onUsage(usage, null, costUsd)
     };
@@ -1124,7 +1189,7 @@ export class AgentSession {
         cacheKey: `${this.id}:${parentToolUseId}`,
         privacy: this.privacy(),
         turnId: parentToolUseId,
-        maxIterations: SUBAGENT_ITERATIONS,
+        maxIterations: this.deps.preferences().maxSteps ?? SUBAGENT_ITERATIONS,
         agentLabel: input.description,
         taproot: false,
         stripThinking: false,

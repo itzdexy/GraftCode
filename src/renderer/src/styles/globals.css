@@ -279,10 +279,11 @@
     transform: none;
   }
 }
+/* Panels grow in from the edge they sit on; scaling down never widens the page the way a sideways slide would. */
 @keyframes graft-slide-left {
   from {
     opacity: 0;
-    transform: translateX(16px);
+    transform: scaleX(0.96);
   }
   to {
     opacity: 1;
@@ -314,7 +315,8 @@
     animation: graft-rise 260ms var(--g-ease-out) both;
   }
   .motion-slide-left {
-    animation: graft-slide-left 280ms var(--g-ease-out) both;
+    transform-origin: right center;
+    animation: graft-slide-left 240ms var(--g-ease-out) both;
   }
   .motion-slide-up {
     animation: graft-slide-up 260ms var(--g-ease-out) both;

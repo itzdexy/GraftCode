@@ -29,7 +29,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('todos'), todos: z.array(TodoItemSchema) }),
   z.object({ type: z.literal('status'), status: SessionStatusSchema, error: ErrorInfoSchema.nullable() }),
   z.object({ type: z.literal('usage'), usage: SessionUsageSchema }),
-  z.object({ type: z.literal('notice'), level: z.enum(['info', 'warning', 'error']), text: z.string() }),
+  /** `action: 'continue'` offers to pick the turn up where it stopped (the step limit). */
+  z.object({ type: z.literal('notice'), level: z.enum(['info', 'warning', 'error']), text: z.string(), action: z.literal('continue').optional() }),
   z.object({ type: z.literal('queue'), queue: z.array(QueuedInputSchema) }),
   z.object({ type: z.literal('retrying'), attempt: z.number().int(), delayMs: z.number().int(), reason: z.string() }),
   z.object({ type: z.literal('compacted'), summaryMessageId: z.string() }),

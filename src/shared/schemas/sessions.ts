@@ -48,7 +48,14 @@ export const SessionSummarySchema = z.object({
 });
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
 
-export const QueuedInputSchema = z.object({ id: z.string(), text: z.string(), attachmentCount: z.number().int().nonnegative(), createdAt: z.number().int() });
+/** A message waiting for the running turn; `steer` ones reach the agent at its next step instead of after the turn. */
+export const QueuedInputSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  attachmentCount: z.number().int().nonnegative(),
+  createdAt: z.number().int(),
+  steer: z.boolean().default(false)
+});
 export type QueuedInput = z.infer<typeof QueuedInputSchema>;
 
 export const SessionDetailSchema = z.object({

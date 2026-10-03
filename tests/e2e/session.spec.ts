@@ -6,6 +6,8 @@ import { MockProvider } from './support/mockProvider';
 import { completeOnboarding, makeGitProject } from './support/onboard';
 
 const SHOTS = path.join(__dirname, '..', '..', 'test-results', 'shots');
+/** The message box of a code session with a project folder, by its label. */
+const SESSION_BOX = /^Ask anything/;
 
 async function shot(w: Page, name: string): Promise<void> {
   fs.mkdirSync(SHOTS, { recursive: true });
@@ -90,7 +92,7 @@ test('Stop interrupts a streaming reply and the session accepts the next message
   await expect(w.getByText('Stopped.')).toBeVisible();
   await expect(w.getByRole('button', { name: 'Stop' })).toBeHidden();
 
-  const next = w.getByRole('textbox', { name: 'Type / for commands' });
+  const next = w.getByRole('textbox', { name: SESSION_BOX });
   await next.fill('Try again');
   await next.press('Enter');
   await expect(w.getByText('Second answer.')).toBeVisible();
@@ -178,7 +180,7 @@ test('typing / lists commands and Enter runs one without arguments', async () =>
   await composer.press('Enter');
   await expect(w.getByText('Hi.', { exact: true })).toBeVisible();
 
-  const box = w.getByRole('combobox', { name: 'Type / for commands' }).or(w.getByRole('textbox', { name: 'Type / for commands' }));
+  const box = w.getByRole('combobox', { name: SESSION_BOX }).or(w.getByRole('textbox', { name: SESSION_BOX }));
   await box.fill('/he');
   const list = w.getByRole('listbox', { name: 'Commands' });
   await expect(list.getByRole('option', { name: /\/help/ })).toBeVisible();
@@ -219,5 +221,5 @@ test('rewind restores the files and the conversation to before a message', async
   expect(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8')).toBe('hello\n');
   await expect(w.getByText('Rewrote the notes.')).toBeHidden();
   // The rewound message returns to the composer for editing.
-  await expect(w.getByRole('textbox', { name: 'Type / for commands' })).toHaveValue('Rewrite the notes');
+  await expect(w.getByRole('textbox', { name: SESSION_BOX })).toHaveValue('Rewrite the notes');
 });

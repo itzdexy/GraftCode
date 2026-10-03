@@ -48,7 +48,7 @@ export function AboutSection() {
   return (
     <div className="flex flex-col gap-24">
       <div className="flex items-center gap-12">
-        <Mark size={36} />
+        <Mark size={36} motion="idle" interactive />
         <div>
           <Wordmark className="text-xl" />
           <p className="mt-4 text-sm text-fg-muted">A desktop coding agent that works with your own model provider keys.</p>

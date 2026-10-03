@@ -560,6 +560,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).removeQueued(id, queueId);
       return { ok: true as const };
     },
+    'sessions:steer': async ({ id, queueId }) => {
+      (await ctx.sessions()).steer(id, queueId);
+      return { ok: true as const };
+    },
     'sessions:markRead': async ({ id }) => {
       (await ctx.sessions()).markRead(id);
       return { ok: true as const };

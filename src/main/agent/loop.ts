@@ -50,6 +50,12 @@ export interface LoopHost {
   onUsage(usage: Usage, contextTokens: number | null, costUsd: number | null): void;
   /** The session's task list (Taproot won't finish with tasks open). */
   todos(): TodoItem[];
+  /**
+   * Messages the user sent with "Send now" while the turn ran: stored as
+   * user messages after the latest tool results and returned for the
+   * history, so the agent reads them at its next step.
+   */
+  takeSteering?(signal: AbortSignal): Promise<ContentBlock[][]>;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -64,7 +70,8 @@ export interface LoopConfig {
   cacheKey: string;
   privacy: RequestPrivacy;
   turnId: string;
-  maxIterations: number;
+  /** Model steps before the turn pauses; null runs until the work is done (the repeat guard still applies). */
+  maxIterations: number | null;
   retryPolicy?: RetryPolicy;
   /** Label shown on permission prompts raised by a sub-agent. */
   agentLabel: string | null;
@@ -280,8 +287,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
 
   for (let iteration = 0; ; iteration++) {
     if (signal.aborted) return done('interrupted');
-    if (iteration >= config.maxIterations) {
-      host.emit({ type: 'notice', level: 'warning', text: `Stopped after ${config.maxIterations} steps. Send a message to continue.` });
+    if (config.maxIterations !== null && iteration >= config.maxIterations) {
+      host.emit({
+        type: 'notice',
+        level: 'warning',
+        text: `Paused after ${config.maxIterations} steps, the limit set in Settings → Permissions.`,
+        action: 'continue'
+      });
       return done('guard');
     }
 
@@ -436,6 +448,10 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       content: userContent.map((b) => (b.type === 'tool_result' ? { type: 'tool_result', toolUseId: b.toolUseId, content: b.content, isError: b.isError } : b))
     });
     if (signal.aborted) return done('interrupted');
+    // Messages sent with "Send now" join the tool results, as replay does (mergeAdjacent), so roles keep alternating.
+    const steering = ((await host.takeSteering?.(signal)) ?? []).flat();
+    const last = history.at(-1);
+    if (steering.length > 0 && last?.role === 'user') history[history.length - 1] = { role: 'user', content: [...last.content, ...steering] };
     if (repeatStrikes >= 2) {
       host.emit({ type: 'notice', level: 'warning', text: 'Stopped: the agent kept repeating the same tool calls.' });
       return done('guard');

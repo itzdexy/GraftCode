@@ -69,7 +69,7 @@ function AboutBody() {
       {state.status === 'ready' ? (
         <div className="flex flex-col gap-16">
           <div className="flex items-center gap-10">
-            <Mark size={28} />
+            <Mark size={28} motion="idle" interactive />
             <Wordmark className="text-xl" />
             <span className="text-base text-fg-muted">Version {state.info.version}</span>
           </div>

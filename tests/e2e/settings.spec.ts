@@ -84,13 +84,13 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await w.getByRole('button', { name: 'Change shortcut for Search chats and sessions' }).click();
   await w.keyboard.press('Control+N');
   await expect(w.getByText(/Already used for “New session or chat”/)).toBeVisible();
-  await w.keyboard.press('Control+Shift+P');
+  await w.keyboard.press('Control+Shift+O');
   const row = w.getByRole('list', { name: 'Shortcuts' }).getByRole('listitem').filter({ hasText: 'Search chats and sessions' });
-  await expect(row.getByText('Ctrl+Shift+P')).toBeVisible();
+  await expect(row.getByText('Ctrl+Shift+O')).toBeVisible();
   await expect(row.getByRole('button', { name: 'Reset' })).toBeEnabled();
   await shot(w, 'settings-shortcuts');
   await w.locator('body').click({ position: { x: 600, y: 700 } });
-  await w.keyboard.press('Control+Shift+P');
+  await w.keyboard.press('Control+Shift+O');
   await expect(w.getByRole('dialog', { name: /Search/ })).toBeVisible();
   await w.keyboard.press('Escape');
 

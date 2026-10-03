@@ -62,6 +62,8 @@ export interface HarnessOptions {
   runCode?: SessionDeps['runCode'];
   /** Settings → Personalization (default: empty). */
   personalization?: SessionPreferences['personalization'];
+  /** Settings → Permissions → Steps per turn (default: no limit). */
+  maxSteps?: number | null;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -141,7 +143,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       noTraining: options.noTraining ?? false,
       incognitoLocalOnly: options.incognitoLocalOnly ?? false,
       computerUse: options.computer !== undefined,
-      personalization: options.personalization ?? { about: '', instructions: '', style: 'default' }
+      personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
+      maxSteps: options.maxSteps ?? null
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),

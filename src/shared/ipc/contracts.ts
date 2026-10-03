@@ -255,6 +255,8 @@ export const contracts = {
   /** The system prompt and tool names the session's next turn sends (Session → View system prompt). */
   'sessions:systemPrompt': channel(z.object({ id: IdSchema }), z.object({ system: z.string(), tools: z.array(z.string()), model: z.string() })),
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
+  /** "Send now": a queued message reaches the agent after its next tool step instead of after the turn. */
+  'sessions:steer': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),
   'sessions:feedback': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, value: z.union([z.literal(-1), z.literal(0), z.literal(1)]) }), Ok),

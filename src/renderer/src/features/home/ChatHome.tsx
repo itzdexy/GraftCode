@@ -69,7 +69,7 @@ export function ChatHome() {
           </div>
         ) : (
           <h1 className="flex items-center gap-12 text-center font-serif text-greeting font-normal text-fg-strong">
-            <Mark size={36} />
+            <Mark size={36} motion="idle" interactive />
             <span>
               Good {partOfDay(now)}
               {name ? `, ${name}` : ''}

@@ -15,6 +15,9 @@ import { useToasts } from '../../stores/toasts';
 import { ConfirmDialog, Group, saveSettings, SettingRow } from './common';
 import { ProjectPicker } from './ProjectPicker';
 
+/** Choices for Steps per turn (besides no limit). */
+const STEP_LIMITS = [100, 250, 500, 1000, 2500] as const;
+
 const KINDS: Array<{ kind: keyof RuleLists; title: string; help: string }> = [
   { kind: 'allow', title: 'Allow', help: 'Runs without asking.' },
   { kind: 'ask', title: 'Ask', help: 'Always asks, even in Auto modes.' },
@@ -194,6 +197,25 @@ export function PermissionsSection() {
             }
           />
         ) : null}
+        <SettingRow
+          label="Steps per turn"
+          description="How many steps the agent may take before it pauses and offers to continue. With no limit it works until the task is done; it still stops if it repeats the same actions."
+          control={
+            <select
+              aria-label="Steps per turn"
+              className="h-28 rounded-md border border-input-border bg-input px-8 text-base text-fg outline-none focus:border-border-strong"
+              value={settings.behavior.maxSteps === null ? 'none' : String(settings.behavior.maxSteps)}
+              onChange={(e) => saveSettings({ behavior: { maxSteps: e.target.value === 'none' ? null : Number(e.target.value) } })}
+            >
+              <option value="none">No limit</option>
+              {STEP_LIMITS.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n.toLocaleString()} steps
+                </option>
+              ))}
+            </select>
+          }
+        />
       </Group>
 
       <Group title="Computer use">

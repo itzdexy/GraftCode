@@ -167,7 +167,7 @@ export function CodeHome() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="motion-stagger mx-auto w-full max-w-[calc(var(--g-content-width)+48px)] px-24 pt-16 pb-24">
           <h1 className="flex items-center gap-10 text-xl font-medium text-fg-strong">
-            <Mark size={20} />
+            <Mark size={20} motion="idle" interactive />
             <span className="truncate">
               {justOnboarded ? 'Welcome' : 'Welcome back'}
               {name ? `, ${name}` : ''}

@@ -1,5 +1,10 @@
 /* Mascot animations. All motion collapses under reduced-motion (globals.css). */
 
+/* A hop lifts Scion a pixel above its box. */
+.graft-mark {
+  overflow: visible;
+}
+
 .graft-mark__leaves,
 .graft-mark__stem {
   transform-box: fill-box;
@@ -42,30 +47,226 @@
   }
 }
 
-/* Thinking: the leaves bob a pixel and the sprout blinks now and then. */
-.graft-mark--thinking .graft-mark__leaves {
-  animation: graft-bob 1000ms steps(1, end) infinite;
+/*
+ * Frames: leaf poses and eye frames (scion.json) are drawn over the sprite
+ * and stay hidden until a motion shows them. Every move is a frame swap or a
+ * one-pixel step, so Scion stays on the pixel grid.
+ */
+.graft-frame {
+  opacity: 0;
 }
-.graft-mark--thinking .graft-mark__eyes {
-  animation: graft-blink 3600ms steps(1, end) infinite;
+
+/* Thinking: the leaves flap and the sprout bobs while Graft works, with a blink now and then. */
+.graft-mark--thinking .graft-mark__body {
+  animation: graft-bob 1200ms step-end infinite;
+}
+.graft-mark--thinking .graft-frame--rest {
+  animation: graft-flap-rest 1200ms step-end infinite;
+}
+.graft-mark--thinking .graft-frame--perk {
+  animation: graft-flap-perk 1200ms step-end infinite;
+}
+.graft-mark--thinking .graft-frame--droop {
+  animation: graft-flap-droop 1200ms step-end infinite;
+}
+.graft-mark--thinking .graft-frame--shut {
+  animation: graft-blink 3600ms step-end infinite;
 }
 
 @keyframes graft-bob {
   0% {
     transform: none;
   }
-  50% {
+  25% {
     transform: translateY(-1px);
+  }
+  50% {
+    transform: none;
+  }
+}
+@keyframes graft-flap-rest {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0;
+  }
+}
+@keyframes graft-flap-perk {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes graft-flap-droop {
+  0% {
+    opacity: 0;
+  }
+  75% {
+    opacity: 1;
   }
 }
 @keyframes graft-blink {
   0% {
-    transform: none;
+    opacity: 0;
+  }
+  92% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 0;
+  }
+}
+
+/*
+ * Idle: Scion blinks, glances left and right, and gives its leaves a happy
+ * wiggle every few seconds. The leaf and eye cycles have different lengths,
+ * so the two never settle into the same rhythm.
+ */
+.graft-mark--idle .graft-frame--rest {
+  animation: graft-wiggle-rest 7s step-end infinite;
+}
+.graft-mark--idle .graft-frame--perk {
+  animation: graft-wiggle-perk 7s step-end infinite;
+}
+.graft-mark--idle .graft-frame--shut {
+  animation: graft-glance-shut 9s step-end infinite;
+}
+.graft-mark--idle .graft-frame--left {
+  animation: graft-glance-left 9s step-end infinite;
+}
+.graft-mark--idle .graft-frame--right {
+  animation: graft-glance-right 9s step-end infinite;
+}
+
+@keyframes graft-wiggle-rest {
+  0% {
+    opacity: 1;
+  }
+  84% {
+    opacity: 0;
+  }
+  87% {
+    opacity: 1;
   }
   90% {
-    transform: scaleY(0.1);
+    opacity: 0;
   }
-  95% {
+  93% {
+    opacity: 1;
+  }
+}
+@keyframes graft-wiggle-perk {
+  0% {
+    opacity: 0;
+  }
+  84% {
+    opacity: 1;
+  }
+  87% {
+    opacity: 0;
+  }
+  90% {
+    opacity: 1;
+  }
+  93% {
+    opacity: 0;
+  }
+}
+@keyframes graft-glance-shut {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  20% {
+    opacity: 0;
+  }
+  76% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 0;
+  }
+}
+@keyframes graft-glance-left {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  48% {
+    opacity: 0;
+  }
+}
+@keyframes graft-glance-right {
+  0% {
+    opacity: 0;
+  }
+  52% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 0;
+  }
+}
+
+/* Hover: a quick double hop. Click: a cheer, with hops, flapping leaves and happy, squinting eyes. */
+.graft-mark--interactive {
+  cursor: pointer;
+}
+.graft-mark--interactive:hover .graft-mark__body {
+  animation: graft-hop 520ms step-end;
+}
+.graft-mark--cheer .graft-mark__body {
+  animation: graft-hop 520ms step-end 2;
+}
+.graft-mark--cheer .graft-frame--rest {
+  animation: graft-flap-rest 400ms step-end infinite;
+}
+.graft-mark--cheer .graft-frame--perk {
+  animation: graft-flap-perk 400ms step-end infinite;
+}
+.graft-mark--cheer .graft-frame--droop {
+  animation: graft-flap-droop 400ms step-end infinite;
+}
+.graft-mark--cheer .graft-frame--shut {
+  animation: none;
+  opacity: 1;
+}
+.graft-mark--cheer .graft-frame--left,
+.graft-mark--cheer .graft-frame--right {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes graft-hop {
+  0% {
+    transform: none;
+  }
+  15% {
+    transform: translateY(-1px);
+  }
+  40% {
+    transform: none;
+  }
+  55% {
+    transform: translateY(-1px);
+  }
+  80% {
     transform: none;
   }
 }

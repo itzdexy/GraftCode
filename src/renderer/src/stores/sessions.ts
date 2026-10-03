@@ -10,6 +10,8 @@ export interface Notice {
   id: number;
   level: 'info' | 'warning' | 'error';
   text: string;
+  /** "continue": the turn paused at the step limit and can pick up where it stopped. */
+  action?: 'continue';
 }
 
 export interface SessionView {
@@ -145,7 +147,7 @@ function reduce(view: SessionView, event: AgentEvent): SessionView {
     case 'queue':
       return { ...view, queue: event.queue };
     case 'notice':
-      return { ...view, notices: [...view.notices, { id: ++noticeSeq, level: event.level, text: event.text }].slice(-6) };
+      return { ...view, notices: [...view.notices, { id: ++noticeSeq, level: event.level, text: event.text, ...(event.action ? { action: event.action } : {}) }].slice(-6) };
     case 'retrying':
       return { ...view, retrying: { attempt: event.attempt, delayMs: event.delayMs, reason: event.reason } };
     case 'compacted':

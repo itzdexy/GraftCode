@@ -867,3 +867,85 @@ describe('custom agents in sessions', () => {
     expect(result).toContain('\\"general\\", \\"explore\\"');
   });
 });
+
+describe('steps per turn', () => {
+  it('runs past 150 steps when no limit is set', async () => {
+    const steps = Array.from({ length: 155 }, (_, i) => ({ toolCalls: [{ name: 'Glob', input: { pattern: `**/*.step${i}` } }] }));
+    const h = harness({ script: [...steps, { text: 'All 155 searches done.' }] });
+    h.session.send('search a lot');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(156);
+    expect(texts(h).at(-1)).toBe('assistant:All 155 searches done.');
+    expect(h.events.some((e) => e.type === 'notice' && /Paused after/.test(e.text))).toBe(false);
+  }, 60_000);
+
+  it('pauses at the limit from Settings and continues from where it stopped', async () => {
+    const h = harness({
+      maxSteps: 2,
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Finished after continuing.' }
+      ]
+    });
+    h.session.send('work');
+    await h.session.idle();
+    const paused = h.events.find((e) => e.type === 'notice' && /Paused after 2 steps/.test(e.text));
+    expect(paused).toMatchObject({ action: 'continue' });
+    expect(h.provider.requests).toHaveLength(2);
+    expect(h.session.summary.status).toBe('idle');
+
+    h.session.retry();
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(3);
+    expect(texts(h).at(-1)).toBe('assistant:Finished after continuing.');
+  });
+});
+
+describe('sending a queued message now', () => {
+  it('hands the message to the running turn after its next tool step, without stopping it', async () => {
+    const h = harness({
+      script: [
+        { text: 'Reading.', toolCalls: [{ name: 'Glob', input: { pattern: '*.md' } }], chunkDelayMs: 20 },
+        { text: 'Got it: I will use pnpm from now on.' }
+      ]
+    });
+    h.session.send('look around');
+    await h.waitFor((e) => e.type === 'assistant-delta');
+    expect(h.session.send('use pnpm, not npm').queued).toBe(true);
+    const queued = h.events.findLast((e) => e.type === 'queue');
+    const id = queued?.type === 'queue' ? queued.queue[0]!.id : '';
+    h.session.steer(id);
+    const steered = h.events.findLast((e) => e.type === 'queue');
+    expect(steered?.type === 'queue' ? steered.queue : null).toEqual([expect.objectContaining({ id, steer: true })]);
+    await h.session.idle();
+
+    // One turn: the second request already carries the message, right after the tool results.
+    expect(h.provider.requests).toHaveLength(2);
+    const last = h.provider.requests[1]!.messages.at(-1)!;
+    expect(last.role).toBe('user');
+    expect(last.content.map((b) => b.type)).toEqual(['tool_result', 'text']);
+    expect(JSON.stringify(last.content[1])).toContain('use pnpm, not npm');
+    // The transcript shows it as the user's message, and nothing is left waiting.
+    const typed = h.store.listMessages('session-1').filter((m) => m.role === 'user' && m.meta.typed).map((m) => m.meta.typed);
+    expect(typed).toEqual(['look around', 'use pnpm, not npm']);
+    const after = h.events.findLast((e) => e.type === 'queue');
+    expect(after?.type === 'queue' ? after.queue : null).toEqual([]);
+  });
+
+  it('runs a "Send now" message next when the turn ends before reading it, and refuses commands', async () => {
+    const h = harness({ script: [{ text: Array.from({ length: 30 }, (_, i) => `w${i}`).join(' '), chunkDelayMs: 15 }, { text: 'Second turn.' }] });
+    h.session.send('just answer');
+    await h.waitFor((e) => e.type === 'assistant-delta');
+    h.session.send('/cost');
+    h.session.send('and then this');
+    const queue = h.events.findLast((e) => e.type === 'queue');
+    const [command, message] = queue?.type === 'queue' ? queue.queue : [];
+    expect(() => h.session.steer(command!.id)).toThrow(/Commands run once the current turn ends/);
+    h.session.steer(message!.id);
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('and then this');
+    expect(texts(h).some((t) => t.startsWith('assistant:Tokens this session'))).toBe(true);
+  });
+});

@@ -109,7 +109,7 @@ export function Onboarding() {
   return (
     <div className="flex h-full flex-col bg-bg">
       <header className="app-drag flex h-[var(--g-titlebar-height)] shrink-0 items-center gap-8 pr-[calc(var(--g-controls-right)+16px)] pl-[calc(var(--g-controls-left)+16px)]">
-        <Mark size={16} />
+        <Mark size={16} motion="idle" />
         <Wordmark className="text-md" />
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">

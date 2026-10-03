@@ -161,7 +161,8 @@ export class SessionManager {
           noTraining: s.privacy.noTraining,
           incognitoLocalOnly: s.privacy.incognitoLocalOnly,
           computerUse: s.behavior.computerUse,
-          personalization: s.personalization
+          personalization: s.personalization,
+          maxSteps: s.behavior.maxSteps
         };
       },
       gitInfo: async (cwd) => {
@@ -528,6 +529,10 @@ export class SessionManager {
 
   removeQueued(id: string, queueId: string): void {
     this.get(id).removeQueued(queueId);
+  }
+
+  steer(id: string, queueId: string): void {
+    this.get(id).steer(queueId);
   }
 
   feedback(sessionId: string, messageId: string, value: -1 | 0 | 1): void {

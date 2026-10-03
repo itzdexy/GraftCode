@@ -86,7 +86,7 @@ test('main views fit from the minimum window size up to 1920×1080', async () =>
     await expect(w.getByRole('region', { name: 'Terminal' })).toBeVisible();
     expect(await horizontalOverflow(w), `session ${tag}`).toEqual([]);
     expect(await unnamedControls(w), `session controls ${tag}`).toEqual([]);
-    await expect(w.getByRole('textbox', { name: /Type \/ for commands|Reply/ })).toBeVisible();
+    await expect(w.getByRole('textbox', { name: /Ask anything|Type \/ for commands|Reply/ })).toBeVisible();
     await w.screenshot({ path: path.join(SHOTS, `session-${tag}.png`) });
     await w.getByRole('button', { name: 'Terminal', exact: true }).click();
 
