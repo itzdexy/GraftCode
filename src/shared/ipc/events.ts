@@ -33,6 +33,8 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   /** The agent opened a page for a session: show the Browser panel there. */
   z.object({ type: z.literal('browser:reveal'), sessionId: z.string() }),
   z.object({ type: z.literal('mcp:changed') }),
+  /** A site's picture or details changed (the gallery reloads). */
+  z.object({ type: z.literal('sites:changed') }),
   z.object({ type: z.literal('schedules:changed') }),
   z.object({ type: z.literal('updates:state'), state: UpdateStateSchema })
 ]);

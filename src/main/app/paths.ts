@@ -17,6 +17,8 @@ export interface GraftPaths {
   checkpointsShadow: string;
   /** Files chats made for download, one folder per chat. */
   chatFiles: string;
+  /** Websites from the Sites tab, one folder each (Documents/Graft Sites, where people can find them). */
+  sites: string;
 }
 
 export function resolveGraftHome(): string {
@@ -24,7 +26,15 @@ export function resolveGraftHome(): string {
   return override && override.length > 0 ? path.resolve(override) : path.join(os.homedir(), '.graft');
 }
 
-export function buildPaths(userData: string, graftHome: string = resolveGraftHome()): GraftPaths {
+/** Where sites live: GRAFT_SITES_DIR, else beside an isolated GRAFT_HOME (tests), else Documents/Graft Sites. */
+function sitesDir(graftHome: string, documents: string): string {
+  const override = process.env.GRAFT_SITES_DIR;
+  if (override && override.length > 0) return path.resolve(override);
+  if (process.env.GRAFT_HOME) return path.join(graftHome, 'sites');
+  return path.join(documents, 'Graft Sites');
+}
+
+export function buildPaths(userData: string, graftHome: string = resolveGraftHome(), documents: string = path.join(os.homedir(), 'Documents')): GraftPaths {
   return {
     userData,
     graftHome,
@@ -33,6 +43,7 @@ export function buildPaths(userData: string, graftHome: string = resolveGraftHom
     worktrees: path.join(graftHome, 'worktrees'),
     shellLogs: path.join(userData, 'shell-logs'),
     checkpointsShadow: path.join(userData, 'shadow-repos'),
-    chatFiles: path.join(userData, 'chat-files')
+    chatFiles: path.join(userData, 'chat-files'),
+    sites: sitesDir(graftHome, documents)
   };
 }

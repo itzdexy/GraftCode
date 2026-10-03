@@ -23,6 +23,7 @@ import { openSettings, startNew, toggleSidebar } from './shellActions';
 // Views opened now and then load on first use, which keeps startup light.
 const ProjectsView = lazy(() => import('../projects/ProjectsView').then((m) => ({ default: m.ProjectsView })));
 const ArtifactsView = lazy(() => import('../artifacts/ArtifactsView').then((m) => ({ default: m.ArtifactsView })));
+const SitesView = lazy(() => import('../sites/SitesView').then((m) => ({ default: m.SitesView })));
 const ScheduledView = lazy(() => import('../scheduled/ScheduledView').then((m) => ({ default: m.ScheduledView })));
 const CustomizeView = lazy(() => import('../customize/CustomizeView').then((m) => ({ default: m.CustomizeView })));
 const SettingsView = lazy(() => import('../settings/SettingsView').then((m) => ({ default: m.SettingsView })));
@@ -44,6 +45,8 @@ function RouteView({ route }: { route: Route }) {
       return <Later>{<ProjectsView />}</Later>;
     case 'artifacts':
       return <Later>{<ArtifactsView />}</Later>;
+    case 'sites':
+      return <Later>{<SitesView />}</Later>;
     case 'scheduled':
       return <Later>{<ScheduledView />}</Later>;
     case 'customize':

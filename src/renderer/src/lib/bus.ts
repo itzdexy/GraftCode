@@ -1,6 +1,6 @@
 /** Lightweight notifications for main-process "something changed" events (views re-fetch on them). */
 
-export type ChangeTopic = 'mcp' | 'schedules';
+export type ChangeTopic = 'mcp' | 'schedules' | 'sites';
 
 const listeners = new Map<ChangeTopic, Set<() => void>>();
 

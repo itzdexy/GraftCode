@@ -7,6 +7,7 @@ import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
 import { BrowserPanel } from './browser/browserPanel';
+import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
 import { disposeSandbox, runInSandbox } from './chat/codeSandbox';
 import { configureLogFile, log } from './app/log';
@@ -35,7 +36,7 @@ if (process.env.GRAFT_USER_DATA_DIR) {
 // Artifact previews are served from their own privileged, sandboxed scheme.
 protocol.registerSchemesAsPrivileged([{ scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
-const paths = buildPaths(app.getPath('userData'));
+const paths = buildPaths(app.getPath('userData'), undefined, app.getPath('documents'));
 configureLogFile(paths.logs);
 const isFirstLaunch = !fs.existsSync(paths.database);
 
@@ -275,6 +276,22 @@ async function mcp(): Promise<McpManager> {
   return mcpManager;
 }
 
+/** After a turn in a site's session, retakes the site's picture for the Sites gallery. */
+async function refreshSiteThumbnail(sessionId: string): Promise<void> {
+  try {
+    const s = await services();
+    const folder = sessionManager?.summary(sessionId).projectPath ?? null;
+    const site = folder ? s.sites.forFolder(folder) : null;
+    if (!site) return;
+    await s.siteServer.start();
+    s.sites.saveThumbnail(site.slug, await capturePage(s.siteServer.url(site.slug)));
+    s.sites.update(site.slug, { touched: true });
+    emit({ type: 'sites:changed' });
+  } catch (error) {
+    log.warn('sites', 'Could not take a picture of a site', { message: (error as Error).message });
+  }
+}
+
 async function sessions(): Promise<SessionManager> {
   if (sessionManager) return sessionManager;
   const s = await services();
@@ -295,11 +312,18 @@ async function sessions(): Promise<SessionManager> {
     search: s.search,
     computer: computer(),
     browser: () => (mainWindow ? browser() : null),
+    site: async (root) => {
+      const site = s.sites.forFolder(root);
+      if (!site) return null;
+      await s.siteServer.start();
+      return { name: site.name, url: s.siteServer.url(site.slug) };
+    },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     chatFiles: s.chatFiles,
     runCode: runInSandbox,
     emitEvent: (sessionId, event) => {
       emit({ type: 'session:event', sessionId, event });
+      if (event.type === 'turn-end') void refreshSiteThumbnail(sessionId);
       if (event.type === 'status') {
         keepAwake.status(sessionId, event.status);
         tray.refresh();
@@ -363,6 +387,7 @@ async function shutdown(): Promise<void> {
     await sessionManager?.disposeAll();
     if (servicesPromise) {
       const s = await servicesPromise;
+      await s.siteServer.close();
       await s.shells.disposeAll();
       s.db.close();
     }

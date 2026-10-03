@@ -350,3 +350,35 @@ test('README screenshots: checks, the browser and the sandbox', async () => {
     site.close();
   }
 });
+
+test('README screenshots: sites', async () => {
+  test.setTimeout(240_000);
+  provider = await MockProvider.start({ models: ['qwen3-coder', 'qwen3-coder-flash'] });
+  graft = await launchGraft();
+  const w = graft.window;
+  await graft.app.evaluate(({ BrowserWindow }, s) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win?.unmaximize();
+    win?.setContentSize(s.width, s.height);
+  }, SIZE);
+  await completeOnboarding(graft, provider, { model: /^Qwen3 Coder(?! Flash)/ });
+  await palette(w, 'theme dark');
+
+  provider.titleText = 'Peach Palace';
+  provider.script(
+    { text: 'I’ll build a warm, handcrafted one-page site for Peach Palace.', toolCalls: [{ name: 'Write', input: { file_path: 'index.html', content: SHOP_PAGE.replace(/Acme storefront/g, 'Peach Palace') } }] },
+    { text: 'Peach Palace is ready: a warm storefront with the trail runner up front, add to cart and restock sign-up. It reloads live as you ask for changes.' }
+  );
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Sites' }).click();
+  await w.getByRole('button', { name: 'Bakery' }).click();
+  await snap(w, 'sites-new');
+  await w.getByRole('button', { name: 'Build site' }).click();
+  await expect(w.getByText(/Peach Palace is ready/).first()).toBeVisible({ timeout: 30_000 });
+  await w.waitForTimeout(1500);
+  await showBrowserPage(w);
+  await snap(w, 'sites-session');
+
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Sites' }).click();
+  await expect(w.getByRole('button', { name: 'Open Peach Palace' }).locator('img')).toBeVisible({ timeout: 20_000 });
+  await snap(w, 'sites');
+});

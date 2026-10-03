@@ -23,6 +23,8 @@ import { runFile } from '../tools/run';
 import { detectShell, type ShellSpec } from '../tools/shell/detect';
 import { ShellManager } from '../tools/shell/shellManager';
 import { SandboxManager } from '../sandbox/sandbox';
+import { SiteServer } from '../sites/siteServer';
+import { starterPage, SitesStore } from '../sites/sites';
 import { log } from './log';
 import type { GraftPaths } from './paths';
 
@@ -45,6 +47,9 @@ export interface Services {
   shell: ShellSpec;
   /** Containers that run sandboxed projects' commands. */
   sandbox: SandboxManager;
+  /** Websites from the Sites tab, and the local server that hosts them (started on first use). */
+  sites: SitesStore;
+  siteServer: SiteServer;
   tools: ToolRegistry;
   settingsFiles: SettingsStore;
   rgPath: string;
@@ -163,6 +168,7 @@ export async function initServices(options: {
   const providers = new ProvidersRepo(db);
   const registry = new ProviderRegistry(providers, keys, catalog);
   const sandbox = new SandboxManager({ log: (level, message, fields) => log[level]('sandbox', message, fields) });
+  const sites = new SitesStore(paths.sites);
   const services: Services = {
     paths,
     db,
@@ -180,6 +186,15 @@ export async function initServices(options: {
     shells: new ShellManager(shell, paths.shellLogs, process.env, process.platform, sandbox),
     shell,
     sandbox,
+    sites,
+    siteServer: new SiteServer(
+      paths.sites,
+      (level, message, fields) => log[level]('sites', message, fields),
+      (slug) => {
+        const site = sites.get(slug);
+        return site ? starterPage(site.name) : null;
+      }
+    ),
     tools: createBuiltinRegistry(),
     settingsFiles: new SettingsStore(paths.graftHome),
     rgPath,

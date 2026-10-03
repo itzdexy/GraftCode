@@ -38,6 +38,8 @@ export interface CodePromptContext {
   personalization?: Personalization | null;
   /** Commands run in a sandbox container instead of on this computer. */
   sandbox?: { image: string; network: boolean; ports: number[] } | null;
+  /** This session builds a site from the Sites tab, served live at this address. */
+  site?: { name: string; url: string } | null;
 }
 
 const MODE_LABEL: Record<PermissionMode, string> = {
@@ -95,6 +97,24 @@ function sandboxSection(ctx: CodePromptContext): string {
     box.network && box.ports.length > 0
       ? `- To preview a server, bind it to 0.0.0.0 (for example npm run dev -- --host 0.0.0.0). Ports ${box.ports.join(', ')} are forwarded, and the Browser tool reaches them at http://localhost:<port>.`
       : null
+  );
+}
+
+function siteSection(ctx: CodePromptContext): string {
+  const site = ctx.site;
+  if (!site) return '';
+  return lines(
+    '# Website',
+    `This session builds "${site.name}", a website in ${ctx.projectRoot}. Graft serves the folder live at ${site.url} and the page reloads by itself whenever a file changes, so the user watches it take shape in the Browser panel. Make it look like a studio built it:`,
+    '- Start from a concept: who it is for, the tone, and one strong visual idea. Choose a type pairing (a characterful display face with a clean text face, from Google Fonts with system fallbacks) and a deliberate palette with real contrast.',
+    '- Plain HTML, CSS and JavaScript unless the user asks for a framework: index.html at the root, styles.css, script.js when needed, images in assets/. No build step; links are relative.',
+    '- Lay out with CSS grid and flexbox, fluid type and spacing with clamp(), and a small design system in CSS custom properties. It must look right from a 360px phone to a wide desktop.',
+    '- Write real content for the brand: headlines, sections, calls to action, a footer. No lorem ipsum, no "Feature 1".',
+    '- Craft the details: hover and focus states, subtle motion that respects prefers-reduced-motion, consistent radii and shadows, a favicon, a meta description and Open Graph tags.',
+    '- Imagery: use pictures the user gives you (save them in assets/). Otherwise draw your own with SVG, CSS gradients and shapes; never hotlink images that might not exist.',
+    '- Semantic HTML, alt text, visible focus, AA contrast and keyboard access are part of the design, not extras.',
+    `- Check your work with the Browser tool at ${site.url}: read the page, look at the console, and take screenshots when you can see images. Fix what looks off before you report.`,
+    '- When you finish, say what you built and how to change it; the user can open the site in their own browser from the Sites tab.'
   );
 }
 
@@ -220,6 +240,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
       'In Plan mode you may only read and research. When you have a concrete plan (the files to change, the approach, how you will verify it), present it with ExitPlanMode. Start changing things only after the user approves.'
     ),
     sandboxSection(ctx),
+    siteSection(ctx),
     notesSection(ctx.memory),
     skillsSection(ctx.skills),
     agentsSection(ctx.agents),

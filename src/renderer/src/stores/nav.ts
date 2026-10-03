@@ -27,6 +27,7 @@ export type Route =
   | { name: 'session'; id: string }
   | { name: 'projects' }
   | { name: 'artifacts' }
+  | { name: 'sites' }
   | { name: 'scheduled' }
   | { name: 'customize'; tab?: CustomizeTabId }
   | { name: 'settings'; section: SettingsSection };

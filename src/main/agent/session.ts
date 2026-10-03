@@ -99,6 +99,8 @@ export interface SessionDeps {
   trust(projectRoot: string): void;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
   sandbox?(projectRoot: string): SandboxSettings | null;
+  /** The site from the Sites tab that this folder holds, with its live address; null for other folders. */
+  site?(projectRoot: string): Promise<{ name: string; url: string } | null>;
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;
@@ -799,7 +801,8 @@ export class AgentSession {
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
-        sandbox: this.sandboxPrompt()
+        sandbox: this.sandboxPrompt(),
+        site: (await this.deps.site?.(root)) ?? null
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.

@@ -30,6 +30,7 @@ import { generateCommitMessage, titleModel } from '../agent/title';
 import { suggestChecks } from '../agent/checks';
 import { engineProblem } from '../sandbox/engine';
 import { localServers } from '../browser/servers';
+import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { listDirectory, readPreview } from '../files/fileTree';
@@ -58,6 +59,7 @@ import { cleanRuleLists } from '../permissions/rules';
 import { isInside } from '../tools/paths';
 import { openExternalSafely } from '../app/security';
 import type { Services } from '../app/services';
+import type { SiteView } from '@shared/schemas/sites';
 import { favicon } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
 import { FileIndex } from './fileIndex';
@@ -167,6 +169,20 @@ function searchStatus(s: Services) {
       openai: providers.includes('openai'),
       gemini: providers.includes('gemini')
     }
+  };
+}
+
+/** A site for the gallery: its record, its live address and its picture. */
+function siteView(s: Services, site: SiteRecord): SiteView {
+  return {
+    slug: site.slug,
+    name: site.name,
+    description: site.description,
+    url: s.siteServer.url(site.slug),
+    folder: site.folder,
+    updatedAt: site.updatedAt,
+    sessionId: site.sessionId,
+    thumbnail: s.sites.thumbnail(site.slug)
   };
 }
 
@@ -702,6 +718,68 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'customize:saveHooks': async ({ scope, projectPath, hooks }) => {
       await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => ({ ...settings, hooks }));
       return { ok: true as const };
+    },
+    'sites:list': async () => {
+      const s = await ctx.services();
+      await s.siteServer.start();
+      return s.sites.list().map((site) => siteView(s, site));
+    },
+    'sites:create': async ({ prompt, name }) => {
+      const s = await ctx.services();
+      await s.siteServer.start();
+      const site = s.sites.create(name?.trim() || siteName(prompt), prompt);
+      // Graft made this folder, so it is trusted; edits in it go ahead without asking.
+      const project = s.projects.findByPath(site.folder) ?? s.projects.upsert(site.folder);
+      s.projects.update(project.id, { trusted: true });
+      const summary = await (await ctx.sessions()).create({
+        kind: 'code',
+        projectPath: site.folder,
+        useWorktree: false,
+        branch: null,
+        model: null,
+        effort: null,
+        permissionMode: 'auto-edit',
+        incognito: false,
+        message: { text: prompt, images: [], files: [] }
+      });
+      const saved = s.sites.update(site.slug, { sessionId: summary.id }) ?? site;
+      return { site: siteView(s, saved), sessionId: summary.id };
+    },
+    'sites:session': async ({ slug }) => {
+      const s = await ctx.services();
+      const site = s.sites.get(slug);
+      if (!site) throw new GraftError('not_found', 'That site is gone.');
+      const sessions = await ctx.sessions();
+      if (site.sessionId && sessions.list(true).some((x) => x.id === site.sessionId)) return { sessionId: site.sessionId };
+      await s.siteServer.start();
+      const summary = await sessions.create({
+        kind: 'code',
+        projectPath: site.folder,
+        useWorktree: false,
+        branch: null,
+        model: null,
+        effort: null,
+        permissionMode: 'auto-edit',
+        incognito: false,
+        message: null
+      });
+      s.sites.update(slug, { sessionId: summary.id });
+      return { sessionId: summary.id };
+    },
+    'sites:remove': async ({ slug }) => {
+      const s = await ctx.services();
+      const site = s.sites.get(slug);
+      if (!site) return { ok: true as const };
+      s.siteServer.forget(slug);
+      await electronShell.trashItem(site.folder);
+      ctx.emit({ type: 'sites:changed' });
+      return { ok: true as const };
+    },
+    'sites:reveal': async ({ slug }) => {
+      const site = (await ctx.services()).sites.get(slug);
+      if (!site) throw new GraftError('not_found', 'That site is gone.');
+      const error = await electronShell.openPath(site.folder);
+      if (error) throw new GraftError('open_failed', error);
     },
     'sandbox:status': async ({ refresh }) => {
       const s = await ctx.services();

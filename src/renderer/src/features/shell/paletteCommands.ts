@@ -159,6 +159,7 @@ export function paletteCommands(ctx: PaletteContext): PaletteCommand[] {
     { id: 'go.scheduled', title: 'Scheduled tasks', group: 'Go to', keywords: 'cron automation recurring', icon: Calendar, run: () => useNav.getState().go({ name: 'scheduled' }) },
     { id: 'go.artifacts', title: 'Artifacts', group: 'Go to', keywords: 'files outputs', icon: Zap, run: () => useNav.getState().go({ name: 'artifacts' }) },
     { id: 'go.customize', title: 'Customize: commands, skills, hooks and MCP', group: 'Go to', keywords: 'agents plugins', icon: Wrench, run: () => useNav.getState().go({ name: 'customize' }) },
+    { id: 'go.sites', title: 'Sites: build and host a website', group: 'Go to', keywords: 'website web page landing portfolio host', icon: Globe, run: () => useNav.getState().go({ name: 'sites' }) },
     {
       id: 'go.checks',
       title: 'Checks: commands to run after the agent changes files',

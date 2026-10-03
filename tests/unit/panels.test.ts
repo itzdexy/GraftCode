@@ -99,3 +99,10 @@ describe('terminals', () => {
     removeDir(dir);
   }, 40_000);
 });
+
+describe('local addresses in the Browser panel', () => {
+  it('opens sites and other *.localhost addresses over http', () => {
+    expect(normalizeUrl('peach-palace.localhost:4870')).toBe('http://peach-palace.localhost:4870');
+    expect(normalizeUrl('app.localhost:3000/about')).toBe('http://app.localhost:3000/about');
+  });
+});

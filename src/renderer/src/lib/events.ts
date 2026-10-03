@@ -56,6 +56,9 @@ export function useGraftEvents(): void {
           case 'mcp:changed':
             emitChanged('mcp');
             break;
+          case 'sites:changed':
+            emitChanged('sites');
+            break;
           case 'schedules:changed':
             emitChanged('schedules');
             break;

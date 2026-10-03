@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { CalendarClock, ChevronDown, ChevronRight, FolderClosed, Plus, Search, Shapes, SlidersHorizontal } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight, FolderClosed, PanelsTopLeft, Plus, Search, Shapes, SlidersHorizontal } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
@@ -165,7 +165,7 @@ export function Sidebar() {
   const activeId = route.name === 'session' ? route.id : null;
 
   const moreOpen = useUi((s) => s.moreOpen);
-  const entry = (id: 'projects' | 'artifacts' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
+  const entry = (id: 'projects' | 'artifacts' | 'sites' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
     id,
     label,
     icon,
@@ -174,11 +174,13 @@ export function Sidebar() {
   });
   const projectsEntry = entry('projects', 'Projects', <FolderClosed className="size-14" />);
   const artifactsEntry = entry('artifacts', 'Artifacts', <Shapes className="size-14" />);
+  const sitesEntry = entry('sites', 'Sites', <PanelsTopLeft className="size-14" />);
   const scheduledEntry = entry('scheduled', 'Scheduled', <CalendarClock className="size-14" />);
   const customizeEntry = entry('customize', 'Customize', <SlidersHorizontal className="size-14" />);
   const newEntry: NavEntry = { id: 'new', label: 'New', icon: <Plus className="size-14" />, route: { name: 'home' }, isActive: (r) => r.name === 'home', onSelect: startNew };
   // Chat mode shows everything; Code mode keeps the list short and folds the rest under More.
-  const nav: NavEntry[] = mode === 'chat' ? [newEntry, projectsEntry, artifactsEntry, scheduledEntry, customizeEntry] : [newEntry, artifactsEntry, customizeEntry];
+  const nav: NavEntry[] =
+    mode === 'chat' ? [newEntry, projectsEntry, sitesEntry, artifactsEntry, scheduledEntry, customizeEntry] : [newEntry, sitesEntry, artifactsEntry, customizeEntry];
   const more: NavEntry[] = mode === 'chat' ? [] : [projectsEntry, scheduledEntry];
 
   const commitWidth = (next: number): void => {

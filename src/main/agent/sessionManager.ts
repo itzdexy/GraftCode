@@ -55,6 +55,8 @@ export interface SessionManagerDeps {
   runCode: SessionDeps['runCode'];
   /** The Browser panel for the agent's Browser tool; absent where there is none. */
   browser?: SessionDeps['browser'];
+  /** Sites from the Sites tab, for the prompt of a session that builds one. */
+  site?: SessionDeps['site'];
   revealBrowser?: SessionDeps['revealBrowser'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
@@ -133,6 +135,7 @@ export class SessionManager {
       chatFiles: d.chatFiles,
       runCode: d.runCode,
       ...(d.browser ? { browser: d.browser } : {}),
+      ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);

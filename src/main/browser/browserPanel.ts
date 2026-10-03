@@ -83,7 +83,8 @@ export function normalizeUrl(input: string): string | null {
   if (trimmed.length === 0) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return isAllowedUrl(trimmed) ? trimmed : null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !/^(localhost|[\w.-]+):\d+/i.test(trimmed)) return null;
-  const local = /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(trimmed);
+  // Local addresses, sites included (peach-palace.localhost:4870), are plain http.
+  const local = /^([a-z0-9-]+\.)*(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(trimmed);
   const candidate = `${local ? 'http' : 'https'}://${trimmed}`;
   return isAllowedUrl(candidate) ? candidate : null;
 }
