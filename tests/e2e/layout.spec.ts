@@ -73,7 +73,9 @@ test('main views fit from the minimum window size up to 1920×1080', async () =>
   const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
   await composer.fill('Hello');
   await composer.press('Enter');
-  await expect(w.getByText(/A reply long enough/)).toBeVisible();
+  await expect(w.getByText(/A reply long enough/).first()).toBeVisible();
+  // While it streams, the reply also shows in the status line; measure the finished turn.
+  await expect(w.getByRole('region', { name: 'Work in progress' })).toHaveCount(0);
   const sessionUrl = await w.evaluate(() => location.href);
   fs.mkdirSync(SHOTS, { recursive: true });
 
