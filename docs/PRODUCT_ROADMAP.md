@@ -19,6 +19,35 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.12 (2026-10-06)
+
+- **Old tool output goes first** (`src/main/agent/prune.ts`). When the context passes 80% of
+  the window, the session keeps the newest results worth `min(40,000, 25% of the window)`
+  estimated tokens (the latest step's always) and sends each older result of 200 tokens or
+  more as `[The output of this <tool> call was removed to save context. Run it again if you
+  need it.]`. When that brings the context to 60% or less, nothing is summarized. This is
+  how the history is sent (`Session.history`, `pruneBeforeSeq`), not how it is stored: no
+  message is changed, and every call keeps a result.
+- **A rewind pulls the cutoff back.** The store hands the numbers of deleted messages out
+  again, so `Session.deleteMessagesFrom` moves the cutoff to the first deleted message.
+- **A summary keeps the recent steps** (`compactionCut`, `modelOrder`). The newest messages
+  worth `min(15,000, 10% of the window)` tokens stay as they are, starting at a reply; the
+  summary is stored after them and sent ahead of them, and ends with `The most recent steps
+  follow this summary unchanged.` Kept steps keep their thinking. With fewer than two
+  messages to summarize, or after the provider refused a request as too long, everything is
+  summarized as before. `/compact` does the same.
+- **A backup model** (`defaults.fallbackModel`, `LoopHost.fallback`, `Session.backupFor`).
+  After `overloaded`, `rate_limit`, `server` or `network` survived the retries and before
+  any output, the turn continues once on the backup, without the first model's thinking,
+  and a notice says so. From then on the turn is measured against the backup's context
+  window and summarized by it. No switch in incognito chats, for agents of a group or
+  sub-agents, when the backup is the failing model, can't be found, or can't call tools the
+  turn offers. Settings → Models has the choice and `None`.
+- **Fixed:** the plan card in the transcript showed the plan as offered under "Approved"
+  after the user had edited it. It shows the agreed plan and "Approved with your changes"
+  (`planShown`). Found in the end-to-end screenshot of 0.6.11.
+- **Catalog** regenerated: 212 providers, 7,557 models.
+
 ### 0.6.11 (2026-10-06)
 
 - **The current plan of a session** is read from its messages (`src/shared/plans.ts`): the
@@ -251,11 +280,17 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   slide runs off its edge. Sheets have no dates, number formats or charts. There is no
   table of contents, cover page or page-break control, and equations are plain text. The
   PDF uses the computer's own fonts.
-- `src/main/agent/session.ts` is 1,690 lines: turns, slash commands, compaction, the
+- `src/main/agent/session.ts` is 1,950 lines: turns, slash commands, compaction, the
   loop host, and now the mission controller and agent-group wiring. Split the loop host
   and the mission controller out before adding more.
-- Compaction is all or nothing: one summary replaces the whole history. Old tool output
-  is never pruned first, so long sessions pay for a summary sooner than they need to.
+- The cutoff for removed tool output lives in memory: a restarted session sends old output
+  in full again until it next fills up. Removing output changes the start of the history
+  once, so a provider's prompt cache is rebuilt from that point. The estimate of what
+  removing frees is by characters, not the provider's count. In the transcript a summary
+  appears after the steps it kept, where it was made, though the model reads it first.
+- The backup model finishes one turn: the next turn asks the session's own model again and
+  waits through its retries before switching. Agents of a group and sub-agents have no
+  backup. A backup without vision gets a history with screenshots as it is.
 - Agents that change files with no paths of their own share the session's working tree
   and run one at a time. Writers given `writes` paths run together in that same tree, kept
   apart only by their paths: the scope is enforced on the edit tools, not on Shell commands
@@ -295,7 +330,6 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 - Newer spreadsheet functions are stored with their prefix from a list (`NEWER` in
   `xlsx.ts`); functions that take a `LAMBDA` or name variables (`LET`) are written as typed
   and may show `#NAME?` until re-entered. Nothing here was opened in Microsoft Excel.
-- No model fallback: when a provider stays down after retries the turn ends in an error.
 - macOS builds are not published (GitHub Actions is blocked by an account billing lock).
 - Loose edit matching ignores only leading and trailing whitespace per line. Differences
   inside a line (double spaces, escaped `\n`) still fail with the exact-match error.
@@ -312,8 +346,8 @@ praise and complain about (October 2026).
 | Tool search for MCP servers with many tools | Claude Code MCP tool search | Shipped in 0.6.8 as `ToolSearch` |
 | A loop that goes on until a condition holds | Claude Code and Codex goals | Shipped in 0.6.6 as missions, with the user's commands as the condition |
 | One function per fresh agent with a machine check | Decompilation projects driven by agents (compile, diff, feed the failure back, cap the attempts) | Shipped in 0.6.6 as `/decompile` on top of `verify` |
-| Prune old tool output before summarizing | OpenCode session compaction, Claude Code | Next |
-| Fallback model per session | Roo Code and Goose provider settings | Open |
+| Prune old tool output before summarizing | OpenCode session compaction, Claude Code | Shipped in 0.6.12, as a view of the history: nothing stored changes |
+| Fallback model per session | Roo Code and Goose provider settings | Shipped in 0.6.12 as one backup model in Settings, used once a turn |
 | Worktree per agent that writes | Claude Code, Cursor | Open; unlocks parallel implementers and best-of-N |
 | Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
@@ -346,11 +380,9 @@ round. What exists now and what does not:
 
 Five rounds are designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
 planned task by task, one plan a round, in `docs/superpowers/plans/`. The first, chat
-documents, shipped as 0.6.9, the second, research, as 0.6.10, and the third, plans that last,
-as 0.6.11. The rest:
+documents, shipped as 0.6.9, research as 0.6.10, plans that last as 0.6.11 and long sessions
+as 0.6.12. The last:
 
-4. 0.6.12, `2026-10-05-long-sessions.md`: remove old tool output before summarizing, keep
-   the recent steps in a summary, a backup model.
 5. 0.6.13, `2026-10-05-attention-and-context.md`: "Needs you" in the sidebar, what fills
    the context, a sound switch.
 

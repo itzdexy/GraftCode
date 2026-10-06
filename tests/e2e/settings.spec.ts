@@ -129,6 +129,19 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await openSettings(w, 'Models');
   await expect(w.getByRole('listbox', { name: 'Default model' }).getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);
   await shot(w, 'settings-models');
+  // A backup model for when a session's model keeps failing: chosen from the same list, and cleared with None.
+  const backup = w.getByRole('listbox', { name: 'Backup model' });
+  await expect(w.getByRole('button', { name: 'None', exact: true })).toBeDisabled();
+  await backup.getByRole('option', { name: /Graft Test Mini/ }).first().click();
+  const savedBackup = (): Promise<unknown> =>
+    w.evaluate(async () => {
+      const bridge = (window as unknown as { graft: { invoke(c: string, i: unknown): Promise<{ value: { defaults: { fallbackModel: unknown } } }> } }).graft;
+      return (await bridge.invoke('settings:get', undefined)).value.defaults.fallbackModel;
+    });
+  await expect.poll(savedBackup).toMatchObject({ modelId: 'graft-test-mini' });
+  await shot(w, 'settings-backup-model');
+  await w.getByRole('button', { name: 'None', exact: true }).click();
+  await expect.poll(savedBackup).toBeNull();
   // Agents: each kind of work can be given a model from either provider, or left to routing.
   const coder = w.getByRole('combobox', { name: 'Coder' });
   await expect(coder.getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);

@@ -12,6 +12,7 @@ import { reportError } from '../../stores/toasts';
 import { imageSrc } from '../composer/attachments';
 import { useCopy } from './CodeBlock';
 import { Markdown } from './Markdown';
+import { planShown } from './planModel';
 import { TodoList } from './ToolDetail';
 import type { TranscriptItem } from './transcriptModel';
 import { useSmoothText } from './useSmoothText';
@@ -248,7 +249,7 @@ export function TodosItem({ item }: { item: Item<'todos'> }) {
 
 export function PlanItem({ item }: { item: Item<'plan'> }) {
   const [open, setOpen] = useState(true);
-  const status = item.display ? (item.display.approved ? 'Approved' : 'Changes requested') : 'Waiting for approval';
+  const shown = planShown(item.plan, item.display);
   return (
     <section aria-label="Plan" className="rounded-md border border-border-card">
       <button
@@ -258,11 +259,11 @@ export function PlanItem({ item }: { item: Item<'plan'> }) {
         className="flex h-32 w-full items-center gap-8 px-12 text-left text-md text-fg-strong"
       >
         <span className="font-medium">Plan</span>
-        <Badge tone={item.display?.approved ? 'accent' : item.display ? 'warning' : 'neutral'}>{status}</Badge>
+        <Badge tone={shown.tone}>{shown.status}</Badge>
         <ChevronRight className={cn('ml-auto size-14 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" />
       </button>
       <Collapse open={open} className="border-t border-border-card px-12 py-8">
-        <Markdown text={item.plan} variant="code" />
+        <Markdown text={shown.text} variant="code" />
         {item.display?.feedback ? <p className="mt-8 text-sm text-fg-muted">Your feedback: {item.display.feedback}</p> : null}
       </Collapse>
     </section>

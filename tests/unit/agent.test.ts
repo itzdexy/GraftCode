@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/main/providers/errors';
-import { toLlmHistory } from '../../src/main/agent/history';
+import { modelOrder, toLlmHistory } from '../../src/main/agent/history';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
 import { ChatFiles } from '../../src/main/chat/chatFiles';
 import { DocumentMaker } from '../../src/main/chat/documents';
-import { renderTranscript, summaryMessageText } from '../../src/main/agent/compaction';
-import type { LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
+import { compactionCut, renderTranscript, summaryMessageText } from '../../src/main/agent/compaction';
+import type { ContentBlock, LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
 import { currentPlan } from '../../src/shared/plans';
 import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
@@ -137,6 +137,78 @@ describe('agent turns', () => {
 });
 
 describe('cancellation, retries and errors', () => {
+  describe('the backup model from Settings', () => {
+    const backup = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model' });
+    const busy = { error: new ProviderError('overloaded', 'busy') };
+    const switched = (h: Harness): boolean => h.events.some((e) => e.type === 'notice' && e.text === "Fake Model isn't answering (overloaded). Continuing with Backup Model.");
+
+    it('finishes the turn when the session model keeps failing', async () => {
+      const h = harness({ models: [fakeModel(), backup], fallbackModel: backup.ref, script: [busy, busy, busy, { text: 'From the backup.' }, { text: 'Back on the first.' }] });
+      h.session.send('hi');
+      await h.session.idle();
+      expect(texts(h).at(-1)).toBe('assistant:From the backup.');
+      expect(h.provider.requests.at(-1)!.model.ref.modelId).toBe('backup-model');
+      expect(switched(h)).toBe(true);
+      expect(h.session.summary.status).toBe('idle');
+      expect(h.store.listMessages('session-1').at(-1)?.meta.model).toEqual(backup.ref);
+      // The session's model is still its model: the next turn asks it first.
+      expect(h.session.summary.model).toEqual(fakeModel().ref);
+      h.session.send('again');
+      await h.session.idle();
+      expect(h.provider.requests.at(-1)!.model.ref.modelId).toBe('fake-model');
+      expect(texts(h).at(-1)).toBe('assistant:Back on the first.');
+    });
+
+    it('is not used when it is the session’s own model, when it is gone, or in an incognito chat', async () => {
+      for (const options of [
+        { fallbackModel: fakeModel().ref },
+        { fallbackModel: { providerId: 'fake', modelId: 'removed-model' } },
+        { models: [fakeModel(), backup], fallbackModel: backup.ref, kind: 'chat' as const, incognito: true },
+        { models: [fakeModel(), backup], fallbackModel: null }
+      ]) {
+        const h = harness({ ...options, script: [busy, busy, busy] });
+        h.session.send('hi');
+        await h.session.idle();
+        expect(h.session.summary.lastError).toMatchObject({ code: 'overloaded' });
+        expect(h.provider.requests).toHaveLength(3);
+        expect(switched(h)).toBe(false);
+      }
+    });
+
+    it('is not used when it cannot call tools and the turn needs them', async () => {
+      const plain = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model', supportsTools: false });
+      const h = harness({ models: [fakeModel(), plain], fallbackModel: plain.ref, script: [busy, busy, busy] });
+      h.session.send('hi');
+      await h.session.idle();
+      expect(h.session.summary.lastError).toMatchObject({ code: 'overloaded' });
+      expect(h.provider.requests).toHaveLength(3);
+    });
+
+    it('measures the conversation against the backup model once it has taken over', async () => {
+      const small = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model', contextWindow: 4000 });
+      const h = harness({
+        models: [fakeModel(), small],
+        fallbackModel: small.ref,
+        script: [
+          { toolCalls: [{ name: 'Glob', input: { pattern: '*' } }], usage: { inputTokens: 3500, outputTokens: 20 } },
+          busy,
+          busy,
+          busy,
+          { text: 'They listed the files.' },
+          { text: 'Finished on the backup.' }
+        ]
+      });
+      h.session.send('list the files');
+      await h.session.idle();
+      // 3,520 tokens are nothing to the first model and nearly all of the backup's window: it makes room itself.
+      const summarize = h.provider.requests[4]!;
+      expect(summarize.system).toMatch(/summarize a coding session/);
+      expect(summarize.model.ref.modelId).toBe('backup-model');
+      expect(h.provider.requests[5]!.model.ref.modelId).toBe('backup-model');
+      expect(texts(h).at(-1)).toBe('assistant:Finished on the backup.');
+    });
+  });
+
   it('interrupts mid-stream, keeps the partial reply and can continue afterwards', async () => {
     const h = harness({ script: [{ text: 'word '.repeat(200), chunkDelayMs: 15 }, { text: 'Fresh answer.' }] });
     h.session.send('write a lot');
@@ -347,6 +419,240 @@ describe('compaction', () => {
     expect(after.messages).toHaveLength(1);
     expect(JSON.stringify(after.messages[0])).toContain('This session was compacted');
     expect(h.events.some((e) => e.type === 'compacted')).toBe(true);
+  });
+
+  const lines = (word: string, count: number): string => Array.from({ length: count }, (_, i) => `${word} ${String(i)} ${'x'.repeat(90)}`).join('\n');
+  const REMOVED = '[The output of this Read call was removed to save context. Run it again if you need it.]';
+  const removedNotice = (h: Harness): boolean => h.events.some((e) => e.type === 'notice' && e.text === 'Removed old tool output to make room.');
+
+  it('removes old tool output instead of summarizing when that makes enough room', async () => {
+    const h = harness({
+      model: { contextWindow: 20_000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 17_000, outputTokens: 20 } },
+        { text: 'Both read.' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 300));
+    writeFile(h.projectDir, 'b.txt', 'beta marker\n');
+    h.session.send('read both');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(3);
+    expect(h.provider.requests.some((r) => /summarize a coding session/.test(r.system))).toBe(false);
+    const sent = JSON.stringify(h.provider.requests[2]!.messages);
+    expect(sent).toContain(REMOVED);
+    expect(sent).not.toContain('alpha 150');
+    expect(sent).toContain('beta marker');
+    expect(removedNotice(h)).toBe(true);
+    // Every call still has its result: the history stays valid for providers that check.
+    const blocks = h.provider.requests[2]!.messages.flatMap((m) => m.content);
+    const results = new Set(blocks.flatMap((b) => (b.type === 'tool_result' ? [b.toolUseId] : [])));
+    expect(blocks.flatMap((b) => (b.type === 'tool_use' ? [b.id] : [])).every((id) => results.has(id))).toBe(true);
+    // Nothing stored was changed: the transcript still shows what the tool returned.
+    const stored = h.store.listMessages('session-1');
+    expect(JSON.stringify(stored)).toContain('alpha 150');
+    expect(stored.some((m) => m.meta.compacted)).toBe(false);
+  });
+
+  it('summarizes when removing old output would not make enough room', async () => {
+    const h = harness({
+      model: { contextWindow: 20_000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 17_000, outputTokens: 20 } },
+        { text: 'They read two files.' },
+        { text: 'Carrying on.' }
+      ]
+    });
+    // The old output is small and the latest step's is huge: that one always stays, so removing frees too little.
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 30));
+    writeFile(h.projectDir, 'b.txt', lines('beta', 300));
+    h.session.send('read both');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(4);
+    expect(h.provider.requests[2]!.system).toMatch(/summarize a coding session/);
+    expect(removedNotice(h)).toBe(false);
+    expect(JSON.stringify(h.provider.requests[3]!.messages)).not.toContain(REMOVED);
+    expect(texts(h).at(-1)).toBe('assistant:Carrying on.');
+  });
+
+  // Stored messages by hand, as in tests/unit/prune.test.ts.
+  let seq = 0;
+  const msg = (role: 'user' | 'assistant', content: ContentBlock[]): StoredMessage => ({ id: `m${String(++seq)}`, sessionId: 's', seq, role, content, meta: {}, createdAt: 0 });
+  const called = (id: string, name: string) => msg('assistant', [{ type: 'tool_use', id, name, input: {} }]);
+  const result = (id: string, text: string) => msg('user', [{ type: 'tool_result', toolUseId: id, isError: false, content: [{ type: 'text', text }] }]);
+  const big = 'x'.repeat(35_000); // 10,000 tokens
+  const small = 'y'.repeat(350); // 100 tokens
+
+  it('cuts where the newest steps fit, at a reply', () => {
+    const said = msg('assistant', [{ type: 'text', text: 'Done so far.' }]);
+    const m = [msg('user', [{ type: 'text', text: 'go' }]), called('a', 'Read'), result('a', big), called('b', 'Read'), result('b', small), said, msg('user', [{ type: 'text', text: 'next' }])];
+    expect(compactionCut(m, 400)).toBe(3);
+    // The newest that fit start at a tool result: the kept part starts at the reply after it.
+    expect(compactionCut(m, 125)).toBe(5);
+    expect(compactionCut(m, 20)).toBe(5);
+    expect(compactionCut(m, 1)).toBe(m.length);
+    // Everything fits: the kept part still starts at a reply, never at what the user typed first.
+    expect(compactionCut(m, 1_000_000)).toBe(1);
+    expect(compactionCut([], 400)).toBe(0);
+  });
+
+  it('sends the newest summary ahead of the steps kept from before it', () => {
+    const [t1, t2, n1] = [called('k', 'Read'), result('k', small), msg('user', [{ type: 'text', text: 'more' }])];
+    const summary: StoredMessage = { ...msg('user', [{ type: 'text', text: 'Summary' }]), meta: { kind: 'compaction-summary' } };
+    expect(modelOrder([t1, t2, summary, n1])).toEqual([summary, t1, t2, n1]);
+    expect(modelOrder([t1, t2, n1])).toEqual([t1, t2, n1]);
+    expect(toLlmHistory([t1, t2, summary, n1]).map((x) => x.role)).toEqual(['user', 'assistant', 'user']);
+    // Only the newest summary moves, and one that is already first stays where it is.
+    const older: StoredMessage = { ...msg('user', [{ type: 'text', text: 'Older summary' }]), meta: { kind: 'compaction-summary' } };
+    const newer: StoredMessage = { ...msg('user', [{ type: 'text', text: 'Newer summary' }]), meta: { kind: 'compaction-summary' } };
+    expect(modelOrder([older, t1, t2, newer, n1])).toEqual([newer, older, t1, t2, n1]);
+    const first = [summary, t1, t2];
+    expect(modelOrder(first)).toBe(first);
+  });
+
+  it('ends a summary by saying the latest steps follow, when they do', () => {
+    const all = summaryMessageText('S', [], []);
+    expect(all.endsWith('Continue from where the work left off. Re-read files before editing them; earlier reads are no longer in context.')).toBe(true);
+    expect(summaryMessageText('S', [], [], { keptRecent: false })).toBe(all);
+    const kept = summaryMessageText('S', [], [], { plan: '1. A', keptRecent: true });
+    expect(kept.endsWith('The most recent steps follow this summary unchanged.')).toBe(true);
+    expect(kept).toContain('Re-read files before editing them');
+    expect(kept).toContain('The plan you and the user agreed on (follow it):\n1. A');
+    expect(kept).not.toContain('Continue from where the work left off.');
+  });
+
+  it('summarizes the older part and leaves the latest steps as they were', async () => {
+    const h = harness({
+      model: { contextWindow: 4000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 1000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'c.txt' } }], usage: { inputTokens: 3300, outputTokens: 20 } },
+        { text: 'They read two long files.' },
+        { text: 'All three read.' },
+        { text: 'Yes.' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 20));
+    writeFile(h.projectDir, 'b.txt', lines('beta', 20));
+    writeFile(h.projectDir, 'c.txt', 'gamma marker\n');
+    h.session.send('read three');
+    await h.session.idle();
+    expect(h.provider.requests[3]!.system).toMatch(/summarize a coding session/);
+    // The summarizer got what is being replaced, not the steps that stay.
+    expect(JSON.stringify(h.provider.requests[3]!.messages)).not.toContain('gamma marker');
+    expect(JSON.stringify(h.provider.requests[3]!.messages)).toContain('alpha 3');
+    const after = h.provider.requests[4]!.messages;
+    expect(after).toHaveLength(3);
+    expect(JSON.stringify(after[0])).toContain('This session was compacted');
+    expect(JSON.stringify(after[0])).toContain('The most recent steps follow this summary unchanged.');
+    expect(after[1]!.role).toBe('assistant');
+    expect(JSON.stringify(after[2])).toContain('gamma marker');
+    expect(JSON.stringify(after)).not.toContain('alpha 10');
+    expect(texts(h).at(-1)).toBe('assistant:All three read.');
+    // Stored: what was summarized is marked, the latest step is not, and nothing was deleted.
+    const stored = h.store.listMessages('session-1');
+    expect(JSON.stringify(stored.filter((m) => m.meta.compacted))).toContain('alpha 10');
+    expect(JSON.stringify(stored.filter((m) => !m.meta.compacted))).toContain('gamma marker');
+
+    // The next turn still sends the summary first, then the kept step, then what came after.
+    h.session.send('are you sure?');
+    await h.session.idle();
+    const next = h.provider.requests.at(-1)!.messages;
+    expect(JSON.stringify(next[0])).toContain('This session was compacted');
+    expect(next.map((x) => x.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user']);
+    expect(JSON.stringify(next.at(-1))).toContain('are you sure?');
+  });
+
+  it('summarizes everything when the provider refused the request as too long', async () => {
+    const h = harness({
+      model: { contextWindow: 40_000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 1000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'c.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { error: new ProviderError('context_length', 'The conversation is too long for this model') },
+        { text: 'They read two files.' },
+        { text: 'Carrying on.' }
+      ]
+    });
+    // Long enough that the latest step alone would be kept, were there room to keep anything.
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 150));
+    writeFile(h.projectDir, 'c.txt', 'gamma marker\n');
+    h.session.send('read both');
+    await h.session.idle();
+    expect(h.provider.requests[3]!.system).toMatch(/summarize a coding session/);
+    expect(JSON.stringify(h.provider.requests[3]!.messages)).toContain('gamma marker');
+    expect(h.provider.requests[4]!.messages).toHaveLength(1);
+    expect(JSON.stringify(h.provider.requests[4]!.messages)).not.toContain('The most recent steps follow');
+    expect(texts(h).at(-1)).toBe('assistant:Carrying on.');
+  });
+
+  it('/compact keeps the latest steps too', async () => {
+    const h = harness({
+      model: { contextWindow: 4000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }] },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }] },
+        { text: 'Both read.' },
+        { text: 'They read two files.' },
+        { text: 'Yes.' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 20));
+    writeFile(h.projectDir, 'b.txt', lines('beta', 20));
+    h.session.send('read both');
+    await h.session.idle();
+    h.session.send('/compact');
+    await h.session.idle();
+    h.session.send('sure?');
+    await h.session.idle();
+    const next = h.provider.requests.at(-1)!.messages;
+    expect(JSON.stringify(next[0])).toContain('The most recent steps follow this summary unchanged.');
+    expect(JSON.stringify(next[1])).toContain('Both read.');
+    expect(JSON.stringify(next)).not.toContain('alpha 10');
+  });
+
+  it('leaves the output alone when automatic compaction is off, and removes nothing from a turn that comes after a rewind', async () => {
+    const off = harness({
+      model: { contextWindow: 20_000 },
+      autoCompact: false,
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 17_000, outputTokens: 20 } },
+        { text: 'Both read.' }
+      ]
+    });
+    writeFile(off.projectDir, 'a.txt', lines('alpha', 300));
+    writeFile(off.projectDir, 'b.txt', 'beta marker\n');
+    off.session.send('read both');
+    await off.session.idle();
+    expect(JSON.stringify(off.provider.requests[2]!.messages)).toContain('alpha 150');
+    expect(removedNotice(off)).toBe(false);
+
+    const h = harness({
+      model: { contextWindow: 20_000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 17_000, outputTokens: 20 } },
+        { text: 'Both read.' },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { text: 'Read again.' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 300));
+    writeFile(h.projectDir, 'b.txt', 'beta marker\n');
+    h.session.send('read both');
+    await h.session.idle();
+    expect(removedNotice(h)).toBe(true);
+    // Rewind to the start: the messages the cutoff was measured against are gone, and their numbers are used again.
+    h.session.truncateFrom(h.store.listMessages('session-1')[0]!.seq);
+    h.session.send('read a again');
+    await h.session.idle();
+    const sent = JSON.stringify(h.provider.requests[4]!.messages);
+    expect(sent).toContain('alpha 150');
+    expect(sent).not.toContain(REMOVED);
   });
 
   it('compacts and tries again when the provider says the conversation is too long', async () => {

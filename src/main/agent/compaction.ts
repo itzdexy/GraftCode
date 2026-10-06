@@ -4,7 +4,8 @@ import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { ProviderError } from '../providers/errors';
 import { streamWithRetry } from '../providers/retry';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
-import { toLlmHistory } from './history';
+import { isSent, toLlmHistory } from './history';
+import { estimateMessagesTokens } from './tokens';
 
 const COMPACTION_SYSTEM = [
   'You summarize a coding session so it can continue in a fresh context without losing anything important.',
@@ -53,6 +54,31 @@ export function renderTranscript(history: LlmMessage[], budgetChars: number): st
   return `${head}\n\n[… earlier middle of the session omitted …]\n\n${tail.join('\n\n')}`;
 }
 
+/** Tokens of the newest messages a summary leaves as they are (the session takes less for a small context window). */
+export const COMPACT_KEEP_TOKENS = 15_000;
+
+/**
+ * Where the part that stays begins: the index of a reply, with everything from
+ * it on within `keepTokens`. A summary then replaces what comes before, and the
+ * agent keeps its latest steps word for word instead of reading about them.
+ * The kept part never starts at a tool result, whose call would be gone, and
+ * `messages.length` means nothing is kept.
+ */
+export function compactionCut(messages: StoredMessage[], keepTokens: number): number {
+  let start = messages.length;
+  let total = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (isSent(message)) {
+      total += estimateMessagesTokens([{ role: message.role, content: message.content }]);
+      if (total > keepTokens) break;
+    }
+    start = i;
+  }
+  while (start < messages.length && !(messages[start]!.role === 'assistant' && isSent(messages[start]!))) start++;
+  return start;
+}
+
 export interface CompactionRequest {
   provider: LLMProvider;
   model: ModelInfo;
@@ -96,8 +122,14 @@ export async function summarizeSession(req: CompactionRequest): Promise<string> 
 /**
  * Text of the message that replaces the compacted history. The plan the user
  * approved is said again word for word: a summary of a plan is not the plan.
+ * `keptRecent` says the latest steps were left in place after the summary.
  */
-export function summaryMessageText(summary: string, todos: TodoItem[], files: string[], extra: { plan?: string | null } = {}): string {
+export function summaryMessageText(
+  summary: string,
+  todos: TodoItem[],
+  files: string[],
+  extra: { plan?: string | null; keptRecent?: boolean } = {}
+): string {
   const planText = extra.plan ? `\n\nThe plan you and the user agreed on (follow it):\n${extra.plan}` : '';
   const todoText =
     todos.length > 0
@@ -110,6 +142,8 @@ export function summaryMessageText(summary: string, todos: TodoItem[], files: st
     summary,
     `${planText}${todoText}${fileText}`,
     '',
-    'Continue from where the work left off. Re-read files before editing them; earlier reads are no longer in context.'
+    extra.keptRecent
+      ? 'Re-read files before editing them; earlier reads are no longer in context. The most recent steps follow this summary unchanged.'
+      : 'Continue from where the work left off. Re-read files before editing them; earlier reads are no longer in context.'
   ].join('\n');
 }

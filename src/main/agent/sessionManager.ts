@@ -181,6 +181,7 @@ export class SessionManager {
           autoCompact: s.behavior.autoCompact,
           userName: s.profile.name || null,
           defaultModel: s.defaults.model,
+          fallbackModel: s.defaults.fallbackModel,
           defaultEffort: s.defaults.effort,
           noTraining: s.privacy.noTraining,
           incognitoLocalOnly: s.privacy.incognitoLocalOnly,

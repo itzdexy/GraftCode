@@ -68,6 +68,8 @@ export interface HarnessOptions {
   agents?: Partial<SessionPreferences['agents']>;
   /** Settings → Personalization (default: empty). */
   personalization?: SessionPreferences['personalization'];
+  /** Settings → Models → Backup model (default: none). */
+  fallbackModel?: SessionPreferences['fallbackModel'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
   maxSteps?: number | null;
   /** The project's sandbox settings (default: no sandbox). */
@@ -166,6 +168,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       autoCompact: options.autoCompact ?? true,
       userName: 'Tester',
       defaultModel: model.ref,
+      fallbackModel: options.fallbackModel ?? null,
       defaultEffort: 'medium',
       noTraining: options.noTraining ?? false,
       incognitoLocalOnly: options.incognitoLocalOnly ?? false,

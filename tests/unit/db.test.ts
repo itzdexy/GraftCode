@@ -154,6 +154,17 @@ describe('app settings', () => {
     expect(settings.get().profile.name).toBe('Kai');
   });
 
+  it('gives an install from before the backup model no backup model, and keeps its other defaults', () => {
+    const stored = { model: { providerId: 'p', modelId: 'm' }, effort: 'high', permissionMode: 'auto', useWorktree: true, lastProjectPath: null };
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('defaults', JSON.stringify(stored));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().defaults).toEqual({ ...stored, fallbackModel: null });
+    settings.update({ defaults: { fallbackModel: { providerId: 'p', modelId: 'backup' } } });
+    expect(new AppSettingsService(db).get().defaults).toEqual({ ...stored, fallbackModel: { providerId: 'p', modelId: 'backup' } });
+    settings.update({ defaults: { fallbackModel: null } });
+    expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
+  });
+
   it('follows the system for motion until told otherwise', () => {
     const settings = new AppSettingsService(db);
     expect(settings.get().appearance.motion).toBe('system');

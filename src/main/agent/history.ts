@@ -1,8 +1,26 @@
 import type { ContentBlock, LlmMessage, StoredMessage } from '@shared/schemas/messages';
 
+/** Whether a stored message is part of what the model reads: notices, command output and check records are for the user only. */
+export function isSent(message: StoredMessage): boolean {
+  return !message.meta.compacted && message.meta.kind !== 'notice' && message.meta.kind !== 'command-output' && message.meta.kind !== 'check';
+}
+
+/**
+ * The order the model reads messages in. A summary is stored when it is made,
+ * which is after the steps it left as they were; it stands for everything
+ * before those steps, so it is sent ahead of them. Only the newest summary
+ * moves: an older one is always among what the newer one replaced.
+ */
+export function modelOrder(messages: StoredMessage[]): StoredMessage[] {
+  const at = messages.findLastIndex((m) => m.meta.kind === 'compaction-summary');
+  if (at <= 0) return messages;
+  return [messages[at]!, ...messages.slice(0, at), ...messages.slice(at + 1)];
+}
+
 /**
  * Turns stored messages into what a provider sees:
- *  - messages replaced by a compaction summary are skipped,
+ *  - messages replaced by a compaction summary are skipped, and the summary
+ *    goes ahead of the steps that were kept from before it,
  *  - UI-only fields (tool display metadata) are dropped,
  *  - every tool_use gets a tool_result (interrupted turns are repaired so
  *    the history is always valid for strict providers),
@@ -13,7 +31,7 @@ export function toLlmHistory(messages: StoredMessage[]): LlmMessage[] {
   // 'check' is a record of what the repository's own checks said. The agent gets
   // the failure during the turn that caused it; replaying it forever would only
   // spend context on output it has already acted on.
-  const visible = messages.filter((m) => !m.meta.compacted && m.meta.kind !== 'notice' && m.meta.kind !== 'command-output' && m.meta.kind !== 'check');
+  const visible = modelOrder(messages.filter(isSent));
   const out: LlmMessage[] = [];
   for (let i = 0; i < visible.length; i++) {
     const message = visible[i]!;

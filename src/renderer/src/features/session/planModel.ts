@@ -21,3 +21,19 @@ export function planBarText(plan: ApprovedPlan, todos: TodoItem[]): { title: str
   const progress = planProgress(todos);
   return { title: `Plan: ${planTitle(plan.plan)}`, progress: progress ? `${String(progress.done)} of ${String(progress.total)} done` : null };
 }
+
+/**
+ * A plan's card in the transcript: the plan as the agent offered it while it
+ * waits or after it was sent back, and the version the user approved once
+ * there is one. That version is what the agent follows, so it is what the
+ * card must show.
+ */
+export function planShown(
+  offered: string,
+  display: { plan: string; approved: boolean } | null
+): { text: string; status: string; tone: 'neutral' | 'warning' | 'accent' } {
+  if (!display) return { text: offered, status: 'Waiting for approval', tone: 'neutral' };
+  if (!display.approved) return { text: offered, status: 'Changes requested', tone: 'warning' };
+  const edited = display.plan.trim() !== offered.trim();
+  return { text: edited ? display.plan : offered, status: edited ? 'Approved with your changes' : 'Approved', tone: 'accent' };
+}

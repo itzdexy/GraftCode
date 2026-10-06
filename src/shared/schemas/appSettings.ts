@@ -97,6 +97,8 @@ export const AppSettingsSchema = z.object({
   }),
   defaults: z.object({
     model: ModelRefSchema.nullable(),
+    /** Finishes a turn when the session's model keeps failing (overloaded, rate limited, unreachable); null for none. */
+    fallbackModel: ModelRefSchema.nullable(),
     effort: EffortLevelSchema,
     permissionMode: PermissionModeSchema,
     useWorktree: z.boolean(),
@@ -200,7 +202,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
-  defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
+  defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
   security: { allowPlaintextKeys: false },

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import { textOf, type ContentBlock, type LlmMessage, type StoredMessage } from '../../src/shared/schemas/messages';
 import type { ModelInfo } from '../../src/shared/schemas/models';
-import { runAgentLoop, type LoopConfig, type LoopHost, type LoopResult } from '../../src/main/agent/loop';
+import { runAgentLoop, type LoopConfig, type LoopHost, type LoopModel, type LoopResult } from '../../src/main/agent/loop';
 import type { Decision } from '../../src/main/permissions/engine';
 import type { RetryPolicy } from '../../src/main/providers/retry';
 import { ToolRegistry } from '../../src/main/tools/registry';
@@ -41,10 +41,16 @@ export interface LoopHarnessOptions {
   maybeCompact?: (history: LlmMessage[], contextTokens: number, overflow: boolean) => LlmMessage[] | null;
   retry?: RetryPolicy;
   maxIterations?: number | null;
+  /** The replies of a second model, which the host offers when the first keeps failing. */
+  backup?: FakeStep[];
+  /** The host's answer when the loop asks for another model, given the backup model (null without `backup`). Default: that model. */
+  fallback?: (offer: LoopModel | null) => Promise<LoopModel | null>;
 }
 
 export interface LoopHarness {
   provider: FakeProvider;
+  /** The second model's provider, when the test gave it replies. */
+  backup: FakeProvider | null;
   events: AgentEvent[];
   stored: StoredMessage[];
   /** The conversation as the model is sent it, after the run. */
@@ -56,6 +62,9 @@ export interface LoopHarness {
 export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
   const model = fakeModel(options.model);
   const provider = new FakeProvider(options.script, [model]);
+  const backupModel = fakeModel({ ref: { providerId: 'backup', modelId: 'backup-model' }, label: 'Backup Model' });
+  const backup = options.backup ? new FakeProvider(options.backup, [backupModel], 'backup') : null;
+  const offer: LoopModel | null = backup ? { provider: backup, model: backupModel, effort: null } : null;
   const registry = new ToolRegistry();
   for (const tool of options.tools) registry.register(tool);
   const events: AgentEvent[] = [];
@@ -76,7 +85,8 @@ export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
     maybeCompact: (history, tokens, _signal, overflow) => Promise.resolve(options.maybeCompact ? options.maybeCompact(history, tokens, overflow === true) : null),
     onUsage: () => undefined,
     todos: () => [],
-    log: () => undefined
+    log: () => undefined,
+    ...(offer || options.fallback ? { fallback: () => (options.fallback ? options.fallback(offer) : Promise.resolve(offer)) } : {})
   };
   const config: LoopConfig = {
     provider,
@@ -99,6 +109,7 @@ export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
   };
   return {
     provider,
+    backup,
     events,
     stored,
     run: (prompt, signal = new AbortController().signal) => runAgentLoop([{ role: 'user', content: [{ type: 'text', text: prompt }] }], config, host, signal),

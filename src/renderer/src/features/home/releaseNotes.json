@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.12",
+    "date": "2026-10-06",
+    "items": [
+      "Long sessions last longer. When the context fills up, Graft first drops the output of old tool calls, which the agent can run again, and only summarizes when that is not enough. The transcript still shows everything.",
+      "A summary no longer starts the agent from scratch: the latest steps stay exactly as they were, after the summary of what came before.",
+      "A backup model. Choose one in Settings → Models, and when a session's model is overloaded, rate limited or unreachable after its retries, the turn continues on the backup and says so.",
+      "The plan card in the transcript shows the plan you approved. After an edit it showed the plan as first offered under “Approved”; it now shows your version and says “Approved with your changes”."
+    ]
+  },
+  {
     "version": "0.6.11",
     "date": "2026-10-06",
     "items": [

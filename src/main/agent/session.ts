@@ -30,11 +30,12 @@ import type { ChatFile } from '../chat/chatFiles';
 import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
-import { summarizeSession, summaryMessageText } from './compaction';
+import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { checksSummary, runChecks } from './checks';
 import type { HookRunner } from './hooks';
-import { toLlmHistory, withSentTimes } from './history';
-import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
+import { modelOrder, toLlmHistory, withSentTimes } from './history';
+import { PRUNE_KEEP_TOKENS, pruneCutoff, withPrunedOutput } from './prune';
+import { runAgentLoop, type LoopHost, type LoopModel, type PermissionAnswer, type PermissionPrompt } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
 import { expandMentions } from './mentions';
@@ -77,7 +78,7 @@ import {
 } from './slashCommands';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
-import { estimateTextTokens, shouldCompact } from './tokens';
+import { estimateMessagesTokens, estimateTextTokens, shouldCompact } from './tokens';
 import { searchTools, type SearchableTool } from '../tools/toolSearch';
 
 export interface ModelResolver {
@@ -95,6 +96,8 @@ export interface SessionPreferences {
   autoCompact: boolean;
   userName: string | null;
   defaultModel: ModelRef | null;
+  /** Settings → Models → Backup model: finishes a turn when the session's model keeps failing. */
+  fallbackModel: ModelRef | null;
   defaultEffort: EffortLevel;
   /** Ask providers not to train on or keep requests (Settings → Privacy). */
   noTraining: boolean;
@@ -193,6 +196,9 @@ const DELTA_FLUSH_MS = 40;
 const USER_SHELL_TIMEOUT_MS = 300_000;
 const USER_SHELL_SHOWN = 20_000;
 const MODE_CYCLE: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
+
+/** Removing old tool output counts as enough when the context falls to this share of the window; otherwise the session summarizes. */
+const PRUNE_TARGET = 0.6;
 const DEFAULT_TITLES = new Set(['New session', 'New chat']);
 
 /**
@@ -224,6 +230,11 @@ export class AgentSession {
   private modelKey: string | null = null;
   /** Thinking in messages before this seq is never replayed (model switch, tool set change). */
   private stripBeforeSeq = 0;
+  /**
+   * Tool output in messages before this seq is sent as a line saying it was removed (see prune.ts).
+   * Kept in memory only: after a restart the session removes it again when it next fills up.
+   */
+  private pruneBeforeSeq = 0;
   private notes: string[] = [];
   private prePlanMode: PermissionMode = 'auto-edit';
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
@@ -527,7 +538,7 @@ export class AgentSession {
     const messages = this.deps.store.listMessages(this.id);
     const last = messages.at(-1);
     if (!last) throw new GraftError('nothing_to_retry', 'There is nothing to retry.');
-    if (last.role === 'assistant' && (last.meta.error || last.meta.interrupted)) this.deps.store.deleteMessagesFrom(this.id, last.seq);
+    if (last.role === 'assistant' && (last.meta.error || last.meta.interrupted)) this.deleteMessagesFrom(last.seq);
     this.running = this.runTurn(null).finally(() => this.afterTurn());
   }
 
@@ -540,14 +551,23 @@ export class AgentSession {
     );
     if (!lastTyped) throw new GraftError('nothing_to_retry', 'There is nothing to retry.');
     const reply = messages.find((m) => m.seq > lastTyped.seq);
-    if (reply) this.deps.store.deleteMessagesFrom(this.id, reply.seq);
+    if (reply) this.deleteMessagesFrom(reply.seq);
     this.running = this.runTurn(null).finally(() => this.afterTurn());
+  }
+
+  /**
+   * Deletes the messages from `seq` on. The store gives their numbers out again, so a cutoff
+   * measured against them is pulled back: the messages that take their place are new work.
+   */
+  private deleteMessagesFrom(seq: number): StoredMessage[] {
+    this.pruneBeforeSeq = Math.min(this.pruneBeforeSeq, seq);
+    return this.deps.store.deleteMessagesFrom(this.id, seq);
   }
 
   /** Removes messages from `seq` on (conversation rewind / edit-and-resubmit). */
   truncateFrom(seq: number): StoredMessage[] {
     if (this.running) throw new GraftError('busy', 'Stop the session before rewinding it.');
-    const removed = this.deps.store.deleteMessagesFrom(this.id, seq);
+    const removed = this.deleteMessagesFrom(seq);
     // The agents those turns started go with them.
     const first = removed[0];
     if (first) {
@@ -879,6 +899,7 @@ export class AgentSession {
       case 'clear': {
         const ids = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted).map((m) => m.id);
         this.deps.store.markCompacted(this.id, ids);
+        this.pruneBeforeSeq = 0;
         this.files.clear();
         this.deps.store.updateSession(this.id, { todos: [] });
         this.emit({ type: 'todos', todos: [] });
@@ -1210,13 +1231,33 @@ export class AgentSession {
     this.stripBeforeSeq = (this.deps.store.listMessages(this.id).at(-1)?.seq ?? 0) + 1;
   }
 
-  private history(): LlmMessage[] {
+  /** What is sent to the model: the stored messages, without stale thinking and without tool output before `pruneBefore`. */
+  private history(pruneBefore = this.pruneBeforeSeq): LlmMessage[] {
     const messages = this.deps.store.listMessages(this.id);
     const floor = this.stripBeforeSeq;
-    const kept = messages.map((m) =>
-      m.seq < floor && m.role === 'assistant' ? { ...m, content: m.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking') } : m
+    const kept = withPrunedOutput(
+      messages.map((m) =>
+        m.seq < floor && m.role === 'assistant' ? { ...m, content: m.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking') } : m
+      ),
+      pruneBefore
     );
     return toLlmHistory(this.summary.kind === 'chat' ? withSentTimes(kept) : kept);
+  }
+
+  /**
+   * Removes old tool output from what is sent, when that alone brings the context back to
+   * PRUNE_TARGET of the window: the agent can run a tool again, and can't undo a summary.
+   * Returns whether it did. Stored messages are not touched.
+   */
+  private pruneOutput(tokens: number, contextWindow: number): boolean {
+    const messages = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted);
+    const cutoff = pruneCutoff(messages, Math.min(PRUNE_KEEP_TOKENS, Math.floor(contextWindow * 0.25)));
+    if (cutoff === null || cutoff <= this.pruneBeforeSeq) return false;
+    const saving = estimateMessagesTokens(this.history()) - estimateMessagesTokens(this.history(cutoff));
+    if (tokens - saving > contextWindow * PRUNE_TARGET) return false;
+    this.pruneBeforeSeq = cutoff;
+    this.notice('info', 'Removed old tool output to make room.');
+    return true;
   }
 
   private async runTurn(item: InternalQueued | null): Promise<void> {
@@ -1296,10 +1337,18 @@ export class AgentSession {
       if (summary.kind === 'code') await this.syncSandbox();
       const { system, toolNames } = await this.ensurePrompt(model);
       const effort = this.effortFor(model);
+      // The model that answers this turn. The backup model takes its place when the session's keeps failing,
+      // and from then on the turn is measured against that one's context window and summarized by it.
+      const answering = { model, provider };
       const host: LoopHost = {
-        ...this.makeHost(model, provider, hooks, root, trusted),
+        ...this.makeHost(model, provider, hooks, root, trusted, answering),
         takeSteering: (s) => this.deliverSteering(turnId, hooks, s),
-        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined
+        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined,
+        fallback: async () => {
+          const backup = await this.backupFor(model, toolNames.length > 0, signal);
+          if (backup) Object.assign(answering, { model: backup.model, provider: backup.provider });
+          return backup;
+        }
       };
       const result = await runAgentLoop(
         this.history(),
@@ -1429,13 +1478,27 @@ export class AgentSession {
 
   // ---- compaction ---------------------------------------------------------
 
-  private async compact(instructions: string, signal: AbortSignal): Promise<LlmMessage[] | null> {
-    const { provider, model } = await this.resolveModel(signal);
-    const messages = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted && m.meta.kind !== 'command-output');
-    if (messages.length < 2) {
+  /**
+   * Replaces the conversation so far with a summary. The newest steps stay as they are, after
+   * the summary, when at least two messages come before them; `keepRecent` false summarizes
+   * everything, for when every token counts.
+   */
+  private async compact(
+    instructions: string,
+    signal: AbortSignal,
+    keepRecent = true,
+    using: { provider: LLMProvider; model: ModelInfo } | null = null
+  ): Promise<LlmMessage[] | null> {
+    // `using` is the model answering the turn when that is not the session's own (a backup model took over).
+    const { provider, model } = using ?? (await this.resolveModel(signal));
+    const all = modelOrder(this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted && m.meta.kind !== 'command-output'));
+    if (all.length < 2) {
       this.commandOutput('Nothing to compact yet.');
       return null;
     }
+    const cut = keepRecent ? compactionCut(all, Math.min(COMPACT_KEEP_TOKENS, Math.floor(model.contextWindow * 0.1))) : all.length;
+    const messages = cut >= 2 ? all.slice(0, cut) : all;
+    const keptRecent = messages.length < all.length;
     this.notice('info', 'Compacting the conversation…');
     const todos = this.deps.store.getTodos(this.id);
     // Read before anything is folded away; the approval stays among the messages, so the plan stays the session's plan.
@@ -1455,13 +1518,15 @@ export class AgentSession {
       this.id,
       messages.map((m) => m.id)
     );
-    const text = summaryMessageText(summaryText, todos, this.files.touchedFiles(), { plan });
+    const text = summaryMessageText(summaryText, todos, this.files.touchedFiles(), { plan, keptRecent });
     const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text }], { kind: 'compaction-summary' });
     this.files.clear();
-    this.markThinkingStale();
+    // The steps that stay are sent as they were, thinking included: a reply that called a tool is not valid without it for some models.
+    if (!keptRecent) this.markThinkingStale();
     this.emit({ type: 'message', message: stored });
     this.emit({ type: 'compacted', summaryMessageId: stored.id });
-    return [{ role: 'user', content: [{ type: 'text', text }] }];
+    // The summary is stored after the steps it kept and sent ahead of them: history() puts it there.
+    return this.history();
   }
 
   // ---- loop host ----------------------------------------------------------
@@ -1503,7 +1568,37 @@ export class AgentSession {
     });
   }
 
-  private makeHost(model: ModelInfo, provider: LLMProvider, hooks: HookRunner | null, root: string | null, trusted: boolean): LoopHost {
+  /**
+   * The model from Settings → Models that finishes a turn when the session's model keeps failing.
+   * None in an incognito chat (its model was chosen for where it runs), none when it is the model
+   * that is failing or can't be found, and none when the turn offers tools and it can't call them.
+   */
+  private async backupFor(failing: ModelInfo, needsTools: boolean, signal: AbortSignal): Promise<LoopModel | null> {
+    const ref = this.deps.preferences().fallbackModel;
+    if (!ref || this.summary.incognito) return null;
+    if (ref.providerId === failing.ref.providerId && ref.modelId === failing.ref.modelId) return null;
+    try {
+      const { provider, model } = await this.deps.models.resolve(ref, signal);
+      if (needsTools && !model.supportsTools) return null;
+      return { provider, model, effort: this.effortFor(model) };
+    } catch (error) {
+      this.deps.log('warn', 'The backup model is not available', { session: this.id, message: (error as Error).message });
+      return null;
+    }
+  }
+
+  /**
+   * What the loop needs from the session. `answering` is the model the host measures and
+   * summarizes with; the main turn passes one it can change, everyone else keeps their own.
+   */
+  private makeHost(
+    model: ModelInfo,
+    provider: LLMProvider,
+    hooks: HookRunner | null,
+    root: string | null,
+    trusted: boolean,
+    answering: { model: ModelInfo; provider: LLMProvider } = { model, provider }
+  ): LoopHost {
     const cwd = this.workingDir();
     const describeContext = { cwd, projectRoot: root ?? cwd, platform: this.deps.platform };
     const host: LoopHost = {
@@ -1527,20 +1622,24 @@ export class AgentSession {
           },
           signal
         ),
-      toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, model, provider, hooks, root, trusted),
+      toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, answering.model, answering.provider, hooks, root, trusted),
       describeContext: () => describeContext,
       hooks,
       todos: () => this.deps.store.getTodos(this.id),
       maybeCompact: async (_history, tokens, signal, overflow) => {
-        if (!this.deps.preferences().autoCompact || !(overflow || shouldCompact(tokens, model.contextWindow))) return null;
-        return this.compact('', signal);
+        const window = answering.model.contextWindow;
+        if (!this.deps.preferences().autoCompact || !(overflow || shouldCompact(tokens, window))) return null;
+        // A request the provider just refused was measured wrong, so an estimate of what removing output frees can't be trusted either.
+        if (!overflow && this.pruneOutput(tokens, window)) return this.history();
+        // And one that was refused needs all the room there is: nothing is kept beside the summary.
+        return this.compact('', signal, !overflow, answering);
       },
       onUsage: (usage: Usage, contextTokens: number | null, costUsd: number | null) => {
         const current = this.summary.usage;
         const next = {
           totals: addUsage(current.totals, usage),
           contextTokens: contextTokens ?? current.contextTokens,
-          contextLimit: contextTokens === null ? current.contextLimit : model.contextWindow,
+          contextLimit: contextTokens === null ? current.contextLimit : answering.model.contextWindow,
           costUsd: costUsd === null ? current.costUsd : (current.costUsd ?? 0) + costUsd
         };
         this.deps.store.updateSession(this.id, { usage: next });

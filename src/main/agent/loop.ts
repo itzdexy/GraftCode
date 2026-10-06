@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import { addUsage, EMPTY_USAGE, type EffortLevel, type Usage } from '@shared/schemas/common';
 import { textOf, type CheckReport, type ContentBlock, type LlmMessage, type MessageMeta, type StoredMessage, type ToolResultBlock, type ToolUseBlock } from '@shared/schemas/messages';
-import type { ModelInfo } from '@shared/schemas/models';
+import type { ModelInfo, ProviderErrorCode } from '@shared/schemas/models';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { PermissionDecision, PermissionDetail } from '@shared/schemas/permissions';
 import { ProviderError, isAbortError } from '../providers/errors';
@@ -36,10 +36,29 @@ export interface PermissionAnswer {
   plan?: string;
 }
 
-/** Everything the loop needs from its surroundings (session, UI, storage). */
 /** How many times a Taproot turn is sent back to its open tasks before it may finish. */
 const MAX_TODO_NUDGES = 3;
 
+/** A model as the loop asks it: where it lives, what it is, and how hard it should think. */
+export interface LoopModel {
+  provider: LLMProvider;
+  model: ModelInfo;
+  effort: EffortLevel | null;
+}
+
+/**
+ * Failures another model may not have, and what the notice calls them. The rest (a wrong
+ * key, a request the provider rejects, a conversation that is too long) would follow the
+ * turn to any model, or are the user's to fix.
+ */
+const FALLBACK_REASONS: Partial<Record<ProviderErrorCode, string>> = {
+  overloaded: 'overloaded',
+  rate_limit: 'rate limited',
+  server: 'server error',
+  network: 'unreachable'
+};
+
+/** Everything the loop needs from its surroundings (session, UI, storage). */
 export interface LoopHost {
   append(role: 'user' | 'assistant', content: ContentBlock[], meta: MessageMeta, id?: string): StoredMessage;
   emit(event: AgentEvent): void;
@@ -70,6 +89,11 @@ export interface LoopHost {
    * history, so the agent reads them at its next step.
    */
   takeSteering?(signal: AbortSignal): Promise<ContentBlock[][]>;
+  /**
+   * Another model to finish the turn with, after `error` ended a request before any
+   * output and after its retries; null when there is none. Asked at most once a turn.
+   */
+  fallback?(error: ProviderError): Promise<LoopModel | null>;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -325,6 +349,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
   // The provider refused the last request as too long: compact once, whatever the estimate says.
   let overflow = false;
   let overflowRecovered = false;
+  // The model that answers. It changes at most once a turn: when the first keeps failing and the host has a backup.
+  let active: LoopModel = { provider: config.provider, model: config.model, effort: config.effort };
+  let switched = false;
   const recent: string[] = [];
   const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText, changed });
 
@@ -364,12 +391,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let responseUsage: Usage | null = null;
     let responseCost: number | null = null;
     const request: StreamRequest = {
-      model: config.model,
+      model: active.model,
       system: config.system,
-      messages: config.stripThinking ? withoutThinking(history) : history,
+      // Thinking belongs to the model that did it: another model gets the history without.
+      messages: config.stripThinking || switched ? withoutThinking(history) : history,
       tools: config.registry.specs(config.toolNames),
-      effort: config.effort,
-      webSearch: config.webSearch,
+      effort: active.effort,
+      webSearch: config.webSearch && active.model.supportsWebSearch,
       cacheKey: config.cacheKey,
       privacy: config.privacy
     };
@@ -377,7 +405,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let failure: ProviderError | null = null;
     try {
       for await (const event of streamWithRetry(
-        config.provider,
+        active.provider,
         request,
         signal,
         (info) => host.emit({ type: 'retrying', attempt: info.attempt, delayMs: info.delayMs, reason: info.error.message }),
@@ -415,13 +443,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     if (responseUsage && contextTokens(responseUsage) > 0) {
       usage = addUsage(usage, responseUsage);
       lastContext = contextTokens(responseUsage);
-      host.onUsage(responseUsage, lastContext, responseCost ?? usageCost(config.model.pricing, responseUsage));
+      host.onUsage(responseUsage, lastContext, responseCost ?? usageCost(active.model.pricing, responseUsage));
     }
 
     const aborted = signal.aborted || failure?.code === 'aborted';
     const content = blocks.filter((b) => !(b.type === 'text' && b.text.length === 0));
     if (content.length > 0) {
-      const meta: MessageMeta = { turnId: config.turnId, model: config.model.ref, ...(responseUsage ? { usage: responseUsage } : {}) };
+      const meta: MessageMeta = { turnId: config.turnId, model: active.model.ref, ...(responseUsage ? { usage: responseUsage } : {}) };
       if (aborted) meta.interrupted = true;
       else if (failure) meta.error = { code: failure.code, message: failure.message };
       const stored = host.append('assistant', content, meta, messageId);
@@ -438,6 +466,26 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       overflow = true;
       iteration--;
       continue;
+    }
+    // The model kept failing through its retries and nothing of a reply arrived, so nothing would be
+    // said twice: another model may finish the turn. Once, so two failing models can't trade it forever.
+    const reason = failure ? FALLBACK_REASONS[failure.code] : undefined;
+    if (failure && reason && content.length === 0 && !switched && host.fallback) {
+      let next: LoopModel | null = null;
+      try {
+        next = await host.fallback(failure);
+      } catch (error) {
+        host.log('warn', 'No backup model', { message: (error as Error).message });
+      }
+      if (signal.aborted) return done('interrupted');
+      if (next) {
+        host.emit({ type: 'notice', level: 'warning', text: `${active.model.label} isn't answering (${reason}). Continuing with ${next.model.label}.` });
+        host.log('warn', 'Continuing on the backup model', { code: failure.code, from: active.model.ref.modelId, to: next.model.ref.modelId });
+        active = next;
+        switched = true;
+        iteration--;
+        continue;
+      }
     }
     if (failure) {
       host.log('warn', 'Model request failed', { code: failure.code, message: failure.message });

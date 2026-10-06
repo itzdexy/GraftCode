@@ -253,6 +253,11 @@ test('a plan is edited before it is approved, and stays above the message box', 
   expect(told).toContain('carry out their version');
   expect(told).toContain('Say hello in Norwegian too');
 
+  // The transcript shows the plan that was agreed on, not the one first offered.
+  const agreed = w.getByRole('region', { name: 'Plan', exact: true });
+  await expect(agreed.getByText('Approved with your changes')).toBeVisible();
+  await expect(agreed.getByText('Say hello in Norwegian too')).toBeVisible();
+
   // The plan stays above the message box, as the user approved it.
   await w.getByRole('button', { name: /^Plan: Add a greeting/ }).click();
   const dialog = w.getByRole('dialog', { name: 'Plan' });

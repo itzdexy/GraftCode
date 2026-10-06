@@ -148,6 +148,35 @@ export function ModelsSection() {
         ) : null}
       </Group>
 
+      <Group
+        title="Backup model"
+        description="When a session's model keeps failing (overloaded, rate limited or unreachable), Graft continues the turn with this one."
+        actions={
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={defaults.fallbackModel === null}
+            onClick={() => saveSettings({ defaults: { fallbackModel: null } }, "Couldn't change the backup model")}
+          >
+            None
+          </Button>
+        }
+      >
+        <div className="p-10">
+          {models.length > 0 ? (
+            <ModelListbox
+              models={models}
+              value={defaults.fallbackModel}
+              onChange={(model) => saveSettings({ defaults: { fallbackModel: model.ref } }, "Couldn't change the backup model")}
+              label="Backup model"
+              className="max-h-[200px]"
+            />
+          ) : (
+            <p className="px-4 py-8 text-base text-fg-muted">{loading ? 'Loading models…' : 'No models yet. Add a provider first.'}</p>
+          )}
+        </div>
+      </Group>
+
       <Group title="Sessions">
         <SwitchRow
           label="Start code sessions in a new worktree"
@@ -157,7 +186,7 @@ export function ModelsSection() {
         />
         <SwitchRow
           label="Compact automatically"
-          description="Summarize older turns when a conversation nears the model's context limit."
+          description="Make room when a conversation nears the model's context limit: the output of old tool calls goes first, then older turns are summarized."
           checked={settings.behavior.autoCompact}
           onChange={(autoCompact) => saveSettings({ behavior: { autoCompact } })}
         />

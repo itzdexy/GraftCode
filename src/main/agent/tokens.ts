@@ -3,7 +3,7 @@ import type { ModelInfo } from '@shared/schemas/models';
 import type { LlmMessage } from '@shared/schemas/messages';
 
 /** Rough per-image cost used by estimates (providers charge ~1–1.6K tokens for typical screenshots). */
-const IMAGE_TOKENS = 1600;
+export const IMAGE_TOKENS = 1600;
 
 /** Conservative token estimate (≈3.5 characters per token for code-heavy text). */
 export function estimateTextTokens(text: string): number {
