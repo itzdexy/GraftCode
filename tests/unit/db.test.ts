@@ -69,6 +69,27 @@ describe('sessions and messages', () => {
     expect(repo.search('third')).toEqual([]);
   });
 
+  it('remembers which message replaced which, and brings those back when asked', () => {
+    const repo = new SessionsRepo(db);
+    const s = repo.create({ kind: 'code', title: 't', projectId: null, cwd: dir, worktreePath: null, branch: null, baseBranch: null, model: null, effort: 'medium', permissionMode: 'ask' });
+    const [m1, m2, m3] = ['one', 'two', 'three'].map((text) => repo.appendMessage(s.id, 'user', [{ type: 'text', text }], {}));
+    const summary = repo.appendMessage(s.id, 'user', [{ type: 'text', text: 'summary' }], { kind: 'compaction-summary' });
+    repo.markCompacted(s.id, [m1!.id, m2!.id], summary.id);
+    // From before this was recorded: replaced, by nobody in particular.
+    repo.markCompacted(s.id, [m3!.id]);
+    expect(repo.listMessages(s.id).map((m) => [m.meta.compacted ?? false, m.meta.compactedBy ?? null])).toEqual([
+      [true, summary.id],
+      [true, summary.id],
+      [true, null],
+      [false, null]
+    ]);
+    expect(repo.restoreCompacted(s.id, ['someone-else'])).toBe(0);
+    expect(repo.restoreCompacted(s.id, [summary.id])).toBe(2);
+    expect(repo.listMessages(s.id).map((m) => m.meta.compacted ?? false)).toEqual([false, false, true, false]);
+    expect(repo.listMessages(s.id)[0]!.meta.compactedBy).toBeUndefined();
+    expect(repo.restoreCompacted(s.id, [])).toBe(0);
+  });
+
   it('searches titles and message bodies by substring, treating quotes literally', () => {
     const repo = new SessionsRepo(db);
     const base = {
@@ -163,6 +184,14 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().defaults).toEqual({ ...stored, fallbackModel: { providerId: 'p', modelId: 'backup' } });
     settings.update({ defaults: { fallbackModel: null } });
     expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
+  });
+
+  it('gives an install from before the sound switch the sound, and keeps its notification choices', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('notifications', JSON.stringify({ enabled: true, needsInput: false, finished: true, errors: false }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().notifications).toEqual({ enabled: true, needsInput: false, finished: true, errors: false, sound: true });
+    settings.update({ notifications: { sound: false } });
+    expect(new AppSettingsService(db).get().notifications).toEqual({ enabled: true, needsInput: false, finished: true, errors: false, sound: false });
   });
 
   it('follows the system for motion until told otherwise', () => {

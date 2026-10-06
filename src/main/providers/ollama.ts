@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { EffortLevel, Usage } from '@shared/schemas/common';
 import type { LlmMessage } from '@shared/schemas/messages';
-import type { ModelInfo } from '@shared/schemas/models';
+import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
@@ -11,6 +11,13 @@ import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, Stream
 interface TagModel {
   name: string;
   modified_at?: string;
+  /** Set when the server does not run the model itself but passes requests on to a hosted one. */
+  remote_host?: string;
+}
+
+/** A model the server passes on to a hosted one: it says so, or its tag does ("…-cloud", ":cloud"). */
+function isHosted(tag: TagModel): boolean {
+  return (typeof tag.remote_host === 'string' && tag.remote_host.length > 0) || /[:-]cloud$/i.test(tag.name);
 }
 
 interface ShowResponse {
@@ -23,7 +30,11 @@ type OllamaMessage =
   | { role: 'assistant'; content: string; tool_calls?: Array<{ function: { name: string; arguments: unknown } }> }
   | { role: 'tool'; content: string; tool_name: string };
 
-/** Context we request by default; Ollama's own default is too small for an agent's prompt. */
+/**
+ * Context we request by default; Ollama's own default is too small for an agent's prompt, and
+ * a model's full trained length can take more memory than the computer has. A size set for
+ * the model in Settings → Models replaces it.
+ */
 const DEFAULT_NUM_CTX = 32_768;
 
 /**
@@ -80,10 +91,13 @@ export class OllamaProvider implements LLMProvider {
   readonly kind = 'ollama' as const;
   readonly id: string;
   private readonly base: string;
+  /** Context sizes the user set per model (Settings → Models → Custom model IDs). */
+  private readonly sizes: Map<string, number>;
 
-  constructor(connection: ProviderConnection) {
+  constructor(connection: ProviderConnection, customModels: CustomModel[] = []) {
     this.id = connection.id;
     this.base = connection.baseUrl ?? 'http://localhost:11434';
+    this.sizes = new Map(customModels.flatMap((m) => (m.contextWindow !== undefined ? [[m.id, m.contextWindow] as const] : [])));
   }
 
   private unreachable(error: unknown): unknown {
@@ -105,6 +119,7 @@ export class OllamaProvider implements LLMProvider {
     }
     const names = (tags.models ?? []).map((m) => m.name).slice(0, 80);
     const modified = new Map((tags.models ?? []).map((m) => [m.name, m.modified_at ? Date.parse(m.modified_at) : NaN]));
+    const hosted = new Set((tags.models ?? []).filter(isHosted).map((m) => m.name));
     const infos: ModelInfo[] = [];
     const queue = [...names];
     const worker = async (): Promise<void> => {
@@ -115,17 +130,22 @@ export class OllamaProvider implements LLMProvider {
           ...(signal ? { signal } : {}),
           timeoutMs: 15_000
         });
-        infos.push(this.toModelInfo(name, show, modified.get(name)));
+        infos.push(this.toModelInfo(name, show, modified.get(name), hosted.has(name)));
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
     return arrangeModels(infos);
   }
 
-  private toModelInfo(name: string, show: ShowResponse, modifiedAt: number | undefined): ModelInfo {
+  private toModelInfo(name: string, show: ShowResponse, modifiedAt: number | undefined, hosted: boolean): ModelInfo {
     const caps = show.capabilities ?? [];
     const ctxEntry = Object.entries(show.model_info ?? {}).find(([k, v]) => k.endsWith('.context_length') && typeof v === 'number');
-    const contextWindow = (ctxEntry?.[1] as number | undefined) ?? 8192;
+    const trained = (ctxEntry?.[1] as number | undefined) ?? 8192;
+    // The window is what Graft asks the server to hold (num_ctx below), because that is all the server keeps:
+    // it drops the oldest messages beyond it without saying so. Measuring against the trained length
+    // would compact long after the model had stopped seeing the start of the conversation.
+    // A hosted model costs this computer no memory, so it gets its whole window.
+    const contextWindow = Math.min(trained, this.sizes.get(name) ?? (hosted ? trained : DEFAULT_NUM_CTX));
     const tools = caps.includes('tools');
     const vision = caps.includes('vision');
     const effort = caps.includes('thinking')
@@ -134,7 +154,7 @@ export class OllamaProvider implements LLMProvider {
     return {
       ref: { providerId: this.id, modelId: name },
       label: name,
-      description: describeCapabilities({ contextWindow, supportsVision: vision, effort, supportsTools: tools }),
+      description: describeCapabilities({ contextWindow, of: trained, supportsVision: vision, effort, supportsTools: tools }),
       family: familyOf(name),
       contextWindow,
       maxOutputTokens: Math.min(contextWindow, 32_768),
@@ -164,7 +184,7 @@ export class OllamaProvider implements LLMProvider {
             ? { tools: req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })) }
             : {}),
           ...(think !== undefined ? { think } : {}),
-          options: { num_ctx: Math.min(req.model.contextWindow, DEFAULT_NUM_CTX) }
+          options: { num_ctx: req.model.contextWindow }
         },
         signal,
         timeoutMs: 300_000

@@ -491,12 +491,44 @@ describe('Ollama adapter', () => {
     );
     const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
     const [model] = await provider.listModels();
-    expect(model).toMatchObject({ contextWindow: 65536, supportsTools: true, supportsVision: false, effort: { levels: ['low', 'high', 'taproot'] } });
+    // Measured against what Graft asks the server to hold, not what the model was trained for:
+    // the server drops what does not fit without saying so.
+    expect(model).toMatchObject({ contextWindow: 32768, supportsTools: true, supportsVision: false, effort: { levels: ['low', 'high', 'taproot'] } });
+    expect(model!.description).toBe('32K of 64K context · reasoning');
     const events = await collect(provider.streamText(request({ model: model!, effort: 'high' }), new AbortController().signal));
     expect(events.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text', 'tool_use']);
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
     const body = server.requests.at(-1)?.json() as Record<string, unknown>;
     expect(body).toMatchObject({ think: true, options: { num_ctx: 32768 } });
+  });
+
+  it('asks the server for the context it measures against: 32K, the size set in Settings, never more than the model has', async () => {
+    const trained: Record<string, number> = { 'small:1b': 4096, 'coder:7b': 131072, 'big:70b': 131072, 'wide:9b': 65536, 'giant:480b-cloud': 262144, 'relayed:latest': 200_000 };
+    // The last two are not run on this computer: the server passes them on to a hosted one, which has the whole window.
+    const hosted: Record<string, object> = { 'relayed:latest': { remote_model: 'relayed', remote_host: 'https://models.example:443' } };
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: Object.keys(trained).map((name) => ({ name, ...hosted[name] })) }));
+    server.route('POST', '/api/show', (req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': trained[(req.json() as { model: string }).model] } }));
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true, done_reason: 'stop', prompt_eval_count: 3, eval_count: 1 }]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [
+      { id: 'big:70b', contextWindow: 65536 },
+      { id: 'wide:9b', contextWindow: 200_000 },
+      { id: 'not-installed:1b', contextWindow: 8192 }
+    ]);
+    const models = await provider.listModels();
+    const window = Object.fromEntries(models.map((m) => [m.ref.modelId, m.contextWindow]));
+    expect(window).toEqual({ 'small:1b': 4096, 'coder:7b': 32768, 'big:70b': 65536, 'wide:9b': 65536, 'giant:480b-cloud': 262144, 'relayed:latest': 200_000 });
+    const said = Object.fromEntries(models.map((m) => [m.ref.modelId, m.description]));
+    expect(said['small:1b']).toBe('4K context');
+    expect(said['coder:7b']).toBe('32K of 128K context');
+    expect(said['big:70b']).toBe('64K of 128K context');
+    expect(said['wide:9b']).toBe('64K context');
+    expect(said['giant:480b-cloud']).toBe('256K context');
+    expect(said['relayed:latest']).toBe('200K context');
+    for (const model of models) {
+      await collect(provider.streamText(request({ model }), new AbortController().signal));
+      const body = server.requests.at(-1)?.json() as { model: string; options: { num_ctx: number } };
+      expect([body.model, body.options.num_ctx]).toEqual([model.ref.modelId, model.contextWindow]);
+    }
   });
 
   it('explains when Ollama is not running', async () => {

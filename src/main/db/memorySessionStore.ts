@@ -100,13 +100,27 @@ export class MemorySessionStore implements SessionStore {
     throw new GraftError('message_not_found', `Message ${messageId} does not exist.`);
   }
 
-  markCompacted(sessionId: string, messageIds: string[]): void {
+  markCompacted(sessionId: string, messageIds: string[], by?: string): void {
     const ids = new Set(messageIds);
     const list = this.list_(sessionId);
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
-      if (m && ids.has(m.id)) list[i] = { ...m, meta: { ...m.meta, compacted: true } };
+      if (m && ids.has(m.id)) list[i] = { ...m, meta: { ...m.meta, compacted: true, ...(by ? { compactedBy: by } : {}) } };
     }
+  }
+
+  restoreCompacted(sessionId: string, by: string[]): number {
+    const gone = new Set(by);
+    const list = this.list_(sessionId);
+    let restored = 0;
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m || m.meta.compactedBy === undefined || !gone.has(m.meta.compactedBy)) continue;
+      const { compacted: _compacted, compactedBy: _by, ...meta } = m.meta;
+      list[i] = { ...m, meta };
+      restored++;
+    }
+    return restored;
   }
 
   deleteMessagesFrom(sessionId: string, fromSeq: number): StoredMessage[] {

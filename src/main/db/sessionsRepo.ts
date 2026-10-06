@@ -70,7 +70,13 @@ export interface SessionStore {
   listMessages(sessionId: string): StoredMessage[];
   getMessage(messageId: string): StoredMessage | null;
   updateMessageMeta(messageId: string, patch: Partial<MessageMeta>): StoredMessage;
-  markCompacted(sessionId: string, messageIds: string[]): void;
+  /**
+   * Marks messages as replaced: kept for display, not sent to models. `by` is the message that
+   * stands for them (a summary, or the note /clear left).
+   */
+  markCompacted(sessionId: string, messageIds: string[], by?: string): void;
+  /** Brings back the messages the given messages replaced (a rewind removed those). Returns how many. */
+  restoreCompacted(sessionId: string, by: string[]): number;
   /** Deletes messages with seq >= fromSeq; returns them (for rewind). */
   deleteMessagesFrom(sessionId: string, fromSeq: number): StoredMessage[];
   /** Stores an agent of a group (RunAgents), replacing its earlier state. */
@@ -333,18 +339,39 @@ export class SessionsRepo implements SessionStore {
     return { ...current, meta };
   }
 
-  markCompacted(sessionId: string, messageIds: string[]): void {
+  markCompacted(sessionId: string, messageIds: string[], by?: string): void {
     const tx = this.db.transaction(() => {
       for (const id of messageIds) {
         const row = this.db.prepare('SELECT meta FROM messages WHERE id = ? AND session_id = ?').get(id, sessionId) as
           | { meta: string }
           | undefined;
         if (!row) continue;
-        const meta = { ...parseJson<MessageMeta>(row.meta, 'message meta'), compacted: true };
+        const meta: MessageMeta = { ...parseJson<MessageMeta>(row.meta, 'message meta'), compacted: true, ...(by ? { compactedBy: by } : {}) };
         this.db.prepare('UPDATE messages SET meta = ? WHERE id = ?').run(JSON.stringify(meta), id);
       }
     });
     tx();
+  }
+
+  restoreCompacted(sessionId: string, by: string[]): number {
+    if (by.length === 0) return 0;
+    const gone = new Set(by);
+    const tx = this.db.transaction(() => {
+      // Only rows that name a replacement are read; a rewind is rare, so this need not be indexed.
+      const rows = this.db.prepare("SELECT id, meta FROM messages WHERE session_id = ? AND meta LIKE '%\"compactedBy\"%'").all(sessionId) as Array<{
+        id: string;
+        meta: string;
+      }>;
+      let restored = 0;
+      for (const row of rows) {
+        const { compacted: _compacted, compactedBy, ...meta } = parseJson<MessageMeta>(row.meta, 'message meta');
+        if (compactedBy === undefined || !gone.has(compactedBy)) continue;
+        this.db.prepare('UPDATE messages SET meta = ? WHERE id = ?').run(JSON.stringify(meta), row.id);
+        restored++;
+      }
+      return restored;
+    });
+    return tx();
   }
 
   deleteMessagesFrom(sessionId: string, fromSeq: number): StoredMessage[] {

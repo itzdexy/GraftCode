@@ -108,7 +108,9 @@ export const AppSettingsSchema = z.object({
     enabled: z.boolean(),
     needsInput: z.boolean(),
     finished: z.boolean(),
-    errors: z.boolean()
+    errors: z.boolean(),
+    /** A sound with questions, approvals and errors. A finished session is quiet either way. */
+    sound: z.boolean()
   }),
   behavior: z.object({
     runInTray: z.boolean(),
@@ -203,7 +205,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
-  notifications: { enabled: true, needsInput: true, finished: true, errors: true },
+  notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },

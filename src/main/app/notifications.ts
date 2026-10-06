@@ -20,6 +20,15 @@ export function notificationContent(summary: SessionSummary, kind: NotifyKind, t
 }
 
 /**
+ * Whether a session notification is shown, and whether it is silent. What needs the user
+ * may make a sound; a finished session never does, and with the sound switched off nothing does.
+ */
+export function notificationPlan(settings: AppSettings['notifications'], kind: NotifyKind): { show: boolean; silent: boolean } {
+  const wanted = kind === 'needs-input' ? settings.needsInput : kind === 'finished' ? settings.finished : settings.errors;
+  return { show: settings.enabled && wanted, silent: kind === 'finished' || !settings.sound };
+}
+
+/**
  * Desktop notifications for sessions the user isn't looking at. Clicking a
  * notification brings the window forward on that session.
  */
@@ -31,12 +40,11 @@ export function showSessionNotification(options: {
   visible: boolean;
   onClick: (sessionId: string) => void;
 }): void {
-  const n = options.settings.notifications;
-  if (options.visible || !n.enabled || !Notification.isSupported()) return;
-  if ((options.kind === 'needs-input' && !n.needsInput) || (options.kind === 'finished' && !n.finished) || (options.kind === 'error' && !n.errors)) return;
+  const plan = notificationPlan(options.settings.notifications, options.kind);
+  if (options.visible || !plan.show || !Notification.isSupported()) return;
   const notification = new Notification({
     ...notificationContent(options.summary, options.kind, options.text),
-    silent: options.kind === 'finished'
+    silent: plan.silent
   });
   notification.on('click', () => options.onClick(options.summary.id));
   notification.show();

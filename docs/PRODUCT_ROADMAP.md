@@ -19,6 +19,42 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.13 (2026-10-06)
+
+- **What fills the context** (`src/main/agent/contextBreakdown.ts`). The next request is
+  split into seven parts, estimated from the text with the estimator compaction uses:
+  system prompt, built-in tools, MCP tools (only the loaded ones, since only they are
+  sent), the user's messages, replies, tool results, reasoning. It reads the history as it
+  is sent, so output removed in 0.6.12 is not counted. `Session.contextReport` builds it
+  without keeping a prompt, asking a model or touching a message; `sessions:context` is its
+  channel.
+- **`/context`** prints the total against the window, a line a part, and `Estimated from
+  the text; the provider counted N.` It works in chats too. The context popover shows the
+  same parts as bars against the largest (`contextModel.ts`, `ContextUsage.tsx`), worked
+  out each time it opens.
+- **Needs you** (`needsYou`, `withoutThose`, `Sidebar.tsx`). Sessions with status
+  `needs-input` or `error`, not archived, newest first, above the other lists and listed
+  once. A code session there names its project. Hidden while a filter is on. Search and
+  the filter sit in the topmost header. The session that is open is left in its place: in
+  Ask mode its row would otherwise move up and back with every approval (seen in the
+  end-to-end screenshots).
+- **A rewind undoes a summary or a `/clear`.** The messages a summary replaced, or a
+  `/clear` cleared, carry the id of that summary or of the note `/clear` leaves
+  (`meta.compactedBy`, `markCompacted(…, by)`); when a rewind deletes it,
+  `restoreCompacted` brings them back into what is sent. Before, they stayed on screen and
+  out of the model's context, and after 0.6.12 the steps a summary kept would have been
+  sent without it.
+- **Local models are measured against what is asked for** (`ollama.ts`). The adapter
+  reported the trained length as the window and asked the server for at most 32,768, so
+  the ring and compaction ran up to four times late while the server dropped old messages
+  silently. The window is now `min(trained, 32,768)`, or the size set for the model under
+  Custom model IDs (the adapter ignored those before), and `num_ctx` is that window. The
+  description reads `32K of 128K context`. A model the server passes on to a hosted one
+  (`remote_host` on its tag, or a name ending in `cloud`) gets its whole window.
+- **A sound switch** (`notifications.sound`, default on; `notificationPlan`). Off makes
+  every notification silent, the sample one included; a finished session was and is silent.
+- **Catalog** regenerated: 212 providers, 7,557 models.
+
 ### 0.6.12 (2026-10-06)
 
 - **Old tool output goes first** (`src/main/agent/prune.ts`). When the context passes 80% of
@@ -42,7 +78,8 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   and a notice says so. From then on the turn is measured against the backup's context
   window and summarized by it. No switch in incognito chats, for agents of a group or
   sub-agents, when the backup is the failing model, can't be found, or can't call tools the
-  turn offers. Settings → Models has the choice and `None`.
+  turn offers. Settings → Models has the choice and `None`; with none chosen the list marks
+  no row at rest (`ModelListbox`), so the first model does not read as a choice.
 - **Fixed:** the plan card in the transcript showed the plan as offered under "Approved"
   after the user had edited it. It shows the agreed plan and "Approved with your changes"
   (`planShown`). Found in the end-to-end screenshot of 0.6.11.
@@ -260,6 +297,18 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Known weaknesses and technical debt
 
+- The parts of the context are estimates by characters (about 3.5 a token): they say which
+  part is large, not what a provider bills, and their sum differs from the provider's
+  count, which is shown beside them. Tool schemas are counted as written out in JSON, which
+  is not how every provider encodes them. Spend by day is still not shown.
+- A rewind brings back only what was replaced from 0.6.13 on: messages summarized or
+  cleared by an earlier version carry no `compactedBy` and stay out of the context.
+- Needs you lists by status only: a session whose turn finished with a question in plain
+  text is not there, since nothing marks it as waiting. A session that stopped with an
+  error stays there until it is continued, retried or archived, also across restarts; a
+  project whose only session is listed there has no header, and so no "new session in this
+  project" button, for as long as it is.
+
 - A session has one current plan: a second approved plan replaces the first in the bar and
   in summaries, and there is no history of plans beyond the transcript. A plan is not saved
   as a file in the project. The bar's progress counts the session's tasks, which the agent
@@ -280,7 +329,7 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   slide runs off its edge. Sheets have no dates, number formats or charts. There is no
   table of contents, cover page or page-break control, and equations are plain text. The
   PDF uses the computer's own fonts.
-- `src/main/agent/session.ts` is 1,950 lines: turns, slash commands, compaction, the
+- `src/main/agent/session.ts` is 1,980 lines: turns, slash commands, compaction, the
   loop host, and now the mission controller and agent-group wiring. Split the loop host
   and the mission controller out before adding more.
 - The cutoff for removed tool output lives in memory: a restarted session sends old output
@@ -320,11 +369,11 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   package exists on PyPI, but it has not been run here (no Ghidra on the dev machine).
 - The preview protocol reads a file whole, so media over 64 MB is not shown and video
   can't be seeked without loading it all. Text previews don't refresh when a file changes.
-- The local-model adapter asks its server for at most 32,768 tokens of context
-  (`DEFAULT_NUM_CTX` in `ollama.ts`) but measures a session against the model's full window,
-  so a long session is cut short by the server before Graft summarizes it. Its window should
-  be the one requested, with a way to raise it; hosted models served through the same
-  program should not be capped at all. Not changed here: nothing was running to test it on.
+- The local-model adapter's context handling (0.6.13) is checked against a recorded
+  server, not a live one: nothing was running here. A model is taken for hosted when its
+  tag carries `remote_host` or its name ends in `cloud`; a size set for a model above what
+  the computer can hold makes the server slow or fail to load it, and Graft does not
+  warn about that.
 - Context sizes for a model on an unknown gateway are estimates from other providers. A
   server that allows less is found out by a refused request, not before.
 - Newer spreadsheet functions are stored with their prefix from a list (`NEWER` in
@@ -353,7 +402,7 @@ praise and complain about (October 2026).
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
 | A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | Open; small. Graft notifies but has no sound |
 | Comments on a diff that go back to the agent | Cursor and Codex review | Open |
-| Where the context and the money went, by category | Claude Code `/context` and `/cost` | Open |
+| Where the context and the money went, by category | Claude Code `/context` and `/cost` | The context half shipped in 0.6.13 as `/context` and the popover; spend by day is open |
 | A side question that doesn't derail the turn | Claude Code `/btw` | Open |
 | Watch a pull request's CI and fix what fails | Claude Code desktop, Codex | Open |
 | Sandbox by default instead of prompts | Codex (workspace-write sandbox, asks only to leave it) | Graft's container sandbox is opt-in; default-on is open |
@@ -378,20 +427,18 @@ round. What exists now and what does not:
 
 ## Next, in order
 
-Five rounds are designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
-planned task by task, one plan a round, in `docs/superpowers/plans/`. The first, chat
-documents, shipped as 0.6.9, research as 0.6.10, plans that last as 0.6.11 and long sessions
-as 0.6.12. The last:
+The five rounds designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
+planned task by task in `docs/superpowers/plans/` are done: chat documents (0.6.9),
+research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention and context
+(0.6.13). What comes next:
 
-5. 0.6.13, `2026-10-05-attention-and-context.md`: "Needs you" in the sidebar, what fills
-   the context, a sound switch.
-
-After those:
-
-6. A worktree per agent that writes, merged back by the main agent: parallel
+1. Split the loop host and the mission controller out of `session.ts` (1,980 lines): the
+   last three rounds each added to it.
+2. A worktree per agent that writes, merged back by the main agent: parallel
    implementers, then best-of-N.
-7. Split the loop host and the mission controller out of `session.ts`.
-8. Diagnostics after edits (LSP), starting with TypeScript.
-9. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation
+3. Diagnostics after edits (LSP), starting with TypeScript.
+4. Keep the cutoff for removed tool output across restarts; a backup model for agents of a
+   group; spend by day.
+5. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation
    and @-mentioning resources.
-10. Diagrams and equations in replies; reading PDFs from the web; usage by day.
+6. Diagrams and equations in replies; reading PDFs from the web.

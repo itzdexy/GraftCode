@@ -616,6 +616,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { ok: true as const };
     },
     'sessions:systemPrompt': async ({ id }) => (await ctx.sessions()).promptPreview(id),
+    'sessions:context': async ({ id }) => (await ctx.sessions()).contextReport(id),
     'sessions:shell': async ({ id, command }) => {
       (await ctx.sessions()).runShell(id, command);
       return { ok: true as const };
@@ -1006,9 +1007,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       }));
       return { ok: true as const };
     },
-    'notifications:test': () => {
+    'notifications:test': async () => {
       if (!Notification.isSupported()) return { shown: false };
-      new Notification({ title: 'Graft', body: 'Notifications are on. Sessions that need you or finish in the background show up like this.' }).show();
+      // The sample sounds like the real thing: silent when the sound is switched off.
+      const silent = !(await ctx.services()).settings.get().notifications.sound;
+      new Notification({ title: 'Graft', body: 'Notifications are on. Sessions that need you or finish in the background show up like this.', silent }).show();
       return { shown: true };
     },
     'data:export': async () => {

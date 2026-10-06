@@ -24,6 +24,13 @@ export function NotificationsSection() {
         <SwitchRow label="When a session needs your input" description="A permission request or a question." checked={n.needsInput} disabled={!n.enabled} onChange={(needsInput) => saveSettings({ notifications: { needsInput } })} />
         <SwitchRow label="When a session finishes" checked={n.finished} disabled={!n.enabled} onChange={(finished) => saveSettings({ notifications: { finished } })} />
         <SwitchRow label="When a session stops with an error" checked={n.errors} disabled={!n.enabled} onChange={(errors) => saveSettings({ notifications: { errors } })} />
+        <SwitchRow
+          label="Play a sound"
+          description="For questions, approvals and errors. A finished session stays quiet."
+          checked={n.sound}
+          disabled={!n.enabled}
+          onChange={(sound) => saveSettings({ notifications: { sound } })}
+        />
         <SettingRow
           label="Test"
           description="Shows a sample notification now."

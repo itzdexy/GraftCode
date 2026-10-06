@@ -9,7 +9,8 @@ import { SessionMenuItems } from './SessionMenu';
 import { SessionStatusIcon } from './SessionStatus';
 
 /** One sidebar session row: status bullet, title, hover "⋮" menu, inline rename. */
-export function SessionRow({ session, active }: { session: SessionSummary; active: boolean }) {
+/** A session in the sidebar. `detail` follows the title, faint: the project, where the row is not under its project. */
+export function SessionRow({ session, active, detail }: { session: SessionSummary; active: boolean; detail?: string | null }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(session.title);
@@ -80,6 +81,7 @@ export function SessionRow({ session, active }: { session: SessionSummary; activ
         >
           <SessionStatusIcon session={session} />
           <span className="min-w-0 flex-1 truncate">{session.title}</span>
+          {detail ? <span className="max-w-[45%] shrink-0 truncate text-sm text-fg-faint">{detail}</span> : null}
           {session.pinned ? <Pin className="size-12 shrink-0 text-icon-muted group-hover:hidden" aria-label="Pinned" /> : null}
         </button>
       )}

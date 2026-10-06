@@ -194,7 +194,10 @@ export function ModelsSection() {
 
       <AgentsSettings models={models} />
 
-      <Group title="Custom model IDs" description="Add models a provider doesn't list, such as fine-tunes or models on a local server.">
+      <Group
+        title="Custom model IDs"
+        description="Add models a provider doesn't list, such as fine-tunes. For a model Ollama already lists, an entry with its name and a context window sets how much context Graft asks Ollama to hold (32K otherwise)."
+      >
         {providers.length === 0 ? <p className="px-14 py-12 text-base text-fg-muted">Add a provider first.</p> : null}
         {providers.map((p) => (
           <CustomModels key={p.id} provider={p} />

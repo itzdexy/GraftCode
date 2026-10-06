@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Ring } from '../../components/ContextRing';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover';
 import { Tooltip } from '../../components/Tooltip';
-import type { SessionUsage } from '@shared/schemas/sessions';
+import type { ContextReport, SessionUsage } from '@shared/schemas/sessions';
 import { formatTokenCount } from '../../lib/format';
+import { partBars } from './contextModel';
 
 interface ContextUsageProps {
   used: number;
@@ -13,6 +15,8 @@ interface ContextUsageProps {
   compactDisabled?: boolean;
   /** Tokens and spend so far, shown in the details. */
   session?: SessionUsage;
+  /** Works out what fills the context; when given, the details show it part by part. */
+  loadParts?: () => Promise<ContextReport>;
 }
 
 /**
@@ -48,8 +52,65 @@ export function spendText(usage: SessionUsage): { tokens: string; cost: string }
   };
 }
 
+/**
+ * The parts of the context, as bars. It is mounted when the popover opens, so the parts are
+ * worked out again each time: they change with every step of a turn.
+ */
+function WhatFillsIt({ load }: { load: () => Promise<ContextReport> }) {
+  const [state, setState] = useState<{ status: 'loading' | 'failed' } | { status: 'ready'; report: ContextReport }>({ status: 'loading' });
+  // The loader is a new function on every render of the session; only the one at opening is used.
+  const loader = useRef(load);
+  useEffect(() => {
+    let shown = true;
+    loader.current().then(
+      (report) => {
+        if (shown) setState({ status: 'ready', report });
+      },
+      () => {
+        if (shown) setState({ status: 'failed' });
+      }
+    );
+    return () => {
+      shown = false;
+    };
+  }, []);
+  return (
+    <>
+      <p className="mt-12 text-base font-medium text-fg-strong">What fills it</p>
+      {state.status === 'loading' ? (
+        <p role="status" className="mt-4 text-sm text-fg-muted">
+          Working it out…
+        </p>
+      ) : null}
+      {state.status === 'failed' ? (
+        <p role="alert" className="mt-4 text-sm text-fg-muted">
+          Couldn't work it out.
+        </p>
+      ) : null}
+      {state.status === 'ready' ? (
+        <>
+          <div className="mt-6 flex flex-col gap-6">
+            {partBars(state.report.parts).map((bar) => (
+              <div key={bar.id} role="img" aria-label={`${bar.label}: ${bar.tokens} tokens`}>
+                <div className="flex items-baseline justify-between gap-8 text-sm">
+                  <span className="min-w-0 truncate text-fg-secondary">{bar.label}</span>
+                  <span className="shrink-0 text-fg-muted tabular-nums">{bar.tokens}</span>
+                </div>
+                <div className="mt-2 h-4 overflow-hidden rounded-full bg-control">
+                  <div className="h-full rounded-full bg-blue" style={{ width: `${String(bar.share * 100)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-6 text-sm text-fg-muted">Estimated from the text.</p>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** Circular context-window usage indicator for the composer row. */
-export function ContextUsage({ used, limit, onCompact, compactDisabled = false, session }: ContextUsageProps) {
+export function ContextUsage({ used, limit, onCompact, compactDisabled = false, session, loadParts }: ContextUsageProps) {
   const fraction = limit > 0 ? used / limit : 0;
   const text = usageText(used, limit);
   const spend = session ? spendText(session) : null;
@@ -80,6 +141,7 @@ export function ContextUsage({ used, limit, onCompact, compactDisabled = false, 
         <div className="mt-8 h-4 overflow-hidden rounded-full bg-control" aria-hidden="true">
           <div className="h-full rounded-full bg-blue" style={{ width: `${Math.min(100, Math.round(fraction * 100))}%` }} />
         </div>
+        {loadParts ? <WhatFillsIt load={loadParts} /> : null}
         {spend ? (
           <>
             <p className="mt-12 text-base font-medium text-fg-strong">This session</p>
@@ -88,8 +150,8 @@ export function ContextUsage({ used, limit, onCompact, compactDisabled = false, 
           </>
         ) : null}
         <p className="mt-10 text-sm text-fg-muted">
-          Compacting summarizes the conversation so far and keeps the task, decisions and files in view. Graft also compacts
-          automatically near the limit.
+          Compacting summarizes the conversation so far and keeps the task, decisions, files and latest steps in view. Near the
+          limit Graft makes room itself: old tool output goes first.
         </p>
         <Button size="sm" variant="secondary" className="mt-10" onClick={onCompact} disabled={compactDisabled}>
           Compact now

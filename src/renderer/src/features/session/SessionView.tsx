@@ -189,6 +189,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
                     limit={contextLimit(summary.usage.contextLimit, model)}
                     session={summary.usage}
                     onCompact={() => compact(summary.id)}
+                    loadParts={() => invoke('sessions:context', { id: summary.id })}
                     compactDisabled={busy || view.messages.length === 0}
                   />
                 </>

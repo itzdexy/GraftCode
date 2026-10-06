@@ -12,7 +12,7 @@ import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { newSessionIn } from '../home/codeContext';
 import { FilterPopover } from './FilterPopover';
-import { groupByProject, visibleSessions } from './sessionLists';
+import { groupByProject, needsYou, visibleSessions, withoutThose } from './sessionLists';
 import { SessionRow } from './SessionRow';
 import { SidebarFooter } from './SidebarFooter';
 import { SidebarResizer } from './SidebarResizer';
@@ -74,15 +74,42 @@ function SearchButton() {
   );
 }
 
-function ChatList({ sessions, activeId }: { sessions: SessionSummary[]; activeId: string | null }) {
+/** Search and the filter, in the topmost header of the lists. */
+function ListControls({ kind }: { kind: 'chat' | 'code' }) {
+  return (
+    <>
+      <SearchButton />
+      <FilterPopover kind={kind} />
+    </>
+  );
+}
+
+/**
+ * What waits for the user, above everything else: sessions with a question or an approval
+ * open, or stopped with an error. A code session says which project it is in, since it is
+ * not listed under it here.
+ */
+function NeedsYouList({ sessions, kind, activeId }: { sessions: SessionSummary[]; kind: 'chat' | 'code'; activeId: string | null }) {
+  return (
+    <section aria-label="Needs you">
+      <ListHeader label="Needs you">
+        <ListControls kind={kind} />
+      </ListHeader>
+      <ul className="flex flex-col">
+        {sessions.map((s) => (
+          <SessionRow key={s.id} session={s} active={s.id === activeId} detail={kind === 'code' ? s.projectName : null} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ChatList({ sessions, activeId, controls }: { sessions: SessionSummary[]; activeId: string | null; controls: boolean }) {
   const expanded = useUi((s) => s.chatListExpanded);
   const shown = expanded ? sessions : sessions.slice(0, CHAT_LIST_LIMIT);
   return (
-    <section aria-label="Chats and tasks" className="mt-24">
-      <ListHeader label="Chats and tasks">
-        <SearchButton />
-        <FilterPopover kind="chat" />
-      </ListHeader>
+    <section aria-label="Chats and tasks">
+      <ListHeader label="Chats and tasks">{controls ? <ListControls kind="chat" /> : null}</ListHeader>
       {sessions.length === 0 ? <EmptyList text="No chats here yet." /> : null}
       <ul className="flex flex-col">
         {shown.map((s) => (
@@ -102,21 +129,18 @@ function ChatList({ sessions, activeId }: { sessions: SessionSummary[]; activeId
   );
 }
 
-function CodeList({ sessions, activeId }: { sessions: SessionSummary[]; activeId: string | null }) {
+function CodeList({ sessions, activeId, controls }: { sessions: SessionSummary[]; activeId: string | null; controls: boolean }) {
   const groups = useMemo(() => groupByProject(sessions), [sessions]);
   if (groups.length === 0) {
     return (
-      <section aria-label="Sessions" className="mt-24">
-        <ListHeader label="Sessions">
-          <SearchButton />
-          <FilterPopover kind="code" />
-        </ListHeader>
+      <section aria-label="Sessions">
+        <ListHeader label="Sessions">{controls ? <ListControls kind="code" /> : null}</ListHeader>
         <EmptyList text="No sessions here yet." />
       </section>
     );
   }
   return (
-    <div className="mt-24 flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
       {groups.map((group, i) => (
         <section key={group.key} aria-label={group.name}>
           <ListHeader label={group.name} detail={group.detail}>
@@ -131,12 +155,7 @@ function CodeList({ sessions, activeId }: { sessions: SessionSummary[]; activeId
                 <Plus className="size-14" />
               </IconButton>
             ) : null}
-            {i === 0 ? (
-              <>
-                <SearchButton />
-                <FilterPopover kind="code" />
-              </>
-            ) : null}
+            {i === 0 && controls ? <ListControls kind="code" /> : null}
           </ListHeader>
           <ul className="flex flex-col">
             {group.sessions.map((s) => (
@@ -163,6 +182,9 @@ export function Sidebar() {
   const now = useNow(60_000);
   const sessions = useMemo(() => visibleSessions(Object.values(summaries), mode, filter, now), [summaries, mode, filter, now]);
   const activeId = route.name === 'session' ? route.id : null;
+  // What waits for the user elsewhere is listed once, at the top; the lists below go without it.
+  const needing = useMemo(() => needsYou(Object.values(summaries), mode, filter, activeId), [summaries, mode, filter, activeId]);
+  const rest = useMemo(() => withoutThose(sessions, needing), [sessions, needing]);
 
   const moreOpen = useUi((s) => s.moreOpen);
   const entry = (id: 'projects' | 'artifacts' | 'sites' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
@@ -220,11 +242,15 @@ export function Sidebar() {
             : null}
         </ul>
         {loaded ? (
-          mode === 'chat' ? (
-            <ChatList sessions={sessions} activeId={activeId} />
-          ) : (
-            <CodeList sessions={sessions} activeId={activeId} />
-          )
+          <div className="mt-24 flex flex-col gap-8">
+            {needing.length > 0 ? <NeedsYouList sessions={needing} kind={mode} activeId={activeId} /> : null}
+            {/* With every session waiting, there is no list below to call empty. */}
+            {needing.length > 0 && rest.length === 0 ? null : mode === 'chat' ? (
+              <ChatList sessions={rest} activeId={activeId} controls={needing.length === 0} />
+            ) : (
+              <CodeList sessions={rest} activeId={activeId} controls={needing.length === 0} />
+            )}
+          </div>
         ) : null}
       </nav>
       <SidebarFooter />

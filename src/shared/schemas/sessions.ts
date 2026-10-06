@@ -21,6 +21,26 @@ export const SessionUsageSchema = z.object({
 });
 export type SessionUsage = z.infer<typeof SessionUsageSchema>;
 
+/** One part of what a request holds, with its estimated size. */
+export const ContextPartSchema = z.object({
+  id: z.enum(['system', 'tools', 'mcp', 'user', 'replies', 'results', 'reasoning']),
+  label: z.string(),
+  tokens: z.number().int().nonnegative()
+});
+export type ContextPart = z.infer<typeof ContextPartSchema>;
+
+/**
+ * What a session's next request would hold: the parts (estimated from the text, largest
+ * first), the provider's own count of the last request when there is one, and the
+ * model's context window (0 when unknown).
+ */
+export const ContextReportSchema = z.object({
+  parts: z.array(ContextPartSchema),
+  measured: z.number().int().nonnegative().nullable(),
+  limit: z.number().int().nonnegative()
+});
+export type ContextReport = z.infer<typeof ContextReportSchema>;
+
 export const ErrorInfoSchema = z.object({ code: z.string(), message: z.string() });
 export type ErrorInfo = z.infer<typeof ErrorInfoSchema>;
 

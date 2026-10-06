@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { dataHandling, isLocalUrl, isPrivateAddress, isPrivateIp } from '../../src/shared/privacy';
 import type { SessionSummary } from '../../src/shared/schemas/sessions';
 import { EMPTY_SESSION_USAGE } from '../../src/main/db/sessionsRepo';
-import { notificationContent } from '../../src/main/app/notifications';
+import { notificationContent, notificationPlan } from '../../src/main/app/notifications';
+import { AppSettingsSchema, DEFAULT_APP_SETTINGS } from '../../src/shared/schemas/appSettings';
 
 describe('where data goes', () => {
   it('classifies providers by kind and endpoint', () => {
@@ -52,6 +53,22 @@ describe('where data goes', () => {
       body: 'Your results look normal.'
     });
     expect(notificationContent({ ...base, incognito: true }, 'finished', 'Your results look normal.')).toEqual({ title: 'Finished · Incognito chat', body: '' });
+  });
+
+  it('is silent for a finished session, and for everything when the sound is off', () => {
+    const on = DEFAULT_APP_SETTINGS.notifications;
+    expect(on.sound).toBe(true);
+    expect(notificationPlan(on, 'needs-input')).toEqual({ show: true, silent: false });
+    expect(notificationPlan(on, 'error')).toEqual({ show: true, silent: false });
+    expect(notificationPlan(on, 'finished')).toEqual({ show: true, silent: true });
+    expect(notificationPlan({ ...on, sound: false }, 'needs-input')).toEqual({ show: true, silent: true });
+    expect(notificationPlan({ ...on, sound: false }, 'error')).toEqual({ show: true, silent: true });
+    expect(notificationPlan({ ...on, enabled: false }, 'error').show).toBe(false);
+    expect(notificationPlan({ ...on, needsInput: false }, 'needs-input').show).toBe(false);
+    expect(notificationPlan({ ...on, finished: false }, 'finished').show).toBe(false);
+    expect(notificationPlan({ ...on, errors: false }, 'error').show).toBe(false);
+    // An install from before the switch keeps its choices and gets the sound on.
+    expect(AppSettingsSchema.shape.notifications.parse({ ...on, enabled: true, needsInput: false, finished: true, errors: true })).toMatchObject({ needsInput: false, sound: true });
   });
 });
 

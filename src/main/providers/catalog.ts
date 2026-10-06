@@ -69,11 +69,14 @@ export function describeCapabilities(info: {
   contextWindow: number;
   /** Nothing said how large the model is: the size is the one assumed for its kind of server. */
   assumed?: boolean;
+  /** What the model itself allows, when it is run with less (a local server asked for a smaller context). */
+  of?: number;
   supportsVision: boolean;
   effort: EffortSupport | null;
   supportsTools: boolean;
 }): string {
-  const parts = [`${formatTokens(info.contextWindow)} context${info.assumed ? ' (assumed)' : ''}`];
+  const ofWhole = info.of !== undefined && info.of > info.contextWindow ? ` of ${formatTokens(info.of)}` : '';
+  const parts = [`${formatTokens(info.contextWindow)}${ofWhole} context${info.assumed ? ' (assumed)' : ''}`];
   if (info.effort) parts.push(info.effort.levels.includes('max') ? 'deep reasoning' : 'reasoning');
   if (info.supportsVision) parts.push('vision');
   if (!info.supportsTools) parts.push('no tools');

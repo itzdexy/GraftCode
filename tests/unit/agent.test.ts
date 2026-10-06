@@ -15,6 +15,7 @@ import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
 import { fakeModel } from '../support/fakeProvider';
+import { testTool } from '../support/loopHarness';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
@@ -614,6 +615,69 @@ describe('compaction', () => {
     expect(JSON.stringify(next)).not.toContain('alpha 10');
   });
 
+  it('brings back what a summary replaced when a rewind takes the summary away', async () => {
+    const h = harness({
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }] },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'c.txt' } }] },
+        { text: 'Both read.' },
+        { text: 'They read two files.' },
+        { text: 'Here again.' }
+      ]
+    });
+    // More than the 10,000 tokens a summary leaves in place for this model, so the first read is summarized and the rest stays.
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 400));
+    writeFile(h.projectDir, 'c.txt', 'gamma marker\n');
+    h.session.send('read both');
+    await h.session.idle();
+    h.session.send('/compact');
+    await h.session.idle();
+    const stored = h.store.listMessages('session-1');
+    const summary = stored.find((m) => m.meta.kind === 'compaction-summary');
+    if (!summary) throw new Error('no summary');
+    const replaced = stored.filter((m) => m.meta.compacted);
+    expect(replaced).toHaveLength(3);
+    expect(replaced.every((m) => m.meta.compactedBy === summary.id)).toBe(true);
+
+    // Rewind to the summary: it goes, and what it stood for is the conversation again.
+    h.session.truncateFrom(summary.seq);
+    expect(h.store.listMessages('session-1').some((m) => m.meta.compacted || m.meta.compactedBy !== undefined)).toBe(false);
+    h.session.send('and now?');
+    await h.session.idle();
+    const sent = JSON.stringify(h.provider.requests.at(-1)!.messages);
+    expect(sent).toContain('alpha 3');
+    expect(sent).toContain('gamma marker');
+    expect(sent).not.toContain('This session was compacted');
+    expect(texts(h).at(-1)).toBe('assistant:Here again.');
+  });
+
+  it('brings back the conversation when a rewind goes behind a /clear, and only then', async () => {
+    const h = harness({ script: [{ text: 'First answer.' }, { text: 'Second answer.' }, { text: 'Third answer.' }, { text: 'Fourth answer.' }] });
+    h.session.send('first question');
+    await h.session.idle();
+    h.session.send('/clear');
+    await h.session.idle();
+    h.session.send('second question');
+    await h.session.idle();
+    // A rewind that stays after the /clear leaves what it cleared alone.
+    const second = h.store.listMessages('session-1').find((m) => JSON.stringify(m.content).includes('second question'));
+    if (!second) throw new Error('no second question');
+    h.session.truncateFrom(second.seq);
+    h.session.send('second question, again');
+    await h.session.idle();
+    expect(JSON.stringify(h.provider.requests.at(-1)!.messages)).not.toContain('first question');
+
+    // A rewind to before the /clear takes the clearing with it.
+    const cleared = h.store.listMessages('session-1').find((m) => m.meta.cleared);
+    if (!cleared) throw new Error('no /clear note');
+    h.session.truncateFrom(cleared.seq);
+    h.session.send('what did I ask first?');
+    await h.session.idle();
+    const sent = JSON.stringify(h.provider.requests.at(-1)!.messages);
+    expect(sent).toContain('first question');
+    expect(sent).toContain('First answer.');
+  });
+
   it('leaves the output alone when automatic compaction is off, and removes nothing from a turn that comes after a rewind', async () => {
     const off = harness({
       model: { contextWindow: 20_000 },
@@ -1204,6 +1268,58 @@ describe('agent tools that involve the user', () => {
 });
 
 describe('commands, memory and history', () => {
+  it('reports what the next request would hold without sending anything or changing the session', async () => {
+    const h = harness({
+      model: { contextWindow: 20_000 },
+      mcpTools: Array.from({ length: 12 }, (_, i) => ({
+        ...testTool(`mcp__crm__record_${String(i)}`, { safe: true }),
+        description: 'It works on the connected service. '.repeat(20),
+        mcp: { server: 'crm', tool: `record_${String(i)}`, readOnly: true, destructive: false }
+      })),
+      script: [{ text: 'Hello there!', usage: { inputTokens: 1000, outputTokens: 50 } }]
+    });
+    // Before anything was sent: the prompt and the tools are already known, and nothing was measured.
+    const before = await h.session.contextReport();
+    expect(before).toMatchObject({ measured: null, limit: 20_000 });
+    expect(before.parts.map((p) => p.id)).toEqual(expect.arrayContaining(['system', 'tools']));
+    expect(before.parts.some((p) => p.id === 'user' || p.id === 'replies')).toBe(false);
+    expect(h.provider.requests).toHaveLength(0);
+
+    h.session.send('hi');
+    await h.session.idle();
+    const stored = JSON.stringify(h.store.listMessages('session-1'));
+    const report = await h.session.contextReport();
+    expect(report).toMatchObject({ measured: 1050, limit: 20_000 });
+    expect(report.parts.map((p) => p.id)).toEqual(expect.arrayContaining(['system', 'tools', 'user', 'replies']));
+    // The twelve MCP tools wait to be loaded (they weigh more than a tenth of this window), so none is counted.
+    expect(report.parts.some((p) => p.id === 'mcp')).toBe(false);
+    // Largest first, and what the estimate says is what the request held.
+    expect(report.parts.map((p) => p.tokens)).toEqual([...report.parts.map((p) => p.tokens)].sort((a, b) => b - a));
+    expect(report.parts.find((p) => p.id === 'system')?.tokens).toBe(Math.ceil(h.provider.requests[0]!.system.length / 3.5));
+    expect(h.provider.requests).toHaveLength(1);
+    expect(JSON.stringify(h.store.listMessages('session-1'))).toBe(stored);
+  });
+
+  it('/context prints what fills the window, without asking the model', async () => {
+    const h = harness({ script: [{ text: 'Hello there!', usage: { inputTokens: 1000, outputTokens: 50 } }] });
+    h.session.send('hi');
+    await h.session.idle();
+    h.session.send('/context');
+    await h.session.idle();
+    const printed = texts(h).at(-1) ?? '';
+    expect(printed).toMatch(/^assistant:Context: about [\d,]+ of 100,000 tokens \(\d+%\)\.\n- /);
+    expect(printed).toMatch(/- System prompt: [\d,]+/);
+    expect(printed).toMatch(/- Built-in tools: [\d,]+/);
+    // The source of the numbers is a paragraph of its own, not the tail of the last list item.
+    expect(printed.endsWith('\n\nEstimated from the text; the provider counted 1,050.')).toBe(true);
+    expect(h.provider.requests).toHaveLength(1);
+    // What /context printed is for the user: it is not counted as part of the conversation.
+    expect((await h.session.contextReport()).parts.find((p) => p.id === 'replies')?.tokens).toBe(Math.ceil('Hello there!'.length / 3.5));
+    const { listCommands } = await import('../../src/main/agent/slashCommands');
+    const names = listCommands(h.home, null).map((c) => c.name);
+    expect(names[names.indexOf('cost') + 1]).toBe('context');
+  });
+
   it('marks where /clear happened', async () => {
     const h = harness({ script: [{ text: 'hello' }] });
     h.session.send('hi');

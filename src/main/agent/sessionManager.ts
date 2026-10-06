@@ -8,7 +8,7 @@ import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from
 import type { MissionStart } from '@shared/schemas/missions';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { RewindMode, RewindPreview, RewindResult } from '@shared/schemas/rewind';
-import type { SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
+import type { ContextReport, SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
 import type { CreateSessionInput } from '@shared/ipc/contracts';
 import { MemorySessionStore } from '../db/memorySessionStore';
 import type { ProjectsRepo } from '../db/projectsRepo';
@@ -580,6 +580,11 @@ export class SessionManager {
   /** The system prompt and tools this session's next turn sends. */
   promptPreview(id: string): Promise<{ system: string; tools: string[]; model: string }> {
     return this.get(id).promptPreview();
+  }
+
+  /** What fills the context of this session's next request. */
+  contextReport(id: string): Promise<ContextReport> {
+    return this.get(id).contextReport();
   }
 
   removeQueued(id: string, queueId: string): void {

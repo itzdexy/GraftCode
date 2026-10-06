@@ -99,3 +99,24 @@ export function homeSessions(all: SessionSummary[], kind: SessionKind, limit: nu
 export function filterActive(filter: SessionFilter): boolean {
   return filter.status !== 'all' || filter.project !== null || filter.date !== 'any';
 }
+
+/**
+ * Sessions that wait for the user: for an answer or an approval, or stopped
+ * with an error. Not archived, newest first. Empty while a filter is on, so
+ * a filtered list shows only what was asked for. The session that is open
+ * (`openId`) is left where it is: what it asks is on screen already, and a
+ * row that moved up and back with every approval would only be noise.
+ */
+export function needsYou(all: SessionSummary[], kind: SessionKind, filter: SessionFilter, openId: string | null = null): SessionSummary[] {
+  if (filterActive(filter)) return [];
+  return all
+    .filter((s) => s.kind === kind && !s.archived && s.id !== openId && (s.status === 'needs-input' || s.status === 'error'))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** `sessions` without the ones listed under Needs you, so nothing is shown twice. */
+export function withoutThose(sessions: SessionSummary[], listed: SessionSummary[]): SessionSummary[] {
+  if (listed.length === 0) return sessions;
+  const ids = new Set(listed.map((s) => s.id));
+  return sessions.filter((s) => !ids.has(s.id));
+}

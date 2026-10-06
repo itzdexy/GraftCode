@@ -213,6 +213,11 @@ test('data: export and clear history; with the tray on, closing the window keeps
   await expect(w.getByText('No sessions here yet.')).toBeVisible();
 
   await openSettings(w, 'Notifications');
+  // The sound is on until it is switched off; a finished session is quiet either way.
+  const sound = w.getByRole('switch', { name: 'Play a sound' });
+  await expect(sound).toHaveAttribute('aria-checked', 'true');
+  await sound.click();
+  await expect(sound).toHaveAttribute('aria-checked', 'false');
   await w.getByRole('switch', { name: 'Keep running in the tray' }).click();
   await expect(w.getByRole('switch', { name: 'Keep running in the tray' })).toHaveAttribute('aria-checked', 'true');
   await graft.app.evaluate(({ BrowserWindow }) => {

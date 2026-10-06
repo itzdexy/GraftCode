@@ -42,7 +42,7 @@ import { MISSION_LIMITS, MissionStartSchema } from '../schemas/missions';
 import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
-import { SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
+import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
 import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
 
 /**
@@ -302,6 +302,8 @@ export const contracts = {
   'sessions:compact': channel(z.object({ id: IdSchema, instructions: z.string().max(4000) }), Ok),
   /** The system prompt and tool names the session's next turn sends (Session → View system prompt). */
   'sessions:systemPrompt': channel(z.object({ id: IdSchema }), z.object({ system: z.string(), tools: z.array(z.string()), model: z.string() })),
+  /** What fills the context of the session's next request, part by part (estimates). Sends nothing and changes nothing. */
+  'sessions:context': channel(z.object({ id: IdSchema }), ContextReportSchema),
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   /** "Send now": a queued message reaches the agent after its next tool step instead of after the turn. */
   'sessions:steer': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),

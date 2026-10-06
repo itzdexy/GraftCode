@@ -25,7 +25,7 @@ export const createProvider: ProviderFactory = (connection, record, catalog) => 
     case 'gemini':
       return new GeminiProvider(connection);
     case 'ollama':
-      return new OllamaProvider(connection);
+      return new OllamaProvider(connection, record.customModels);
     case 'openai':
     case 'openrouter':
     case 'openai-compatible':

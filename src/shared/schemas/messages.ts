@@ -126,6 +126,8 @@ export const MessageMetaSchema = z.object({
   kind: MessageKindSchema.optional(),
   /** Replaced by a compaction summary; kept for display, not sent to models. */
   compacted: z.boolean().optional(),
+  /** The message that stands for this one: a summary, or the note /clear left. A rewind that removes it brings this one back. */
+  compactedBy: z.string().optional(),
   /** On the message /clear leaves: nothing before it is current any more (see shared/plans.ts). */
   cleared: z.boolean().optional(),
   feedback: z.union([z.literal(-1), z.literal(0), z.literal(1)]).optional(),

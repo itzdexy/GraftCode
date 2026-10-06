@@ -10,7 +10,7 @@ import type { ModelInfo } from '@shared/schemas/models';
 import { currentPlan } from '@shared/plans';
 import type { Source } from '@shared/sources';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
-import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
+import type { ContextReport, QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
@@ -31,6 +31,7 @@ import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
+import { contextBreakdown, contextLines } from './contextBreakdown';
 import { checksSummary, runChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { modelOrder, toLlmHistory, withSentTimes } from './history';
@@ -327,9 +328,10 @@ export class AgentSession {
   }
 
   /** A message shown in the transcript but never sent to the model. */
-  private commandOutput(text: string, meta: Partial<MessageMeta> = {}): void {
+  private commandOutput(text: string, meta: Partial<MessageMeta> = {}): StoredMessage {
     const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text }], { kind: 'command-output', ...meta });
     this.emit({ type: 'message', message: stored });
+    return stored;
   }
 
   // ---- public controls ----------------------------------------------------
@@ -558,10 +560,15 @@ export class AgentSession {
   /**
    * Deletes the messages from `seq` on. The store gives their numbers out again, so a cutoff
    * measured against them is pulled back: the messages that take their place are new work.
+   * Messages that a deleted summary or /clear had replaced are sent again.
    */
   private deleteMessagesFrom(seq: number): StoredMessage[] {
     this.pruneBeforeSeq = Math.min(this.pruneBeforeSeq, seq);
-    return this.deps.store.deleteMessagesFrom(this.id, seq);
+    const removed = this.deps.store.deleteMessagesFrom(this.id, seq);
+    // A summary, or the note /clear left, went with them: what it stood for is the conversation again.
+    const stoodFor = removed.filter((m) => m.meta.kind === 'compaction-summary' || m.meta.cleared).map((m) => m.id);
+    if (stoodFor.length > 0) this.deps.store.restoreCompacted(this.id, stoodFor);
+    return removed;
   }
 
   /** Removes messages from `seq` on (conversation rewind / edit-and-resubmit). */
@@ -898,12 +905,13 @@ export class AgentSession {
     switch (slash.name) {
       case 'clear': {
         const ids = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted).map((m) => m.id);
-        this.deps.store.markCompacted(this.id, ids);
         this.pruneBeforeSeq = 0;
         this.files.clear();
         this.deps.store.updateSession(this.id, { todos: [] });
         this.emit({ type: 'todos', todos: [] });
-        this.commandOutput('Context cleared. Earlier messages stay visible but are no longer sent to the model.', { cleared: true });
+        const note = this.commandOutput('Context cleared. Earlier messages stay visible but are no longer sent to the model.', { cleared: true });
+        // The note stands for what it cleared: a rewind to before it brings the conversation back.
+        this.deps.store.markCompacted(this.id, ids, note.id);
         return null;
       }
       case 'compact':
@@ -915,6 +923,16 @@ export class AgentSession {
         this.commandOutput(
           `Tokens this session: ${u.totals.inputTokens.toLocaleString()} input, ${u.totals.outputTokens.toLocaleString()} output, ${u.totals.cacheReadTokens.toLocaleString()} cache reads, ${u.totals.cacheWriteTokens.toLocaleString()} cache writes${cost}. Context: ${u.contextTokens.toLocaleString()} of ${u.contextLimit.toLocaleString()}.`
         );
+        return null;
+      }
+      case 'context': {
+        try {
+          const lines = contextLines(await this.contextReport());
+          // The parts are a list; where the numbers come from is a paragraph of its own after it.
+          this.commandOutput(`${lines.slice(0, -1).join('\n')}\n\n${lines.at(-1) ?? ''}`);
+        } catch (error) {
+          this.commandOutput(`Couldn't work out the context: ${(error as Error).message}`);
+        }
         return null;
       }
       case 'help': {
@@ -1207,6 +1225,21 @@ export class AgentSession {
     const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
     if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
     return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
+  }
+
+  /**
+   * What the next request would hold, part by part. Like the preview it reads and builds,
+   * and keeps nothing: no prompt is stored, no model is asked, no message changes.
+   */
+  async contextReport(): Promise<ContextReport> {
+    const { system, tools } = await this.promptPreview();
+    const { model } = await this.resolveModel(new AbortController().signal);
+    const measured = this.summary.usage.contextTokens;
+    return {
+      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools), messages: this.history() }),
+      measured: measured > 0 ? measured : null,
+      limit: model.contextWindow
+    };
   }
 
   /**
@@ -1514,12 +1547,15 @@ export class AgentSession {
       privacy: this.privacy(),
       signal
     });
+    // The summary's id goes on what it replaces, so a rewind that removes the summary can bring those messages back.
+    const summaryId = randomUUID();
     this.deps.store.markCompacted(
       this.id,
-      messages.map((m) => m.id)
+      messages.map((m) => m.id),
+      summaryId
     );
     const text = summaryMessageText(summaryText, todos, this.files.touchedFiles(), { plan, keptRecent });
-    const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text }], { kind: 'compaction-summary' });
+    const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text }], { kind: 'compaction-summary' }, summaryId);
     this.files.clear();
     // The steps that stay are sent as they were, thinking included: a reply that called a tool is not valid without it for some models.
     if (!keptRecent) this.markThinkingStale();

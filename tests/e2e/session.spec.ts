@@ -264,3 +264,51 @@ test('a plan is edited before it is approved, and stays above the message box', 
   await expect(dialog.getByText('Say hello in Norwegian too')).toBeVisible();
   await shot(w, 'session-plan');
 });
+
+test('what fills the context is shown, and a session that waits is listed under Needs you', async () => {
+  const w = graft.window;
+  provider.script({ text: 'Hi.' }, { toolCalls: [{ name: 'Write', input: { file_path: 'x.txt', content: 'x' } }] });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('hello');
+  await composer.press('Enter');
+  await expect(w.getByText('Hi.', { exact: true })).toBeVisible();
+
+  // /context prints the parts and where the numbers come from, and asks no model.
+  const box = w.getByRole('combobox', { name: SESSION_BOX }).or(w.getByRole('textbox', { name: SESSION_BOX }));
+  await box.fill('/context');
+  await box.press('Enter');
+  await expect(w.getByText(/Context: about [\d,]+ of [\d,]+ tokens/)).toBeVisible();
+  await expect(w.getByText(/System prompt: [\d,]+/)).toBeVisible();
+  await expect(w.getByText(/Estimated from the text; the provider counted [\d,]+\./)).toBeVisible();
+  expect(provider.chatRequests()).toHaveLength(1);
+
+  // The same parts as bars, behind the context ring.
+  await w.getByRole('button', { name: /^Context:/ }).click();
+  await expect(w.getByText('What fills it')).toBeVisible();
+  await expect(w.getByRole('img', { name: /^System prompt: .* tokens$/ })).toBeVisible();
+  await expect(w.getByRole('img', { name: /^Built-in tools: .* tokens$/ })).toBeVisible();
+  await shot(w, 'session-context');
+  await w.keyboard.press('Escape');
+
+  // A session that waits for an approval stays where it is while it is open: its card is on screen.
+  const needsYou = w.getByRole('region', { name: 'Needs you' });
+  await expect(needsYou).toHaveCount(0);
+  await box.fill('write a file');
+  await box.press('Enter');
+  const card = w.getByRole('alertdialog');
+  await expect(card).toBeVisible();
+  await expect(needsYou).toHaveCount(0);
+
+  // Look elsewhere and it is at the top of the sidebar; open it from there, answer, and it is back in its place.
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
+  const waiting = needsYou.getByRole('button', { name: /Scripted title/ }).first();
+  await expect(waiting).toBeVisible();
+  await shot(w, 'session-needs-you');
+  await waiting.click();
+  await expect(card).toBeVisible();
+  await expect(needsYou).toHaveCount(0);
+  await card.getByRole('button', { name: /Allow once/ }).click();
+  await expect(w.getByText('Done.', { exact: true })).toBeVisible();
+  await expect(needsYou).toHaveCount(0);
+  await expect(w.getByRole('navigation', { name: 'Main' }).getByText('Scripted title', { exact: true })).toBeVisible();
+});

@@ -60,7 +60,7 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
   };
 
   return (
-    <div className={cn('flex flex-col overflow-hidden rounded-lg border border-border bg-surface', className)}>
+    <div className={cn('group flex flex-col overflow-hidden rounded-lg border border-border bg-surface', className)}>
       <div className="flex items-center gap-8 border-b border-border px-10">
         <Search className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
         <input
@@ -99,7 +99,9 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
               onMouseMove={() => setActive(i)}
               className={cn(
                 'flex min-h-[var(--g-menu-row-2line-height)] cursor-default items-center gap-8 rounded-md px-8 py-4',
-                i === activeIndex && 'bg-hover'
+                // The row the keys act on. At rest it is marked only when it is also the chosen one:
+                // with nothing chosen, a highlighted first row would read as a choice.
+                i === activeIndex && (selected ? 'bg-hover' : 'group-focus-within:bg-hover group-hover:bg-hover')
               )}
             >
               <div className="min-w-0 flex-1">

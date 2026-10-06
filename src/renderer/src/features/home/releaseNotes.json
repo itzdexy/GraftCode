@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.13",
+    "date": "2026-10-06",
+    "items": [
+      "Needs you: sessions that wait for an answer or an approval, or stopped with an error, are listed at the top of the sidebar. The session you have open stays in its place.",
+      "See what fills the context. Type /context, or click the context ring: the system prompt, tools, your messages, replies, tool results and reasoning, each with its size. They are estimates from the text, shown next to the provider's own count.",
+      "Notifications have a sound switch (Settings → Notifications). A finished session stays quiet either way.",
+      "A rewind to before a summary, or to before /clear, brings the earlier conversation back for the model. Before, those messages stayed on screen but were no longer sent.",
+      "Models on Ollama are measured against the context Graft asks Ollama for: 32K, or the size you set for the model in Settings → Models. Before, Graft counted against the size the model was trained for while Ollama kept only 32K and dropped older messages without saying so. Models that Ollama passes on to a hosted service get their whole window."
+    ]
+  },
+  {
     "version": "0.6.12",
     "date": "2026-10-06",
     "items": [

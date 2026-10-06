@@ -5,6 +5,7 @@ import type { SessionSummary } from '../../../src/shared/schemas/sessions';
 import type { SessionUsage } from '../../../src/shared/schemas/sessions';
 import { baseName, partOfDay, relativeTime, shortenPath } from '../../../src/renderer/src/lib/format';
 import { contextLimit, spendText, usageText } from '../../../src/renderer/src/features/composer/ContextUsage';
+import { partBars } from '../../../src/renderer/src/features/composer/contextModel';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
 import { fileGlyph } from '../../../src/renderer/src/features/session/fileCardModel';
 import {
@@ -12,7 +13,9 @@ import {
   groupByProject,
   homeSessions,
   matchesFilter,
-  visibleSessions
+  needsYou,
+  visibleSessions,
+  withoutThose
 } from '../../../src/renderer/src/features/shell/sessionLists';
 
 const NOW = Date.UTC(2026, 8, 30, 12, 0, 0);
@@ -72,6 +75,34 @@ describe('session lists', () => {
     const b = session({ id: 'b', archived: true });
     expect(visibleSessions([a, b], 'code', DEFAULT_FILTER, NOW).map((s) => s.id)).toEqual(['a']);
     expect(visibleSessions([a, b], 'code', { ...DEFAULT_FILTER, status: 'archived' }, NOW).map((s) => s.id)).toEqual(['b']);
+  });
+
+  it('lists what needs the user first, once, and not while a filter is on', () => {
+    const all = [
+      session({ id: 'ask', status: 'needs-input', updatedAt: NOW - 3000 }),
+      session({ id: 'err', status: 'error', updatedAt: NOW - 1000 }),
+      session({ id: 'run', status: 'running' }),
+      session({ id: 'unread', unread: true }),
+      session({ id: 'old', status: 'needs-input', archived: true }),
+      session({ id: 'chat', kind: 'chat', status: 'needs-input' })
+    ];
+    const needing = needsYou(all, 'code', DEFAULT_FILTER);
+    expect(needing.map((s) => s.id)).toEqual(['err', 'ask']);
+    expect(needsYou(all, 'chat', DEFAULT_FILTER).map((s) => s.id)).toEqual(['chat']);
+    expect(withoutThose(visibleSessions(all, 'code', DEFAULT_FILTER, NOW), needing).map((s) => s.id).sort()).toEqual(['run', 'unread']);
+    expect(needsYou(all, 'code', { ...DEFAULT_FILTER, status: 'archived' })).toEqual([]);
+    expect(needsYou(all, 'code', { ...DEFAULT_FILTER, status: 'running' })).toEqual([]);
+    // Newest first whatever is pinned: the order says what has waited least, not what the user keeps at hand.
+    const pinned = [session({ id: 'pinned', status: 'needs-input', pinned: true, updatedAt: NOW - 9000 }), session({ id: 'fresh', status: 'error', updatedAt: NOW - 10 })];
+    expect(needsYou(pinned, 'code', DEFAULT_FILTER).map((s) => s.id)).toEqual(['fresh', 'pinned']);
+    // The session that is open stays where it is: its question is on screen, and a row that
+    // jumped to the top and back with every approval would be all movement and no news.
+    expect(needsYou(all, 'code', DEFAULT_FILTER, 'ask').map((s) => s.id)).toEqual(['err']);
+    expect(needsYou(all, 'code', DEFAULT_FILTER, 'run').map((s) => s.id)).toEqual(['err', 'ask']);
+    expect(needsYou(all, 'code', DEFAULT_FILTER, null).map((s) => s.id)).toEqual(['err', 'ask']);
+    // Nothing waits: the lists below are returned as they are.
+    const calm = [session({ id: 'a' })];
+    expect(withoutThose(calm, [])).toBe(calm);
   });
 
   it('filters by attention, project and date', () => {
@@ -212,6 +243,16 @@ describe('context and spend', () => {
     // Until the model list has loaded, the recorded limit is all there is.
     expect(contextLimit(200_000, null)).toBe(200_000);
     expect(contextLimit(0, undefined)).toBe(0);
+  });
+
+  it('draws each part against the largest', () => {
+    expect(partBars([{ id: 'results', label: 'Tool results', tokens: 22_100 }, { id: 'system', label: 'System prompt', tokens: 5_525 }])).toEqual([
+      { id: 'results', label: 'Tool results', tokens: '22K', share: 1 },
+      { id: 'system', label: 'System prompt', tokens: '5.5K', share: 0.25 }
+    ]);
+    expect(partBars([])).toEqual([]);
+    // A part too small to round to a hundredth still shows a sliver, so no row looks empty.
+    expect(partBars([{ id: 'results', label: 'Tool results', tokens: 100_000 }, { id: 'user', label: 'Your messages', tokens: 12 }])[1]).toMatchObject({ tokens: '12', share: 0.01 });
   });
 
   it('summarizes tokens, the share read from cache, and cost', () => {
