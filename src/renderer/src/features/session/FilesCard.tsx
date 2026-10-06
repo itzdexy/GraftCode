@@ -1,20 +1,23 @@
-import { Download, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, Globe, Paperclip } from 'lucide-react';
+import { Download, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, Globe, Paperclip, Presentation } from 'lucide-react';
 import type { MadeFile } from '@shared/schemas/toolDisplay';
 import { canOpenChatFile } from '@shared/chatFileTypes';
 import { IconButton } from '../../components/Button';
 import { fileSize } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
 import { reportError, useToasts } from '../../stores/toasts';
+import { fileGlyph, type FileGlyph } from './fileCardModel';
 
 export { fileSize };
 
-function iconFor(file: MadeFile): typeof FileText {
-  if (file.mime.startsWith('image/')) return FileImage;
-  if (/csv|tab-separated/.test(file.mime)) return FileSpreadsheet;
-  if (file.mime === 'text/html') return Globe;
-  if (/json|javascript|python|xml|yaml|css/.test(file.mime) || /\.(ts|tsx|jsx|rs|go|java|c|cpp|cs|rb|php|sh|ps1|sql)$/i.test(file.name)) return FileCode2;
-  return FileText;
-}
+const ICONS: Record<FileGlyph, typeof FileText> = {
+  image: FileImage,
+  sheet: FileSpreadsheet,
+  slides: Presentation,
+  web: Globe,
+  code: FileCode2,
+  document: FileText,
+  text: FileText
+};
 
 async function save(sessionId: string, name: string): Promise<void> {
   try {
@@ -39,7 +42,7 @@ export function FilesCard({ sessionId, files }: { sessionId: string; files: Made
       </header>
       <ul className="flex flex-col py-2">
         {files.map((file) => {
-          const Icon = iconFor(file);
+          const Icon = ICONS[fileGlyph(file)];
           return (
             <li key={file.name} className="group flex h-32 items-center gap-8 px-12 text-md transition-ui hover:bg-hover">
               <Icon className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />

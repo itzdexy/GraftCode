@@ -133,6 +133,8 @@ describe('catalog helpers', () => {
     expect(formatTokens(1_000_000)).toBe('1M');
     expect(formatTokens(200_000)).toBe('200K');
     expect(formatTokens(131_072)).toBe('128K');
+    // A round decimal size is not a binary one: 128,000 is 125 x 1,024 and used to read "125K".
+    expect([128_000, 256_000, 512_000, 64_000, 32_768, 262_144, 8_192, 1_048_576].map(formatTokens)).toEqual(['128K', '256K', '512K', '64K', '32K', '256K', '8K', '1M']);
     const arranged = arrangeModels([
       fakeModel({ ref: { providerId: 'p', modelId: 'line-a-1' }, family: 'line-a', createdAt: 1 }),
       fakeModel({ ref: { providerId: 'p', modelId: 'line-a-2' }, family: 'line-a', createdAt: 2 }),

@@ -57,6 +57,7 @@ export interface SessionManagerDeps {
   computer: SessionDeps['computer'];
   /** Files chats make for download; deleted with their chat. */
   chatFiles: ChatFiles | null;
+  documents: SessionDeps['documents'];
   runCode: SessionDeps['runCode'];
   media: SessionDeps['media'];
   /** The Browser panel for the agent's Browser tool; absent where there is none. */
@@ -142,6 +143,7 @@ export class SessionManager {
       search: d.search,
       computer: d.computer,
       chatFiles: d.chatFiles,
+      documents: d.documents,
       runCode: d.runCode,
       media: d.media,
       ...(d.browser ? { browser: d.browser } : {}),

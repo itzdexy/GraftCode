@@ -10,6 +10,8 @@ import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
 import { disposeSandbox, runInSandbox } from './chat/codeSandbox';
+import { DocumentMaker } from './chat/documents';
+import { disposePrinter, printHtmlToPdf } from './chat/pdfPrinter';
 import { configureLogFile, log } from './app/log';
 import { createMainWindow, type MainWindowHandle } from './app/mainWindow';
 import { showSessionNotification } from './app/notifications';
@@ -328,6 +330,7 @@ async function sessions(): Promise<SessionManager> {
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     chatFiles: s.chatFiles,
+    documents: new DocumentMaker({ printPdf: printHtmlToPdf }),
     runCode: runInSandbox,
     media: s.media,
     emitEvent: (sessionId, event) => {
@@ -378,8 +381,9 @@ function openMainWindow(): void {
   win.on('closed', () => {
     mainWindow = null;
     browserPanel = null;
-    // The hidden code sandbox page must not keep the app open.
+    // The hidden code sandbox page and a print in flight must not keep the app open.
     disposeSandbox();
+    disposePrinter();
   });
 }
 

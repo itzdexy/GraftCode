@@ -43,6 +43,7 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     computer: null,
     chatFiles: null,
     runCode: null,
+    makeDocument: null,
     browser: null,
     media: null,
     mission: null,

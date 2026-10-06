@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { OpenAiChatProvider, mergeReasoningDetail, toChatMessages } from '../../src/main/providers/openaiChat';
+import { contextSize, OpenAiChatProvider, mergeReasoningDetail, smallerReplyBudget, toChatMessages } from '../../src/main/providers/openaiChat';
 import { catalogEffort, ProviderCatalog, type CatalogModel } from '../../src/main/providers/presets';
 import type { StreamEvent, StreamRequest } from '../../src/main/providers/types';
 import type { LlmMessage } from '../../src/shared/schemas/messages';
@@ -344,6 +344,162 @@ describe('catalog-backed OpenAI-style providers', () => {
     server.route('POST', '/v2/chat/completions', (_req, res) => json(res, 401, { error: { message: 'bad key' } }));
     const wrong = new OpenAiChatProvider({ id: 'b', kind: 'openai-compatible', preset: 'acme', apiKey: 'k', baseUrl: `${server.url}/v2` }, [], catalog);
     await expect(wrong.listModels()).rejects.toMatchObject({ code: 'auth' });
+  });
+
+  describe('how large a model is', () => {
+    /** A catalog whose providers answer at the fixture server, the way a real provider's entry names its real address. */
+    function catalogAt(providers: Array<{ id: string; api: string | null; models: object[] }>): ProviderCatalog {
+      const file = path.join(dir, `sizes-${String(Math.random()).slice(2)}.json`);
+      fs.writeFileSync(file, JSON.stringify({ providers: providers.map((p) => ({ name: p.id, kind: 'openai-compatible', env: [], doc: null, key: 'required', ...p })) }));
+      return new ProviderCatalog(file);
+    }
+
+    it('a custom endpoint at a known provider’s address gets that provider’s sizes (regression: every model there was 32K)', async () => {
+      // The server names its models and nothing else, as many do.
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'moonshotai/kimi-k3' }, { id: 'nvidia/nemotron-3-ultra' }] }));
+      const known = catalogAt([
+        { id: 'elsewhere', api: 'https://api.elsewhere.test/v1', models: [{ id: 'moonshotai/kimi-k3', n: 'Wrong', t: 1, c: 8000, o: 1000 }] },
+        {
+          id: 'nim',
+          api: `${server.url}/v1`,
+          models: [
+            { id: 'moonshotai/kimi-k3', n: 'Kimi K3', t: 1, v: 1, c: 1048576, o: 131072 },
+            { id: 'nvidia/nemotron-3-ultra', n: 'Nemotron 3 Ultra', t: 1, c: 1000000, o: 65536 }
+          ]
+        }
+      ]);
+      // Added by typing the address: the connection names no preset. A trailing slash and upper case don't matter.
+      const typed = `${server.url.replace('http://', 'HTTP://')}/v1/`;
+      const provider = new OpenAiChatProvider({ id: 'n', kind: 'openai-compatible', preset: null, apiKey: 'k', baseUrl: typed }, [], known);
+      const models = await provider.listModels();
+      expect(Object.fromEntries(models.map((m) => [m.ref.modelId, [m.contextWindow, m.maxOutputTokens]]))).toEqual({
+        'moonshotai/kimi-k3': [1048576, 131072],
+        'nvidia/nemotron-3-ultra': [1000000, 65536]
+      });
+      expect(models.find((m) => m.ref.modelId === 'moonshotai/kimi-k3')).toMatchObject({ label: 'Kimi K3', supportsVision: true });
+    });
+
+    it('believes what a server says about its own models, under the names servers use for it', async () => {
+      server.route('GET', '/v1/models', (_req, res) =>
+        json(res, 200, {
+          data: [
+            { id: 'a', context_window: 131072, max_completion_tokens: 32768 },
+            { id: 'b', context_length: 262144 },
+            { id: 'c', max_context_length: 128000 },
+            { id: 'd', max_model_len: 65536 },
+            { id: 'e', metadata: { context_length: 200000, max_tokens: 16000 } },
+            { id: 'f', meta: { n_ctx_train: 40960 } },
+            { id: 'g', limits: { max_input_tokens: 1000000, max_output_tokens: 64000 } },
+            { id: 'h', capabilities: { limits: { max_context_window_tokens: 400000, max_output_tokens: 128000 } } },
+            { id: 'i', context_size: '204800' },
+            // The server's own figure is for this server: it wins over the catalog's.
+            { id: 'acme-reasoner', context_length: 64000 }
+          ]
+        })
+      );
+      const provider = new OpenAiChatProvider({ id: 's', kind: 'openai-compatible', preset: 'acme', apiKey: 'k', baseUrl: `${server.url}/v1` }, [], catalog);
+      const models = await provider.listModels();
+      expect(Object.fromEntries(models.map((m) => [m.ref.modelId, m.contextWindow]))).toEqual({
+        a: 131072,
+        b: 262144,
+        c: 128000,
+        d: 65536,
+        e: 200000,
+        f: 40960,
+        g: 1000000,
+        h: 400000,
+        i: 204800,
+        'acme-reasoner': 64000
+      });
+      const output = Object.fromEntries(models.map((m) => [m.ref.modelId, m.maxOutputTokens]));
+      expect([output.a, output.e, output.g, output.h, output['acme-reasoner']]).toEqual([32768, 16000, 64000, 128000, 32000]);
+    });
+
+    it('knows what most providers give for a model of a name, whatever account or case it is listed under', () => {
+      const known = catalogAt([
+        { id: 'p1', api: 'https://p1.test/v1', models: [{ id: 'vendor/big-model', n: 'Big', t: 1, v: 1, c: 1000000, o: 64000 }, { id: 'small-model', n: 'Small', t: 1, c: 16000 }] },
+        { id: 'p2', api: 'https://p2.test/v1', models: [{ id: 'big-model', n: 'Big', t: 1, c: 1000000 }, { id: 'small-model', n: 'Small', t: 1, c: 8000 }] },
+        { id: 'p3', api: 'https://p3.test/v1', models: [{ id: 'Vendor/Big-Model', n: 'Big', t: 1, c: 262144 }] },
+        { id: 'p4', api: 'https://p4.test/v1', models: [{ id: 'big-model', n: 'Big', t: 1 }] }
+      ]);
+      expect(known.typicalContext('accounts/acme/models/Big-Model')).toBe(1000000);
+      expect(known.typicalContext('big-model:free')).toBe(1000000);
+      expect(known.typicalContext('never-heard-of-it')).toBeNull();
+      // A tie goes to the larger window: too small a guess costs every turn, too large a one is corrected the first time it matters.
+      expect(known.typicalContext('small-model')).toBe(16000);
+    });
+
+    it('takes the best source that says how large a model is, and says so when none does', () => {
+      const nothing = { reported: null, listed: null, typical: null };
+      // The server's own figure, then its provider's entry, then (hosted only) the usual size for the name.
+      expect(contextSize({ reported: 64_000, listed: 128_000, typical: 1_000_000, local: false })).toEqual({ tokens: 64_000, assumed: false });
+      expect(contextSize({ reported: null, listed: 128_000, typical: 1_000_000, local: false })).toEqual({ tokens: 128_000, assumed: false });
+      expect(contextSize({ ...nothing, typical: 1_000_000, local: false })).toEqual({ tokens: 1_000_000, assumed: false });
+      // A server on this computer runs with the window it was started with, whatever the model could hold elsewhere.
+      expect(contextSize({ ...nothing, typical: 1_000_000, local: true })).toEqual({ tokens: 32_768, assumed: true });
+      expect(contextSize({ reported: 8192, listed: null, typical: 1_000_000, local: true })).toEqual({ tokens: 8192, assumed: false });
+      // Nothing known: nine in ten hosted models have 128,000 tokens or more.
+      expect(contextSize({ ...nothing, local: false })).toEqual({ tokens: 128_000, assumed: true });
+      expect(contextSize({ ...nothing, local: true })).toEqual({ tokens: 32_768, assumed: true });
+    });
+
+    it('marks a size nothing vouches for as assumed in the model’s description', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'never-heard-of-it' }, { id: 'acme-reasoner' }, { id: 'vendor/thinker' }] }));
+      const provider = new OpenAiChatProvider({ id: 'u', kind: 'openai-compatible', preset: 'acme', apiKey: 'k', baseUrl: `${server.url}/v1` }, [], catalog);
+      const models = await provider.listModels();
+      // The test server is on this computer: an unknown model gets the local size, and a name known elsewhere is not trusted here.
+      expect(models.find((m) => m.ref.modelId === 'never-heard-of-it')).toMatchObject({ contextWindow: 32_768, description: '32K context (assumed)' });
+      expect(models.find((m) => m.ref.modelId === 'vendor/thinker')).toMatchObject({ contextWindow: 32_768, description: '32K context (assumed)' });
+      expect(models.find((m) => m.ref.modelId === 'acme-reasoner')?.description).toBe('128K context · reasoning');
+    });
+
+    it('works out a smaller reply budget from a server’s refusal, and leaves a prompt that is too long alone', () => {
+      // The most the server allows, however it words it.
+      expect(smallerReplyBudget('max_tokens is too large: 64000. This model supports at most 8192 completion tokens.', 64_000)).toBe(8192);
+      expect(smallerReplyBudget('Invalid max_tokens value, the valid range of max_tokens is [1, 8192]', 64_000)).toBe(8192);
+      expect(smallerReplyBudget('`max_tokens` must be less than or equal to `16384`', 64_000)).toBe(16_384);
+      // The window minus the prompt, when the server counts the reply against its window.
+      const counted = "This model's maximum context length is 131072 tokens. However, you requested 140000 tokens (76000 in the messages, 64000 in the completion).";
+      expect(smallerReplyBudget(counted, 64_000)).toBe(131_072 - 76_000 - 64);
+      expect(smallerReplyBudget('`inputs` tokens + `max_new_tokens` must be <= 32768. Given: 6000 `inputs` tokens and 64000 `max_new_tokens`', 64_000)).toBe(32_768 - 6000 - 64);
+      // The prompt alone is too long: a smaller reply would not help, summarizing will.
+      expect(smallerReplyBudget("This model's maximum context length is 32768 tokens. However, you requested 100000 tokens (36000 in the messages, 64000 in the completion).", 64_000)).toBeNull();
+      expect(smallerReplyBudget('prompt is too long: 250000 tokens > 200000 maximum', 64_000)).toBeNull();
+      // Not about the reply budget at all.
+      expect(smallerReplyBudget('Unrecognized request argument supplied: reasoning_effort', 64_000)).toBeNull();
+      // Named, but with no figure to go by: the modest budget every server takes, once.
+      expect(smallerReplyBudget('max_tokens is too large', 64_000)).toBe(8192);
+      expect(smallerReplyBudget('max_tokens is too large', 8192)).toBeNull();
+    });
+
+    it('retries with a smaller reply budget when a server refuses the one its catalog entry suggests, and remembers it', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'acme-reasoner' }] }));
+      server.route('POST', '/v1/chat/completions', (req, res) => {
+        const sent = (req.json() as { max_tokens: number }).max_tokens;
+        if (sent > 8192) return json(res, 400, { error: { message: `max_tokens is too large: ${String(sent)}. This model supports at most 8192 completion tokens.` } });
+        return sse(res, [{ data: { choices: [{ index: 0, delta: { content: 'Done.' } }] } }, { data: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } }, { data: '[DONE]' }]);
+      });
+      const provider = new OpenAiChatProvider({ id: 'r', kind: 'openai-compatible', preset: 'acme', apiKey: 'k', baseUrl: `${server.url}/v1` }, [], catalog);
+      const model = (await provider.listModels())[0]!;
+      const ask = (): Promise<StreamEvent[]> => collect(provider.streamText(request(model, [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], null), new AbortController().signal));
+      const first = await ask();
+      expect(first.some((e) => e.type === 'block' && e.block.type === 'text' && e.block.text === 'Done.')).toBe(true);
+      await ask();
+      const budgets = server.requests.filter((r) => r.method === 'POST').map((r) => (r.json() as { max_tokens: number }).max_tokens);
+      // The catalog says 32,000; the server takes 8,192: one refusal, then the smaller budget from the start.
+      expect(budgets).toEqual([32_000, 8192, 8192]);
+    });
+
+    it('finds a provider by its address in the shipped catalog', () => {
+      const shipped = new ProviderCatalog(SHIPPED);
+      expect(shipped.presetsForUrl('https://integrate.api.nvidia.com/v1')).toEqual(['nvidia']);
+      expect(shipped.presetsForUrl('https://INTEGRATE.api.nvidia.com/v1/')).toEqual(['nvidia']);
+      expect(shipped.presetsForUrl('https://api.groq.com/openai/v1')).toEqual(['groq']);
+      // Two entries at one address are both consulted, the larger first.
+      expect(shipped.presetsForUrl('https://api.llmgateway.io/v1')).toEqual(['llmgateway-providers', 'llmgateway']);
+      expect(shipped.presetsForUrl('https://my-own-gateway.example/v1')).toEqual([]);
+      expect(shipped.presetsForUrl('not an address')).toEqual([]);
+    });
   });
 
   it('asks for a real value when the preset URL still has a placeholder', () => {

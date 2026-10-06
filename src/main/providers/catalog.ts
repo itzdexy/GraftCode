@@ -59,18 +59,21 @@ export function arrangeModels(models: ModelInfo[], limit = 6): ModelInfo[] {
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1))}M`;
-  if (n >= 1000) return `${Math.round(n / 1024) * 1024 === n ? n / 1024 : Math.round(n / 1000)}K`;
+  // 131,072 reads as 128K, and so must 128,000: a size is binary only when it is not a round decimal one.
+  if (n >= 1000) return `${n % 1024 === 0 && n % 1000 !== 0 ? n / 1024 : Math.round(n / 1000)}K`;
   return String(n);
 }
 
 /** One-line capability summary used as the model's menu description. */
 export function describeCapabilities(info: {
   contextWindow: number;
+  /** Nothing said how large the model is: the size is the one assumed for its kind of server. */
+  assumed?: boolean;
   supportsVision: boolean;
   effort: EffortSupport | null;
   supportsTools: boolean;
 }): string {
-  const parts = [`${formatTokens(info.contextWindow)} context`];
+  const parts = [`${formatTokens(info.contextWindow)} context${info.assumed ? ' (assumed)' : ''}`];
   if (info.effort) parts.push(info.effort.levels.includes('max') ? 'deep reasoning' : 'reasoning');
   if (info.supportsVision) parts.push('vision');
   if (!info.supportsTools) parts.push('no tools');

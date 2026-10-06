@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.9",
+    "date": "2026-10-05",
+    "items": [
+      "Chats make real documents. Ask for a PDF, a text document (.docx), slides (.pptx) or a spreadsheet (.xlsx) and Graft builds it from what the model writes, with headings, lists, tables, links and the pictures made in that chat. Each one appears as a card to save, open or show in its folder.",
+      "A document is built inside Graft, in a window that runs no script and loads nothing from the web. Spreadsheets take numbers and formulas, on one sheet or several; slides take a title, bullets, a table, a picture and speaker’s notes. A formula that would reach outside the workbook stays text, and Graft only saves office files it built itself.",
+      "Models show their real context size. A provider added by typing its address used to give every model 32K, even ones with a million tokens. Graft now recognises the address, believes what the server reports about its own models, and otherwise uses the size most providers give for a model of that name. A size nothing vouches for is marked “assumed”, a 128,000-token model no longer reads “125K”, and a session’s context ring follows the model you picked instead of the size recorded at its last turn.",
+      "If a server refuses the reply length its catalog entry suggests, Graft retries with what the server allows instead of failing the request.",
+      "The files card shows what each file is: a document, a spreadsheet, slides, a picture, a web page or code."
+    ]
+  },
+  {
     "version": "0.6.8",
     "date": "2026-10-04",
     "items": [

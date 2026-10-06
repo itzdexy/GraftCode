@@ -61,6 +61,7 @@ export interface HarnessOptions {
   computer?: SessionDeps['computer'];
   /** Chat file store and code sandbox (default: none). */
   chatFiles?: SessionDeps['chatFiles'];
+  documents?: SessionDeps['documents'];
   runCode?: SessionDeps['runCode'];
   media?: SessionDeps['media'];
   /** Settings → Models → Agents (default: session model, four at once, one retry, no budget). */
@@ -138,6 +139,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     search: options.search ?? { active: () => null, search: () => Promise.reject(new Error('No web search engine in this test.')) },
     computer: options.computer ?? null,
     chatFiles: options.chatFiles ?? null,
+    documents: options.documents ?? null,
     runCode: options.runCode ?? null,
     media: options.media ?? null,
     dataHandling: () => options.dataHandling ?? 'unknown',

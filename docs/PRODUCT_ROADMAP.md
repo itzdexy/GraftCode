@@ -19,6 +19,60 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.9 (2026-10-05)
+
+- **Documents from chats.** `CreateFile` builds a file named `.pdf`, `.docx`, `.pptx` or
+  `.xlsx` from the Markdown or rows the model wrote (`src/main/chat/documents/`:
+  `markdown.ts` parses, `html.ts`, `docx.ts`, `pptx.ts` and `xlsx.ts` convert, `index.ts`
+  holds `DocumentMaker` with the 2 MB and 60-second limits). The converters and their
+  libraries are separate chunks loaded on first use, so startup does not pay for them.
+- **PDFs are printed** by `pdfPrinter.ts`: a hidden window with scripts off and the renderer
+  sandbox on, in a private in-memory session that serves only the page being printed and
+  cancels every other request. The page's content policy is sent as a header too. Prints go
+  one at a time; `disposePrinter()` gives up on one when the app's window closes.
+- **What a model's text cannot do in a document.** Raw HTML is shown as text. A link is kept
+  only when it is a web or mail address. A picture is placed only by the plain name of a
+  file of that chat; one from the web becomes a link. Characters the formats forbid are
+  dropped, so a file always opens. A cell that only starts like a formula stays text, and
+  a number longer than 15 digits stays text instead of being rounded.
+- **Slides**: `---` between slides, first heading as title, list items as bullets with
+  their nesting, the first table as a table, one picture on the right half, `Note:` lines as
+  speaker's notes. **Sheets**: CSV, or a JSON object of sheet name to rows; typed numbers,
+  booleans and formulas, a bold heading row, column widths from the content.
+- **Checked with other programs, not only our own tests.** Samples were opened with
+  python-docx, python-pptx and openpyxl, and rendered by LibreOffice in a container, which
+  also computed the formulas. That found three faults the unit tests had passed: formulas
+  stored with a doubled `=`, control characters making a file unreadable, and ragged table
+  rows. The printer was run in real Electron on Windows and its PDFs read back.
+- **Context sizes that are true.** A connection added by typing a provider's address named no
+  preset, so the catalog was never asked and every model there got 32,768 tokens (seen on a
+  typed NVIDIA address: a 1,048,576-token model at 32K). `ProviderCatalog.presetsForUrl` now
+  finds the entries that answer at an address. `contextSize` (`openaiChat.ts`) takes the
+  best source that says: what the server reports under the names servers use
+  (`context_length`, `context_window`, `max_model_len`, `meta.n_ctx_train` and others), then
+  the provider's entry, then, for a hosted model only, what most providers give for a model
+  of that name (`typicalContext`). When nothing says, 128,000 is assumed for a hosted model
+  (nine in ten catalog models have that or more) and 32,768 for a server on this computer,
+  and the model's description says "(assumed)". `formatTokens` no longer prints 128,000 as
+  "125K". The session's ring measures against the selected model, not the limit recorded at
+  the last turn (`contextLimit`).
+- **A reply budget a server refuses is lowered and retried** (`smallerReplyBudget`): the room
+  the refusal leaves, or the most the server says it allows, remembered for that model. A
+  prompt that is itself too long is still left to compaction.
+- **After review** of the documents round (one reviewer, no critical findings): office files
+  are saved only when Graft built them (`CreateFile` refuses bytes under those names,
+  `RunCode` cannot write them); a formula that reaches outside the workbook (`WEBSERVICE`,
+  DDE, another file, a share, a link that is not a web address) stays text; semicolons
+  between arguments become commas and newer functions get their `_xlfn.` prefix; CSV may
+  have spaces after its commas; numbered lists in a .docx count from where the text says;
+  slides keep hard line breaks; a picture the chat does not have fails the build with a
+  sentence instead of vanishing; `<br>` is a line break; a forbidden character written as a
+  character reference is dropped; long numbers in JSON stay text.
+- `fileCardModel.ts` gives the files card an icon per kind of file.
+- `scripts/e2e-docker.mjs` (`npm run test:e2e:docker`) runs the end-to-end tests in a Linux
+  container from the working tree, for computers where they cannot drive Electron.
+- **Catalog** regenerated: 212 providers, 7,552 models.
+
 ### 0.6.8 (2026-10-04)
 
 - **Agents that write, side by side.** `RunAgents` takes `writes` paths per agent. The
@@ -127,6 +181,12 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Known weaknesses and technical debt
 
+- Documents are built in chats only; a code session writes files with its own tools. The
+  files were opened with LibreOffice and three Python readers, not with Microsoft Office.
+  Slides hold one picture and one table each and their text is not measured, so a long
+  slide runs off its edge. Sheets have no dates, number formats or charts. There is no
+  table of contents, cover page or page-break control, and equations are plain text. The
+  PDF uses the computer's own fonts.
 - `src/main/agent/session.ts` is 1,690 lines: turns, slash commands, compaction, the
   loop host, and now the mission controller and agent-group wiring. Split the loop host
   and the mission controller out before adding more.
@@ -161,6 +221,16 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   package exists on PyPI, but it has not been run here (no Ghidra on the dev machine).
 - The preview protocol reads a file whole, so media over 64 MB is not shown and video
   can't be seeked without loading it all. Text previews don't refresh when a file changes.
+- The local-model adapter asks its server for at most 32,768 tokens of context
+  (`DEFAULT_NUM_CTX` in `ollama.ts`) but measures a session against the model's full window,
+  so a long session is cut short by the server before Graft summarizes it. Its window should
+  be the one requested, with a way to raise it; hosted models served through the same
+  program should not be capped at all. Not changed here: nothing was running to test it on.
+- Context sizes for a model on an unknown gateway are estimates from other providers. A
+  server that allows less is found out by a refused request, not before.
+- Newer spreadsheet functions are stored with their prefix from a list (`NEWER` in
+  `xlsx.ts`); functions that take a `LAMBDA` or name variables (`LET`) are written as typed
+  and may show `#NAME?` until re-entered. Nothing here was opened in Microsoft Excel.
 - No model fallback: when a provider stays down after retries the turn ends in an error.
 - macOS builds are not published (GitHub Actions is blocked by an account billing lock).
 - Loose edit matching ignores only leading and trailing whitespace per line. Differences
@@ -210,12 +280,10 @@ round. What exists now and what does not:
 
 ## Next, in order
 
-The next five rounds are designed in
-`docs/superpowers/specs/2026-10-05-next-rounds-design.md` and planned task by task, one plan
-a round, in `docs/superpowers/plans/`:
+Five rounds are designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
+planned task by task, one plan a round, in `docs/superpowers/plans/`. The first, chat
+documents, shipped as 0.6.9. The rest:
 
-1. 0.6.9, `2026-10-05-chat-documents.md`: a chat makes a PDF, a text document, slides or a
-   spreadsheet from what the model wrote.
 2. 0.6.10, `2026-10-05-research.md`: `/research`, researchers in parallel in chats, a
    sources card, and a mark on cited links nobody opened.
 3. 0.6.11, `2026-10-05-plans-that-last.md`: edit a plan before approving it; the plan stays

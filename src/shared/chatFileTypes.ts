@@ -1,9 +1,33 @@
 /**
  * Chat files that open in their viewer when clicked. Scripts and programs
  * (.js, .py, .bat, .exe…) can only be saved or shown in their folder, so a
- * click never runs something a model wrote.
+ * click never runs something a model wrote. Documents, slides and
+ * spreadsheets open; their macro-enabled kinds (.docm, .xlsm, .pptm) do not.
  */
-const OPENABLE = new Set(['.txt', '.log', '.md', '.csv', '.tsv', '.json', '.html', '.htm', '.css', '.xml', '.yaml', '.yml', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
+const OPENABLE = new Set([
+  '.txt',
+  '.log',
+  '.md',
+  '.csv',
+  '.tsv',
+  '.json',
+  '.html',
+  '.htm',
+  '.css',
+  '.xml',
+  '.yaml',
+  '.yml',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.pdf',
+  '.docx',
+  '.xlsx',
+  '.pptx'
+]);
 
 function extensionOf(name: string): string {
   const base = name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);

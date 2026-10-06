@@ -5,6 +5,8 @@ import { ProviderError } from '../../src/main/providers/errors';
 import { toLlmHistory } from '../../src/main/agent/history';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
+import { ChatFiles } from '../../src/main/chat/chatFiles';
+import { DocumentMaker } from '../../src/main/chat/documents';
 import { renderTranscript } from '../../src/main/agent/compaction';
 import type { LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
 import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
@@ -919,6 +921,20 @@ describe('commands, memory and history', () => {
     const transcript = renderTranscript(history, 10_000);
     expect(transcript).not.toContain('[]');
     expect(transcript).toContain('[Searched the web for “graft”]');
+  });
+
+  it('a chat builds a document through the session, and its prompt says how', async () => {
+    const files = new ChatFiles(makeTempDir());
+    const h = harness({
+      kind: 'chat',
+      chatFiles: files,
+      documents: new DocumentMaker({ printPdf: () => Promise.resolve(Buffer.from('%PDF-from-session')) }),
+      script: [{ toolCalls: [{ name: 'CreateFile', input: { name: 'report.pdf', content: '# Report' } }] }, { text: 'Done.' }]
+    });
+    h.session.send('make a report');
+    await h.session.idle();
+    expect(fs.readFileSync(files.find('session-1', 'report.pdf')!, 'utf8')).toBe('%PDF-from-session');
+    expect(h.provider.requests[0]!.system).toContain('write Markdown and name the file .pdf or .docx');
   });
 
   it('chat sessions have no tools and use the chat prompt', async () => {

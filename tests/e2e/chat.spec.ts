@@ -50,3 +50,60 @@ test('a chat runs code in the sandbox and makes files to download', async () => 
   await expect.poll(() => fs.existsSync(target)).toBe(true);
   expect(fs.readFileSync(target, 'utf8')).toBe('# Notes\n\nForty-two.');
 });
+
+test('a chat builds a PDF, a document, slides and a spreadsheet from what the model wrote', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+  await w.getByRole('radio', { name: 'Chat' }).click();
+
+  provider.script(
+    {
+      toolCalls: [
+        { name: 'CreateFile', input: { name: 'report.pdf', content: '# Report\n\nForty-two **exactly**.\n\n<script>document.title = "ran"</script>\n\n| n | sq |\n| - | - |\n| 6 | 36 |' } },
+        { name: 'CreateFile', input: { name: 'report.docx', content: '# Report\n\nForty-two.' } },
+        { name: 'CreateFile', input: { name: 'deck.pptx', content: '# Deck\n\n---\n\n## One\n\n- a' } },
+        { name: 'CreateFile', input: { name: 'data.xlsx', content: 'n,sq\n6,36' } }
+      ]
+    },
+    { text: 'Four files.' }
+  );
+  const composer = w.getByRole('textbox', { name: 'How can I help you today?' });
+  await composer.fill('Make the report in every format');
+  await composer.press('Enter');
+  await expect(w.getByText('Four files.')).toBeVisible();
+
+  const card = w.getByRole('region', { name: 'Files from this reply' });
+  const dir = makeTempDir('graft-e2e-docs-');
+  const save = async (name: string): Promise<Buffer> => {
+    const target = path.join(dir, name);
+    await graft.app.evaluate(({ dialog }, chosen) => {
+      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath: chosen });
+    }, target);
+    await card.getByRole('button', { name: `Save ${name}` }).click();
+    await expect.poll(() => fs.existsSync(target)).toBe(true);
+    return fs.readFileSync(target);
+  };
+
+  // The PDF was really printed, not written as text.
+  const pdf = await save('report.pdf');
+  expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  expect(pdf.length).toBeGreaterThan(1000);
+  await expect(card.getByRole('button', { name: 'Open report.pdf' })).toBeVisible();
+
+  // The other three are real packages holding the part each format needs.
+  for (const [name, entry] of [
+    ['report.docx', 'word/document.xml'],
+    ['deck.pptx', 'ppt/slides/slide2.xml'],
+    ['data.xlsx', 'xl/worksheets/sheet1.xml']
+  ] as const) {
+    const file = await save(name);
+    expect(file.subarray(0, 2).toString('latin1')).toBe('PK');
+    expect(file.includes(entry)).toBe(true);
+    await expect(card.getByRole('button', { name: `Open ${name}` })).toBeVisible();
+  }
+
+  // The model was told what it got back.
+  expect(JSON.stringify(provider.chatRequests()[1]!.body)).toContain('built from the Markdown you wrote');
+});

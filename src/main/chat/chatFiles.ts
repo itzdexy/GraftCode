@@ -18,6 +18,9 @@ export interface ChatFile {
 
 export const MAX_CHAT_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_CHAT_BYTES = 250 * 1024 * 1024;
+/** The pictures a document may hold, and how large one may be. */
+const DOCUMENT_PICTURES = new Set(['image/png', 'image/jpeg', 'image/gif']);
+const MAX_DOCUMENT_PICTURE_BYTES = 10 * 1024 * 1024;
 
 const MIME: Record<string, string> = {
   '.txt': 'text/plain',
@@ -39,6 +42,9 @@ const MIME: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.zip': 'application/zip',
   '.js': 'text/javascript',
   '.ts': 'text/plain',
@@ -97,6 +103,14 @@ export class ChatFiles {
     if (safeFileName(name) !== name) return null;
     const target = path.join(this.dir(sessionId), name);
     return fs.existsSync(target) && fs.statSync(target).isFile() ? target : null;
+  }
+
+  /** A picture of this chat, for a document that names it; null for any other file, name or chat. */
+  image(sessionId: string, name: string): { mime: string; data: Buffer } | null {
+    const file = this.find(sessionId, name);
+    const mime = mimeOf(name);
+    if (file === null || !DOCUMENT_PICTURES.has(mime) || fs.statSync(file).size > MAX_DOCUMENT_PICTURE_BYTES) return null;
+    return { mime, data: fs.readFileSync(file) };
   }
 
   deleteForSession(sessionId: string): void {

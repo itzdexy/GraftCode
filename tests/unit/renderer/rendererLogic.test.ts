@@ -4,8 +4,9 @@ import type { ModelInfo } from '../../../src/shared/schemas/models';
 import type { SessionSummary } from '../../../src/shared/schemas/sessions';
 import type { SessionUsage } from '../../../src/shared/schemas/sessions';
 import { baseName, partOfDay, relativeTime, shortenPath } from '../../../src/renderer/src/lib/format';
-import { spendText, usageText } from '../../../src/renderer/src/features/composer/ContextUsage';
+import { contextLimit, spendText, usageText } from '../../../src/renderer/src/features/composer/ContextUsage';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
+import { fileGlyph } from '../../../src/renderer/src/features/session/fileCardModel';
 import {
   DEFAULT_FILTER,
   groupByProject,
@@ -177,6 +178,19 @@ describe('formatting', () => {
     expect(baseName('/home/me/proj')).toBe('proj');
     expect(shortenPath('C:\\Users\\someone\\very\\deeply\\nested\\project\\folder', 24)).toMatch(/^.{11}….{11}$/);
   });
+
+  it('gives each kind of file its own icon', () => {
+    const glyph = (name: string, mime: string) => fileGlyph({ name, mime });
+    expect(glyph('r.pdf', 'application/pdf')).toBe('document');
+    expect(glyph('r.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe('document');
+    expect(glyph('d.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).toBe('sheet');
+    expect(glyph('d.csv', 'text/csv')).toBe('sheet');
+    expect(glyph('s.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')).toBe('slides');
+    expect(glyph('p.png', 'image/png')).toBe('image');
+    expect(glyph('i.html', 'text/html')).toBe('web');
+    expect(glyph('m.ts', 'text/plain')).toBe('code');
+    expect(glyph('n.md', 'text/markdown')).toBe('text');
+  });
 });
 
 describe('context and spend', () => {
@@ -190,6 +204,14 @@ describe('context and spend', () => {
   it('describes the context window', () => {
     expect(usageText(50_000, 200_000)).toBe('50K of 200K tokens used (25%)');
     expect(usageText(10, 0)).toBe('Context size unknown');
+  });
+
+  it('measures a session against the model it will use next, not the limit recorded at its last turn', () => {
+    // A session whose last turn recorded 32K (a size since corrected, or another model's) on a model with a 1M window.
+    expect(contextLimit(32_768, { contextWindow: 1_048_576 })).toBe(1_048_576);
+    // Until the model list has loaded, the recorded limit is all there is.
+    expect(contextLimit(200_000, null)).toBe(200_000);
+    expect(contextLimit(0, undefined)).toBe(0);
   });
 
   it('summarizes tokens, the share read from cache, and cost', () => {

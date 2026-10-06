@@ -8,6 +8,7 @@ import type { SearchEngineId, SearchResult } from './web/search';
 import type { ComputerControl } from '../computer/desktop';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
+import type { DocumentKind } from '../chat/documents';
 import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
 import type { MediaAccess } from '../media/mediaService';
 import type { AgentGroupInput } from '../agent/agentGroup';
@@ -65,6 +66,8 @@ export interface ToolContext extends DescribeContext {
   search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
   /** Saves files the user can download from the chat; null outside chats and in incognito chats. */
   chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
+  /** Builds a PDF, a text document, slides or a spreadsheet from what was written, for CreateFile; null where files can't be made. */
+  makeDocument: ((kind: DocumentKind, name: string, source: string, signal: AbortSignal) => Promise<Buffer>) | null;
   /** Runs JavaScript in an isolated page with no network or file access; null outside chats. */
   runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
   /** The Browser panel, for the Browser tool; null outside code sessions or without a window. */

@@ -13,7 +13,7 @@ import { useSessions, viewOf, type SessionView as SessionViewState } from '../..
 import { reportError } from '../../stores/toasts';
 import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
-import { ContextUsage } from '../composer/ContextUsage';
+import { contextLimit, ContextUsage } from '../composer/ContextUsage';
 import { EffortPopover } from '../composer/EffortPopover';
 import { ModelQuickMenu } from '../composer/ModelQuickMenu';
 import { PermissionModeMenu } from '../composer/PermissionModeMenu';
@@ -181,7 +181,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
                   {model && effort ? <EffortPopover model={model} value={effort} onChange={(level) => setSessionEffort(summary, model, level)} /> : null}
                   <ContextUsage
                     used={summary.usage.contextTokens}
-                    limit={summary.usage.contextLimit || model?.contextWindow || 0}
+                    limit={contextLimit(summary.usage.contextLimit, model)}
                     session={summary.usage}
                     onCompact={() => compact(summary.id)}
                     compactDisabled={busy || view.messages.length === 0}

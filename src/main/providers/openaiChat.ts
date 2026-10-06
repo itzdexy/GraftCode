@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ProviderKind, Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
+import { isLocalUrl } from '@shared/privacy';
 import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
@@ -41,6 +42,92 @@ const OPENAI_LIMITS: Array<{ prefix: RegExp; context: number; output: number; re
   { prefix: /^gpt-4/, context: 128_000, output: 8_192, reasoning: false, vision: false },
   { prefix: /^gpt-3\.5/, context: 16_385, output: 4_096, reasoning: false, vision: false }
 ];
+
+/**
+ * Where servers that speak this API say how large a model's context is and how
+ * long a reply may be. There is no standard name for either, so each is a path
+ * into the model's entry in the list; the first that holds a believable count
+ * wins.
+ */
+const CONTEXT_PATHS = [
+  ['context_length'],
+  ['context_window'],
+  ['max_context_length'],
+  ['context_size'],
+  ['max_model_len'],
+  ['max_input_tokens'],
+  ['input_token_limit'],
+  ['n_ctx'],
+  ['top_provider', 'context_length'],
+  ['metadata', 'context_length'],
+  ['meta', 'n_ctx_train'],
+  ['limits', 'max_input_tokens'],
+  ['capabilities', 'limits', 'max_context_window_tokens'],
+  ['model_spec', 'availableContextTokens'],
+  ['model_info', 'max_input_tokens']
+];
+const OUTPUT_PATHS = [
+  ['max_completion_tokens'],
+  ['max_output_tokens'],
+  ['max_output_length'],
+  ['top_provider', 'max_completion_tokens'],
+  ['metadata', 'max_tokens'],
+  ['limits', 'max_output_tokens'],
+  ['capabilities', 'limits', 'max_output_tokens'],
+  ['model_info', 'max_output_tokens']
+];
+
+/**
+ * How large a model's context is, from the best source that says: the server
+ * itself (its figure is about this server), then its provider's catalog entry,
+ * then, for a hosted model, what most providers give for a model of that name.
+ * A server on this computer runs with the window it was started with, whatever
+ * the model could hold elsewhere, and some cut a long prompt short without a
+ * word, so a name is not trusted there.
+ *
+ * When nothing says, the size is assumed: nine in ten hosted models in the
+ * catalog have 128,000 tokens or more, and a local server often has far less.
+ * Too large a guess is corrected the first time a request is refused as too
+ * long; too small a one summarizes the conversation early, on every turn.
+ */
+export function contextSize(sources: { reported: number | null; listed: number | null; typical: number | null; local: boolean }): { tokens: number; assumed: boolean } {
+  const known = sources.reported ?? sources.listed ?? (sources.local ? null : sources.typical);
+  return known !== null ? { tokens: known, assumed: false } : { tokens: sources.local ? 32_768 : 128_000, assumed: true };
+}
+
+/**
+ * The reply budget to try again with when a server refuses the one it was
+ * sent. What the catalog says a model can write is not always what a given
+ * server allows, and some servers count the reply against the context window.
+ * Gives the room the refusal leaves (the window minus the prompt, or the most
+ * the server says it allows), a modest budget when it names no figure, and
+ * null when the refusal is not about the reply budget or a smaller one would
+ * not help: a prompt that is itself too long has to be summarized instead.
+ */
+export function smallerReplyBudget(message: string, sent: number): number | null {
+  if (!/max_(completion_|new_|output_)?tokens|in the completion|completion tokens/i.test(message)) return null;
+  const window = Number(/(?:context (?:length|window|size)(?: is| of|:)?|must be <=)\s*(\d+)/i.exec(message)?.[1]);
+  const prompt = Number(/(\d+)\s*(?:in the messages|`?inputs?`? tokens|input tokens|prompt tokens)/i.exec(message)?.[1]);
+  if (Number.isFinite(window) && Number.isFinite(prompt)) {
+    const room = window - prompt - 64;
+    return room >= 256 && room < sent ? room : null;
+  }
+  // The largest figure below the one sent is the most the server allows ("at most 8192", "the range is [1, 8192]").
+  const allowed = Math.max(0, ...(message.match(/\d+/g) ?? []).map(Number).filter((n) => n >= 256 && n < sent));
+  if (allowed > 0) return allowed;
+  return sent > 8192 ? 8192 : null;
+}
+
+/** The token count at the first of the paths that holds one (a number, or digits as text) no smaller than `least`. */
+function reported(model: unknown, paths: string[][], least: number): number | null {
+  for (const keys of paths) {
+    let value: unknown = model;
+    for (const key of keys) value = value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+    const count = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    if (typeof count === 'number' && Number.isInteger(count) && count >= least && count <= 10_000_000) return count;
+  }
+  return null;
+}
 
 interface OpenAiModel {
   id: string;
@@ -200,10 +287,12 @@ export class OpenAiChatProvider implements LLMProvider {
   private readonly apiKey: string | null;
   private readonly customModels: CustomModel[];
   private readonly catalog: ProviderCatalog | null;
-  /** Catalog entry used for model metadata. */
-  private readonly presetId: string | null;
+  /** Catalog entries used for model metadata: the connection's own preset, else the ones that answer at its address. */
+  private readonly presetIds: string[];
   private readonly noStreamOptions = new Set<string>();
   private readonly noReasoningParam = new Set<string>();
+  /** The reply budget a server turned out to allow for a model, when it refused the catalog's. */
+  private readonly replyBudget = new Map<string, number>();
   /** OpenAI models that answered "only supported in v1/responses"; they go there first from then on. */
   private readonly responsesOnly = new Set<string>();
 
@@ -220,7 +309,8 @@ export class OpenAiChatProvider implements LLMProvider {
     this.apiKey = connection.apiKey;
     this.customModels = customModels;
     this.catalog = catalog;
-    this.presetId = connection.preset ?? NATIVE_PRESET[connection.kind] ?? null;
+    const named = connection.preset ?? NATIVE_PRESET[connection.kind] ?? null;
+    this.presetIds = named ? [named] : (catalog?.presetsForUrl(base) ?? []);
     if (this.kind !== 'openai-compatible' && !this.apiKey) {
       throw new ProviderError('auth', 'An API key is required.', { retryable: false });
     }
@@ -234,7 +324,11 @@ export class OpenAiChatProvider implements LLMProvider {
   }
 
   private meta(modelId: string): CatalogModel | null {
-    return this.catalog?.model(this.presetId, modelId) ?? null;
+    for (const preset of this.presetIds) {
+      const found = this.catalog?.model(preset, modelId);
+      if (found) return found;
+    }
+    return null;
   }
 
   async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
@@ -255,7 +349,8 @@ export class OpenAiChatProvider implements LLMProvider {
       listed = body.data.filter((m) => typeof m.id === 'string');
     } catch (error) {
       // Some providers have no list endpoint: confirm the key with a one-token request and offer the catalog's models.
-      const known = this.kind === 'openai-compatible' && this.presetId ? (this.catalog?.models(this.presetId) ?? []) : [];
+      const preset = this.presetIds[0];
+      const known = this.kind === 'openai-compatible' && preset ? (this.catalog?.models(preset) ?? []) : [];
       const listMissing = error instanceof ProviderError && (error.code === 'not_found' || error.code === 'bad_base_url');
       const first = known.find((m) => !m.deprecated) ?? known[0];
       if (!listMissing || !first) throw error;
@@ -291,19 +386,16 @@ export class OpenAiChatProvider implements LLMProvider {
   private toModelInfo(m: OpenAiModel): ModelInfo {
     const custom = this.customModels.find((c) => c.id === m.id);
     const meta = this.meta(m.id);
-    let context = meta?.context ?? 32_768;
-    let output = meta?.output ?? 8_192;
+    let known: { context: number | null; output: number | null } = { context: meta?.context ?? null, output: meta?.output ?? null };
     let reasoning = meta?.reasoning ?? false;
     let vision = meta?.vision ?? false;
     let tools = meta ? meta.tools : true;
     let pricing = modelPricing(meta?.pricing ?? null);
     if (this.kind === 'openai' && !meta) {
-      const hint = OPENAI_LIMITS.find((h) => h.prefix.test(m.id));
-      if (hint) ({ context, output, reasoning, vision } = hint);
-      else ({ context, output, vision } = { context: 128_000, output: 16_384, vision: true });
+      const hint = OPENAI_LIMITS.find((h) => h.prefix.test(m.id)) ?? { context: 128_000, output: 16_384, reasoning, vision: true };
+      known = { context: hint.context, output: hint.output };
+      ({ reasoning, vision } = hint);
     } else if (this.kind === 'openrouter') {
-      context = m.context_length ?? context;
-      output = m.top_provider?.max_completion_tokens ?? meta?.output ?? Math.min(32_768, Math.floor(context / 4));
       const params = m.supported_parameters;
       if (params) {
         reasoning = params.includes('reasoning');
@@ -318,6 +410,15 @@ export class OpenAiChatProvider implements LLMProvider {
         pricing = { input, output: out, ...(cacheRead !== null ? { cacheRead } : {}), ...(cacheWrite !== null ? { cacheWrite } : {}) };
       }
     }
+    // What a server says about its own model is about this server; the catalog's figure is about the model in general.
+    const size = contextSize({
+      reported: reported(m, CONTEXT_PATHS, 1024),
+      listed: known.context,
+      typical: this.catalog?.typicalContext(m.id) ?? null,
+      local: isLocalUrl(this.base)
+    });
+    let context = size.tokens;
+    let output = reported(m, OUTPUT_PATHS, 256) ?? known.output ?? (this.kind === 'openrouter' ? Math.min(32_768, Math.floor(context / 4)) : 8_192);
     if (custom) {
       context = custom.contextWindow ?? context;
       output = custom.maxOutputTokens ?? output;
@@ -336,7 +437,7 @@ export class OpenAiChatProvider implements LLMProvider {
       description:
         this.kind === 'openrouter' && m.description
           ? firstSentence(m.description)
-          : describeCapabilities({ contextWindow: context, supportsVision: vision, effort, supportsTools: tools }),
+          : describeCapabilities({ contextWindow: context, assumed: size.assumed && custom?.contextWindow === undefined, supportsVision: vision, effort, supportsTools: tools }),
       family: meta?.family ?? familyOf(m.id),
       contextWindow: context,
       maxOutputTokens: output,
@@ -357,7 +458,7 @@ export class OpenAiChatProvider implements LLMProvider {
       yield* this.streamResponses(req, signal);
       return;
     }
-    const maxTokens = Math.min(req.model.maxOutputTokens, 64_000);
+    let maxTokens = Math.min(req.model.maxOutputTokens, 64_000, this.replyBudget.get(modelId) ?? Infinity);
     const wire = req.effort && req.model.effort ? req.model.effort.values?.[req.effort] : undefined;
     const interleaved = this.meta(modelId)?.interleaved ?? null;
     const build = (withStreamOptions: boolean, withReasoning: boolean): Record<string, unknown> => ({
@@ -384,8 +485,10 @@ export class OpenAiChatProvider implements LLMProvider {
     let streamOptions = !this.noStreamOptions.has(modelId);
     let reasoningParam = !this.noReasoningParam.has(modelId);
     let response: Response | null = null;
-    // Some OpenAI-compatible servers reject optional parameters; drop the one named in the error and retry.
-    for (let attempt = 0; attempt < 3 && !response; attempt++) {
+    // Some OpenAI-compatible servers reject optional parameters, or a reply budget their model can't give:
+    // drop the parameter the error names, or lower the budget, and retry.
+    let refusal: ProviderError | null = null;
+    for (let attempt = 0; attempt < 6 && !response; attempt++) {
       try {
         response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
       } catch (error) {
@@ -396,19 +499,24 @@ export class OpenAiChatProvider implements LLMProvider {
           yield* this.streamResponses(req, signal);
           return;
         }
-        if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
-        if (streamOptions && /stream_options/i.test(error.message)) {
+        if (!(error instanceof ProviderError) || (error.code !== 'bad_request' && error.code !== 'context_length')) throw error;
+        refusal = error;
+        const smaller = smallerReplyBudget(error.message, maxTokens);
+        if (error.code === 'bad_request' && streamOptions && /stream_options/i.test(error.message)) {
           this.noStreamOptions.add(modelId);
           streamOptions = false;
-        } else if (reasoningParam && wire !== undefined && this.kind === 'openai-compatible' && /reasoning/i.test(error.message)) {
+        } else if (error.code === 'bad_request' && reasoningParam && wire !== undefined && this.kind === 'openai-compatible' && /reasoning/i.test(error.message)) {
           this.noReasoningParam.add(modelId);
           reasoningParam = false;
+        } else if (smaller !== null) {
+          this.replyBudget.set(modelId, smaller);
+          maxTokens = smaller;
         } else {
           throw error;
         }
       }
     }
-    if (!response) throw new ProviderError('bad_request', 'The provider rejected the request.');
+    if (!response) throw refusal ?? new ProviderError('bad_request', 'The provider rejected the request.');
     if (!response.body) throw new ProviderError('server', 'The provider returned an empty stream.');
 
     let text = '';

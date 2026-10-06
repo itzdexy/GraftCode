@@ -349,7 +349,7 @@ export function buildChatSystemPrompt(ctx: {
   }
   if (work.files) {
     tools.push(
-      'CreateFile saves a file the user can download from the chat. Use it when they ask for a file or a document, or when the result is long and meant to be kept (a script, data, a report). Afterwards say in a sentence or two what the file holds instead of repeating its content.'
+      'CreateFile saves a file the user can download from the chat. Use it when they ask for a file or a document, or when the result is long and meant to be kept (a script, data, a report). For a PDF or a text document, write Markdown and name the file .pdf or .docx. For slides, name it .pptx, put a line of --- between slides and start each with its title as a heading. For a spreadsheet, name it .xlsx and give CSV. A picture made in this chat can be placed in a document by its file name. Afterwards say in a sentence or two what the file holds instead of repeating its content.'
     );
   }
   if (work.code) {

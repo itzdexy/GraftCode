@@ -158,6 +158,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 - Conversations with attachments and images, and per-chat model and effort.
 - **Web search and page reading** without prompts, with sources cited inline as site pills.
 - **Files to download:** chats can create documents, data, code and pictures, shown as cards with Save, Open and Show in folder. Opening is limited to documents and pictures, so a click never runs a script.
+- **Real documents:** ask for a PDF, a text document (.docx), slides (.pptx) or a spreadsheet (.xlsx) and Graft builds it from the Markdown or rows the model writes: headings, lists, tables, links, the chat's own pictures, speaker's notes on slides, numbers and formulas in sheets. It is built inside Graft, in a window that runs no script and loads nothing from the web.
 - **Code in a sandbox:** chats run JavaScript in a hidden page with no network or file access to calculate, process data and make files.
 - **They know the time:** each message carries when it was sent.
 - **Read aloud** with pause, resume and stop, in a natural voice from OpenRouter's speech models or your computer's own voice (Settings → Voice).
@@ -166,6 +167,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 ### Models and providers
 
 - A catalog generated from [models.dev](https://models.dev) with 200+ providers, plus Ollama and custom endpoints. Each model's context window, tool use, vision, effort levels and prices come from the catalog and the provider's own model list.
+- **Context sizes you can trust:** a provider added by typing its address is matched to its catalog entry, a server's own figure for a model wins, and a model on an unknown gateway gets the size most providers give for it. A size nothing vouches for says "(assumed)", and you can set a model's size yourself in Settings → Models.
 - **OpenAI's Responses API** for the models only it serves (the `-pro` and Codex models and deep research): the summary of their reasoning is shown as they think, and the reasoning is kept across tool calls. Tested against recordings of the API, not a live account.
 - **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions.
 - Reasoning carried across tool calls for models that need it. Prompt caching for Claude models, both on Anthropic and through OpenRouter. Cost tracking that counts cached tokens at their own rates and uses the charged amount when the provider reports it.
@@ -242,6 +244,7 @@ npm run dev        # run Graft with hot reload
 | `npm test` | Unit tests (Vitest) |
 | `GRAFT_LIVE_MCP=1 npx vitest run tests/unit/mcp.live.test.ts` | Starts real MCP servers through Graft's manager and checks the integrations catalogue against npm, PyPI and the remote endpoints (needs the network, Node.js and uv) |
 | `npm run test:e2e` | End-to-end tests that drive the built app (Playwright) |
+| `npm run test:e2e:docker` | Runs the end-to-end tests in a Linux container, from the working tree (needs Docker) |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds installers with electron-builder |
 | `npm run dist:linux:docker` | Builds and smoke-tests the Linux installers in a Docker container, from any OS |
 | `npm run icons` | Regenerates the app and tray icons from the mascot sprite |

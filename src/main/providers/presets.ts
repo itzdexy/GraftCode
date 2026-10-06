@@ -114,7 +114,24 @@ export function modelPricing(pricing: CatalogModel['pricing']): ModelInfo['prici
   };
 }
 
+/** An address as host and path, so that its spellings (upper case, a trailing slash) compare equal; null when it is not one. */
+function addressOf(url: string): { host: string; path: string } | null {
+  try {
+    const parsed = new URL(url);
+    return { host: parsed.host.toLowerCase(), path: parsed.pathname.replace(/\/+$/, '') };
+  } catch {
+    return null;
+  }
+}
+
+/** A model's name as providers share it: its id without the account or folder it is listed under, in lower case. */
+function modelName(id: string): string {
+  return (id.split('/').pop() ?? id).toLowerCase();
+}
+
 export class ProviderCatalog {
+  /** How many providers give each context size for a model name; built on first use. */
+  private sizes: Map<string, Map<number, number>> | null = null;
   private data: { providers: RawProvider[]; byId: Map<string, RawProvider>; models: Map<string, Map<string, RawModel>> } | null = null;
 
   constructor(
@@ -161,10 +178,65 @@ export class ProviderCatalog {
     return this.presets().find((p) => p.id === id) ?? null;
   }
 
+  /**
+   * The presets that answer at an address. A connection added by typing a
+   * provider's address names no preset; without this, nothing the catalog
+   * knows about that provider's models would reach it. Those at exactly the
+   * address come first, then others on the same host, the one with more
+   * models leading in each group.
+   */
+  presetsForUrl(url: string): string[] {
+    const wanted = addressOf(url);
+    if (!wanted) return [];
+    const exact: RawProvider[] = [];
+    const sameHost: RawProvider[] = [];
+    for (const provider of this.load().providers) {
+      const at = provider.api ? addressOf(provider.api) : null;
+      if (at?.host === wanted.host) (at.path === wanted.path ? exact : sameHost).push(provider);
+    }
+    const larger = (a: RawProvider, b: RawProvider): number => b.models.length - a.models.length;
+    return [...exact.sort(larger), ...sameHost.sort(larger)].map((p) => p.id);
+  }
+
   model(presetId: string | null, modelId: string): CatalogModel | null {
     if (!presetId) return null;
     const raw = this.load().models.get(presetId)?.get(modelId);
     return raw ? toModel(raw) : null;
+  }
+
+  /**
+   * The context size most providers give for a model of this name, for a model
+   * the connection's own entry does not list (a gateway the catalog has never
+   * heard of, or a model newer than its provider's entry). The name is the id
+   * without the account or folder it is listed under, in any case, and failing
+   * that without a ":variant" at its end. Hosts serve one model with different
+   * limits, so this is an estimate: a tie goes to the larger window, since too
+   * small a guess costs every turn and too large a one is corrected the first
+   * time a request is refused as too long.
+   */
+  typicalContext(modelId: string): number | null {
+    const name = modelName(modelId);
+    const sizes = this.sizesByName().get(name) ?? this.sizesByName().get(name.replace(/:[^:]*$/, ''));
+    if (!sizes) return null;
+    let best: [size: number, count: number] = [0, 0];
+    for (const [size, count] of sizes) if (count > best[1] || (count === best[1] && size > best[0])) best = [size, count];
+    return best[0];
+  }
+
+  private sizesByName(): Map<string, Map<number, number>> {
+    if (this.sizes) return this.sizes;
+    const sizes = new Map<string, Map<number, number>>();
+    for (const provider of this.load().providers) {
+      for (const model of provider.models) {
+        if (!model.c) continue;
+        const name = modelName(model.id);
+        const counts = sizes.get(name) ?? new Map<number, number>();
+        counts.set(model.c, (counts.get(model.c) ?? 0) + 1);
+        sizes.set(name, counts);
+      }
+    }
+    this.sizes = sizes;
+    return sizes;
   }
 
   /** The catalog's model list for a preset (used when a provider has no list-models endpoint). */

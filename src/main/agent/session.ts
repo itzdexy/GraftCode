@@ -25,6 +25,7 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { AgentBrowser, SubagentType, ToolContext } from '../tools/types';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
 import type { ChatFile } from '../chat/chatFiles';
+import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { summarizeSession, summaryMessageText } from './compaction';
@@ -145,7 +146,9 @@ export interface SessionDeps {
     search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
   };
   /** Files chats make for the user to download (CreateFile, RunCode); null where unavailable. */
-  chatFiles: { save(sessionId: string, name: string, data: Buffer): ChatFile } | null;
+  chatFiles: { save(sessionId: string, name: string, data: Buffer): ChatFile; image?(sessionId: string, name: string): { mime: string; data: Buffer } | null } | null;
+  /** Builds the documents CreateFile makes from Markdown or rows; null where there are none. */
+  documents: DocumentMaker | null;
   /** Image models and ComfyUI for the GenerateImage and ComfyUI tools (Settings → Images); null where unavailable. */
   media: MediaAccess | null;
   /** RunCode's sandbox: JavaScript in an isolated page; null where unavailable. */
@@ -1635,6 +1638,17 @@ export class AgentSession {
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
       computer: this.deps.computer,
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
+      makeDocument:
+        work.files && this.deps.documents
+          ? (kind, name, source, s) =>
+              this.deps.documents!.make(
+                kind,
+                source,
+                // A document may place the pictures made in its own chat, and nothing else.
+                { title: name.replace(/\.[^.]+$/, ''), assets: { image: (file) => this.deps.chatFiles?.image?.(this.id, file) ?? null } },
+                s
+              )
+          : null,
       runCode: work.code ? this.deps.runCode : null,
       browser: this.summary.kind === 'code' ? this.agentBrowser() : null,
       media: this.summary.incognito ? null : this.deps.media,

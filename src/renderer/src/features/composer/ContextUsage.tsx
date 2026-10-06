@@ -15,6 +15,16 @@ interface ContextUsageProps {
   session?: SessionUsage;
 }
 
+/**
+ * The window a session is measured against: the selected model's, since the
+ * next request goes to it. The limit recorded at the last turn may be another
+ * model's, or a size since corrected; it stands in only until the model list
+ * has loaded.
+ */
+export function contextLimit(recorded: number, model: { contextWindow: number } | null | undefined): number {
+  return model?.contextWindow || recorded;
+}
+
 export function usageText(used: number, limit: number): string {
   if (limit <= 0) return 'Context size unknown';
   const pct = Math.min(100, Math.round((used / limit) * 100));
