@@ -1,16 +1,51 @@
 import type { ElementContent, Root, RootContent } from 'hast';
-import { memo, type ReactNode } from 'react';
+import { createContext, memo, useContext, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { SourceIndex } from '@shared/sources';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
 import { reportError } from '../../stores/toasts';
 import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
+import { citationNote, citationState } from './sourcesModel';
 import { healMarkdown, splitBlocks } from './streaming';
 
-function openLink(href: string): void {
+export function openLink(href: string): void {
   invoke('app:openExternal', { url: href }).catch((error: unknown) => reportError("Couldn't open the link", error));
+}
+
+/** What the conversation read and found on the web; null when it has no sources, and then no citation is marked. */
+export const SourcesContext = createContext<SourceIndex | null>(null);
+
+/**
+ * A citation: a pill naming the site a claim came from. In a conversation
+ * that used the web it also says whether the page was opened, only found by
+ * a search, or neither, and one nobody opened or found has a dashed border.
+ */
+function Citation({ href, text, arriving }: { href: string; text: string; arriving: string }): ReactNode {
+  const state = citationState(href, useContext(SourcesContext));
+  const site = text.replace(/^www\./i, '');
+  const note = state ? citationNote(state) : null;
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        openLink(href);
+      }}
+      title={note ? `${href}\n${note}` : href}
+      aria-label={note ? `${site}: ${note}` : undefined}
+      className={cn(
+        arriving,
+        'mx-2 inline-flex -translate-y-px items-center gap-4 rounded-full border bg-control px-6 py-px align-middle font-sans text-[0.75em] leading-[1.6] text-fg-secondary no-underline transition-ui hover:bg-hover hover:text-fg',
+        state === 'unseen' ? 'border-dashed border-fg-faint' : 'border-transparent'
+      )}
+    >
+      <SiteIcon url={href} size={11} />
+      {site}
+    </a>
+  );
 }
 
 function textContent(node: unknown): string {
@@ -122,22 +157,7 @@ function buildComponents(live: boolean): Components {
     a({ href, children }) {
       if (!href) return <span>{children}</span>;
       const text = childText(children);
-      if (isCitation(href, text)) {
-        return (
-          <a
-            href={href}
-            onClick={(e) => {
-              e.preventDefault();
-              openLink(href);
-            }}
-            title={href}
-            className={`${arriving}mx-2 inline-flex -translate-y-px items-center gap-4 rounded-full bg-control px-6 py-px align-middle font-sans text-[0.75em] leading-[1.6] text-fg-secondary no-underline transition-ui hover:bg-hover hover:text-fg`}
-          >
-            <SiteIcon url={href} size={11} />
-            {text.replace(/^www\./i, '')}
-          </a>
-        );
-      }
+      if (isCitation(href, text)) return <Citation href={href} text={text} arriving={arriving.trim()} />;
       return (
         <a
           href={href}

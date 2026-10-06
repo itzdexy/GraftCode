@@ -7,6 +7,7 @@ import type { ChecksConfig } from '@shared/schemas/config';
 import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
+import type { Source } from '@shared/sources';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
@@ -66,6 +67,7 @@ import {
   parseSlash,
   prPrompt,
   PROMPT_COMMANDS,
+  researchPrompt,
   reviewPrompt,
   securityReviewPrompt,
   testPrompt,
@@ -906,6 +908,8 @@ export class AgentSession {
         return { text: securityReviewPrompt(slash.args), typed: item.text };
       case 'explain':
         return { text: explainPrompt(slash.args), typed: item.text };
+      case 'research':
+        return { text: researchPrompt(slash.args), typed: item.text };
       case 'test':
         return { text: testPrompt(slash.args), typed: item.text };
       case 'decompile':
@@ -1044,6 +1048,8 @@ export class AgentSession {
         : [
             ...(web.fetch ? ['WebFetch'] : []),
             ...(web.clientSearch ? ['WebSearch'] : []),
+            // Researchers, for a question with several parts: they get the web tools above and nothing else.
+            ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
             ...(work.files ? ['CreateFile'] : []),
             ...(work.code ? ['RunCode'] : []),
             // A chat keeps what it makes in its own files, so pictures need those.
@@ -1134,6 +1140,7 @@ export class AgentSession {
       name: summary.incognito ? null : prefs.userName,
       model: identity,
       web: { search: web.native || web.clientSearch, fetch: web.fetch },
+      researchers: web.fetch || web.clientSearch,
       workspace: this.chatWork(model),
       personalization: summary.incognito ? null : prefs.personalization,
       mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
@@ -1637,6 +1644,7 @@ export class AgentSession {
       notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
       computer: this.deps.computer,
+      publicWebOnly: this.summary.kind === 'chat',
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
       makeDocument:
         work.files && this.deps.documents
@@ -1694,16 +1702,22 @@ export class AgentSession {
     hooks: HookRunner | null,
     root: string | null,
     trusted: boolean
-  ): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }> }> {
+  ): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }> {
     const prefs = this.deps.preferences();
-    const { report, runs } = await runAgentGroup(
+    const chat = this.summary.kind === 'chat';
+    // A chat has no project: nothing to run a command in and no files to change. Its agents research, whatever role they are given.
+    if (chat && input.agents.some((agent) => agent.verify !== undefined || agent.writes !== undefined)) {
+      throw new GraftError('bad_agent_graph', 'In a chat, agents can search and read the web and nothing else: leave out verify and writes.');
+    }
+    const available = this.toolNames ?? this.deps.tools.names();
+    const { report, runs, sources } = await runAgentGroup(
       input,
       parentToolUseId,
       {
         onControl: (control) => this.agentGroups.set(parentToolUseId, control),
         sessionId: this.id,
         system: this.system ?? '',
-        toolNames: this.toolNames ?? this.deps.tools.names(),
+        toolNames: chat ? available.filter((name) => name === 'WebFetch' || name === 'WebSearch') : available,
         customAgents: loadAgents(this.deps.graftHome, this.projectRoot()),
         sessionModel: model,
         sessionProvider: provider,
@@ -1731,6 +1745,7 @@ export class AgentSession {
     ).finally(() => this.agentGroups.delete(parentToolUseId));
     return {
       report,
+      sources,
       agents: runs.map((run) => ({
         nodeId: run.nodeId,
         title: run.title,

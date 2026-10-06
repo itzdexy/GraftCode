@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.10",
+    "date": "2026-10-05",
+    "items": [
+      "Research: type /research and a question. Graft plans the questions to answer, searches, opens the pages instead of trusting excerpts, checks claims against a second source and writes a report with its sources. It works in chats and in code sessions.",
+      "Chats can run several researchers at once, each on one part of a question, and bring their findings back together. They can search and read the web and nothing else.",
+      "You can see what an answer stands on. A reply that read pages ends with the list of them, and a cited link says whether the page was opened, only found by a search, or neither: those have a dashed border. Pages a researcher opened count, and so does a page that answered from another address than the one asked for.",
+      "A chat asks before it reads a page on this computer or your local network, and a page on the web can no longer send Graft there with a redirect.",
+      "Reading a server on this computer by name (http://localhost:…) works whichever kind of address it listens on. Before, a dev server that listened on one kind only could fail with “fetch failed”."
+    ]
+  },
+  {
     "version": "0.6.9",
     "date": "2026-10-05",
     "items": [

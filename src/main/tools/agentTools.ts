@@ -190,9 +190,9 @@ export const runAgentsTool: ToolDefinition<RunAgentsInput> = {
   timeoutMs: 6 * 60 * 60_000,
   describe: (input) => Promise.resolve({ summary: `Ran ${input.agents.length === 1 ? 'an agent' : `${input.agents.length} agents`}: ${input.goal}` }),
   async execute(input, ctx) {
-    const { report, agents } = await ctx.runAgents(input);
+    const { report, agents, sources } = await ctx.runAgents(input);
     const failed = agents.length > 0 && agents.every((a) => a.status !== 'done');
-    return textResult(report, { kind: 'agents', goal: input.goal, agents }, failed);
+    return textResult(report, { kind: 'agents', goal: input.goal, agents, ...(sources.length > 0 ? { sources } : {}) }, failed);
   }
 };
 

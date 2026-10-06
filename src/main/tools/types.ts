@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { Source } from '@shared/sources';
 import type { ToolResultContent } from '@shared/schemas/messages';
 import type { PermissionDetail, Question, QuestionAnswer } from '@shared/schemas/permissions';
 import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
@@ -57,13 +58,15 @@ export interface ToolContext extends DescribeContext {
   approvePlan(plan: string): Promise<{ approved: boolean; feedback: string | null }>;
   runSubagent(input: { description: string; prompt: string; type: SubagentType }): Promise<{ text: string; toolCalls: number }>;
   /** Runs a group of agents (RunAgents) and returns their combined report with how each one ended. */
-  runAgents(input: AgentGroupInput): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }> }>;
+  runAgents(input: AgentGroupInput): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }>;
   /** Project notes (GRAFT.md) for directories first touched by these paths, or null. */
   notesForPaths(paths: string[]): string | null;
   /** Screen, mouse and keyboard when computer use is on (Settings → Permissions); null otherwise. */
   computer: ComputerControl | null;
   /** Searches the web with the engine chosen in Settings → Web search. */
   search(query: string, count: number, signal: AbortSignal): Promise<{ engine: SearchEngineId; results: SearchResult[] }>;
+  /** Pages are read without asking here (a chat), so reading must stay on the public web: see WebFetch. */
+  publicWebOnly: boolean;
   /** Saves files the user can download from the chat; null outside chats and in incognito chats. */
   chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
   /** Builds a PDF, a text document, slides or a spreadsheet from what was written, for CreateFile; null where files can't be made. */

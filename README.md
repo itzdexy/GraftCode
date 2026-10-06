@@ -106,7 +106,7 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
-- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test`, `/decompile` and `/init` send carefully written prompts; `/mission`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
+- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/research`, `/test`, `/decompile` and `/init` send carefully written prompts; `/mission`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
 - **Decompilation:** `/decompile` rebuilds compiled code as source one function at a time: a fresh agent per function, the project's own match check as the judge, a limit on attempts, and no editing of the target or the comparison tools. With the Ghidra integration connected, the agent imports binaries, decompiles functions and follows cross-references there.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
 
@@ -156,7 +156,8 @@ Graft uses what a server offers beyond tools. What a server says about using its
 ### Chats
 
 - Conversations with attachments and images, and per-chat model and effort.
-- **Web search and page reading** without prompts, with sources cited inline as site pills.
+- **Web search and page reading** without prompts, with sources cited inline as site pills. A page on this computer or your local network is asked about first, and the web cannot redirect Graft into one.
+- **Research:** `/research` and a question sends a routine: plan the questions, search, open the pages instead of trusting excerpts, check each claim in a second source, write a report with its sources. A chat can run several researchers side by side, each on one part. A reply that read pages ends with the list of them, and every cited link says whether its page was opened, only found by a search, or neither.
 - **Files to download:** chats can create documents, data, code and pictures, shown as cards with Save, Open and Show in folder. Opening is limited to documents and pictures, so a click never runs a script.
 - **Real documents:** ask for a PDF, a text document (.docx), slides (.pptx) or a spreadsheet (.xlsx) and Graft builds it from the Markdown or rows the model writes: headings, lists, tables, links, the chat's own pictures, speaker's notes on slides, numbers and formulas in sheets. It is built inside Graft, in a window that runs no script and loads nothing from the web.
 - **Code in a sandbox:** chats run JavaScript in a hidden page with no network or file access to calculate, process data and make files.

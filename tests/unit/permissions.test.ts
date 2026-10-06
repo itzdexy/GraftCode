@@ -297,3 +297,18 @@ describe('settings files', () => {
     }
   });
 });
+
+describe('a chat reading the web', () => {
+  const chat = (mode: PermissionMode = 'ask'): PermissionEnv => ({ ...env(mode), allowNetwork: true });
+
+  it('reads the public web without asking, and asks before reading this computer or the local network', () => {
+    expect(decide(fetchQ('https://example.com/a'), chat()).behavior).toBe('allow');
+    for (const url of ['http://localhost:8080/', 'http://192.168.1.1/admin', 'http://169.254.169.254/latest/meta-data', 'http://nas.lan/']) {
+      const decision = decide(fetchQ(url), chat());
+      expect(decision.behavior, url).toBe('ask');
+      expect(decision.reason).toBe('Reads from this computer or your local network.');
+    }
+    // A search has no address of its own: it goes to the search engine.
+    expect(decide({ toolName: 'WebSearch', permissionClass: 'network', descriptor: { summary: 'search' } }, chat()).behavior).toBe('allow');
+  });
+});

@@ -80,7 +80,8 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     output: z.string()
   }),
   z.object({ kind: z.literal('kill-shell'), shellId: z.string(), killed: z.boolean() }),
-  z.object({ kind: z.literal('fetch'), url: z.string(), status: z.number().int(), bytes: z.number().int(), title: z.string().nullable() }),
+  /** `url` is where the page answered from; `requested` is the address that was asked for, when the page had moved. */
+  z.object({ kind: z.literal('fetch'), url: z.string(), requested: z.string().optional(), status: z.number().int(), bytes: z.number().int(), title: z.string().nullable() }),
   /** A computer-use step; the screenshot rides along in the result's content, the point is where it acted (screenshot pixels). */
   z.object({
     kind: z.literal('computer'),
@@ -98,7 +99,9 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('agents'),
     goal: z.string(),
-    agents: z.array(z.object({ nodeId: z.string(), title: z.string(), role: z.string(), status: z.string(), durationMs: z.number().int().nullable() }))
+    agents: z.array(z.object({ nodeId: z.string(), title: z.string(), role: z.string(), status: z.string(), durationMs: z.number().int().nullable() })),
+    /** The pages its agents read and found on the web: the conversation's own sources, like the ones the main agent opened. */
+    sources: z.array(z.object({ url: z.string(), title: z.string().nullable(), state: z.enum(['read', 'found']) })).optional()
   }),
   /** A MissionUpdate call: a note for the notebook, or the agent reporting the mission done or blocked. */
   z.object({ kind: z.literal('mission'), action: z.enum(['note', 'done', 'blocked']), noteKind: z.string().nullable(), text: z.string() }),

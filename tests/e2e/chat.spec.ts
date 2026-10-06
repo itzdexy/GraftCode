@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launchGraft, makeTempDir, type LaunchedApp } from './support/launch';
@@ -106,4 +108,53 @@ test('a chat builds a PDF, a document, slides and a spreadsheet from what the mo
 
   // The model was told what it got back.
   expect(JSON.stringify(provider.chatRequests()[1]!.body)).toContain('built from the Markdown you wrote');
+});
+
+test('/research sends the routine; a cited page that was opened says so, and one that was not is flagged', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+  await w.getByRole('radio', { name: 'Chat' }).click();
+
+  // The page that is read is served from this computer and asked for by name, as a dev server would be.
+  const pages = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end('<html><head><title>Heat pumps in the cold</title></head><body><p>They keep working down to -25 C.</p></body></html>');
+  });
+  await new Promise<void>((resolve) => pages.listen(0, 'localhost', resolve));
+  try {
+    const host = 'localhost';
+    const page = `http://${host}:${String((pages.address() as AddressInfo).port)}/study`;
+    provider.script(
+      { toolCalls: [{ name: 'WebFetch', input: { url: page } }] },
+      { text: `They work down to -25 C [${host}](${page}). Others say more [example.com](https://example.com/never-opened).` }
+    );
+    const composer = w.getByRole('textbox', { name: 'How can I help you today?' });
+    await composer.fill('/research how heat pumps work in cold climates');
+    await composer.press('Enter');
+
+    // A chat reads the web without asking, but not this computer: that takes a yes.
+    const card = w.getByRole('alertdialog');
+    await expect(card).toBeVisible();
+    await expect(card.getByText('Reads from this computer or your local network.')).toBeVisible();
+    await card.getByRole('button', { name: /Allow once/ }).click();
+
+    await expect(w.getByText('They work down to -25 C')).toBeVisible();
+    const first = JSON.stringify(provider.chatRequests()[0]!.body);
+    expect(first).toContain('Work like a careful researcher');
+    expect(first).toContain('how heat pumps work in cold climates');
+    // What the user typed is what the transcript shows, not the routine.
+    await expect(w.getByText('/research how heat pumps work in cold climates')).toBeVisible();
+    // The page really was read, whichever of this computer's two addresses the server listens on.
+    expect(JSON.stringify((provider.chatRequests()[1]!.body as { messages: unknown[] }).messages.slice(-1))).toContain('They keep working down to -25 C.');
+
+    const sources = w.getByRole('region', { name: 'Sources of this reply' });
+    await expect(sources.getByText('Read 1 page')).toBeVisible();
+    await expect(sources.getByText('Heat pumps in the cold')).toBeVisible();
+    await expect(w.getByRole('link', { name: `${host}: Opened in this conversation` })).toBeVisible();
+    await expect(w.getByRole('link', { name: 'example.com: Not opened or found in this conversation' })).toBeVisible();
+  } finally {
+    pages.close();
+  }
 });

@@ -5,7 +5,7 @@ import { detectShell } from '../../src/main/tools/shell/detect';
 import { OutputBuffer, stripAnsi } from '../../src/main/tools/shell/outputBuffer';
 import { msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
 import { killShellTool, shellOutputTool, shellTool } from '../../src/main/tools/shell/shellTools';
-import { webFetchTool, WebFetchInput } from '../../src/main/tools/web/webFetch';
+import { fetchPage, pointsInside, redirectProblem, webFetchTool, WebFetchInput } from '../../src/main/tools/web/webFetch';
 import { htmlToText } from '../../src/main/tools/web/htmlToText';
 import { askUserTool, exitPlanModeTool, taskTool, todoWriteTool } from '../../src/main/tools/agentTools';
 import { json, startFixtureServer, type FixtureServer } from '../support/httpFixture';
@@ -174,6 +174,77 @@ describe('WebFetch', () => {
     server.route('GET', '/missing', (_req, res) => json(res, 404, { error: 'nope' }));
     expect(text(await webFetchTool.execute({ url: `${server.url}/bin` }, makeToolContext(dir)))).toMatch(/can't show as text/);
     expect((await webFetchTool.execute({ url: `${server.url}/missing` }, makeToolContext(dir))).isError).toBe(true);
+  });
+
+  it('follows a page that moved, and says which address was asked for', async () => {
+    server.route('GET', '/old', (_req, res) => {
+      res.writeHead(302, { location: '/new?x=1' });
+      res.end();
+    });
+    server.route('GET', '/new', (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('moved here');
+    });
+    const result = await webFetchTool.execute({ url: `${server.url}/old` }, makeToolContext(dir));
+    expect(text(result)).toContain('moved here');
+    expect(result.display).toMatchObject({ kind: 'fetch', url: `${server.url}/new?x=1`, requested: `${server.url}/old`, status: 200 });
+    // A page that did not move records no second address.
+    const direct = await webFetchTool.execute({ url: `${server.url}/new` }, makeToolContext(dir));
+    expect(direct.display && 'requested' in direct.display).toBe(false);
+
+    server.route('GET', '/loop', (_req, res) => {
+      res.writeHead(302, { location: '/loop' });
+      res.end();
+    });
+    expect(text(await webFetchTool.execute({ url: `${server.url}/loop` }, makeToolContext(dir)))).toMatch(/redirected too many times/i);
+  });
+
+  it('never follows the web into this computer or the local network', async () => {
+    // From the public web to an address inside: what a hostile page does to read a router or a local service.
+    expect(redirectProblem('https://example.com/a', 'http://192.168.1.1/admin')).toBe('The page redirected to an address on this computer or a private network, which is not followed.');
+    expect(redirectProblem('https://example.com/a', 'http://localhost:11434/api/tags')).not.toBeNull();
+    expect(redirectProblem('https://example.com/a', 'file:///etc/passwd')).toBe('The page redirected to an address that is not http(s), which is not followed.');
+    // Within the web, and within what the user already allowed, a redirect is just a redirect.
+    expect(redirectProblem('https://example.com/a', 'https://www.example.com/a/')).toBeNull();
+    expect(redirectProblem('http://localhost:3000/', 'http://localhost:3000/login')).toBeNull();
+
+    // A name that looks public but points inside (the trick is called DNS rebinding) is refused where pages are read without asking.
+    const lookup = (host: string): Promise<Array<{ address: string }>> => Promise.resolve([{ address: host === 'rebind.example' ? '127.0.0.1' : '93.184.216.34' }]);
+    expect(await pointsInside('rebind.example', lookup)).toBe(true);
+    expect(await pointsInside('example.com', lookup)).toBe(false);
+    expect(await pointsInside('gone.example', () => Promise.reject(new Error('ENOTFOUND')))).toBe(false);
+    const guarded = makeToolContext(dir, { publicWebOnly: true });
+    server.route('GET', '/ok', (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('local page');
+    });
+    // An address that is plainly local was asked for by name and allowed by the user: it is read.
+    expect(text(await webFetchTool.execute({ url: `${server.url}/ok` }, guarded))).toContain('local page');
+  });
+
+  it('reaches a server on this computer by name, whichever kind of address it listens on', async () => {
+    // "localhost" is two addresses. A dev server often listens on one of them only, and the first one tried may be the other.
+    const tried: string[] = [];
+    const only = (reachable: string) => (url: string): Promise<Response> => {
+      tried.push(url);
+      return new URL(url).hostname === reachable ? Promise.resolve(new Response('ok')) : Promise.reject(new TypeError('fetch failed'));
+    };
+    expect(await (await fetchPage('http://localhost:5173/app?x=1', {}, only('[::1]'))).text()).toBe('ok');
+    expect(tried).toEqual(['http://localhost:5173/app?x=1', 'http://127.0.0.1:5173/app?x=1', 'http://[::1]:5173/app?x=1']);
+    tried.length = 0;
+    expect(await (await fetchPage('http://localhost:5173/', {}, only('127.0.0.1'))).text()).toBe('ok');
+    expect(tried).toEqual(['http://localhost:5173/', 'http://127.0.0.1:5173/']);
+    // Nothing listening at all: the first failure is the one reported. Any other host is tried once.
+    await expect(fetchPage('http://localhost:9/', {}, only('nowhere'))).rejects.toThrow('fetch failed');
+    tried.length = 0;
+    await expect(fetchPage('https://example.com/', {}, only('nowhere'))).rejects.toThrow('fetch failed');
+    expect(tried).toEqual(['https://example.com/']);
+    // A stop is a stop, not a reason to try another address.
+    const stopped = new AbortController();
+    stopped.abort();
+    tried.length = 0;
+    await expect(fetchPage('http://localhost:5173/', { signal: stopped.signal }, only('[::1]'))).rejects.toThrow();
+    expect(tried).toEqual(['http://localhost:5173/']);
   });
 
   it('decodes entities and drops non-http links', () => {

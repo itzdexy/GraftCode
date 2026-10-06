@@ -19,6 +19,33 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.10 (2026-10-05)
+
+- **What a conversation read and found** is worked out from the tool results it already
+  stores (`src/shared/sources.ts`): a page is read when `WebFetch` returned it below 400,
+  found when a search returned it. Addresses are compared after dropping `http`/`www.`, the
+  fragment, a trailing slash and tracking parameters. Nothing new is saved.
+- **Marks on citations and a sources card.** A citation pill says in its tooltip and its
+  accessible name whether its page was opened, only found, or neither (dashed border);
+  nothing is marked in a conversation with no sources (`Markdown.tsx`, `sourcesModel.ts`).
+  A finished turn that read pages ends with `SourcesCard` ("Read 3 pages").
+- **`/research`** sends a seven-step routine (`researchPrompt`), in chats and code sessions.
+- **Researchers in chats.** A chat with web access has `RunAgents`; every agent of its
+  group gets `WebFetch` and `WebSearch` and nothing else, whatever its role, and a group
+  that carries `verify` or `writes` is refused. The pages its agents read and found come
+  back with the result (`display.sources`) and count as the conversation's own.
+- **A page that moved** is known by both addresses: `WebFetch` records the one asked for
+  (`display.requested`), so a link to either counts as opened.
+- **Reading stays on the web.** In a chat, a page on this computer or a private network asks
+  first (`isPrivateAddress`, `engine.ts`). `WebFetch` follows redirects by hand and never
+  from the web into a private address (`redirectProblem`); where pages are read without
+  asking, a public-looking name that resolves to a private address is refused
+  (`pointsInside`).
+- **`localhost` by name.** In the app a request to `http://localhost:port` failed when the
+  server listened on the other of this computer's two addresses (seen in the container:
+  "fetch failed"). `fetchPage` tries 127.0.0.1 and ::1 by number before giving up.
+- **Catalog** regenerated: 212 providers, 7,552 models.
+
 ### 0.6.9 (2026-10-05)
 
 - **Documents from chats.** `CreateFile` builds a file named `.pdf`, `.docx`, `.pptx` or
@@ -181,6 +208,14 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Known weaknesses and technical debt
 
+- Research reads HTML and text only: a PDF on the web can't be read. A mark on a citation
+  says what this conversation opened, not whether the page says what is claimed. Search
+  results that are redirect links (one provider's own search) are compared by the redirect,
+  so a link to the page itself reads "not opened". The `RunAgents` description a chat sees
+  is the code session's, with roles a chat has no use for.
+- The check against names that resolve to private addresses looks the name up before the
+  request, and the request looks it up again: a name that changes its answer in between is
+  not caught. A hosts-file name that points at this computer can't be read from a chat.
 - Documents are built in chats only; a code session writes files with its own tools. The
   files were opened with LibreOffice and three Python readers, not with Microsoft Office.
   Slides hold one picture and one table each and their text is not measured, so a long
@@ -282,10 +317,8 @@ round. What exists now and what does not:
 
 Five rounds are designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
 planned task by task, one plan a round, in `docs/superpowers/plans/`. The first, chat
-documents, shipped as 0.6.9. The rest:
+documents, shipped as 0.6.9, and the second, research, as 0.6.10. The rest:
 
-2. 0.6.10, `2026-10-05-research.md`: `/research`, researchers in parallel in chats, a
-   sources card, and a mark on cited links nobody opened.
 3. 0.6.11, `2026-10-05-plans-that-last.md`: edit a plan before approving it; the plan stays
    in view and survives compaction; `/plan`.
 4. 0.6.12, `2026-10-05-long-sessions.md`: remove old tool output before summarizing, keep

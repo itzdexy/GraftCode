@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { isPrivateAddress } from '@shared/privacy';
 import type { PermissionMode } from '@shared/schemas/common';
 import { isInside, isInsideReal } from '../tools/paths';
 import type { PermissionClass, ToolCallDescriptor } from '../tools/types';
@@ -192,7 +193,12 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
     case 'computer':
       return result('ask', 'Uses your screen, mouse and keyboard.');
     case 'network':
-      if (env.allowNetwork) return result('allow', 'Chats may search and read the web.');
+      if (env.allowNetwork) {
+        // A chat reads the web without asking. What is on this computer or its network is not the web:
+        // a page could steer a model into reading a router or a local service, so the user decides.
+        if (d.url !== undefined && isPrivateAddress(d.url)) return result('ask', 'Reads from this computer or your local network.');
+        return result('allow', 'Chats may search and read the web.');
+      }
       if (mode === 'auto' || mode === 'bypass') return result('allow', 'Network reads are allowed in this mode.');
       // The user's own dev server: opening it in the browser has the reach of an edit.
       if (mode === 'auto-edit' && query.toolName === 'Browser' && d.url !== undefined && isLocalUrl(d.url)) {

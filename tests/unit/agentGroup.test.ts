@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '../../src/shared/schemas/agentRuns';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import { textOf } from '../../src/shared/schemas/messages';
+import { sourcesOf } from '../../src/shared/sources';
 import { ProviderError } from '../../src/main/providers/errors';
 import type { StreamRequest } from '../../src/main/providers/types';
 import { fakeModel, type FakeFailure, type FakeReply, type FakeStep } from '../support/fakeProvider';
@@ -403,5 +404,57 @@ describe('a group of agents', () => {
     const first = h.store.listMessages('session-1')[0]!;
     h.session.truncateFrom(first.seq);
     expect(h.store.listAgentRuns('session-1')).toEqual([]);
+  });
+});
+
+describe('a group of researchers in a chat', () => {
+  const web = { kind: 'chat' as const, webSearch: true, search: { active: () => 'brave' as const, search: () => Promise.resolve({ engine: 'brave' as const, results: [{ title: 'Found page', url: 'https://found.example/page', snippet: 's' }] }) } };
+
+  it('gives every agent the two web tools and nothing else, whatever its role', async () => {
+    const tools: Record<string, string[]> = {};
+    const h = await run({
+      ...web,
+      group: [
+        { id: 'r', role: 'researcher', task: 'Find the dates', prompt: 'Find them.' },
+        { id: 'w', role: 'implementer', task: 'Write it up', prompt: 'Write.', depends_on: ['r'] }
+      ],
+      agent: (task, request) => ((tools[task] = request.tools.map((t) => t.name).sort()), { text: 'Done.' })
+    });
+    expect(tools).toEqual({ 'Find the dates': ['WebFetch', 'WebSearch'], 'Write it up': ['WebFetch', 'WebSearch'] });
+    expect([h.runs.r!.status, h.runs.w!.status]).toEqual(['done', 'done']);
+  });
+
+  it('refuses a group that asks for a command to be run or files to be changed: a chat has no project', async () => {
+    const asked: string[] = [];
+    for (const extra of [{ verify: 'echo pwned > proof.txt' }, { writes: ['notes/**'] }]) {
+      const h = await run({
+        ...web,
+        group: [{ id: 'r', role: 'researcher', task: 'Find the dates', prompt: 'Find them.', ...extra }],
+        agent: (task) => (asked.push(task), { text: 'Done.' })
+      });
+      const result = h.store
+        .listMessages('session-1')
+        .flatMap((m) => m.content)
+        .find((b) => b.type === 'tool_result' && b.toolUseId === 'group-1');
+      expect(result?.type === 'tool_result' && result.isError).toBe(true);
+      expect(result?.type === 'tool_result' && textOf(result.content)).toContain('In a chat, agents can search and read the web and nothing else: leave out verify and writes.');
+      expect(Object.keys(h.runs)).toEqual([]);
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it('hands back the pages its agents read and found, so the conversation knows them as its own', async () => {
+    const h = await run({
+      ...web,
+      group: [{ id: 'r', role: 'researcher', task: 'Find the dates', prompt: 'Find them.' }],
+      agent: (_task, request) =>
+        request.messages.some((m) => m.content.some((b) => b.type === 'tool_result'))
+          ? { text: 'It was 2024.' }
+          : { toolCalls: [{ id: 'search-1', name: 'WebSearch', input: { query: 'when' } }] }
+    });
+    const messages = h.store.listMessages('session-1');
+    const result = messages.flatMap((m) => m.content).find((b) => b.type === 'tool_result' && b.toolUseId === 'group-1');
+    expect(result?.type === 'tool_result' && result.display).toMatchObject({ kind: 'agents', sources: [{ url: 'https://found.example/page', title: 'Found page', state: 'found' }] });
+    expect(sourcesOf(messages)).toEqual([{ url: 'https://found.example/page', title: 'Found page', state: 'found' }]);
   });
 });

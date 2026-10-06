@@ -7,6 +7,7 @@ import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EMPTY_USAGE, type EffortLevel, type ModelRef, type Usage } from '@shared/schemas/common';
 import { textOf, type StoredMessage, type ToolUseBlock } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
+import { sourcesOf, type Source } from '@shared/sources';
 import { ProviderError } from '../providers/errors';
 import type { RetryPolicy } from '../providers/retry';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
@@ -86,7 +87,12 @@ export interface GroupHost {
 export interface AgentGroupResult {
   report: string;
   runs: AgentRun[];
+  /** The pages the agents read and found on the web, each once. */
+  sources: Source[];
 }
+
+/** The most pages a group hands back: its result is stored with the conversation. */
+const SOURCES_MAX = 200;
 
 /** Rounds of "run the check, send its failure back" before an agent's work counts as failed. */
 const VERIFY_ROUNDS = 3;
@@ -146,6 +152,8 @@ export async function runAgentGroup(input: AgentGroupInput, groupId: string, hos
   }
 
   const runs = new Map<string, AgentRun>();
+  /** Every message of every agent, for the pages they read and found. */
+  const seen: StoredMessage[] = [];
   const created = Date.now();
   const change = (id: string, patch: Partial<AgentRun>, entry?: Omit<AgentTimelineEntry, 'at'>): void => {
     const current = runs.get(id);
@@ -243,7 +251,7 @@ export async function runAgentGroup(input: AgentGroupInput, groupId: string, hos
     run: (node, _attempt, nodeSignal, deps) => {
       const plan = planned.get(node.id);
       if (!plan) throw new GraftError('internal', `No plan for ${node.id}.`);
-      return runAgent(plan, input.goal, groupId, host, nodeSignal, deps, planned, (patch, entry) => change(node.id, patch, entry), () => runs.get(node.id));
+      return runAgent(plan, input.goal, groupId, host, nodeSignal, deps, planned, (patch, entry) => change(node.id, patch, entry), () => runs.get(node.id), (message) => seen.push(message));
     }
   });
 
@@ -269,7 +277,7 @@ export async function runAgentGroup(input: AgentGroupInput, groupId: string, hos
     }
     return `${head}\n${run.error ?? 'It did not finish.'}`;
   });
-  return { report: `Agents: ${tally || 'none ran'}.\n\n${sections.join('\n\n')}`, runs: finished };
+  return { report: `Agents: ${tally || 'none ran'}.\n\n${sections.join('\n\n')}`, runs: finished, sources: sourcesOf(seen).slice(0, SOURCES_MAX) };
 }
 
 async function runAgent(
@@ -281,7 +289,8 @@ async function runAgent(
   deps: Map<string, string>,
   planned: Map<string, Planned>,
   change: (patch: Partial<AgentRun>, entry?: Omit<AgentTimelineEntry, 'at'>) => void,
-  current: () => AgentRun | undefined
+  current: () => AgentRun | undefined,
+  saw: (message: StoredMessage) => void
 ): Promise<string> {
   const { spec, role, route, writes } = plan;
   const { provider, model } = sameModel(route.ref, host.sessionModel.ref) ? { provider: host.sessionProvider, model: host.sessionModel } : await host.resolve(route.ref, signal);
@@ -301,6 +310,7 @@ async function runAgent(
     append: (messageRole, content, meta, id) => {
       const message: StoredMessage = { id: id ?? randomUUID(), sessionId: host.sessionId, seq: scratch.length + 1, role: messageRole, content, meta, createdAt: Date.now() };
       scratch.push(message);
+      saw(message);
       const touched = content.flatMap((block) => {
         const display = block.type === 'tool_result' && !block.isError ? block.display : undefined;
         if (display?.kind === 'edit') return [display.path];

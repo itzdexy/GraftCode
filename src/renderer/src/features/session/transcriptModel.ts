@@ -1,5 +1,7 @@
 import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
+import type { Source } from '@shared/sources';
+import { turnSources } from './sourcesModel';
 
 /**
  * Turns stored messages into display items: consecutive tool calls collapse
@@ -36,6 +38,8 @@ export type TranscriptItem =
   | { kind: 'interrupted'; key: string }
   | { kind: 'edits'; key: string; files: EditedFile[] }
   | { kind: 'files'; key: string; files: MadeFile[] }
+  /** The pages a finished turn read. */
+  | { kind: 'sources'; key: string; sources: Source[] }
   | { kind: 'media'; key: string; media: MadeMedia }
   | ActivityItem;
 
@@ -351,6 +355,9 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       // …and, in chats, the files it made for the user to download.
       const made = madeFiles(calls);
       if (made.length > 0) out.push({ kind: 'files', key: `files:${segment[0]?.key ?? String(index)}`, files: made });
+      // …and the pages it read on the web.
+      const read = turnSources(calls);
+      if (read.length > 0) out.push({ kind: 'sources', key: `sources:${segment[0]?.key ?? String(index)}`, sources: read });
       const media = madeMedia(calls);
       if (media) out.push({ kind: 'media', key: `media:${segment[0]?.key ?? String(index)}`, media });
     }

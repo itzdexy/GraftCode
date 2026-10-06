@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
+import { sourceIndex, sourcesOf } from '@shared/sources';
 import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
@@ -20,8 +21,10 @@ import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
+import { SourcesContext } from './Markdown';
 import { MediaCard } from './MediaCard';
 import { RunningShell, ShellItem } from './ShellItem';
+import { SourcesCard } from './SourcesCard';
 import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
 import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
@@ -85,6 +88,11 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     [view.messages, view.streaming, view.running, modelWorking]
   );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
+  // What the conversation read and found, for the marks on citations; null when it never used the web.
+  const sources = useMemo(() => {
+    const seen = sourcesOf(view.messages);
+    return seen.length > 0 ? sourceIndex(seen) : null;
+  }, [view.messages]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -178,6 +186,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <EditsCard files={item.files} />;
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
+      case 'sources':
+        return <SourcesCard sources={item.sources} />;
       case 'media':
         return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} />;
       case 'todos':
@@ -229,11 +239,13 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       {variant === 'code' ? <Timeline turns={turns} current={currentTurn} onJump={jumpTo} /> : null}
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
-          {items.map((item) => (
-            <Arrival key={item.key} live={view.turnActive}>
-              {render(item)}
-            </Arrival>
-          ))}
+          <SourcesContext.Provider value={sources}>
+            {items.map((item) => (
+              <Arrival key={item.key} live={view.turnActive}>
+                {render(item)}
+              </Arrival>
+            ))}
+          </SourcesContext.Provider>
           {view.retrying ? (
             <p className="text-md text-fg-muted">
               {view.retrying.reason}. Retrying in {Math.ceil(view.retrying.delayMs / 1000)}s (attempt {view.retrying.attempt})…
