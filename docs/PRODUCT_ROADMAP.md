@@ -221,7 +221,8 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   and `ToolSearch` loads tools by words or `select:name`; a server's name alone loads all
   its tools. The choice is sticky for the session; sub-agents get what was loaded.
 - **Edit errors show the file's lines** at the nearest match.
-- `video/`, a separate Remotion package that appeared in the tree, is ignored by ESLint.
+- `video/`, a separate package that may sit in a working copy, is ignored by ESLint and by
+  git: it is not part of this repository.
 
 ### 0.6.7 (2026-10-04)
 
@@ -427,8 +428,7 @@ round. What exists now and what does not:
 
 ## Next, in order
 
-The five rounds designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
-planned task by task in `docs/superpowers/plans/` are done: chat documents (0.6.9),
+The five rounds designed and planned in October 2026 are done: chat documents (0.6.9),
 research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention and context
 (0.6.13). What comes next:
 

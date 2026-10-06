@@ -11,3 +11,8 @@ Thumbs.db
 reference/
 # Local-scope Graft settings are per-machine.
 .graft/settings.local.json
+# Kept on the author's computer only: the launch film, planning notes and tool settings.
+/video/
+/docs/superpowers/
+/.superpowers/
+/.claude/

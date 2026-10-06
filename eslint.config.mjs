@@ -15,7 +15,7 @@ export default defineConfig(
       'playwright-report/**',
       'build/**',
       'resources/**',
-      // The launch film is its own package: page scripts and a film script (video/README.md).
+      // A working copy may hold the launch film here: a package of its own, kept out of this repository.
       'video/**'
     ]
   },
