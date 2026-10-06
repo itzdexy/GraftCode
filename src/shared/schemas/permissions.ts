@@ -35,7 +35,9 @@ export type PermissionDecision = z.infer<typeof PermissionDecisionSchema>;
 export const PermissionResponseSchema = z.object({
   requestId: z.string(),
   decision: PermissionDecisionSchema,
-  feedback: z.string().max(4000).optional()
+  feedback: z.string().max(4000).optional(),
+  /** With the approval of a plan: the plan as the user edited it. The agent follows this version. */
+  plan: z.string().max(50_000).optional()
 });
 export type PermissionResponse = z.infer<typeof PermissionResponseSchema>;
 

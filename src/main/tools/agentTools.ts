@@ -121,11 +121,14 @@ export const exitPlanModeTool: ToolDefinition<ExitPlanModeInput> = {
   timeoutMs: 24 * 60 * 60_000,
   describe: () => Promise.resolve({ summary: 'Presented a plan' }),
   async execute(input, ctx) {
-    const { approved, feedback } = await ctx.approvePlan(input.plan);
-    const text = approved
-      ? 'The user approved the plan. Plan mode is off; carry out the plan now.'
-      : `The user did not approve the plan.${feedback ? ` Feedback: ${feedback}` : ''} Stay in plan mode and revise it.`;
-    return textResult(text, { kind: 'plan', plan: input.plan, approved, feedback });
+    const { approved, feedback, plan } = await ctx.approvePlan(input.plan);
+    const text = !approved
+      ? `The user did not approve the plan.${feedback ? ` Feedback: ${feedback}` : ''} Stay in plan mode and revise it.`
+      : plan !== input.plan
+        ? `The user approved the plan after editing it. Plan mode is off; carry out their version:\n\n${plan}`
+        : 'The user approved the plan. Plan mode is off; carry out the plan now.';
+    // What is kept is the plan that was agreed: the user's version when they edited it.
+    return textResult(text, { kind: 'plan', plan: approved ? plan : input.plan, approved, feedback });
   }
 };
 

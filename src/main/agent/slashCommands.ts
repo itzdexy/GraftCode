@@ -16,7 +16,7 @@ export interface CustomCommand extends SlashCommandInfo {
 
 /**
  * Built-in commands. Some act inside the session (clear, compact, cost,
- * help, model, effort, permissions), some send a prepared prompt (init,
+ * help, model, effort, permissions, plan), some send a prepared prompt (init,
  * review, security-review, explain, research, test, decompile, commit, pr), and the rest open UI
  * in the renderer (mcp, resume, rewind, config, export, system, new, mission).
  */
@@ -26,6 +26,7 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'model', description: 'Switch the model for this session', argumentHint: '[model]' },
   { name: 'effort', description: 'Set the effort level', argumentHint: '[low|medium|high|extra|max|taproot]' },
   { name: 'permissions', description: 'Change the permission mode or edit rules', argumentHint: '[ask|auto-edit|plan|auto]' },
+  { name: 'plan', description: 'Plan a change before making it: nothing is changed until you approve', argumentHint: '[what to plan]' },
   { name: 'mcp', description: 'Show MCP servers and their status', argumentHint: null },
   { name: 'init', description: 'Analyze the project and write a GRAFT.md for future sessions', argumentHint: null },
   { name: 'review', description: 'Review the current changes for bugs and risks', argumentHint: '[focus]' },
@@ -167,6 +168,11 @@ export function explainPrompt(target: string): string {
     'Read the relevant code first. Start with a short overview, then walk through the main pieces and how data flows between them, with path:line references.',
     'Point out anything surprising or easy to get wrong. Don\'t change any files.'
   ].join(' ');
+}
+
+/** What /plan sends once Plan mode is on. The mode is what keeps the agent from changing anything; this only says what to plan. */
+export function planPrompt(task: string): string {
+  return `Plan this before changing anything: ${task}`;
 }
 
 /**

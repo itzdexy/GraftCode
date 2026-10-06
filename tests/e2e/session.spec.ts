@@ -223,3 +223,39 @@ test('rewind restores the files and the conversation to before a message', async
   // The rewound message returns to the composer for editing.
   await expect(w.getByRole('textbox', { name: SESSION_BOX })).toHaveValue('Rewrite the notes');
 });
+
+test('a plan is edited before it is approved, and stays above the message box', async () => {
+  const w = graft.window;
+  provider.script(
+    { toolCalls: [{ name: 'ExitPlanMode', input: { plan: '## Add a greeting\n\n1. Create hello.txt' } }] },
+    { text: 'Following your version.' }
+  );
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('/plan add a greeting file');
+  await composer.press('Enter');
+
+  // /plan switched the session to Plan mode, and the plan waits for approval.
+  const card = w.getByRole('alertdialog', { name: 'Approve this plan?' });
+  await expect(card.getByText('Create hello.txt')).toBeVisible();
+  await expect(w.getByRole('button', { name: /Permission mode: Plan/ })).toBeVisible();
+  expect(JSON.stringify(provider.chatRequests()[0]!.body)).toContain('Plan this before changing anything: add a greeting file');
+
+  // A plan edited down to nothing can't be approved; the user's version can.
+  await card.getByRole('button', { name: 'Edit plan' }).click();
+  const box = card.getByRole('textbox', { name: 'Plan' });
+  await box.fill('');
+  await expect(card.getByRole('button', { name: /Approve plan/ })).toBeDisabled();
+  await box.fill('## Add a greeting\n\n1. Create hello.txt\n2. Say hello in Norwegian too');
+  await shot(w, 'session-plan-edit');
+  await card.getByRole('button', { name: /Approve plan/ }).click();
+  await expect(w.getByText('Following your version.')).toBeVisible();
+  const told = JSON.stringify(provider.chatRequests()[1]!.body);
+  expect(told).toContain('carry out their version');
+  expect(told).toContain('Say hello in Norwegian too');
+
+  // The plan stays above the message box, as the user approved it.
+  await w.getByRole('button', { name: /^Plan: Add a greeting/ }).click();
+  const dialog = w.getByRole('dialog', { name: 'Plan' });
+  await expect(dialog.getByText('Say hello in Norwegian too')).toBeVisible();
+  await shot(w, 'session-plan');
+});

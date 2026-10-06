@@ -7,8 +7,9 @@ import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
 import { ChatFiles } from '../../src/main/chat/chatFiles';
 import { DocumentMaker } from '../../src/main/chat/documents';
-import { renderTranscript } from '../../src/main/agent/compaction';
+import { renderTranscript, summaryMessageText } from '../../src/main/agent/compaction';
 import type { LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
+import { currentPlan } from '../../src/shared/plans';
 import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
@@ -292,6 +293,38 @@ describe('cancellation, retries and errors', () => {
 });
 
 describe('compaction', () => {
+  it('says the approved plan again, word for word, in the summary', async () => {
+    const h = harness({
+      mode: 'plan',
+      model: { contextWindow: 2000 },
+      script: [
+        { toolCalls: [{ name: 'ExitPlanMode', input: { plan: '1. Add the limiter\n2. Run npm test' } }] },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*' } }], usage: { inputTokens: 1700, outputTokens: 20 } },
+        { text: 'They are adding a limiter.' },
+        { text: 'Continuing.' }
+      ]
+    });
+    h.session.send('plan it');
+    const prompt = await h.waitFor((e) => e.type === 'permission');
+    if (prompt.type !== 'permission') throw new Error('unreachable');
+    h.session.respondPermission({ requestId: prompt.request.id, decision: 'allow-once' });
+    await h.session.idle();
+    const summary = h.store.listMessages('session-1').find((m) => m.meta.kind === 'compaction-summary');
+    expect(JSON.stringify(summary?.content)).toContain('The plan you and the user agreed on (follow it):\\n1. Add the limiter\\n2. Run npm test');
+    // The plan is still the session's plan after its messages were folded away.
+    expect(currentPlan(h.store.listMessages('session-1'))?.plan).toBe('1. Add the limiter\n2. Run npm test');
+  });
+
+  it('adds no plan section when there is no plan', () => {
+    expect(summaryMessageText('S', [], [])).not.toContain('The plan you and the user agreed on');
+    expect(summaryMessageText('S', [], [], { plan: null })).not.toContain('The plan you and the user agreed on');
+    const withPlan = summaryMessageText('S', [{ id: '1', content: 'a task', status: 'pending' }], [], { plan: '1. A' });
+    expect(withPlan).toContain('The plan you and the user agreed on (follow it):\n1. A');
+    // The plan comes after the summary and before the task list.
+    expect(withPlan.indexOf('S\n')).toBeLessThan(withPlan.indexOf('The plan you and the user agreed on'));
+    expect(withPlan.indexOf('The plan you and the user agreed on')).toBeLessThan(withPlan.indexOf('Task list at the time of compaction'));
+  });
+
   it('summarizes near the context limit and continues from the summary', async () => {
     const h = harness({
       model: { contextWindow: 2000 },
@@ -458,6 +491,39 @@ describe('agent tools that involve the user', () => {
     await h.session.idle();
     expect(h.session.summary.permissionMode).toBe('auto-edit');
     expect(fs.readFileSync(path.join(h.projectDir, 'plan.txt'), 'utf8')).toBe('x');
+  });
+
+  const planned = async (answer: (id: string) => Parameters<Harness['session']['respondPermission']>[0]) => {
+    const h = harness({ mode: 'plan', script: [{ toolCalls: [{ name: 'ExitPlanMode', input: { plan: '1. Write a.txt' } }] }, { text: 'Working.' }] });
+    h.session.send('plan it');
+    const prompt = await h.waitFor((e) => e.type === 'permission');
+    if (prompt.type !== 'permission') throw new Error('unreachable');
+    h.session.respondPermission(answer(prompt.request.id));
+    await h.session.idle();
+    return { h, told: JSON.stringify(h.provider.requests[1]!.messages.at(-1)) };
+  };
+
+  it('carries out the version of the plan the user approved', async () => {
+    const { h, told } = await planned((requestId) => ({ requestId, decision: 'allow-once', plan: '1. Write a.txt\n2. Test it' }));
+    expect(told).toContain('The user approved the plan after editing it. Plan mode is off; carry out their version:');
+    expect(told).toContain('2. Test it');
+    expect(currentPlan(h.store.listMessages('session-1'))?.plan).toBe('1. Write a.txt\n2. Test it');
+    expect(h.session.summary.permissionMode).toBe('auto-edit');
+  });
+
+  it('treats an edit that changes nothing but spacing as a plain approval', async () => {
+    const { h, told } = await planned((requestId) => ({ requestId, decision: 'allow-once', plan: '  1. Write a.txt \n' }));
+    expect(told).toContain('The user approved the plan. Plan mode is off; carry out the plan now.');
+    expect(told).not.toContain('after editing');
+    expect(currentPlan(h.store.listMessages('session-1'))?.plan).toBe('1. Write a.txt');
+  });
+
+  it('drops an edit sent with a refusal: a plan that was turned down is not a plan', async () => {
+    const { h, told } = await planned((requestId) => ({ requestId, decision: 'deny', feedback: 'Too risky.', plan: '1. Something else' }));
+    expect(told).toContain('The user did not approve the plan. Feedback: Too risky.');
+    expect(told).not.toContain('Something else');
+    expect(currentPlan(h.store.listMessages('session-1'))).toBeNull();
+    expect(h.session.summary.permissionMode).toBe('plan');
   });
 
   it('delegates to a read-only sub-agent with its own context', async () => {
@@ -832,6 +898,15 @@ describe('agent tools that involve the user', () => {
 });
 
 describe('commands, memory and history', () => {
+  it('marks where /clear happened', async () => {
+    const h = harness({ script: [{ text: 'hello' }] });
+    h.session.send('hi');
+    await h.session.idle();
+    h.session.send('/clear');
+    await h.session.idle();
+    expect(h.store.listMessages('session-1').at(-1)?.meta).toMatchObject({ kind: 'command-output', cleared: true });
+  });
+
   it('handles built-in and custom slash commands without calling the model when not needed', async () => {
     const h = harness({ script: [{ text: 'Greeted Ada.' }] });
     writeFile(h.projectDir, '.graft/commands/greet.md', '---\ndescription: Say hi\n---\nGreet $ARGUMENTS warmly.');
@@ -1118,6 +1193,36 @@ describe('prompt commands', () => {
     code.session.send('/research what changed in HTTP/3');
     await code.session.idle();
     expect(JSON.stringify(code.provider.requests[0]!.messages.at(-1))).toContain('Research this and write a report: what changed in HTTP/3');
+  });
+
+  it('/plan turns Plan mode on and asks for a plan of what was typed', async () => {
+    const h = harness({ mode: 'auto-edit', script: [{ text: 'Here is the plan.' }] });
+    h.session.send('/plan add rate limiting to the API');
+    await h.session.idle();
+    expect(h.session.summary.permissionMode).toBe('plan');
+    expect(JSON.stringify(h.provider.requests[0]!.messages.at(-1))).toContain('Plan this before changing anything: add rate limiting to the API');
+    expect(h.provider.requests[0]!.system).toContain('ask up to three questions with AskUserQuestion before you plan');
+    expect(h.provider.requests[0]!.system).toContain('The user can edit the plan before approving it; follow the version they approve.');
+    expect(h.store.listMessages('session-1').find((m) => m.role === 'user')?.meta.typed).toBe('/plan add rate limiting to the API');
+    h.session.send('/plan');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Plan mode is on. Describe what you want planned.');
+    expect(h.provider.requests).toHaveLength(1);
+
+    const chat = harness({ kind: 'chat', script: [] });
+    chat.session.send('/plan a trip');
+    await chat.session.idle();
+    expect(texts(chat).at(-1)).toBe('assistant:Plan mode works in code sessions. Here, just ask for a plan.');
+    expect(chat.provider.requests).toHaveLength(0);
+    expect(chat.session.summary.permissionMode).not.toBe('plan');
+
+    const { listCommands, loadCustomCommands } = await import('../../src/main/agent/slashCommands');
+    const names = listCommands(h.home, null).map((c) => c.name);
+    expect(names[names.indexOf('permissions') + 1]).toBe('plan');
+    // /plan changes the session's mode, so a command file with its name can't take its place.
+    fs.mkdirSync(path.join(h.home, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(h.home, 'commands', 'plan.md'), 'Do something else entirely.');
+    expect(loadCustomCommands(h.home, null).map((c) => c.name)).not.toContain('plan');
   });
 
   it('expands /decompile into the one-function-at-a-time loop, with the project’s own check deciding a match', async () => {

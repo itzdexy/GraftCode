@@ -32,6 +32,8 @@ export interface PermissionPrompt {
 export interface PermissionAnswer {
   decision: PermissionDecision;
   feedback?: string;
+  /** The plan as the user edited it, when the request was the approval of a plan. */
+  plan?: string;
 }
 
 /** Everything the loop needs from its surroundings (session, UI, storage). */

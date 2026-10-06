@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.11",
+    "date": "2026-10-06",
+    "items": [
+      "Edit a plan before you approve it. The approval card has Edit plan: change the steps, and the agent follows your version.",
+      "The plan stays. Once approved it sits above the message box with how many tasks are done, opens with a click, and is repeated word for word when a long conversation is compacted.",
+      "/plan and what you want planned switches to Plan mode and asks for a plan. Plans now come as a goal, steps with the files they touch, the checks that will prove it, and the risks; when a request leaves a real choice open, the agent asks first."
+    ]
+  },
+  {
     "version": "0.6.10",
     "date": "2026-10-05",
     "items": [

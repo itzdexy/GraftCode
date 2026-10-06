@@ -93,8 +93,12 @@ export async function summarizeSession(req: CompactionRequest): Promise<string> 
   return text.trim();
 }
 
-/** Text of the message that replaces the compacted history. */
-export function summaryMessageText(summary: string, todos: TodoItem[], files: string[]): string {
+/**
+ * Text of the message that replaces the compacted history. The plan the user
+ * approved is said again word for word: a summary of a plan is not the plan.
+ */
+export function summaryMessageText(summary: string, todos: TodoItem[], files: string[], extra: { plan?: string | null } = {}): string {
+  const planText = extra.plan ? `\n\nThe plan you and the user agreed on (follow it):\n${extra.plan}` : '';
   const todoText =
     todos.length > 0
       ? `\n\nTask list at the time of compaction:\n${todos.map((t) => `- [${t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' '}] ${t.content}`).join('\n')}`
@@ -104,7 +108,7 @@ export function summaryMessageText(summary: string, todos: TodoItem[], files: st
     'This session was compacted to free up context. Summary of the work so far:',
     '',
     summary,
-    `${todoText}${fileText}`,
+    `${planText}${todoText}${fileText}`,
     '',
     'Continue from where the work left off. Re-read files before editing them; earlier reads are no longer in context.'
   ].join('\n');

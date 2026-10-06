@@ -8,6 +8,7 @@ import { decide, type PermissionEnv, type PermissionQuery } from '../../src/main
 import { parseRule, ruleMatches } from '../../src/main/permissions/rules';
 import { SettingsStore } from '../../src/main/permissions/settingsStore';
 import type { PermissionMode } from '../../src/shared/schemas/common';
+import { PermissionResponseSchema } from '../../src/shared/schemas/permissions';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 let root: string;
@@ -310,5 +311,14 @@ describe('a chat reading the web', () => {
     }
     // A search has no address of its own: it goes to the search engine.
     expect(decide({ toolName: 'WebSearch', permissionClass: 'network', descriptor: { summary: 'search' } }, chat()).behavior).toBe('allow');
+  });
+});
+
+describe('answering a plan', () => {
+  it('takes an edited plan with an approval, up to 50,000 characters', () => {
+    const answer = { requestId: 'r', decision: 'allow-once' as const };
+    expect(PermissionResponseSchema.safeParse({ ...answer, plan: 'x'.repeat(50_000) }).success).toBe(true);
+    expect(PermissionResponseSchema.safeParse({ ...answer, plan: 'x'.repeat(50_001) }).success).toBe(false);
+    expect(PermissionResponseSchema.safeParse(answer).success).toBe(true);
   });
 });

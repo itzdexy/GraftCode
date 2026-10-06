@@ -35,7 +35,7 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     },
     progress: (chunk) => progressChunks.push(chunk),
     askUser: () => Promise.resolve(null),
-    approvePlan: () => Promise.resolve({ approved: false, feedback: null }),
+    approvePlan: (plan) => Promise.resolve({ approved: false, feedback: null, plan }),
     runSubagent: () => Promise.resolve({ text: '', toolCalls: 0 }),
     runAgents: () => Promise.resolve({ report: '', agents: [], sources: [] }),
     notesForPaths: () => null,

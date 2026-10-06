@@ -286,12 +286,12 @@ describe('agent interaction tools', () => {
   it('ExitPlanMode reports approval or feedback, and Task returns the sub-agent report', async () => {
     const approved = await exitPlanModeTool.execute(
       { plan: '1. Do it' },
-      makeToolContext(dir, { approvePlan: () => Promise.resolve({ approved: true, feedback: null }) })
+      makeToolContext(dir, { approvePlan: (plan) => Promise.resolve({ approved: true, feedback: null, plan }) })
     );
     expect(text(approved)).toMatch(/approved the plan/);
     const rejected = await exitPlanModeTool.execute(
       { plan: '1. Do it' },
-      makeToolContext(dir, { approvePlan: () => Promise.resolve({ approved: false, feedback: 'Add tests first' }) })
+      makeToolContext(dir, { approvePlan: (plan) => Promise.resolve({ approved: false, feedback: 'Add tests first', plan }) })
     );
     expect(text(rejected)).toMatch(/Feedback: Add tests first/);
     const calls: string[] = [];

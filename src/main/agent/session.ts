@@ -7,6 +7,7 @@ import type { ChecksConfig } from '@shared/schemas/config';
 import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
+import { currentPlan } from '@shared/plans';
 import type { Source } from '@shared/sources';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -65,6 +66,7 @@ import {
   listCommands,
   loadCustomCommands,
   parseSlash,
+  planPrompt,
   prPrompt,
   PROMPT_COMMANDS,
   researchPrompt,
@@ -314,8 +316,8 @@ export class AgentSession {
   }
 
   /** A message shown in the transcript but never sent to the model. */
-  private commandOutput(text: string): void {
-    const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text }], { kind: 'command-output' });
+  private commandOutput(text: string, meta: Partial<MessageMeta> = {}): void {
+    const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text }], { kind: 'command-output', ...meta });
     this.emit({ type: 'message', message: stored });
   }
 
@@ -468,7 +470,11 @@ export class AgentSession {
     }
     this.emit({ type: 'permission-resolved', requestId: response.requestId });
     this.setStatus('running');
-    pending.resolve({ decision: response.decision, ...(response.feedback ? { feedback: response.feedback } : {}) });
+    pending.resolve({
+      decision: response.decision,
+      ...(response.feedback ? { feedback: response.feedback } : {}),
+      ...(response.plan !== undefined ? { plan: response.plan } : {})
+    });
   }
 
   answerQuestion(response: QuestionResponse): void {
@@ -876,7 +882,7 @@ export class AgentSession {
         this.files.clear();
         this.deps.store.updateSession(this.id, { todos: [] });
         this.emit({ type: 'todos', todos: [] });
-        this.commandOutput('Context cleared. Earlier messages stay visible but are no longer sent to the model.');
+        this.commandOutput('Context cleared. Earlier messages stay visible but are no longer sent to the model.', { cleared: true });
         return null;
       }
       case 'compact':
@@ -927,6 +933,19 @@ export class AgentSession {
           this.commandOutput('Usage: /permissions ask | auto-edit | plan | auto. Rules are edited in Settings → Permissions.');
         }
         return null;
+      }
+      case 'plan': {
+        // Plan mode belongs to code sessions: a chat has nothing it could change, so there is nothing to hold back.
+        if (summary.kind !== 'code') {
+          this.commandOutput('Plan mode works in code sessions. Here, just ask for a plan.');
+          return null;
+        }
+        this.setPermissionMode('plan');
+        if (slash.args.length === 0) {
+          this.commandOutput('Plan mode is on. Describe what you want planned.');
+          return null;
+        }
+        return { text: planPrompt(slash.args), typed: item.text };
       }
       case 'effort': {
         const level = slash.args as EffortLevel;
@@ -1419,6 +1438,8 @@ export class AgentSession {
     }
     this.notice('info', 'Compacting the conversation…');
     const todos = this.deps.store.getTodos(this.id);
+    // Read before anything is folded away; the approval stays among the messages, so the plan stays the session's plan.
+    const plan = currentPlan(this.deps.store.listMessages(this.id))?.plan ?? null;
     const summaryText = await summarizeSession({
       provider,
       model,
@@ -1434,7 +1455,7 @@ export class AgentSession {
       this.id,
       messages.map((m) => m.id)
     );
-    const text = summaryMessageText(summaryText, todos, this.files.touchedFiles());
+    const text = summaryMessageText(summaryText, todos, this.files.touchedFiles(), { plan });
     const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text }], { kind: 'compaction-summary' });
     this.files.clear();
     this.markThinkingStale();
@@ -1633,11 +1654,14 @@ export class AgentSession {
           },
           signal
         );
-        if (answer.decision === 'deny') return { approved: false, feedback: answer.feedback ?? null };
+        if (answer.decision === 'deny') return { approved: false, feedback: answer.feedback ?? null, plan };
         const mode = this.prePlanMode === 'plan' ? 'auto-edit' : this.prePlanMode;
         this.deps.store.updateSession(this.id, { permissionMode: mode });
         this.emit({ type: 'mode', permissionMode: mode });
-        return { approved: true, feedback: null };
+        // The user may have edited the plan before approving it: theirs is the one to follow.
+        // An edit that changed only spacing, or left nothing, is an ordinary approval.
+        const edited = answer.plan?.trim() ?? '';
+        return { approved: true, feedback: null, plan: edited.length > 0 && edited !== plan.trim() ? edited : plan };
       },
       runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
       runAgents: (input) => this.runAgents(input, toolUseId, signal, model, provider, hooks, root, trusted),

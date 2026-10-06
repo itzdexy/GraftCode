@@ -19,6 +19,29 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.11 (2026-10-06)
+
+- **The current plan of a session** is read from its messages (`src/shared/plans.ts`): the
+  newest plan the user approved, as approved, after the last `/clear` (which now marks its
+  message with `meta.cleared`). A rejected plan changes nothing and a rewind to before the
+  approval removes it. Nothing new is saved, so there is no migration.
+- **Approve with changes.** The plan card has `Edit plan` (`PermissionCard.tsx`,
+  `planModel.ts`): a text box of at most 50,000 characters, and `Approve plan` is disabled
+  while it is empty. The answer carries the user's version (`PermissionResponse.plan`), the
+  tool result says `carry out their version:` followed by it, and the transcript keeps the
+  agreed plan. An unchanged or whitespace-only edit is an ordinary approval.
+- **The plan stays in view.** `PlanBar` above the message box reads `Plan: <title>` and
+  `<done> of <total> done` when the session has tasks; it opens the plan with `Copy`.
+- **A summary carries the plan** word for word, under `The plan you and the user agreed on
+  (follow it):` (`summaryMessageText`), so compaction can't lose or reword it.
+- **`/plan [what to plan]`** switches a code session to Plan mode and sends `Plan this
+  before changing anything: …`; alone it only switches. A command file can't replace it. In
+  a chat it says that Plan mode belongs to code sessions.
+- **A better brief.** The prompt's Plan mode section asks for a goal, ordered steps with
+  their files, the checks, and the risks, and for up to three questions with
+  `AskUserQuestion` when a request leaves a real choice open.
+- **Catalog** regenerated: 212 providers, 7,554 models.
+
 ### 0.6.10 (2026-10-05)
 
 - **What a conversation read and found** is worked out from the tool results it already
@@ -208,6 +231,12 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Known weaknesses and technical debt
 
+- A session has one current plan: a second approved plan replaces the first in the bar and
+  in summaries, and there is no history of plans beyond the transcript. A plan is not saved
+  as a file in the project. The bar's progress counts the session's tasks, which the agent
+  writes itself and which need not match the plan's steps. `/plan` in a chat only explains;
+  the chat's command menu still lists it.
+
 - Research reads HTML and text only: a PDF on the web can't be read. A mark on a citation
   says what this conversation opened, not whether the page says what is claimed. Search
   results that are redirect links (one provider's own search) are compared by the redirect,
@@ -317,10 +346,9 @@ round. What exists now and what does not:
 
 Five rounds are designed in `docs/superpowers/specs/2026-10-05-next-rounds-design.md` and
 planned task by task, one plan a round, in `docs/superpowers/plans/`. The first, chat
-documents, shipped as 0.6.9, and the second, research, as 0.6.10. The rest:
+documents, shipped as 0.6.9, the second, research, as 0.6.10, and the third, plans that last,
+as 0.6.11. The rest:
 
-3. 0.6.11, `2026-10-05-plans-that-last.md`: edit a plan before approving it; the plan stays
-   in view and survives compaction; `/plan`.
 4. 0.6.12, `2026-10-05-long-sessions.md`: remove old tool output before summarizing, keep
    the recent steps in a summary, a backup model.
 5. 0.6.13, `2026-10-05-attention-and-context.md`: "Needs you" in the sidebar, what fills

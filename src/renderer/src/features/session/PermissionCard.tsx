@@ -7,9 +7,39 @@ import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
 import { reportError } from '../../stores/toasts';
 import { Markdown } from './Markdown';
+import { PLAN_MAX, planEdit } from './planModel';
 import { EditDiff } from './ToolDetail';
 
 const DETAIL = 'selectable max-h-[220px] overflow-auto rounded-sm bg-code-block px-10 py-6 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] whitespace-pre-wrap break-all text-fg';
+
+/** A plan waiting for approval: as it reads, or as text to change before approving it. */
+function PlanDetail({ plan, editing, onChange }: { plan: string; editing: boolean; onChange: (plan: string) => void }) {
+  if (!editing) {
+    return (
+      <div className="max-h-[320px] overflow-y-auto rounded-sm bg-code-block px-12 py-8">
+        <Markdown text={plan} variant="code" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <textarea
+        autoFocus
+        aria-label="Plan"
+        aria-describedby="plan-edit-help"
+        value={plan}
+        onChange={(e) => onChange(e.target.value)}
+        rows={12}
+        maxLength={PLAN_MAX}
+        spellCheck={false}
+        className="selectable w-full resize-y rounded-sm border border-input-border bg-input px-10 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] text-fg outline-none focus:border-border-strong"
+      />
+      <p id="plan-edit-help" className="text-sm text-fg-muted">
+        Approve sends your version to the agent.
+      </p>
+    </div>
+  );
+}
 
 function Detail({ request }: { request: PermissionRequest }) {
   const d = request.detail;
@@ -48,11 +78,8 @@ function Detail({ request }: { request: PermissionRequest }) {
         </div>
       );
     case 'plan':
-      return (
-        <div className="max-h-[320px] overflow-y-auto rounded-sm bg-code-block px-12 py-8">
-          <Markdown text={d.plan} variant="code" />
-        </div>
-      );
+      // A plan has its own view, with an edit state: see PlanDetail.
+      return null;
     case 'generic':
       return <pre className={DETAIL}>{d.text}</pre>;
   }
@@ -61,27 +88,39 @@ function Detail({ request }: { request: PermissionRequest }) {
 /**
  * A pending permission request above the composer: exactly what will run or
  * change, why Graft is asking, and Allow once / for session / always / Deny
- * (with optional feedback). Dangerous actions can only be allowed once.
+ * (with optional feedback). Dangerous actions can only be allowed once. A plan
+ * can be edited before it is approved: the agent then follows that version.
  */
 export function PermissionCard({ sessionId, request }: { sessionId: string; request: PermissionRequest }) {
   const [busy, setBusy] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const isPlan = request.detail.kind === 'plan';
+  const offered = request.detail.kind === 'plan' ? request.detail.plan : null;
+  const isPlan = offered !== null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(offered ?? '');
+  const edit = planEdit(offered ?? '', draft);
   const canRemember = request.suggestedRule !== null && request.dangerous === null && !isPlan;
 
   const respond = async (decision: PermissionDecision, text?: string): Promise<void> => {
     setBusy(true);
     try {
-      await invoke('sessions:respondPermission', { sessionId, requestId: request.id, decision, ...(text ? { feedback: text } : {}) });
+      await invoke('sessions:respondPermission', {
+        sessionId,
+        requestId: request.id,
+        decision,
+        ...(text ? { feedback: text } : {}),
+        // An approval carries the user's version of the plan when they changed it.
+        ...(isPlan && decision !== 'deny' && edit.plan !== undefined ? { plan: edit.plan } : {})
+      });
     } catch (error) {
       reportError("Couldn't send your decision", error);
       setBusy(false);
     }
   };
 
-  const choices: Array<{ key: string; label: string; decision: PermissionDecision; variant: 'primary' | 'secondary' | 'ghost' }> = isPlan
-    ? [{ key: '1', label: 'Approve plan', decision: 'allow-once', variant: 'primary' }]
+  const choices: Array<{ key: string; label: string; decision: PermissionDecision; variant: 'primary' | 'secondary' | 'ghost'; disabled?: boolean }> = isPlan
+    ? [{ key: '1', label: 'Approve plan', decision: 'allow-once', variant: 'primary', disabled: !edit.canApprove }]
     : [
         { key: '1', label: 'Allow once', decision: 'allow-once', variant: 'primary' },
         ...(canRemember
@@ -91,14 +130,20 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
             ]
           : [])
       ];
+  /** A plan has one more key than its choices: 2 edits it, so feedback moves to 3. */
+  const feedbackKey = String(choices.length + (isPlan ? 2 : 1));
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.target instanceof HTMLInputElement || busy) return;
+    // Keys typed into the feedback line or the plan are text, not answers.
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || busy) return;
     const choice = choices.find((c) => c.key === event.key);
     if (choice) {
       event.preventDefault();
-      void respond(choice.decision);
-    } else if (event.key === String(choices.length + 1)) {
+      if (!choice.disabled) void respond(choice.decision);
+    } else if (isPlan && event.key === '2') {
+      event.preventDefault();
+      setEditing(!editing);
+    } else if (event.key === feedbackKey) {
       event.preventDefault();
       setFeedbackOpen(true);
     }
@@ -132,9 +177,7 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
           {request.dangerous}
         </p>
       ) : null}
-      <div className="mt-10">
-        <Detail request={request} />
-      </div>
+      <div className="mt-10">{isPlan ? <PlanDetail plan={draft} editing={editing} onChange={setDraft} /> : <Detail request={request} />}</div>
       {canRemember && request.suggestedRule ? (
         <p className="mt-6 text-sm text-fg-muted">
           “Always allow” saves the rule <span className="font-mono text-fg-secondary">{request.suggestedRule}</span> for this project.
@@ -170,14 +213,26 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
               Deny
             </Button>
           )}
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setFeedbackOpen(true)} trailing={<Kbd className="ml-2">{choices.length + 1}</Kbd>}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setFeedbackOpen(true)} trailing={<Kbd className="ml-2">{feedbackKey}</Kbd>}>
             {isPlan ? 'Keep planning…' : 'Deny with feedback…'}
           </Button>
+          {isPlan ? (
+            <Button size="sm" variant="ghost" disabled={busy} aria-pressed={editing} onClick={() => setEditing(!editing)} trailing={<Kbd className="ml-2">2</Kbd>}>
+              {editing ? 'Preview' : 'Edit plan'}
+            </Button>
+          ) : null}
           {choices
             .slice()
             .reverse()
             .map((choice) => (
-              <Button key={choice.decision} size="sm" variant={choice.variant} disabled={busy} onClick={() => void respond(choice.decision)} trailing={<Kbd className="ml-2">{choice.key}</Kbd>}>
+              <Button
+                key={choice.decision}
+                size="sm"
+                variant={choice.variant}
+                disabled={busy || choice.disabled === true}
+                onClick={() => void respond(choice.decision)}
+                trailing={<Kbd className="ml-2">{choice.key}</Kbd>}
+              >
                 {choice.label}
               </Button>
             ))}

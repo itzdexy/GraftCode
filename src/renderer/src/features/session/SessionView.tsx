@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FileDiff, Globe, SquareTerminal, Workflow } from 'lucide-react';
+import { currentPlan } from '@shared/plans';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { agentRunActive } from '@shared/schemas/agentRuns';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -23,6 +24,7 @@ import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
 import { MissionBar } from './MissionBar';
 import { PermissionCard } from './PermissionCard';
+import { PlanBar } from './PlanBar';
 import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
@@ -108,6 +110,8 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   const [statsBump, setStatsBump] = useState(0);
   const stats = useDiffStats(summary.id, `${view.turnActive}:${view.messages.length}:${statsBump}`);
   const commands = useCommands(summary.projectPath, true);
+  // The plan the session is following: the newest one the user approved, read from the conversation.
+  const plan = useMemo(() => currentPlan(view.messages), [view.messages]);
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
   const folder = summary.worktreePath ?? summary.cwd;
@@ -148,6 +152,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
             <QueueBar sessionId={summary.id} queue={view.queue} />
             <MissionBar sessionId={summary.id} mission={view.mission} checking={view.checking !== null} />
+            <PlanBar plan={plan} todos={view.todos} />
             <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
             {missing ? (
               <p role="alert" className="text-sm text-amber-fg">

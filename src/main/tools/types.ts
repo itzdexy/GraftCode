@@ -55,7 +55,8 @@ export interface ToolContext extends DescribeContext {
   progress(chunk: string): void;
   /** Resolves null when the user dismisses the card. */
   askUser(questions: Question[]): Promise<QuestionAnswer[] | null>;
-  approvePlan(plan: string): Promise<{ approved: boolean; feedback: string | null }>;
+  /** Asks the user to approve a plan. `plan` in the answer is the version to follow: theirs when they edited it, else the one offered. */
+  approvePlan(plan: string): Promise<{ approved: boolean; feedback: string | null; plan: string }>;
   runSubagent(input: { description: string; prompt: string; type: SubagentType }): Promise<{ text: string; toolCalls: number }>;
   /** Runs a group of agents (RunAgents) and returns their combined report with how each one ended. */
   runAgents(input: AgentGroupInput): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }>;

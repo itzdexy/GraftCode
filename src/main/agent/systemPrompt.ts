@@ -305,7 +305,12 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
     ),
     lines(
       '# Plan mode',
-      'In Plan mode you may only read and research. When you have a concrete plan (the files to change, the approach, how you will verify it), present it with ExitPlanMode. Start changing things only after the user approves.'
+      'In Plan mode you may only read and research. Find out enough to be concrete: read the code involved, its callers and its tests. When the request leaves a real choice open, ask up to three questions with AskUserQuestion before you plan. Then present the plan with ExitPlanMode, written so that someone else could carry it out:',
+      '- Goal: one sentence.',
+      '- Steps, in order: what changes in which files (path:line where you know it).',
+      '- Checks: the commands that will show it works.',
+      '- Risks, and anything you are unsure of.',
+      'The user can edit the plan before approving it; follow the version they approve. Start changing things only after they approve.'
     ),
     sandboxSection(ctx),
     siteSection(ctx),
