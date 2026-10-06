@@ -1,6 +1,7 @@
 import type { ResolvedTheme, ThemePreference } from '@shared/ipc/contracts';
 import type { AppSettings } from '@shared/schemas/appSettings';
 import { invoke } from './ipc';
+import { motionAttribute, rememberMotion } from './motion';
 
 const media = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -43,7 +44,7 @@ export function applyTheme(preference: ThemePreference, onError: (error: unknown
 /** Column widths behind Settings → Appearance → Transcript width (narrow is the measured default). */
 const TRANSCRIPT_WIDTHS: Record<AppSettings['appearance']['transcriptWidth'], string> = { narrow: '700px', medium: '860px', wide: '1060px' };
 
-/** Palette, accent, reduced motion, font sizes and the transcript width from Settings → Appearance. */
+/** Palette, accent, motion, font sizes and the transcript width from Settings → Appearance. */
 export function applyAppearance(appearance: AppSettings['appearance'], onError: (error: unknown) => void): void {
   const root = document.documentElement;
   const repaint = root.dataset.palette !== appearance.palette;
@@ -51,7 +52,10 @@ export function applyAppearance(appearance: AppSettings['appearance'], onError: 
   root.dataset.accent = appearance.accent;
   if (repaint) syncTitlebar(onError);
   root.style.setProperty('--g-content-width', TRANSCRIPT_WIDTHS[appearance.transcriptWidth]);
-  root.dataset.reducedMotion = appearance.reducedMotion ? 'true' : 'false';
+  const motion = motionAttribute(appearance.motion);
+  if (motion === null) delete root.dataset.motion;
+  else root.dataset.motion = motion;
+  rememberMotion(motion);
   root.style.setProperty('--g-font-scale', String(appearance.uiFontSize / BASE_UI_FONT_SIZE));
   root.style.setProperty('--g-code-font-size', `${appearance.codeFontSize}px`);
 }

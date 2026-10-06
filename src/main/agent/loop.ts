@@ -16,6 +16,7 @@ import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolRes
 import { checksFailurePrompt, checksSummary, MAX_CHECK_ROUNDS } from './checks';
 import type { HookRunner } from './hooks';
 import { withoutThinking } from './history';
+import { toBatches } from './toolBatches';
 import { TAPROOT_REVIEW, taprootOpenTasks } from './systemPrompt';
 import { contextTokens, estimateMessagesTokens, estimateTextTokens, usageCost } from './tokens';
 
@@ -45,8 +46,12 @@ export interface LoopHost {
   toolContext(toolUseId: string, signal: AbortSignal): ToolContext;
   describeContext(): DescribeContext;
   hooks: HookRunner | null;
-  /** Called before each model request; returns a replacement history when it compacted. */
-  maybeCompact(history: LlmMessage[], contextTokens: number, signal: AbortSignal): Promise<LlmMessage[] | null>;
+  /**
+   * Called before each model request; returns a replacement history when it compacted.
+   * `overflow` means the provider just refused the request as too long, so compact
+   * whatever the estimate says.
+   */
+  maybeCompact(history: LlmMessage[], contextTokens: number, signal: AbortSignal, overflow?: boolean): Promise<LlmMessage[] | null>;
   /** `contextTokens` is null when the usage isn't from this conversation (a subagent's); `costUsd` null means unknown. */
   onUsage(usage: Usage, contextTokens: number | null, costUsd: number | null): void;
   /** The session's task list (Taproot won't finish with tasks open). */
@@ -241,20 +246,36 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
   return resultBlock(call.id, result, extra);
 }
 
-/** Executes a batch of tool calls: in parallel when every call is safe and pre-approved, else in order. */
+/**
+ * Runs one tool call the way a turn would: checked against the permission
+ * rules, through the hooks, asking the user when it has to. For callers that
+ * run a tool on the agent's behalf (an agent group's check command).
+ */
+export async function runToolCall(call: ToolUseBlock, config: LoopConfig, host: LoopHost, signal: AbortSignal): Promise<ToolResultBlock> {
+  return runCall(await prepareCall(call, config, host), config, host, signal);
+}
+
+/** A call that can run beside its neighbours: refused before it starts, or safe to overlap and already approved. */
+function overlaps(p: Prepared): boolean {
+  if (p.error !== null || !p.tool) return true;
+  return p.decision?.behavior === 'allow' && p.tool.concurrencySafe(p.input as never);
+}
+
+/**
+ * Executes the tool calls of one response. Neighbouring calls that are safe to
+ * overlap (reads, searches, anything already approved that changes nothing) run
+ * together; every other call runs alone, in the order it was given, so a read
+ * after an edit sees the edit. Results keep the order of the calls.
+ */
 async function executeCalls(calls: ToolUseBlock[], config: LoopConfig, host: LoopHost, signal: AbortSignal): Promise<ToolResultBlock[]> {
   const prepared = await Promise.all(calls.map((c) => prepareCall(c, config, host)));
-  const parallel =
-    prepared.length > 1 &&
-    prepared.every((p) => p.tool && !p.error && p.decision?.behavior === 'allow' && p.tool.concurrencySafe(p.input as never));
-  if (parallel) return Promise.all(prepared.map((p) => runCall(p, config, host, signal)));
   const results: ToolResultBlock[] = [];
-  for (const p of prepared) {
+  for (const batch of toBatches(prepared, overlaps)) {
     if (signal.aborted) {
-      results.push(errorBlock(p.call.id, 'Not run: the turn was interrupted.'));
+      results.push(...batch.map((p) => errorBlock(p.call.id, 'Not run: the turn was interrupted.')));
       continue;
     }
-    results.push(await runCall(p, config, host, signal));
+    results.push(...(await Promise.all(batch.map((p) => runCall(p, config, host, signal)))));
   }
   return results;
 }
@@ -265,14 +286,18 @@ const FINISH_NOTICES: Partial<Record<FinishReason, { level: 'warning' | 'error';
   context_window: { level: 'warning', text: 'The conversation filled the model\'s context window. Use /compact or start a new session.' }
 };
 
+const OVERFLOW_MESSAGE = 'The conversation is too long for this model. Use /compact or start a new session.';
+
 /** Tools that don't change the project's files; a turn that used nothing else has nothing to verify or check. */
-const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Browser', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
+const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Symbols', 'WebFetch', 'WebSearch', 'Browser', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
 
 function changesSomething(call: ToolUseBlock): boolean {
   if (call.name === 'Shell') {
     const command = (call.input as { command?: unknown } | null)?.command;
     return typeof command !== 'string' || classifyCommand(command) !== 'read-only';
   }
+  // Looking at what ComfyUI has installed changes nothing; running a workflow saves files.
+  if (call.name === 'ComfyUI') return (call.input as { action?: unknown } | null)?.action === 'run';
   return !LOOKING_TOOLS.has(call.name);
 }
 
@@ -295,6 +320,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
   // The project's checks run after the turn's work; a failure is sent back for a fix.
   let checkRounds = 0;
   let repeatStrikes = 0;
+  // The provider refused the last request as too long: compact once, whatever the estimate says.
+  let overflow = false;
+  let overflowRecovered = false;
   const recent: string[] = [];
   const done = (reason: LoopResult['reason'], error: LoopResult['error'] = null): LoopResult => ({ reason, error, usage, toolCalls, finalText, changed });
 
@@ -312,15 +340,19 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
 
     const estimate = lastContext > 0 ? lastContext : estimateMessagesTokens(history) + estimateTextTokens(config.system);
     try {
-      const compacted = await host.maybeCompact(history, estimate, signal);
+      const compacted = await host.maybeCompact(history, estimate, signal, overflow);
       if (compacted) {
         history = compacted;
         lastContext = 0;
+      } else if (overflow) {
+        return done('error', { code: 'context_length', message: OVERFLOW_MESSAGE });
       }
     } catch (error) {
       if (signal.aborted) return done('interrupted');
       host.emit({ type: 'notice', level: 'warning', text: `Couldn't compact the conversation: ${(error as Error).message}` });
+      if (overflow) return done('error', { code: 'context_length', message: OVERFLOW_MESSAGE });
     }
+    overflow = false;
 
     const messageId = randomUUID();
     host.emit({ type: 'assistant-start', messageId });
@@ -397,6 +429,14 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       if (text.length > 0) finalText = text;
     }
     if (aborted) return done('interrupted');
+    // Too long for the model, and nothing came back: the estimate was off (an endpoint with an
+    // unknown or smaller window than listed). Make room once and send the request again.
+    if (failure?.code === 'context_length' && content.length === 0 && !overflowRecovered) {
+      overflowRecovered = true;
+      overflow = true;
+      iteration--;
+      continue;
+    }
     if (failure) {
       host.log('warn', 'Model request failed', { code: failure.code, message: failure.message });
       return done('error', { code: failure.code, message: failure.message });
@@ -405,6 +445,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     const calls = content.filter((b): b is ToolUseBlock => b.type === 'tool_use');
     if (calls.length === 0) {
       if (finish === 'pause') continue;
+      // The reply ran out of room, not out of things to say: make room once and let the agent carry on.
+      if (finish === 'context_window' && !overflowRecovered) {
+        overflowRecovered = true;
+        overflow = true;
+        iteration--;
+        continue;
+      }
       const notice = FINISH_NOTICES[finish];
       if (notice) host.emit({ type: 'notice', level: notice.level, text: notice.text });
       if (host.hooks?.has('Stop') && finish === 'stop') {

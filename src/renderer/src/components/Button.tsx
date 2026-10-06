@@ -36,7 +36,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-ui disabled:pointer-events-none',
+        'pressable inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-ui disabled:pointer-events-none',
         VARIANTS[variant],
         SIZES[size],
         className
@@ -71,7 +71,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       type={type}
       aria-label={label}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center text-icon transition-ui hover:bg-hover hover:text-icon-strong disabled:text-fg-faint disabled:hover:bg-transparent',
+        'pressable inline-flex shrink-0 items-center justify-center text-icon transition-ui hover:bg-hover hover:text-icon-strong disabled:text-fg-faint disabled:hover:bg-transparent',
         active && 'bg-hover text-icon-strong',
         ICON_SIZES[size],
         className

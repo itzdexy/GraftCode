@@ -8,6 +8,7 @@ import { ViewHeader } from '../shell/ViewHeader';
 import { AboutSection } from './AboutSection';
 import { AppearanceSection } from './AppearanceSection';
 import { DataSection } from './DataSection';
+import { MediaSection } from './MediaSection';
 import { ModelsSection } from './ModelsSection';
 import { NotificationsSection } from './NotificationsSection';
 import { PersonalizationSection } from './PersonalizationSection';
@@ -51,6 +52,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <PrivacySection />;
     case 'search':
       return <WebSearchSection />;
+    case 'media':
+      return <MediaSection />;
     case 'voice':
       return <VoiceSection />;
     case 'mcp':
@@ -102,13 +105,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             })}
           </ul>
         </nav>
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        {/* Keyed by section, so each one opens at its top instead of where the last one was scrolled to. */}
+        <div key={info.id} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[720px] px-24 pt-4 pb-40">
             <header className="mb-20">
               <h2 className="text-xl font-medium text-fg-strong">{info.label}</h2>
               <p className="mt-4 text-base text-fg-muted">{info.description}</p>
             </header>
-            <div key={info.id} className="motion-rise">
+            <div className="motion-rise">
               <SectionBody section={info.id} />
             </div>
           </div>

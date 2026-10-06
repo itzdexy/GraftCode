@@ -326,24 +326,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .graft-mark--draw .graft-mark__pot,
-  .graft-mark--draw .graft-mark__stem,
-  .graft-mark--draw .graft-mark__leaves {
+  :root:not([data-motion='full']) .graft-mark--draw .graft-mark__pot,
+  :root:not([data-motion='full']) .graft-mark--draw .graft-mark__stem,
+  :root:not([data-motion='full']) .graft-mark--draw .graft-mark__leaves {
     opacity: 1;
     transform: none;
   }
-  .graft-fade-in,
-  .graft-chip-in {
+  :root:not([data-motion='full']) .graft-fade-in,
+  :root:not([data-motion='full']) .graft-chip-in {
     opacity: 1;
   }
 }
-:root[data-reduced-motion='true'] .graft-mark--draw .graft-mark__pot,
-:root[data-reduced-motion='true'] .graft-mark--draw .graft-mark__stem,
-:root[data-reduced-motion='true'] .graft-mark--draw .graft-mark__leaves {
+:root[data-motion='reduced'] .graft-mark--draw .graft-mark__pot,
+:root[data-motion='reduced'] .graft-mark--draw .graft-mark__stem,
+:root[data-motion='reduced'] .graft-mark--draw .graft-mark__leaves {
   opacity: 1;
   transform: none;
 }
-:root[data-reduced-motion='true'] .graft-fade-in,
-:root[data-reduced-motion='true'] .graft-chip-in {
+:root[data-motion='reduced'] .graft-fade-in,
+:root[data-motion='reduced'] .graft-chip-in {
   opacity: 1;
 }

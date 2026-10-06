@@ -54,7 +54,7 @@ export const SlashCommandSchema = z.object({
   name: z.string(),
   description: z.string(),
   argumentHint: z.string().nullable(),
-  source: z.enum(['builtin', 'user', 'project']),
+  source: z.enum(['builtin', 'user', 'project', 'mcp']),
   path: z.string().nullable()
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;

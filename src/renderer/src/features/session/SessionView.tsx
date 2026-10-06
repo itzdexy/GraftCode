@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileDiff, Globe, SquareTerminal } from 'lucide-react';
+import { FileDiff, Globe, SquareTerminal, Workflow } from 'lucide-react';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
+import { agentRunActive } from '@shared/schemas/agentRuns';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
@@ -20,6 +21,7 @@ import { effortFor, resolveModel, sameModel } from '../models/modelChoice';
 import { PanelColumn } from '../panels/PanelColumn';
 import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
+import { MissionBar } from './MissionBar';
 import { PermissionCard } from './PermissionCard';
 import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
@@ -42,7 +44,7 @@ function useSessionModel(summary: SessionSummary) {
   }, [groups, loading, summary.model, summary.effort]);
 }
 
-function PanelToggles({ sessionId, hasFolder }: { sessionId: string; hasFolder: boolean }) {
+function PanelToggles({ sessionId, hasFolder, agentsWorking }: { sessionId: string; hasFolder: boolean; agentsWorking: number }) {
   const open = usePanels((s) => panelsOf(s, sessionId).open);
   const toggle = usePanels((s) => s.toggle);
   const terminalKey = useShortcutLabel('toggleTerminal');
@@ -58,6 +60,16 @@ function PanelToggles({ sessionId, hasFolder }: { sessionId: string; hasFolder: 
       </IconButton>
       <IconButton label="Browser" active={open.includes('browser')} aria-pressed={open.includes('browser')} onClick={() => toggle(sessionId, 'browser')}>
         <Globe className="size-16" />
+      </IconButton>
+      <IconButton
+        label={agentsWorking > 0 ? `Agents (${String(agentsWorking)} working)` : 'Agents'}
+        active={open.includes('agents')}
+        aria-pressed={open.includes('agents')}
+        onClick={() => toggle(sessionId, 'agents')}
+        className="relative"
+      >
+        <Workflow className="size-16" />
+        {agentsWorking > 0 ? <span aria-hidden="true" className="motion-pulse absolute top-3 right-3 size-6 rounded-full bg-blue" /> : null}
       </IconButton>
     </>
   );
@@ -81,6 +93,15 @@ function useAutoOpenTasks(sessionId: string): void {
   );
 }
 
+/** Opens the Agents panel the first time this session runs a group of agents. */
+function useAutoOpenAgents(sessionId: string, working: boolean): void {
+  useEffect(() => {
+    if (!working || panelsOf(usePanels.getState(), sessionId).agentsAutoOpened) return;
+    usePanels.getState().markAgentsAutoOpened(sessionId);
+    usePanels.getState().show(sessionId, 'agents');
+  }, [sessionId, working]);
+}
+
 function CodeSession({ summary, view }: { summary: SessionSummary; view: SessionViewState }) {
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -91,7 +112,9 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   const busy = view.turnActive;
   const folder = summary.worktreePath ?? summary.cwd;
   const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}`;
+  const agentsWorking = view.agentRuns.filter((r) => agentRunActive(r.status)).length;
   useAutoOpenTasks(summary.id);
+  useAutoOpenAgents(summary.id, agentsWorking > 0 && folder !== null);
   useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
   useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null);
@@ -108,7 +131,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
         onRewind={lastUser ? () => useRewind.getState().open({ sessionId: summary.id, messageId: lastUser.id, chat: false }) : null}
         onShowTasks={() => usePanels.getState().show(summary.id, 'tasks')}
         onToggleFiles={() => usePanels.getState().toggleFiles(summary.id)}
-        panels={<PanelToggles sessionId={summary.id} hasFolder={folder !== null} />}
+        panels={<PanelToggles sessionId={summary.id} hasFolder={folder !== null} agentsWorking={agentsWorking} />}
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
@@ -124,6 +147,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
             <QueueBar sessionId={summary.id} queue={view.queue} />
+            <MissionBar sessionId={summary.id} mission={view.mission} checking={view.checking !== null} />
             <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
             {missing ? (
               <p role="alert" className="text-sm text-amber-fg">

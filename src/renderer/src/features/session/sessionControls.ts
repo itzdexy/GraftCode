@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import type { SlashCommand } from '@shared/schemas/app';
 import type { EffortLevel, PermissionMode } from '@shared/schemas/common';
 import type { FileAttachment, ImageBlock, StoredMessage } from '@shared/schemas/messages';
+import { missionOpen } from '@shared/schemas/missions';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useApp } from '../../stores/app';
+import { useSessions, viewOf } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { exportSession } from '../shell/sessionActions';
 import { openSettings, setMode as setAppMode, startNew } from '../shell/shellActions';
 import { effortFor } from '../models/modelChoice';
+import { useMissionDialog } from './MissionDialog';
 import { useRewind } from './RewindDialog';
 import { useSystemPrompt } from './SystemPromptDialog';
 
@@ -107,12 +110,32 @@ export function handleAppCommand(text: string): boolean {
   }
 }
 
+/** Opens the dialog that starts a mission in a code session, with the objective filled in when one was typed. */
+export function openMissionDialog(summary: SessionSummary, objective: string): void {
+  if (summary.kind !== 'code' || !(summary.worktreePath ?? summary.cwd)) {
+    reportError("Can't start a mission here", new Error('Missions run in code sessions that have a project folder.'));
+    return;
+  }
+  const current = viewOf(useSessions.getState(), summary.id).mission;
+  if (current && missionOpen(current.status)) {
+    reportError('This session already has a mission', new Error('Finish or stop it before starting another.'));
+    return;
+  }
+  useMissionDialog.getState().open({ sessionId: summary.id, projectPath: summary.projectPath, permissionMode: summary.permissionMode, objective });
+}
+
 /**
  * Commands that open app UI instead of going to the agent. Returns true when
  * the text was one of them and has been handled.
  */
 export function handleUiCommand(text: string, ctx: UiCommandContext): boolean {
   if (handleAppCommand(text)) return true;
+  // /mission takes the objective after it; the rest of a mission is filled in the dialog.
+  const mission = /^\/mission(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  if (mission) {
+    openMissionDialog(ctx.summary, (mission[1] ?? '').trim());
+    return true;
+  }
   switch (commandName(text)) {
     case 'model':
       ctx.openModelMenu();

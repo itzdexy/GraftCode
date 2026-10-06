@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Brain, ChevronRight, Globe } from 'lucide-react';
+import { Collapse } from '../../components/Collapse';
 import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
 import { CallRow, DiffCount } from './ToolGroup';
@@ -65,7 +66,9 @@ function NarrationStep({ text }: { text: string }) {
         </span>
         <ChevronRight className={cn('size-14 shrink-0 text-icon-muted transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? <Markdown text={text} variant="code" className="px-4 pt-2 pb-6 text-fg-secondary" /> : null}
+      <Collapse open={open}>
+        <Markdown text={text} variant="code" className="px-4 pt-2 pb-6 text-fg-secondary" />
+      </Collapse>
     </div>
   );
 }
@@ -91,7 +94,9 @@ function ThoughtStep({ text, live }: { text: string; live: boolean }) {
         <span className={cn('min-w-0 flex-1 truncate', live && 'graft-shimmer')}>{thoughtLabel(text, live)}</span>
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? <p className="selectable px-4 pt-2 pb-6 text-md whitespace-pre-wrap text-fg-muted">{text}</p> : null}
+      <Collapse open={open}>
+        <p className="selectable px-4 pt-2 pb-6 text-md whitespace-pre-wrap text-fg-muted">{text}</p>
+      </Collapse>
     </div>
   );
 }
@@ -118,6 +123,16 @@ function Step({ step, live }: { step: ActivityStep; live: boolean }) {
         </p>
       );
   }
+}
+
+/** A step that arrives while its block is working steps in; steps of a finished block are just there. */
+function StepRow({ step, live }: { step: ActivityStep; live: boolean }) {
+  const [arrived] = useState(live);
+  return (
+    <li className={arrived ? 'motion-step' : undefined}>
+      <Step step={step} live={live} />
+    </li>
+  );
 }
 
 /**
@@ -152,15 +167,13 @@ export function ActivityGroup({ item }: { item: ActivityItem }) {
         )}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', expanded && 'rotate-90')} aria-hidden="true" />
       </button>
-      {expanded ? (
-        <ol className="graft-fade-in mt-2 ml-7 flex flex-col gap-1 border-l border-border pl-10">
+      <Collapse open={expanded}>
+        <ol className="mt-2 ml-7 flex flex-col gap-1 border-l border-border pl-10">
           {item.steps.map((step) => (
-            <li key={step.key}>
-              <Step step={step} live={item.live} />
-            </li>
+            <StepRow key={step.key} step={step} live={item.live} />
           ))}
         </ol>
-      ) : null}
+      </Collapse>
     </section>
   );
 }

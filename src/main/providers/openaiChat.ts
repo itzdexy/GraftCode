@@ -5,6 +5,7 @@ import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { parseSse } from './sse';
 import type { FinishReason, LLMProvider, ProviderConnection, RequestPrivacy, StreamEvent, StreamRequest } from './types';
@@ -17,8 +18,8 @@ const DEFAULT_BASE: Record<ChatKind, string | null> = {
   'openai-compatible': null
 };
 
-/** Model ids on the OpenAI list endpoint that cannot serve chat completions. */
-const NON_CHAT = /(embed|whisper|tts|dall-e|davinci|babbage|moderation|audio|realtime|transcribe|image|search|computer-use|sora|codex)/i;
+/** Model ids on the OpenAI list endpoint that neither chat completions nor the Responses API serve as chat. */
+const NON_CHAT = /(embed|whisper|tts|dall-e|davinci|babbage|moderation|audio|realtime|transcribe|image|search|computer-use|sora)/i;
 /** Non-chat models other OpenAI-compatible servers commonly list next to chat models. */
 const NON_CHAT_LIGHT = /(embed|whisper|tts|dall-e|moderation|rerank|transcri|text-to-speech|stable-diffusion|sdxl|flux)/i;
 /**
@@ -203,6 +204,8 @@ export class OpenAiChatProvider implements LLMProvider {
   private readonly presetId: string | null;
   private readonly noStreamOptions = new Set<string>();
   private readonly noReasoningParam = new Set<string>();
+  /** OpenAI models that answered "only supported in v1/responses"; they go there first from then on. */
+  private readonly responsesOnly = new Set<string>();
 
   constructor(connection: ProviderConnection & { kind: ChatKind }, customModels: CustomModel[] = [], catalog: ProviderCatalog | null = null) {
     this.id = connection.id;
@@ -350,6 +353,10 @@ export class OpenAiChatProvider implements LLMProvider {
 
   async *streamText(req: StreamRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
     const modelId = req.model.ref.modelId;
+    if (this.kind === 'openai' && (this.responsesOnly.has(modelId) || usesResponses(modelId))) {
+      yield* this.streamResponses(req, signal);
+      return;
+    }
     const maxTokens = Math.min(req.model.maxOutputTokens, 64_000);
     const wire = req.effort && req.model.effort ? req.model.effort.values?.[req.effort] : undefined;
     const interleaved = this.meta(modelId)?.interleaved ?? null;
@@ -383,6 +390,12 @@ export class OpenAiChatProvider implements LLMProvider {
         response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
       } catch (error) {
         if (this.kind === 'openrouter') throwIfPrivacyBlocked(error, req.privacy);
+        // A model chat completions doesn't serve: this one is answered by the Responses API.
+        if (this.kind === 'openai' && onlyInResponses(error)) {
+          this.responsesOnly.add(modelId);
+          yield* this.streamResponses(req, signal);
+          return;
+        }
         if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
         if (streamOptions && /stream_options/i.test(error.message)) {
           this.noStreamOptions.add(modelId);
@@ -488,6 +501,32 @@ export class OpenAiChatProvider implements LLMProvider {
     }
     yield { type: 'usage', usage, ...(costUsd !== undefined ? { costUsd } : {}) };
     yield { type: 'finish', reason: calls.length > 0 && finish !== 'length' ? 'tool_use' : mapFinish(finish) };
+  }
+
+  /** One reply from the Responses API, for the models that chat completions does not serve. */
+  private async *streamResponses(req: StreamRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
+    const modelId = req.model.ref.modelId;
+    const wire = req.effort && req.model.effort ? req.model.effort.values?.[req.effort] : undefined;
+    const effort = typeof wire === 'string' ? wire : undefined;
+    const maxTokens = Math.min(req.model.maxOutputTokens, 64_000);
+    const url = joinUrl(this.base, 'responses');
+    let summary = true;
+    let encrypted = true;
+    let response: Response | null = null;
+    // An account that may not have reasoning summaries, or the encrypted reasoning, gets the request without them.
+    for (let attempt = 0; attempt < 3 && !response; attempt++) {
+      try {
+        response = await request({ url, headers: this.headers(), body: responsesBody(req, { effort, summary, encrypted, maxTokens }), signal, timeoutMs: 120_000 });
+      } catch (error) {
+        if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
+        if (summary && /summar/i.test(error.message)) summary = false;
+        else if (encrypted && /encrypted_content|include/i.test(error.message)) encrypted = false;
+        else throw error;
+      }
+    }
+    if (!response) throw new ProviderError('bad_request', 'The provider rejected the request.');
+    if (!response.body) throw new ProviderError('server', 'The provider returned an empty stream.');
+    yield* readResponsesStream(response.body, signal, modelId);
   }
 
   /** Request fields for the chosen effort, in each API's own shape. */

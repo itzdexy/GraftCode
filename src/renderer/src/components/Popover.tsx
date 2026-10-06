@@ -16,7 +16,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRe
           sideOffset={sideOffset}
           collisionPadding={collisionPadding}
           className={cn(
-            'z-[var(--g-z-popover)] rounded-lg border border-border bg-surface text-base text-fg shadow-popover outline-none data-[state=open]:animate-[graft-menu-in_var(--g-duration-fast)_var(--g-ease)]',
+            'overlay-pop z-[var(--g-z-popover)] rounded-lg border border-border bg-surface text-base text-fg shadow-popover outline-none',
             className
           )}
           {...props}

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { canOpenProjectFile } from '@shared/chatFileTypes';
 import { GraftError } from '@shared/errors';
 import { looksBinary } from '../tools/fs/read';
 import { isInsideReal } from '../tools/paths';
@@ -14,15 +15,43 @@ export interface TreeEntry {
   size: number | null;
 }
 
+export type MediaKind = 'image' | 'video' | 'audio';
+
 export interface FilePreview {
   path: string;
   content: string | null;
   binary: boolean;
+  /** Text past the limit for text, or a picture or clip past the limit for those. */
   tooLarge: boolean;
   size: number;
+  /** A picture, clip or sound: the panel shows it through a preview address instead of as text. */
+  media: MediaKind | null;
 }
 
 const MAX_PREVIEW_BYTES = 512 * 1024;
+/** The largest picture or clip the panel shows; it is read whole to be shown. */
+export const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+
+const MEDIA: Record<string, MediaKind> = {
+  '.png': 'image',
+  '.jpg': 'image',
+  '.jpeg': 'image',
+  '.gif': 'image',
+  '.webp': 'image',
+  '.bmp': 'image',
+  '.ico': 'image',
+  '.avif': 'image',
+  '.svg': 'image',
+  '.mp4': 'video',
+  '.webm': 'video',
+  '.mp3': 'audio',
+  '.wav': 'audio'
+};
+
+/** What kind of picture, clip or sound a file is by its name, or null for anything else. */
+export function mediaKindOf(file: string): MediaKind | null {
+  return MEDIA[path.extname(file).toLowerCase()] ?? null;
+}
 const MAX_ENTRIES = 2000;
 const HIDDEN = new Set(['.git']);
 
@@ -76,8 +105,44 @@ export async function readPreview(root: string, rel: string): Promise<FilePrevie
     throw error;
   });
   if (!stat.isFile()) throw new GraftError('not_a_file', `${rel} is not a file.`);
-  if (stat.size > MAX_PREVIEW_BYTES) return { path: rel, content: null, binary: false, tooLarge: true, size: stat.size };
+  const media = mediaKindOf(rel);
+  // A picture or clip is shown as what it is, whatever its size as text would be. Only an SVG is also worth reading as text.
+  if (media && path.extname(rel).toLowerCase() !== '.svg') return { path: rel, content: null, binary: true, tooLarge: stat.size > MAX_MEDIA_BYTES, size: stat.size, media };
+  if (stat.size > MAX_PREVIEW_BYTES) return { path: rel, content: null, binary: false, tooLarge: media ? stat.size > MAX_MEDIA_BYTES : true, size: stat.size, media };
   const buffer = await fs.promises.readFile(abs);
-  if (looksBinary(buffer)) return { path: rel, content: null, binary: true, tooLarge: false, size: stat.size };
-  return { path: rel, content: buffer.toString('utf8'), binary: false, tooLarge: false, size: stat.size };
+  if (looksBinary(buffer)) return { path: rel, content: null, binary: true, tooLarge: false, size: stat.size, media };
+  return { path: rel, content: buffer.toString('utf8'), binary: false, tooLarge: false, size: stat.size, media };
+}
+
+async function statFile(abs: string, rel: string): Promise<fs.Stats | null> {
+  try {
+    const stat = await fs.promises.stat(abs);
+    return stat.isFile() ? stat : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new GraftError('not_found', `${rel} no longer exists.`);
+    throw error;
+  }
+}
+
+/** A picture, clip or sound in the session's folder that is small enough to show: where it is and what it is. */
+export async function mediaFile(root: string, rel: string): Promise<{ file: string; kind: MediaKind; size: number }> {
+  const file = resolveInside(root, rel);
+  const kind = mediaKindOf(rel);
+  const stat = kind ? await statFile(file, rel) : null;
+  if (!kind || !stat) throw new GraftError('not_media', `${rel} is not a picture, a clip or a sound.`);
+  if (stat.size > MAX_MEDIA_BYTES) throw new GraftError('too_large', `${rel} is too large to show here (${String(Math.round(stat.size / 1048576))} MB).`);
+  return { file, kind, size: stat.size };
+}
+
+/** Whether a click may open a file with the computer's own app for it: documents, pictures, clips and sound, never scripts or programs. */
+export const canOpenFile = canOpenProjectFile;
+
+/** A file in the session's folder that is safe to hand to the computer's own app for it. */
+export async function openableFile(root: string, rel: string): Promise<string> {
+  const file = resolveInside(root, rel);
+  if (!(await statFile(file, rel))) throw new GraftError('not_a_file', `${rel} is not a file.`);
+  if (!canOpenFile(rel)) {
+    throw new GraftError('file_not_openable', 'Graft doesn’t open this kind of file directly, so a click can’t run it. Show it in its folder, or open it in your editor.');
+  }
+  return file;
 }

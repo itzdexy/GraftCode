@@ -6,7 +6,8 @@ import { toLlmHistory } from '../../src/main/agent/history';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
 import { renderTranscript } from '../../src/main/agent/compaction';
-import type { StoredMessage } from '../../src/shared/schemas/messages';
+import type { LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
+import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
@@ -313,6 +314,36 @@ describe('compaction', () => {
     expect(h.events.some((e) => e.type === 'compacted')).toBe(true);
   });
 
+  it('compacts and tries again when the provider says the conversation is too long', async () => {
+    const h = harness({
+      model: { contextWindow: 0 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*' } }] },
+        { error: new ProviderError('context_length', 'The conversation is too long for this model') },
+        { text: '## Goal\nKeep going.' },
+        { text: 'Finished after making room.' }
+      ]
+    });
+    h.session.send('big task');
+    await h.session.idle();
+    expect(h.session.summary.status).toBe('idle');
+    expect(h.provider.requests[2]!.system).toMatch(/summarize a coding session/);
+    expect(JSON.stringify(h.provider.requests[3]!.messages)).toContain('This session was compacted');
+    expect(texts(h).at(-1)).toBe('assistant:Finished after making room.');
+  });
+
+  it('reports the error when the conversation is still too long after compacting', async () => {
+    const tooLong = new ProviderError('context_length', 'The conversation is too long for this model');
+    const h = harness({
+      script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*' } }] }, { error: tooLong }, { text: 'Summary.' }, { error: tooLong }]
+    });
+    h.session.send('big task');
+    await h.session.idle();
+    expect(h.session.summary.status).toBe('error');
+    expect(h.session.summary.lastError).toMatchObject({ code: 'context_length' });
+    expect(h.provider.remaining).toBe(0);
+  });
+
   it('compacts on /compact and reports when there is nothing to compact', async () => {
     const h = harness({ script: [{ text: 'answer' }, { text: 'Summary: the user said hi.' }] });
     h.session.send('/compact');
@@ -440,7 +471,7 @@ describe('agent tools that involve the user', () => {
     const child = h.provider.requests[1]!;
     expect(child.system).toContain('Delegated task');
     expect(child.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Where is the config loaded?' }] }]);
-    expect(child.tools.map((t) => t.name).sort()).toEqual(['Glob', 'Grep', 'Read', 'WebFetch']);
+    expect(child.tools.map((t) => t.name).sort()).toEqual(['Glob', 'Grep', 'Read', 'Symbols', 'WebFetch']);
     expect(JSON.stringify(h.provider.requests[2]!.messages.at(-1))).toContain('src/config.ts:12');
     expect(texts(h).filter((t) => t.includes('Report:'))).toEqual([]);
   });
@@ -873,6 +904,23 @@ describe('commands, memory and history', () => {
     expect(renderTranscript(replay, 10_000)).toContain('[called Read');
   });
 
+  it('leaves the reasoning a provider asks to have sent back out of the summary’s transcript, and keeps what a block says about itself', () => {
+    const history: LlmMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'provider', provider: 'openai', raw: { model: 'm', output: [{ type: 'reasoning', encrypted_content: 'x'.repeat(500) }] }, summary: '' },
+          { type: 'provider', provider: 'anthropic', raw: { type: 'server_tool_use' }, summary: 'Searched the web for “graft”' },
+          { type: 'text', text: 'Done.' }
+        ]
+      }
+    ];
+    const transcript = renderTranscript(history, 10_000);
+    expect(transcript).not.toContain('[]');
+    expect(transcript).toContain('[Searched the web for “graft”]');
+  });
+
   it('chat sessions have no tools and use the chat prompt', async () => {
     const h = harness({ kind: 'chat', script: [{ text: 'Hi Tester!' }] });
     h.session.send('hello');
@@ -1003,6 +1051,26 @@ describe('prompt commands', () => {
     expect(typed).toEqual(['/commit fix the login typo', '/pr', '/security-review auth', '/explain the session queue', '/test']);
   });
 
+  it('expands /decompile into the one-function-at-a-time loop, with the project’s own check deciding a match', async () => {
+    const h = harness({ script: [{ text: 'a' }, { text: 'b' }] });
+    h.session.send('/decompile func_80012AB0 in src/actor.c');
+    await h.session.idle();
+    h.session.send('/decompile');
+    await h.session.idle();
+    const sent = h.provider.requests.map((r) => JSON.stringify(r.messages.at(-1)));
+    expect(sent[0]).toContain('func_80012AB0 in src/actor.c');
+    // The rules that make the loop honest: one function at a time, a machine check, a limit, and no tampering with what is checked against.
+    expect(sent[0]).toMatch(/one function at a time/i);
+    expect(sent[0]).toMatch(/RunAgents/);
+    expect(sent[0]).toMatch(/verify/);
+    expect(sent[0]).toMatch(/never edit the target/i);
+    expect(sent[0]).toMatch(/attempts/);
+    expect(sent[1]).toMatch(/ask me which/i);
+    const { listCommands } = await import('../../src/main/agent/slashCommands');
+    expect(listCommands(h.home, h.projectDir).find((c) => c.name === 'decompile')).toMatchObject({ source: 'builtin', argumentHint: '[function, file or binary]' });
+    expect(h.store.listMessages('session-1').filter((m) => m.role === 'user').map((m) => m.meta.typed)).toEqual(['/decompile func_80012AB0 in src/actor.c', '/decompile']);
+  });
+
   it('lets a project command replace a prompt built-in, but never a session control', async () => {
     const h = harness({ script: [{ text: 'ok' }] });
     writeFile(h.projectDir, '.graft/commands/commit.md', 'Commit with a Conventional Commits message. $ARGUMENTS');
@@ -1022,6 +1090,59 @@ describe('prompt commands', () => {
     await h.session.idle();
     expect(h.provider.requests).toHaveLength(0);
     expect(texts(h).at(-1)).toMatch(/opens in the app/);
+  });
+});
+
+describe('MCP servers in sessions', () => {
+  const review: McpPromptInfo = { server: 'rich', name: 'review', description: 'Review a file', arguments: [{ name: 'file', description: 'The file to review', required: true }] };
+  const fill = (server: string, name: string, args: Record<string, string>) => Promise.resolve({ text: `Please review ${args.file} (${server}/${name}).`, description: null });
+
+  it('gives the model what the connected servers say about themselves, marked as theirs', async () => {
+    const h = harness({ script: [{ text: 'ok' }], mcp: { instructions: [{ server: 'rich', text: 'Call "count" before anything else.' }] } });
+    h.session.send('hi');
+    await h.session.idle();
+    const system = lastRequest(h).system;
+    expect(system).toContain('Call "count" before anything else.');
+    expect(system).toMatch(/written by the servers themselves, not by Graft or the user/);
+    // Their words come after the rules of the prompt, never in place of them.
+    expect(system.indexOf('# Safety')).toBeLessThan(system.indexOf('Call "count"'));
+  });
+
+  it('runs a server’s prompt as a slash command, and shows what was typed', async () => {
+    const h = harness({ script: [{ text: 'Reviewed.' }], mcp: { prompts: [review], getPrompt: fill } });
+    h.session.send('/mcp__rich__review src/a.ts');
+    await h.session.idle();
+    expect(JSON.stringify(lastRequest(h).messages.at(-1))).toContain('Please review src/a.ts (rich/review).');
+    expect(h.store.listMessages('session-1').find((m) => m.role === 'user')?.meta.typed).toBe('/mcp__rich__review src/a.ts');
+  });
+
+  it('says what a prompt needs when it is run without it, and sends nothing to the model', async () => {
+    const h = harness({ script: [], mcp: { prompts: [review], getPrompt: fill } });
+    h.session.send('/mcp__rich__review');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(0);
+    expect(texts(h).at(-1)).toMatch(/needs <file>/);
+  });
+
+  it('says so when a server cannot fill a prompt in, or the prompt is gone', async () => {
+    const h = harness({
+      script: [],
+      mcp: { prompts: [review], getPrompt: () => Promise.reject(new Error('The server is busy.')) }
+    });
+    h.session.send('/mcp__rich__review a.ts');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toMatch(/rich server couldn't fill in \/mcp__rich__review: The server is busy\./);
+    h.session.send('/mcp__rich__gone');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toMatch(/No MCP prompt is called \/mcp__rich__gone/);
+    expect(h.provider.requests).toHaveLength(0);
+  });
+
+  it('lists the prompts of connected servers in /help', async () => {
+    const h = harness({ script: [], mcp: { prompts: [review] } });
+    h.session.send('/help');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toContain('/mcp__rich__review <file> — Review a file');
   });
 });
 

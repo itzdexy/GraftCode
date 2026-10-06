@@ -38,6 +38,7 @@ import {
   TreeEntrySchema
 } from '../schemas/panels';
 import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
+import { MISSION_LIMITS, MissionStartSchema } from '../schemas/missions';
 import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
@@ -81,6 +82,29 @@ export const SearchStatusSchema = z.object({
   providers: z.object({ openrouter: z.boolean(), anthropic: z.boolean(), openai: z.boolean(), gemini: z.boolean() })
 });
 export type SearchStatus = z.infer<typeof SearchStatusSchema>;
+
+export const MediaStatusSchema = z.object({
+  /** The engine GenerateImage uses now (null: none is set up, or image generation is off). */
+  engine: z.object({ engine: z.string(), model: z.string() }).nullable(),
+  /** Providers with a key that can make images; the keys themselves never leave the main process. */
+  providers: z.array(z.enum(['openrouter', 'openai', 'gemini'])),
+  /** The model each provider uses when Settings names none. */
+  defaults: z.record(z.string(), z.string()),
+  /** What ComfyUI has, when it is switched on; `reachable` is false while it isn't running. */
+  comfy: z
+    .object({
+      reachable: z.boolean(),
+      error: z.string().nullable(),
+      version: z.string().nullable(),
+      devices: z.array(z.string()),
+      checkpoints: z.array(z.string()),
+      modelFolders: z.record(z.string(), z.number()),
+      video: z.array(z.string()),
+      workflows: z.array(z.string())
+    })
+    .nullable()
+});
+export type MediaStatus = z.infer<typeof MediaStatusSchema>;
 
 export const SpeechModelSchema = z.object({
   id: z.string(),
@@ -132,6 +156,8 @@ export const contracts = {
   'search:status': channel(Void, SearchStatusSchema),
   'search:setKey': channel(z.object({ engine: z.enum(['brave', 'tavily']), key: z.string().trim().min(8).max(300).nullable() }), SearchStatusSchema),
   'search:test': channel(Void, z.object({ engine: z.enum(SEARCH_ENGINE_IDS), count: z.number().int(), first: z.object({ title: z.string(), url: z.string() }).nullable() })),
+  /** Generated media: the engine in use, the providers that could make images, and what ComfyUI has when it is on. */
+  'media:status': channel(Void, MediaStatusSchema),
   /** Natural voices: whether an OpenRouter key is set up, and the speech models it offers. */
   'voice:models': channel(Void, z.object({ available: z.boolean(), models: z.array(SpeechModelSchema) })),
   /** MP3 audio (base64) for a piece of a reply; the OpenRouter key stays in the main process. */
@@ -241,6 +267,16 @@ export const contracts = {
     z.object({ queued: z.boolean() })
   ),
   'sessions:interrupt': channel(z.object({ id: IdSchema }), Ok),
+  /** Stops one agent of a group that is running; the rest of the group goes on. */
+  'sessions:stopAgent': channel(z.object({ id: IdSchema, runId: IdSchema }), z.object({ stopped: z.boolean() })),
+  /** Starts a mission in a code session: the agent keeps working on the objective until its checks pass. */
+  'sessions:startMission': channel(MissionStartSchema.extend({ id: IdSchema }), z.object({ queued: z.boolean() })),
+  /** Pauses the mission after the turn that is running. */
+  'sessions:pauseMission': channel(z.object({ id: IdSchema }), Ok),
+  /** Resumes a paused mission; one that used all of its turns gets `extraTurns` more. */
+  'sessions:resumeMission': channel(z.object({ id: IdSchema, extraTurns: z.number().int().min(1).max(MISSION_LIMITS.maxTurns).optional() }), Ok),
+  /** Ends the mission for good and stops the turn working on it. */
+  'sessions:cancelMission': channel(z.object({ id: IdSchema }), Ok),
   /** A command typed after "!" in a code session's message box; it runs in the session's shell. */
   'sessions:shell': channel(z.object({ id: IdSchema, command: z.string().min(1).max(20_000) }), Ok),
   'sessions:respondPermission': channel(PermissionResponseSchema.extend({ sessionId: IdSchema }), Ok),
@@ -281,6 +317,12 @@ export const contracts = {
   // Side panels
   'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
   'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
+  /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
+  'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
+  /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */
+  'files:open': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
+  /** Puts a picture from the session's folder on the clipboard, as a picture. */
+  'files:copyImage': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
   'pty:create': channel(
     z.object({ sessionId: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }),
     TerminalInfoSchema

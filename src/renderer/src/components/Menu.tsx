@@ -14,7 +14,7 @@ export const MenuRadioGroup = DM.RadioGroup;
 export const MenuSub = DM.Sub;
 
 const CONTENT =
-  'z-[var(--g-z-popover)] min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface p-4 text-base text-fg shadow-popover outline-none data-[state=open]:animate-[graft-menu-in_var(--g-duration-fast)_var(--g-ease)]';
+  'overlay-pop z-[var(--g-z-popover)] min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface p-4 text-base text-fg shadow-popover outline-none';
 
 export const MenuContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof DM.Content>>(
   function MenuContent({ className, sideOffset = 6, collisionPadding = 8, ...props }, ref) {

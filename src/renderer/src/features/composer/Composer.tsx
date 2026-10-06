@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { CornerDownLeft, FileText, Plus, Square, SquareTerminal, X } from 'lucide-react';
+import { ArrowUp, FileText, Paperclip, Plus, Square, SquareTerminal, X } from 'lucide-react';
 import type { SlashCommand } from '@shared/schemas/app';
 import { DEFAULT_SHORTCUTS } from '@shared/schemas/appSettings';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
+import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
 import { loadHistory, pushHistory } from '../../lib/promptHistory';
 import { matchesAccelerator } from '../../lib/shortcuts';
@@ -283,22 +284,25 @@ export function Composer({
     </IconButton>
   );
 
-  const actionButton = busy && onInterrupt && !hasContent ? (
-    <IconButton label="Stop" size="sm" onClick={onInterrupt} className="text-icon-strong">
-      <span className="flex size-16 items-center justify-center rounded-full border border-icon">
-        <Square className="size-6 fill-current" strokeWidth={0} />
-      </span>
-    </IconButton>
-  ) : (
-    <IconButton
-      label={blockedReason ?? (shellActive ? 'Run command' : busy ? 'Queue message' : 'Send')}
-      size="sm"
-      disabled={!canSend}
-      onClick={() => void submit()}
-      className={cn('send-button', canSend && (shellActive ? 'text-accent' : 'text-icon-strong'))}
-    >
-      <CornerDownLeft className="size-16" />
-    </IconButton>
+  // One button in one place: it sends, queues or runs what is typed, and stops the turn when nothing is.
+  const stops = busy && onInterrupt !== undefined && !hasContent;
+  const actionButton = (
+    <Tooltip content={stops ? 'Stop' : (blockedReason ?? (shellActive ? 'Run command' : busy ? 'Queue message' : 'Send'))}>
+      <button
+        type="button"
+        aria-label={stops ? 'Stop' : (blockedReason ?? (shellActive ? 'Run command' : busy ? 'Queue message' : 'Send'))}
+        disabled={!stops && !canSend}
+        onClick={() => (stops ? onInterrupt() : void submit())}
+        data-mode={stops ? 'stop' : 'send'}
+        className={cn(
+          'send-button relative flex size-24 shrink-0 items-center justify-center rounded-full',
+          stops ? 'bg-btn-primary text-btn-primary-fg hover:bg-btn-primary-hover' : canSend ? 'bg-accent text-bg hover:bg-accent-strong' : 'bg-control text-fg-faint'
+        )}
+      >
+        <ArrowUp className="send-button__send size-14" strokeWidth={2.25} aria-hidden="true" />
+        <Square className="send-button__stop absolute size-8 fill-current" strokeWidth={0} aria-hidden="true" />
+      </button>
+    </Tooltip>
   );
 
   const shellBanner = shellActive ? (
@@ -313,7 +317,7 @@ export function Composer({
   const thumbnails = hasAttachments ? (
     <ul className="flex flex-wrap items-center gap-6 px-10 pt-8" aria-label="Attachments">
       {images.map((image, i) => (
-        <li key={`image-${i}-${image.data.length}`} className="group relative">
+        <li key={`image-${i}-${image.data.length}`} className="motion-pop group relative">
           <img src={imageSrc(image)} alt={`Image ${i + 1}`} className="size-48 rounded-md border border-border object-cover" />
           <button type="button" aria-label={`Remove image ${i + 1}`} onClick={() => setImages((current) => current.filter((_, j) => j !== i))} className={removeClass}>
             <X className="size-10" />
@@ -321,7 +325,7 @@ export function Composer({
         </li>
       ))}
       {files.map((file, i) => (
-        <li key={`file-${i}-${file.name}`} className="group relative">
+        <li key={`file-${i}-${file.name}`} className="motion-pop group relative">
           <span className="flex h-32 max-w-[220px] items-center gap-6 rounded-md border border-border bg-raised px-8 text-sm text-fg">
             <FileText className="size-14 shrink-0 text-icon" />
             <span className="truncate">{file.name}</span>
@@ -371,7 +375,7 @@ export function Composer({
       id={listId}
       role="listbox"
       aria-label={token?.kind === 'slash' ? 'Commands' : 'Files'}
-      className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-popover)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
+      className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-popover)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
     >
       {suggestions.items.length === 0 ? <p className="px-8 py-6 text-base text-fg-muted">Searching files…</p> : null}
       {suggestions.items.map((item, i) => (
@@ -421,9 +425,19 @@ export function Composer({
         setDragOver(true);
       }
     },
-    onDragLeave: () => setDragOver(false),
+    // Moving over a child fires dragleave on the box; only leaving the box itself ends the drop.
+    onDragLeave: (e: DragEvent<HTMLDivElement>) => {
+      if (!(e.relatedTarget instanceof Node) || !e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+    },
     onDrop
   };
+
+  const dropHint = dragOver ? (
+    <div className="graft-fade-in pointer-events-none absolute inset-0 z-[var(--g-z-sticky)] flex items-center justify-center gap-8 rounded-[inherit] bg-surface/90 text-base text-fg-secondary" aria-hidden="true">
+      <Paperclip className="size-14" />
+      {supportsImages ? 'Drop images or files to attach them' : 'Drop text files to attach them'}
+    </div>
+  ) : null;
 
   if (variant === 'chat') {
     return (
@@ -431,6 +445,7 @@ export function Composer({
         {fileInput}
         {popup}
         <div className={cn(boxClass, 'flex min-h-[var(--g-home-composer-height)] flex-col rounded-xl')} {...dropProps}>
+          {dropHint}
           {perch}
           {thumbnails}
           {textarea}
@@ -451,12 +466,13 @@ export function Composer({
       {fileInput}
       {popup}
       <div className={cn(boxClass, 'rounded-lg')} {...dropProps}>
+        {dropHint}
         {perch}
         {thumbnails}
         {shellBanner}
         <div className="flex items-end">
           <div className="min-w-0 flex-1">{textarea}</div>
-          <div className="flex shrink-0 items-center py-5 pr-5">{actionButton}</div>
+          <div className="flex shrink-0 items-center py-5 pr-6">{actionButton}</div>
         </div>
       </div>
       <div className="mt-6 flex h-24 items-center gap-2">

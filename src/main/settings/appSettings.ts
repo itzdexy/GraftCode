@@ -12,6 +12,14 @@ import { log } from '../app/log';
 
 type Listener = (settings: AppSettings, previous: AppSettings) => void;
 
+/** A stored section in today's shape: the "Reduce motion" switch of 0.6.5 and earlier became the Motion setting. */
+function upgraded(section: AppSettingsSection, stored: object): object {
+  if (section === 'appearance' && !('motion' in stored) && 'reducedMotion' in stored && stored.reducedMotion === true) {
+    return { ...stored, motion: 'reduced' };
+  }
+  return stored;
+}
+
 /**
  * App preferences, stored one JSON row per section. Unknown or invalid stored
  * values fall back to defaults section by section, so one bad row never
@@ -75,7 +83,7 @@ export class AppSettingsService {
       const raw = stored.get(section);
       if (raw === undefined) continue;
       try {
-        const merged = { ...(DEFAULT_APP_SETTINGS[section] as object), ...(JSON.parse(raw) as object) };
+        const merged = { ...(DEFAULT_APP_SETTINGS[section] as object), ...upgraded(section, JSON.parse(raw) as object) };
         const parsed = AppSettingsSchema.shape[section].safeParse(merged);
         if (parsed.success) result[section] = parsed.data;
         else log.warn('settings', 'Stored settings section invalid; using defaults', { section });

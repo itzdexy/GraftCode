@@ -16,7 +16,16 @@ import type {
   SessionUsage
 } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
+import { agentRunActive, type AgentRun } from '@shared/schemas/agentRuns';
+import type { Mission } from '@shared/schemas/missions';
+import { recoverMission } from '../agent/mission';
 import { parseJson, type Db } from './database';
+
+/** An agent's record as it is used today: one written by an earlier version gets what has been added since. */
+function storedAgentRun(data: string): AgentRun {
+  const run = parseJson<Omit<AgentRun, 'writes'> & { writes?: string[] }>(data, 'agent run');
+  return { ...run, writes: run.writes ?? [] };
+}
 
 export const EMPTY_SESSION_USAGE: SessionUsage = { totals: EMPTY_USAGE, contextTokens: 0, contextLimit: 0, costUsd: null };
 
@@ -64,6 +73,18 @@ export interface SessionStore {
   markCompacted(sessionId: string, messageIds: string[]): void;
   /** Deletes messages with seq >= fromSeq; returns them (for rewind). */
   deleteMessagesFrom(sessionId: string, fromSeq: number): StoredMessage[];
+  /** Stores an agent of a group (RunAgents), replacing its earlier state. */
+  saveAgentRun(run: AgentRun): void;
+  /** A session's agents, oldest group first, in the order each group listed them. */
+  listAgentRuns(sessionId: string): AgentRun[];
+  /** Removes the agents of groups started at or after a time (a rewind took their turn away). */
+  deleteAgentRunsFrom(sessionId: string, fromTime: number): void;
+  /** Stores a mission, replacing its earlier state. */
+  saveMission(mission: Mission): void;
+  /** A session's newest mission, or null when it never had one. */
+  getMission(sessionId: string): Mission | null;
+  /** Removes the missions started at or after a time (a rewind took their turn away). */
+  deleteMissionsFrom(sessionId: string, fromTime: number): void;
 }
 
 interface SessionRow {
@@ -336,6 +357,70 @@ export class SessionsRepo implements SessionStore {
       return rows.map(toMessage);
     });
     return tx();
+  }
+
+  saveAgentRun(run: AgentRun): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_runs (id, session_id, group_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`
+      )
+      .run(run.id, run.sessionId, run.groupId, JSON.stringify(run), run.createdAt, Date.now());
+  }
+
+  listAgentRuns(sessionId: string): AgentRun[] {
+    const rows = this.db.prepare('SELECT data FROM agent_runs WHERE session_id = ? ORDER BY created_at ASC, rowid ASC').all(sessionId) as Array<{ data: string }>;
+    return rows.map((row) => storedAgentRun(row.data));
+  }
+
+  deleteAgentRunsFrom(sessionId: string, fromTime: number): void {
+    this.db.prepare('DELETE FROM agent_runs WHERE session_id = ? AND created_at >= ?').run(sessionId, fromTime);
+  }
+
+  saveMission(mission: Mission): void {
+    this.db
+      .prepare(
+        `INSERT INTO missions (id, session_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`
+      )
+      .run(mission.id, mission.sessionId, JSON.stringify(mission), mission.createdAt, mission.updatedAt);
+  }
+
+  getMission(sessionId: string): Mission | null {
+    const row = this.db.prepare('SELECT data FROM missions WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(sessionId) as { data: string } | undefined;
+    return row ? parseJson<Mission>(row.data, 'mission') : null;
+  }
+
+  deleteMissionsFrom(sessionId: string, fromTime: number): void {
+    this.db.prepare('DELETE FROM missions WHERE session_id = ? AND created_at >= ?').run(sessionId, fromTime);
+  }
+
+  /** Missions left going when the app last quit: they wait, paused, for the user to resume them. Returns how many. */
+  recoverMissions(now: number = Date.now()): number {
+    const rows = this.db.prepare('SELECT id, data FROM missions').all() as Array<{ id: string; data: string }>;
+    let recovered = 0;
+    for (const row of rows) {
+      const mission = parseJson<Mission>(row.data, 'mission');
+      const paused = recoverMission(mission, now);
+      if (paused === mission) continue;
+      this.db.prepare('UPDATE missions SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(paused), now, row.id);
+      recovered++;
+    }
+    return recovered;
+  }
+
+  /** Agents left running when the app last quit: they stopped with it, and say so. Returns how many. */
+  recoverAgentRuns(): number {
+    const rows = this.db.prepare('SELECT id, data FROM agent_runs').all() as Array<{ id: string; data: string }>;
+    let recovered = 0;
+    for (const row of rows) {
+      const run = storedAgentRun(row.data);
+      if (!agentRunActive(run.status)) continue;
+      const stopped: AgentRun = { ...run, status: 'cancelled', rev: run.rev + 1, error: 'Graft was closed while this agent was working.', endedAt: run.endedAt ?? Date.now() };
+      this.db.prepare('UPDATE agent_runs SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(stopped), Date.now(), row.id);
+      recovered++;
+    }
+    return recovered;
   }
 
   /** Full-text search over titles and message text (trigram: queries need ≥ 3 characters). */

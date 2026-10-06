@@ -88,6 +88,8 @@ export function suggestRule(query: PermissionQuery, env: PermissionEnv): string 
   const paths = [...(d.writes ?? []), ...(d.reads ?? [])];
   const first = paths[0];
   if (!first) return query.permissionClass === 'none' ? null : query.toolName;
+  // A path rule speaks for the file tools; a tool that does more than read or write files is remembered by name.
+  if (query.permissionClass !== 'read' && query.permissionClass !== 'write') return query.toolName;
   const family = query.permissionClass === 'write' ? 'Edit' : 'Read';
   if (isInside(env.projectRoot, first, env.platform)) {
     const dir = path.relative(env.projectRoot, path.dirname(first)).split(path.sep).join('/');
@@ -135,7 +137,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
   const mcpReadOnly = query.mcp?.readOnly === true;
   if (env.mode === 'plan') {
     const planBlock = 'Plan mode is read-only. Finish researching, then present the plan with ExitPlanMode.';
-    if (cls === 'write') return result('deny', planBlock);
+    // Anything that says it writes a file, whatever kind of tool it is.
+    if (cls === 'write' || writes.length > 0) return result('deny', planBlock);
     if (cls === 'exec') {
       const readOnly = d.command !== undefined && classifyCommand(d.command) === 'read-only';
       if (!readOnly || dangerous || outsideProject) return result('deny', planBlock);

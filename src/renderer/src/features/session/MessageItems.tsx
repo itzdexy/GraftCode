@@ -3,6 +3,7 @@ import { Check, ChevronRight, Copy, FileText, Globe, Loader2, Pause, Pencil, Pla
 import type { StoredMessage } from '@shared/schemas/messages';
 import { IconButton } from '../../components/Button';
 import { Badge } from '../../components/Badge';
+import { Collapse } from '../../components/Collapse';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
 import { pauseSpeech, resumeSpeech, startSpeech, stopSpeech, useSpeech } from '../../lib/speech';
@@ -13,6 +14,7 @@ import { useCopy } from './CodeBlock';
 import { Markdown } from './Markdown';
 import { TodoList } from './ToolDetail';
 import type { TranscriptItem } from './transcriptModel';
+import { useSmoothText } from './useSmoothText';
 
 type Item<K extends TranscriptItem['kind']> = Extract<TranscriptItem, { kind: K }>;
 
@@ -171,11 +173,12 @@ interface ReplyActions {
 /** Assistant prose; the last reply of a turn gets copy / read aloud / feedback / retry. */
 export function AssistantText({ item, variant, actions }: { item: Item<'text'>; variant: 'code' | 'chat'; actions: ReplyActions | null }) {
   const [copied, copy] = useCopy();
+  const shown = useSmoothText(item.text, item.live);
   return (
     <div className="flex flex-col gap-4">
-      <Markdown text={item.text} variant={variant} live={item.live} />
-      {actions ? (
-        <div className="-ml-4 flex gap-2">
+      <Markdown text={shown.text} variant={variant} live={shown.streaming} />
+      {actions && !shown.streaming ? (
+        <div className="graft-fade-in -ml-4 flex gap-2">
           <ActionButton label={copied ? 'Copied' : 'Copy'} onClick={() => copy(item.text)}>
             {copied ? <Check className="size-12" /> : <Copy className="size-12" />}
           </ActionButton>
@@ -211,7 +214,9 @@ export function ThinkingItem({ item }: { item: Item<'thinking'> }) {
         {item.live ? 'Thinking' : 'Thought it through'}
         <ChevronRight className={cn('size-14 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? <p className="selectable mt-2 border-l border-border pl-10 text-md whitespace-pre-wrap text-fg-muted">{item.text}</p> : null}
+      <Collapse open={open}>
+        <p className="selectable mt-2 border-l border-border pl-10 text-md whitespace-pre-wrap text-fg-muted">{item.text}</p>
+      </Collapse>
     </div>
   );
 }
@@ -256,12 +261,10 @@ export function PlanItem({ item }: { item: Item<'plan'> }) {
         <Badge tone={item.display?.approved ? 'accent' : item.display ? 'warning' : 'neutral'}>{status}</Badge>
         <ChevronRight className={cn('ml-auto size-14 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? (
-        <div className="border-t border-border-card px-12 py-8">
-          <Markdown text={item.plan} variant="code" />
-          {item.display?.feedback ? <p className="mt-8 text-sm text-fg-muted">Your feedback: {item.display.feedback}</p> : null}
-        </div>
-      ) : null}
+      <Collapse open={open} className="border-t border-border-card px-12 py-8">
+        <Markdown text={item.plan} variant="code" />
+        {item.display?.feedback ? <p className="mt-8 text-sm text-fg-muted">Your feedback: {item.display.feedback}</p> : null}
+      </Collapse>
     </section>
   );
 }
@@ -276,7 +279,9 @@ export function CompactionItem({ item }: { item: Item<'compaction'> }) {
         <ChevronRight className={cn('size-12 transition-transform', open && 'rotate-90')} aria-hidden="true" />
         <span className="h-px flex-1 bg-divider" aria-hidden="true" />
       </button>
-      {open ? <Markdown text={item.text} variant="code" className="text-fg-secondary" /> : null}
+      <Collapse open={open}>
+        <Markdown text={item.text} variant="code" className="text-fg-secondary" />
+      </Collapse>
     </div>
   );
 }

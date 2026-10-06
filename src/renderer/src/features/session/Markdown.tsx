@@ -1,3 +1,4 @@
+import type { ElementContent, Root, RootContent } from 'hast';
 import { memo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +7,7 @@ import { invoke } from '../../lib/ipc';
 import { reportError } from '../../stores/toasts';
 import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
+import { healMarkdown, splitBlocks } from './streaming';
 
 function openLink(href: string): void {
   invoke('app:openExternal', { url: href }).catch((error: unknown) => reportError("Couldn't open the link", error));
@@ -75,7 +77,37 @@ export function tidyMarkdown(text: string): string {
   return out.join('\n');
 }
 
+/** Elements whose text stays in one piece while a reply streams: code keeps its spacing, a link its label. */
+const KEEP_WHOLE = new Set(['pre', 'code', 'a']);
+
+function wrapWords<T extends RootContent | ElementContent>(nodes: T[]): T[] {
+  return nodes.flatMap((node): T[] => {
+    if (node.type === 'text') {
+      return node.value
+        .split(/(\s+)/)
+        .filter((part) => part.length > 0)
+        .map((part): ElementContent =>
+          /^\s+$/.test(part) ? { type: 'text', value: part } : { type: 'element', tagName: 'span', properties: { className: ['graft-word'] }, children: [{ type: 'text', value: part }] }
+        ) as T[];
+    }
+    if (node.type === 'element' && !KEEP_WHOLE.has(node.tagName)) node.children = wrapWords(node.children);
+    return [node];
+  });
+}
+
+/**
+ * While a reply streams, each word gets its own element, so a word that has
+ * just arrived fades in (.graft-word) and the ones already there stay put.
+ */
+function fadeWords() {
+  return (tree: Root): void => {
+    tree.children = wrapWords(tree.children);
+  };
+}
+
 function buildComponents(live: boolean): Components {
+  // Inline code and links arrive as one piece, so they fade in whole.
+  const arriving = live ? 'graft-word ' : '';
   return {
     pre({ node }) {
       const code = node?.children[0];
@@ -85,7 +117,7 @@ function buildComponents(live: boolean): Components {
       return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} live={live} />;
     },
     code({ children }) {
-      return <code className="rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em] text-code-fg">{children}</code>;
+      return <code className={`${arriving}rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em] text-code-fg`}>{children}</code>;
     },
     a({ href, children }) {
       if (!href) return <span>{children}</span>;
@@ -99,7 +131,7 @@ function buildComponents(live: boolean): Components {
               openLink(href);
             }}
             title={href}
-            className="mx-2 inline-flex -translate-y-px items-center gap-4 rounded-full bg-control px-6 py-px align-middle font-sans text-[0.75em] leading-[1.6] text-fg-secondary no-underline transition-ui hover:bg-hover hover:text-fg"
+            className={`${arriving}mx-2 inline-flex -translate-y-px items-center gap-4 rounded-full bg-control px-6 py-px align-middle font-sans text-[0.75em] leading-[1.6] text-fg-secondary no-underline transition-ui hover:bg-hover hover:text-fg`}
           >
             <SiteIcon url={href} size={11} />
             {text.replace(/^www\./i, '')}
@@ -113,7 +145,7 @@ function buildComponents(live: boolean): Components {
             e.preventDefault();
             openLink(href);
           }}
-          className="text-link underline-offset-2 hover:underline"
+          className={`${arriving}text-link underline-offset-2 hover:underline`}
           title={href}
         >
           {children}
@@ -157,21 +189,40 @@ function buildComponents(live: boolean): Components {
 
 const LIVE_COMPONENTS = buildComponents(true);
 const DONE_COMPONENTS = buildComponents(false);
+const REMARK = [remarkGfm];
+const LIVE_REHYPE = [fadeWords];
+
+/** One run of top-level blocks. Rendering is skipped while its text is unchanged, which is what keeps a long streaming reply cheap. */
+const Blocks = memo(function Blocks({ text, live }: { text: string; live: boolean }): ReactNode {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={live ? LIVE_REHYPE : undefined} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
+      {tidyMarkdown(text)}
+    </ReactMarkdown>
+  );
+});
 
 interface MarkdownProps {
   text: string;
   variant: 'code' | 'chat';
+  /** The text is still streaming: only its last blocks are parsed again as it grows, and new words fade in. */
   live?: boolean;
   className?: string;
 }
 
-/** Markdown for assistant replies and user messages; GFM, highlighted code, external links. */
+/**
+ * Markdown for assistant replies and user messages; GFM, highlighted code,
+ * external links. A long text renders in chunks (see splitBlocks); while it
+ * streams only the last one is live. The cuts are the same whether or not the
+ * text is streaming, so nothing is rebuilt when a reply finishes.
+ */
 export const Markdown = memo(function Markdown({ text, variant, live = false, className }: MarkdownProps): ReactNode {
+  const chunks = splitBlocks(text);
   return (
     <div className={cn('graft-prose selectable', variant === 'chat' ? 'graft-prose--chat' : 'graft-prose--code', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
-        {tidyMarkdown(text)}
-      </ReactMarkdown>
+      {chunks.map((chunk, i) => {
+        const writing = live && i === chunks.length - 1;
+        return <Blocks key={i} text={writing ? healMarkdown(chunk) : chunk} live={writing} />;
+      })}
     </div>
   );
 });

@@ -17,8 +17,8 @@ export interface CustomCommand extends SlashCommandInfo {
 /**
  * Built-in commands. Some act inside the session (clear, compact, cost,
  * help, model, effort, permissions), some send a prepared prompt (init,
- * review, security-review, explain, test, commit, pr), and the rest open UI
- * in the renderer (mcp, resume, rewind, config, export, system, new).
+ * review, security-review, explain, test, decompile, commit, pr), and the rest open UI
+ * in the renderer (mcp, resume, rewind, config, export, system, new, mission).
  */
 export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'clear', description: 'Start over with an empty context (the transcript stays visible)', argumentHint: null },
@@ -32,8 +32,10 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'security-review', description: 'Check the current changes for security problems', argumentHint: '[focus]' },
   { name: 'explain', description: 'Explain how part of the project works', argumentHint: '[file, folder or feature]' },
   { name: 'test', description: 'Run the tests and fix what fails, or add tests for something', argumentHint: '[what to test]' },
+  { name: 'decompile', description: 'Turn compiled code back into source, one function at a time, checked against the original', argumentHint: '[function, file or binary]' },
   { name: 'commit', description: 'Commit the current changes with a well-written message', argumentHint: '[hint]' },
   { name: 'pr', description: 'Push a branch and open a pull request for the changes', argumentHint: '[hint]' },
+  { name: 'mission', description: 'Start a mission: Graft keeps working on an objective until its checks pass', argumentHint: '[objective]' },
   { name: 'resume', description: 'Open a previous session', argumentHint: null },
   { name: 'new', description: 'Start a new session', argumentHint: null },
   { name: 'cost', description: 'Show token usage for this session', argumentHint: null },
@@ -47,10 +49,10 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
 export const BUILTIN_NAMES = new Set(BUILTIN_COMMANDS.map((c) => c.name));
 
 /** Built-ins that only send a prepared prompt: a user or project command with the same name replaces them. */
-export const PROMPT_COMMANDS: ReadonlySet<string> = new Set(['init', 'review', 'security-review', 'explain', 'test', 'commit', 'pr']);
+export const PROMPT_COMMANDS: ReadonlySet<string> = new Set(['init', 'review', 'security-review', 'explain', 'test', 'decompile', 'commit', 'pr']);
 
 /** Built-ins that open app UI; the renderer handles them, so the session only explains when one arrives. */
-export const UI_COMMANDS: ReadonlySet<string> = new Set(['model', 'mcp', 'resume', 'rewind', 'config', 'export', 'system', 'new']);
+export const UI_COMMANDS: ReadonlySet<string> = new Set(['model', 'mcp', 'resume', 'rewind', 'config', 'export', 'system', 'new', 'mission']);
 
 export function parseSlash(text: string): { name: string; args: string } | null {
   const match = /^\/([A-Za-z0-9_:-]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
@@ -170,6 +172,26 @@ export function testPrompt(target: string): string {
   return target.length > 0
     ? `Write or improve tests for ${target}, following the project's existing test style and tools. Cover the important behavior and edge cases, run the tests, and fix any failures your tests uncover in the tests themselves; if one reveals a real bug, report it instead of changing the code under test.`
     : "Find how this project runs its tests (README, manifest, CI config), run them, and fix what fails. Fix the cause in the code or the test, whichever is wrong; never skip, delete or weaken a test to make it pass. Report what failed, why, and what you changed.";
+}
+
+/**
+ * Decompilation as people do it with agents: one function at a time, each in
+ * a fresh context, with the project's own match check as the judge and a limit
+ * on attempts. The agent group's verify command is what makes a function count
+ * only when the check passes.
+ */
+export function decompilePrompt(target: string): string {
+  return [
+    target.length > 0
+      ? `Decompile ${target}: turn the compiled code into source that builds back to the same thing.`
+      : 'This is a decompilation task: turning compiled code into source that builds back to the same thing. Look at what is here first, then ask me which function, file or binary to start with unless it is obvious.',
+    'First learn how this project works: read its README and contributing notes, and find how it builds, how it checks a match (a Makefile or configure script, an objdiff or asm-differ setup, a progress script) and where the target assembly or binary lives. Use those commands exactly as the project gives them; do not invent a check of your own.',
+    'If there is no project yet and you only have a binary, say so and propose a setup before decompiling anything. When a Ghidra server is connected (its tools start with mcp__ghidra__), use it to import the binary, list and decompile functions, follow cross-references and rename things as you learn what they are; Symbols outlines the C that is already written.',
+    'Work one function at a time. For several functions, use RunAgents with one implementer for each: a fresh context, the function\'s target assembly and the source around it in its prompt, and the project\'s match check for that function as its verify command, so a function only counts once the check passes. Start with the smallest and simplest, and let later agents see what has already matched.',
+    'For each function: read the target, write a first version, build, compare, then change one thing at a time towards the target. After about ten attempts without getting closer, stop, leave the best version marked as not matching, and say what still differs.',
+    'Never edit the target assembly, the expected output, or the build and comparison tools to force a match, and never hide a difference. Keep names, types and layout consistent with the code already there.',
+    'Report what matched, what did not and why, with the numbers the check itself prints. For a long job, suggest a mission (/mission) with the project\'s match check as what must pass.'
+  ].join(' ');
 }
 
 export function commitPrompt(hint: string): string {

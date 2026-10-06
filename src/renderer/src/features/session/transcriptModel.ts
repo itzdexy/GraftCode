@@ -1,5 +1,5 @@
 import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
-import type { MadeFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
+import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 
 /**
  * Turns stored messages into display items: consecutive tool calls collapse
@@ -18,7 +18,8 @@ export interface ToolCall {
 
 export type TranscriptItem =
   | { kind: 'user'; key: string; message: StoredMessage; text: string; images: ImageBlock[]; files: string[]; turn: number }
-  | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; endOfTurn: boolean; at: number }
+  /** `closing`: the model ended its step with this text (no tool call came with it), so it reads as an answer unless more work follows. */
+  | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; closing: boolean; endOfTurn: boolean; at: number }
   | { kind: 'thinking'; key: string; text: string; live: boolean; progress: boolean; at: number }
   | { kind: 'tools'; key: string; calls: ToolCall[]; at: number }
   | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean }
@@ -28,11 +29,14 @@ export type TranscriptItem =
   | { kind: 'command-output'; key: string; text: string }
   | { kind: 'shell'; key: string; shell: UserShell }
   | { kind: 'check'; key: string; check: CheckReport }
+  /** Where a later turn of a mission starts: which turn, of how many, and whether it follows checks that failed. */
+  | { kind: 'mission'; key: string; turn: number; of: number; afterChecks: boolean; at: number }
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
   | { kind: 'edits'; key: string; files: EditedFile[] }
   | { kind: 'files'; key: string; files: MadeFile[] }
+  | { kind: 'media'; key: string; media: MadeMedia }
   | ActivityItem;
 
 /** A file a turn changed, with its line counts and the patches that did it. */
@@ -42,6 +46,15 @@ export interface EditedFile {
   removed: number;
   created: boolean;
   patches: string[];
+}
+
+/** The pictures and clips a turn generated, with the engine that made the newest of them. */
+export interface MadeMedia {
+  engine: string;
+  model: string;
+  /** What the turn's pictures cost together; null when a provider didn't say. */
+  costUsd: number | null;
+  files: MediaFile[];
 }
 
 export interface SearchInfo {
@@ -120,6 +133,12 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
       if (message.meta.check) items.push({ kind: 'check', key: message.id, check: message.meta.check });
       continue;
     }
+    if (kind === 'mission') {
+      flush();
+      const at = message.meta.mission;
+      items.push({ kind: 'mission', key: message.id, turn: at?.turn ?? 0, of: at?.of ?? 0, afterChecks: at?.afterChecks ?? false, at: message.createdAt });
+      continue;
+    }
 
     if (message.role === 'user') {
       for (const block of message.content) {
@@ -138,13 +157,18 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
       continue;
     }
 
+    // A message's first text and first thought keep the key they had while streaming (see the
+    // live items below), so the reply stays in place when it is stored instead of arriving again.
+    const firstText = message.content.findIndex((b) => b.type === 'text');
+    const firstThinking = message.content.findIndex((b) => b.type === 'thinking');
+    const closing = !message.content.some((b) => b.type === 'tool_use');
     message.content.forEach((block, index) => {
-      const key = `${message.id}:${index}`;
+      const key = index === firstText ? `${message.id}:text` : index === firstThinking ? `${message.id}:thinking` : `${message.id}:${index}`;
       switch (block.type) {
         case 'text':
           if (block.text.trim().length > 0) {
             flush();
-            items.push({ kind: 'text', key, messageId: message.id, text: block.text, live: false, endOfTurn: false, at: message.createdAt });
+            items.push({ kind: 'text', key, messageId: message.id, text: block.text, live: false, closing, endOfTurn: false, at: message.createdAt });
           }
           break;
         case 'thinking':
@@ -215,8 +239,8 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
   if (live.streaming) {
     const s = live.streaming;
     const at = Date.now();
-    if (s.thinking.trim().length > 0) items.push({ kind: 'thinking', key: `${s.messageId}:live-thinking`, text: s.thinking, live: true, progress: false, at });
-    if (s.text.length > 0) items.push({ kind: 'text', key: `${s.messageId}:live`, messageId: s.messageId, text: s.text, live: true, endOfTurn: false, at });
+    if (s.thinking.trim().length > 0) items.push({ kind: 'thinking', key: `${s.messageId}:thinking`, text: s.thinking, live: true, progress: false, at });
+    if (s.text.length > 0) items.push({ kind: 'text', key: `${s.messageId}:text`, messageId: s.messageId, text: s.text, live: true, closing: false, endOfTurn: false, at });
   }
 
   // The last text before each user turn (or at the end) closes its turn; actions attach there.
@@ -276,20 +300,23 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
   const turns: TranscriptItem[][] = [[]];
   for (const item of items) {
     // A "!" command stands apart from the turn before it, so that turn's file card stays with it.
-    if (item.kind === 'user' || item.kind === 'shell') turns.push([item]);
+    // A later turn of a mission is a turn of its own: it gets its own answer and its own file card.
+    if (item.kind === 'user' || item.kind === 'shell' || item.kind === 'mission') turns.push([item]);
     else turns.at(-1)?.push(item);
   }
   turns.forEach((segment, index) => {
     const lastTurn = index === turns.length - 1;
     const turnStart = out.length;
-    const user = segment[0]?.kind === 'user' ? segment[0] : null;
-    const startedAt = user?.kind === 'user' ? user.message.createdAt : null;
-    // The answer: the last text with no work after it (a streaming text counts while it streams).
+    const first = segment[0];
+    const startedAt = first?.kind === 'user' ? first.message.createdAt : first?.kind === 'mission' ? first.at : null;
+    // The answer: the last text with no work after it. While the turn runs, that is the text
+    // streaming now, or a stored one the model ended its step with (it stays the answer while
+    // hooks and checks run, and becomes narration if the turn goes on working).
     let answer = -1;
     for (let i = segment.length - 1; i >= 0; i--) {
       const item = segment[i];
       if (!item || !isWork(item)) continue;
-      if (item.kind === 'text' && (item.live || !(lastTurn && turnActive))) answer = i;
+      if (item.kind === 'text' && (item.live || item.closing || !(lastTurn && turnActive))) answer = i;
       break;
     }
     let steps: ActivityStep[] = [];
@@ -324,6 +351,8 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       // …and, in chats, the files it made for the user to download.
       const made = madeFiles(calls);
       if (made.length > 0) out.push({ kind: 'files', key: `files:${segment[0]?.key ?? String(index)}`, files: made });
+      const media = madeMedia(calls);
+      if (media) out.push({ kind: 'media', key: `media:${segment[0]?.key ?? String(index)}`, media });
     }
     // The newest block of a turn in progress is still working, even while the answer streams after it.
     if (lastTurn && turnActive) {
@@ -377,6 +406,15 @@ export function madeFiles(calls: ToolCall[]): MadeFile[] {
     if (d?.kind === 'file') return [{ name: d.name, size: d.size, mime: d.mime }];
     return d?.kind === 'code' ? d.files : [];
   });
+}
+
+/** Pictures and clips generated by GenerateImage and ComfyUI calls, in order; null when there are none. */
+export function madeMedia(calls: ToolCall[]): MadeMedia | null {
+  const made = calls.flatMap((call) => (call.result?.display?.kind === 'media' && !call.result.isError ? [call.result.display] : []));
+  const last = made.at(-1);
+  if (!last) return null;
+  const known = made.every((m) => m.costUsd !== null);
+  return { engine: last.engine, model: last.model, costUsd: known ? made.reduce((sum, m) => sum + (m.costUsd ?? 0), 0) : null, files: made.flatMap((m) => m.files) };
 }
 
 /** Lines added and removed by a set of tool calls (edits that went through). */
@@ -438,6 +476,12 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many.replace('#', String(n));
 }
 
+/** How many agents a RunAgents call asked for. */
+function agentCount(input: unknown): number {
+  const agents = inputOf<{ agents: unknown }>(input).agents;
+  return Array.isArray(agents) ? agents.length : 0;
+}
+
 /**
  * One muted line for a group of tool calls, most telling first:
  * "Ran 4 commands (1 failed), created a.ts, edited 2 files, read b.ts".
@@ -463,6 +507,10 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
     parts.push({ text, calls: count });
   };
   const byName = (names: string[]): ToolCall[] => calls.filter((c) => names.includes(c.name));
+  const noted = byName(['MissionUpdate']);
+  // A group of agents is the largest piece of work a block can hold, so it leads.
+  const groups = byName(['RunAgents']);
+  if (groups.length > 0) push(groups.length === 1 ? plural(agentCount(groups[0]!.input), 'Ran an agent', 'Ran # agents') : `Ran ${String(groups.length)} groups of agents`, groups.length);
   const pathsOf = (list: ToolCall[]): Set<string> => new Set(list.map((c) => String(inputOf<{ file_path: string }>(c.input).file_path ?? '')));
   const files = (verb: string, list: ToolCall[]): string => {
     const paths = pathsOf(list);
@@ -538,10 +586,27 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   }
   const runs = byName(['RunCode']);
   if (runs.length > 0) push(plural(runs.length, 'Ran code', 'Ran code # times'), runs.length);
+  const images = byName(['GenerateImage']);
+  if (images.length > 0) push(plural(images.length, 'Generated an image', 'Generated # images'), images.length);
+  const comfy = byName(['ComfyUI']);
+  if (comfy.length > 0) {
+    const runs = comfy.filter((c) => inputOf<{ action: string }>(c.input).action === 'run').length;
+    push(runs > 0 ? plural(runs, 'Ran a ComfyUI workflow', 'Ran # ComfyUI workflows') : 'Checked ComfyUI', comfy.length);
+  }
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) push('Asked you a question', questions.length);
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'AskUserQuestion', 'CreateFile', 'RunCode']);
-  const mcp = calls.filter((c) => c.name.startsWith('mcp__'));
+  const lookups = byName(['Symbols']);
+  if (lookups.length > 0) push(plural(lookups.length, 'Looked up the code’s structure', 'Looked up the code’s structure # times'), lookups.length);
+  const finds = byName(['ToolSearch']);
+  if (finds.length > 0) push(plural(finds.length, 'Looked for a tool', 'Looked for tools # times'), finds.length);
+  const resources = byName(['mcp__resources__list', 'mcp__resources__read']);
+  if (resources.length > 0) push(plural(resources.length, 'Looked at an MCP resource', 'Looked at # MCP resources'), resources.length);
+  if (noted.length > 0) {
+    const status = noted.map((c) => inputOf<{ status: string }>(c.input).status).find((s) => s === 'done' || s === 'blocked');
+    push(status === 'done' ? 'Reported the mission done' : status === 'blocked' ? 'Paused the mission' : plural(noted.length, 'Noted something for the mission', 'Noted # things for the mission'), noted.length);
+  }
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'RunAgents', 'MissionUpdate', 'Symbols', 'ToolSearch', 'AskUserQuestion', 'CreateFile', 'RunCode', 'GenerateImage', 'ComfyUI']);
+  const mcp = calls.filter((c) => c.name.startsWith('mcp__') && !c.name.startsWith('mcp__resources__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
     push(mcp.length === 1 ? `Used ${tool} from ${server}` : `Used ${String(mcp.length)} tools from ${server}`, mcp.length);
@@ -594,6 +659,32 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
     }
     case 'Task':
       return { verb: 'Sub-agent', target: str('description'), mono: false, title: str('prompt') };
+    case 'RunAgents':
+      return { verb: plural(agentCount(call.input), done ? 'Ran an agent' : 'Running an agent', done ? 'Ran # agents' : 'Running # agents'), target: str('goal'), mono: false, title: str('goal') };
+    case 'Symbols': {
+      const action = str('action');
+      const file = fileName(str('path'));
+      if (action === 'outline') return { verb: done ? 'Outlined' : 'Outlining', target: file, mono: false, title: str('path') };
+      if (action === 'importers') return { verb: done ? 'Found what imports' : 'Finding what imports', target: file, mono: false, title: str('path') };
+      if (action === 'tests') return { verb: done ? 'Found the tests of' : 'Finding the tests of', target: file, mono: false, title: str('path') };
+      const what = action === 'definition' ? 'the definition of' : 'uses of';
+      return { verb: done ? `Found ${what}` : `Finding ${what}`, target: str('name'), mono: true, title: str('name') };
+    }
+    case 'ToolSearch':
+      return { verb: done ? 'Searched tools for' : 'Searching tools for', target: `“${str('query')}”`, mono: false, title: str('query') };
+    case 'mcp__resources__list':
+      return { verb: done ? 'Listed MCP resources' : 'Listing MCP resources', target: str('server'), mono: false, title: 'MCP resources' };
+    case 'mcp__resources__read':
+      return { verb: done ? 'Read' : 'Reading', target: str('uri'), mono: true, title: `${str('server')}: ${str('uri')}` };
+    case 'MissionUpdate': {
+      const status = str('status');
+      if (status === 'done') return { verb: 'Reported the mission done', target: '', mono: false, title: str('summary') };
+      if (status === 'blocked') return { verb: 'Paused the mission', target: str('summary'), mono: false, title: str('summary') };
+      const note = inputOf<{ kind: string; text: string }>(input.note);
+      const kind = typeof note.kind === 'string' ? note.kind : '';
+      const text = typeof note.text === 'string' ? note.text : '';
+      return { verb: kind === 'progress' ? 'Noted progress' : kind ? `Noted a ${kind}` : 'Noted', target: text, mono: false, title: text };
+    }
     case 'CreateFile': {
       const d = call.result?.display;
       const name = d?.kind === 'file' ? d.name : str('name');
@@ -603,6 +694,13 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       const d = call.result?.display;
       const verb = !done ? 'Running code' : d?.kind === 'code' && d.error === null ? 'Ran code' : 'Ran code (failed)';
       return { verb, target: '', mono: false, title: 'JavaScript in the sandbox' };
+    }
+    case 'GenerateImage':
+      return { verb: !done ? 'Generating' : call.result?.isError ? "Couldn't generate" : 'Generated', target: fileName(str('path')), mono: false, title: str('prompt') };
+    case 'ComfyUI': {
+      const action = str('action');
+      if (action === 'run') return { verb: done ? 'Ran in ComfyUI' : 'Running in ComfyUI', target: str('workflow') || 'a workflow', mono: false, title: str('prompt') };
+      return { verb: action === 'status' ? (done ? 'Checked ComfyUI' : 'Checking ComfyUI') : done ? 'Looked in ComfyUI' : 'Looking in ComfyUI', target: str('name') || str('search') || str('folder'), mono: false, title: 'ComfyUI' };
     }
     case 'Computer': {
       const d = call.result?.display;
@@ -708,8 +806,24 @@ export function describeCall(call: ToolCall): string {
       return `${call.result ? 'Searched' : 'Searching'} the web for “${str('query')}”`;
     case 'Task':
       return `Sub-agent: ${str('description')}`;
+    case 'RunAgents':
+      return `${plural(agentCount(call.input), call.result ? 'Ran an agent' : 'Running an agent', call.result ? 'Ran # agents' : 'Running # agents')}: ${str('goal')}`;
+    case 'MissionUpdate':
+      return str('status') === 'done' ? 'Reported the mission done' : str('status') === 'blocked' ? 'Paused the mission' : 'Noted something for the mission';
+    case 'Symbols':
+      return `${call.result ? 'Looked up' : 'Looking up'} ${str('name') || str('path')} in the code`;
+    case 'ToolSearch':
+      return `${call.result ? 'Searched' : 'Searching'} tools for “${str('query')}”`;
+    case 'mcp__resources__list':
+      return `${call.result ? 'Listed' : 'Listing'} MCP resources${str('server') ? ` of ${str('server')}` : ''}`;
+    case 'mcp__resources__read':
+      return `${call.result ? 'Read' : 'Reading'} ${str('uri')} from ${str('server')}`;
     case 'AskUserQuestion':
       return 'Ask a question';
+    case 'GenerateImage':
+      return `${call.result ? 'Generated' : 'Generating'} ${str('path')}`;
+    case 'ComfyUI':
+      return str('action') === 'run' ? `${call.result ? 'Ran' : 'Running'} ${str('workflow') || 'a workflow'} in ComfyUI` : 'Checked ComfyUI';
     default:
       return call.name.startsWith('mcp__') ? call.name.split('__').slice(1).join(' · ') : call.name;
   }

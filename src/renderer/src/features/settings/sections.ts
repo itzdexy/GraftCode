@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AudioLines, Bell, BookText, Box, Cpu, Database, EyeOff, Globe, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
+import { AudioLines, Bell, BookText, Box, Cpu, Database, EyeOff, Globe, Image, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
 import type { AccentId, PaletteId } from '@shared/schemas/appSettings';
 import type { SettingsSection } from '../../stores/nav';
 
@@ -24,6 +24,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'sandbox', label: 'Sandbox', description: 'Run a project’s commands in an isolated container.', icon: Box },
   { id: 'privacy', label: 'Privacy', description: 'Model training, incognito chats and where your messages go.', icon: EyeOff },
   { id: 'search', label: 'Web search', description: 'How models search and read the web.', icon: Globe },
+  { id: 'media', label: 'Images', description: 'The image model the agent uses, and ComfyUI on this computer.', icon: Image },
   { id: 'voice', label: 'Voice', description: 'How replies sound when they are read aloud.', icon: AudioLines },
   { id: 'mcp', label: 'Integrations', description: 'Apps and services Graft can work with, connected through MCP.', icon: Plug },
   { id: 'hooks', label: 'Hooks', description: 'Commands that run around tool calls and turns.', icon: Webhook },

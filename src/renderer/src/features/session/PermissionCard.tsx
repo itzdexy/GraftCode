@@ -111,7 +111,7 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
       aria-describedby={`perm-${request.id}`}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="rounded-lg border border-border-card bg-sunken px-12 pt-10 pb-12 outline-none"
+      className="motion-rise rounded-lg border border-border-card bg-sunken px-12 pt-10 pb-12 outline-none"
     >
       <div className="flex items-start gap-8">
         <ShieldAlert className={cn('mt-1 size-16 shrink-0', request.dangerous ? 'text-danger' : 'text-amber')} aria-hidden="true" />

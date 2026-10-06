@@ -46,11 +46,19 @@ export function Segmented<T extends string>({ value, options, onChange, variant,
       aria-label={label}
       onKeyDown={onKeyDown}
       className={cn(
-        'inline-flex items-center p-1',
+        'relative inline-flex items-center p-1',
         titlebar ? 'h-[var(--g-segment-height)] rounded-sm bg-segment-track' : 'h-[var(--g-composer-toggle-height)] rounded-md bg-toggle-track',
         className
       )}
     >
+      {/* The titlebar's segments are all one width, so one thumb slides between them instead of jumping. */}
+      {titlebar ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1 bottom-1 left-1 w-31 rounded-[5px] border border-segment-thumb-border bg-segment-thumb transition-[translate] duration-[var(--g-duration-spring)] ease-[var(--g-ease-spring)]"
+          style={{ translate: `${String(index * 31)}px 0` }}
+        />
+      ) : null}
       {options.map((option, i) => {
         const selected = option.value === value;
         const button = (
@@ -70,7 +78,7 @@ export function Segmented<T extends string>({ value, options, onChange, variant,
               titlebar ? 'w-31 rounded-[5px]' : 'rounded-[7px] px-8 text-base',
               selected
                 ? titlebar
-                  ? 'border-segment-thumb-border bg-segment-thumb text-fg-strong'
+                  ? 'border-transparent text-fg-strong'
                   : 'border-toggle-thumb-border bg-toggle-thumb text-fg-strong'
                 : 'border-transparent text-fg-muted hover:text-fg-secondary'
             )}

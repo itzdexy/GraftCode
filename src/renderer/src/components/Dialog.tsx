@@ -21,10 +21,10 @@ interface DialogContentProps {
 export function DialogContent({ title, description, children, footer, className, hideClose }: DialogContentProps) {
   return (
     <RD.Portal>
-      <RD.Overlay className="fixed inset-0 z-[var(--g-z-dialog)] bg-overlay data-[state=open]:animate-[graft-fade_var(--g-duration-base)_var(--g-ease)]" />
+      <RD.Overlay className="overlay-scrim fixed inset-0 z-[var(--g-z-dialog)] bg-overlay" />
       <RD.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-[var(--g-z-dialog)] flex max-h-[85vh] w-[min(480px,calc(100vw-48px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-surface text-fg shadow-popover outline-none data-[state=open]:animate-[graft-menu-in_var(--g-duration-base)_var(--g-ease)]',
+          'overlay-dialog fixed top-1/2 left-1/2 z-[var(--g-z-dialog)] flex max-h-[85vh] w-[min(480px,calc(100vw-48px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-surface text-fg shadow-popover outline-none',
           className
         )}
       >

@@ -20,6 +20,7 @@ import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
+import { MediaCard } from './MediaCard';
 import { RunningShell, ShellItem } from './ShellItem';
 import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
@@ -177,6 +178,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <EditsCard files={item.files} />;
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
+      case 'media':
+        return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':
@@ -191,6 +194,15 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <ShellItem shell={item.shell} />;
       case 'check':
         return <CheckItem check={item.check} />;
+      case 'mission':
+        return (
+          <p className="flex items-center gap-10 text-sm text-fg-muted">
+            <span className="h-px flex-1 bg-divider" aria-hidden="true" />
+            {item.afterChecks ? 'The checks failed, so the mission goes on' : 'The mission goes on'}
+            {item.turn > 0 ? <span className="text-fg-faint tabular-nums">turn {item.turn} of {item.of}</span> : null}
+            <span className="h-px flex-1 bg-divider" aria-hidden="true" />
+          </p>
+        );
       case 'notice':
         return <p className="text-md text-fg-muted">{item.text}</p>;
       case 'error':

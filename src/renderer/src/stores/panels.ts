@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 import type { BrowserStateView } from '@shared/schemas/panels';
 
-export type PanelId = 'terminal' | 'changes' | 'browser' | 'tasks';
+export type PanelId = 'terminal' | 'changes' | 'browser' | 'tasks' | 'agents';
 
 export interface SessionPanels {
   open: PanelId[];
   changesTab: 'changes' | 'files';
   /** Set once the tasks panel opened itself for this session's first background command. */
   tasksAutoOpened: boolean;
+  /** Set once the agents panel opened itself for this session's first group of agents. */
+  agentsAutoOpened: boolean;
 }
 
-const EMPTY: SessionPanels = { open: [], changesTab: 'changes', tasksAutoOpened: false };
+const EMPTY: SessionPanels = { open: [], changesTab: 'changes', tasksAutoOpened: false, agentsAutoOpened: false };
 
 /** Mirrors --g-panel-width (measured) as the minimum; the default leaves room for a terminal. */
 export const PANEL_MIN_WIDTH = 263;
@@ -31,6 +33,7 @@ interface PanelsState {
   /** Opens the files view of the changes panel, or closes it when it's already showing. */
   toggleFiles: (sessionId: string) => void;
   markTasksAutoOpened: (sessionId: string) => void;
+  markAgentsAutoOpened: (sessionId: string) => void;
   setWidth: (width: number) => void;
   toggleWide: () => void;
   setBrowser: (state: BrowserStateView | null) => void;
@@ -60,6 +63,7 @@ export const usePanels = create<PanelsState>((set, get) => {
           : { ...p, changesTab: 'files', open: p.open.includes('changes') ? p.open : [...p.open, 'changes'] }
       ),
     markTasksAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, tasksAutoOpened: true })),
+    markAgentsAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, agentsAutoOpened: true })),
     setWidth: (width) => set({ width, wide: false }),
     toggleWide: () => set({ wide: !get().wide }),
     setBrowser: (browser) => set({ browser }),

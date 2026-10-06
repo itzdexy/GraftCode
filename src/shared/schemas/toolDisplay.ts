@@ -16,7 +16,31 @@ export type TodoItem = z.infer<typeof TodoItemSchema>;
 export const MadeFileSchema = z.object({ name: z.string(), size: z.number().int().nonnegative(), mime: z.string() });
 export type MadeFile = z.infer<typeof MadeFileSchema>;
 
+/** What kind of generated file something is; decides how the transcript shows it. */
+export const MediaKindSchema = z.enum(['image', 'video', 'gif', 'audio', 'file']);
+export type MediaKind = z.infer<typeof MediaKindSchema>;
+
+/** A picture or clip an image model or ComfyUI made: where it was saved, and a small preview for pictures. */
+export const MediaFileSchema = z.object({
+  /** Relative to the project in code sessions; the file's name in chats. */
+  path: z.string(),
+  kind: MediaKindSchema,
+  bytes: z.number().int().nonnegative(),
+  /** Base64 JPEG preview; null for clips and where no preview could be made. */
+  thumb: z.string().nullable()
+});
+export type MediaFile = z.infer<typeof MediaFileSchema>;
+
 export const ToolDisplaySchema = z.discriminatedUnion('kind', [
+  /** Generated media (GenerateImage, ComfyUI). `costUsd` is what the provider charged: 0 on this computer, null when unknown. */
+  z.object({
+    kind: z.literal('media'),
+    engine: z.string(),
+    model: z.string(),
+    prompt: z.string(),
+    costUsd: z.number().nullable(),
+    files: z.array(MediaFileSchema)
+  }),
   z.object({
     kind: z.literal('read'),
     path: z.string(),
@@ -70,6 +94,14 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('browser'), action: z.string(), url: z.string(), title: z.string(), detail: z.string() }),
   z.object({ kind: z.literal('todos'), todos: z.array(TodoItemSchema) }),
   z.object({ kind: z.literal('task'), description: z.string(), summary: z.string(), toolCalls: z.number().int() }),
+  /** A group of agents (RunAgents): what each one was and how it ended. The full records are in the agent graph. */
+  z.object({
+    kind: z.literal('agents'),
+    goal: z.string(),
+    agents: z.array(z.object({ nodeId: z.string(), title: z.string(), role: z.string(), status: z.string(), durationMs: z.number().int().nullable() }))
+  }),
+  /** A MissionUpdate call: a note for the notebook, or the agent reporting the mission done or blocked. */
+  z.object({ kind: z.literal('mission'), action: z.enum(['note', 'done', 'blocked']), noteKind: z.string().nullable(), text: z.string() }),
   z.object({
     kind: z.literal('question'),
     answers: z.array(z.object({ question: z.string(), answer: z.string().nullable() }))

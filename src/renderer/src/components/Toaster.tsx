@@ -1,6 +1,6 @@
 import { CircleCheck, Info, TriangleAlert, X } from 'lucide-react';
+import { useLingering } from '../lib/motion';
 import { useToasts, type Toast } from '../stores/toasts';
-import { cn } from '../lib/cn';
 import { Button, IconButton } from './Button';
 
 const ICONS: Record<Toast['tone'], JSX.Element> = {
@@ -9,19 +9,27 @@ const ICONS: Record<Toast['tone'], JSX.Element> = {
   error: <TriangleAlert className="size-16 text-danger" aria-hidden="true" />
 };
 
-/** Transient notices for finished or failed actions, stacked in the bottom-right corner clear of page actions. */
+/**
+ * Transient notices for finished or failed actions, stacked in the bottom-right
+ * corner clear of page actions. They stay while the pointer rests on one, and
+ * slide out when they go.
+ */
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
+  const hold = useToasts((s) => s.hold);
+  const release = useToasts((s) => s.release);
+  const shown = useLingering(toasts, (toast) => toast.id);
   return (
     <div className="pointer-events-none fixed right-16 bottom-16 z-[var(--g-z-toast)] flex w-[min(360px,calc(100vw-32px))] flex-col justify-end gap-8">
-      {toasts.map((toast) => (
+      {shown.map(({ item: toast, leaving }) => (
         <div
           key={toast.id}
           role={toast.tone === 'error' ? 'alert' : 'status'}
-          className={cn(
-            'motion-slide-up pointer-events-auto flex items-start gap-10 rounded-lg border border-border bg-surface px-12 py-10 shadow-popover'
-          )}
+          data-state={leaving ? 'closed' : 'open'}
+          onPointerEnter={hold}
+          onPointerLeave={release}
+          className="graft-toast pointer-events-auto flex items-start gap-10 rounded-lg border border-border bg-surface px-12 py-10 shadow-popover"
         >
           <span className="mt-1">{ICONS[toast.tone]}</span>
           <div className="min-w-0 flex-1">

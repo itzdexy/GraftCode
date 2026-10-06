@@ -83,7 +83,11 @@ export const McpServerViewSchema = z.object({
   error: z.string().nullable(),
   /** What to do when the server is connected but offers no tools yet. */
   hint: z.string().nullable(),
-  tools: z.array(z.object({ name: z.string(), description: z.string(), readOnly: z.boolean() }))
+  tools: z.array(z.object({ name: z.string(), description: z.string(), readOnly: z.boolean() })),
+  /** Prompts the server publishes, as the slash commands they appear as. */
+  prompts: z.array(z.object({ command: z.string(), description: z.string(), argumentHint: z.string().nullable() })),
+  /** The server publishes resources the agent can read. */
+  resources: z.boolean()
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;
 

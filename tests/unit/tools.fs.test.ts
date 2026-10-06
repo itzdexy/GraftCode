@@ -96,12 +96,56 @@ describe('Edit and MultiEdit', () => {
   it('explains ambiguous and missing matches precisely', () => {
     const ambiguous = applyEdit('x\nx\n', { old_string: 'x', new_string: 'y' });
     expect(ambiguous.ok ? '' : ambiguous.error).toMatch(/appears 2 times/);
-    const miss = applyEdit('function go() {\n  return 1;\n}\n', { old_string: 'function go() {\n    return 1;', new_string: 'z' });
+    const miss = applyEdit('function go() {\n  return 1;\n}\n', { old_string: 'function go() {\n  return 2;', new_string: 'z' });
     expect(miss.ok).toBe(false);
     expect(miss.ok ? '' : miss.error).toMatch(/line 1/);
     expect(applyEdit('abc', { old_string: 'abc', new_string: 'abc' }).ok).toBe(false);
     expect(applyEdit('a a a', { old_string: 'a', new_string: 'b', replace_all: true })).toMatchObject({ ok: true, content: 'b b b', replacements: 3 });
     expect(applyEdit('cost $1', { old_string: 'cost', new_string: 'price $&' })).toMatchObject({ ok: true, content: 'price $& $1' });
+  });
+
+  it('shows what the file has where an edit nearly matched, so it can be corrected without another Read', () => {
+    const file = 'function go() {\n  return 1;\n}\nfunction stop() {\n  return 0;\n}\n';
+    const miss = applyEdit(file, { old_string: 'function go() {\n  return 2;\n}', new_string: 'z' });
+    const error = miss.ok ? '' : miss.error;
+    expect(error).toMatch(/from line 1/);
+    expect(error).toContain('  return 1;');
+    // As many lines as the edit named, never the whole file.
+    expect(error).not.toContain('function stop');
+    const long = applyEdit(`start\n${'x'.repeat(5000)}\n`, { old_string: 'start\nnope', new_string: 'z' });
+    expect((long.ok ? '' : long.error).length).toBeLessThan(1500);
+  });
+
+  it('matches a block whose indentation differs, and gives the new text the file’s indentation', () => {
+    const file = 'class A {\n    go() {\n        return 1;\n    }\n}\n';
+    const deeper = applyEdit(file, { old_string: 'go() {\n    return 1;\n}', new_string: 'go() {\n    const n = 2;\n    return n;\n}' });
+    expect(deeper).toMatchObject({ ok: true, content: 'class A {\n    go() {\n        const n = 2;\n        return n;\n    }\n}\n', replacements: 1 });
+    expect(deeper.ok ? deeper.note : '').toMatch(/lines 2–4/);
+    const tabs = applyEdit('if (x) {\n\treturn 1;   \n}\n', { old_string: '  return 1;\n', new_string: '  return 2;\n' });
+    expect(tabs).toMatchObject({ ok: true, content: 'if (x) {\n\treturn 2;\n}\n' });
+    const shallower = applyEdit('a\n  b();\nc\n', { old_string: '      b();', new_string: '      b();\n      d();' });
+    expect(shallower).toMatchObject({ ok: true, content: 'a\n  b();\n  d();\nc\n' });
+    const crlf = applyEdit('a\r\n\tb();\r\nc\r\n', { old_string: '  b();\nc', new_string: '  b();\n  d();\nc' });
+    expect(crlf).toMatchObject({ ok: true, content: 'a\r\n\tb();\r\n\td();\r\nc\r\n' });
+  });
+
+  it('never guesses between several loosely matching blocks, and leaves exact matches alone', () => {
+    const twice = applyEdit('  end\n\tend\n', { old_string: '    end', new_string: 'done' });
+    expect(twice.ok ? '' : twice.error).toMatch(/2 places/);
+    const exact = applyEdit('  a\n    a\n', { old_string: '    a', new_string: '    b' });
+    expect(exact).toMatchObject({ ok: true, content: '  a\n    b\n' });
+    expect(exact.ok ? exact.note : 'x').toBeUndefined();
+    expect(applyEdit('a\n\n\nb\n', { old_string: '\n \n', new_string: 'x' }).ok).toBe(false);
+  });
+
+  it('tells the model when an edit matched loosely', async () => {
+    writeFile(dir, 'loose.ts', 'function f() {\n\treturn 1;\n}\n');
+    const ctx = makeToolContext(dir);
+    await readTool.execute({ file_path: 'loose.ts' }, ctx);
+    const result = await editTool.execute({ file_path: 'loose.ts', old_string: '    return 1;', new_string: '    return 2;' }, ctx);
+    expect(result.isError).toBe(false);
+    expect(text(result)).toMatch(/indentation differed.*line 2/);
+    expect(fs.readFileSync(path.join(dir, 'loose.ts'), 'utf8')).toBe('function f() {\n\treturn 2;\n}\n');
   });
 
   it('matches LF edits against CRLF files and keeps CRLF endings', async () => {

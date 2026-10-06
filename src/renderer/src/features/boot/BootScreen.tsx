@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { reducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { BootSplash } from './BootSplash';
 
@@ -6,10 +7,6 @@ import { BootSplash } from './BootSplash';
 export const FIRST_RUN_MIN_MS = 2200;
 export const FIRST_RUN_REDUCED_MOTION_MIN_MS = 900;
 export const QUICK_MIN_MS = 350;
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 /**
  * Shows the splash until initialization finished and the minimum display time
@@ -23,7 +20,7 @@ export function BootScreen({ ready, onDone }: { ready: boolean; onDone: () => vo
 
   useEffect(() => {
     if (!known) return;
-    const min = quick ? QUICK_MIN_MS : prefersReducedMotion() ? FIRST_RUN_REDUCED_MOTION_MIN_MS : FIRST_RUN_MIN_MS;
+    const min = quick ? QUICK_MIN_MS : reducedMotion() ? FIRST_RUN_REDUCED_MOTION_MIN_MS : FIRST_RUN_MIN_MS;
     const timer = setTimeout(() => setMinElapsed(true), min);
     return () => clearTimeout(timer);
   }, [known, quick]);

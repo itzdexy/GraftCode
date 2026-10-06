@@ -28,10 +28,13 @@ Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and
 - **Asks before it acts, until you say otherwise.** Five permission modes, from approving each edit to running on its own, with allow, ask and deny rules per project.
 - **Finishes long tasks.** Turns run until the work is done. Taproot mode plans with a task list it has to complete, verifies with your tests and builds, and reviews its own diff before it reports.
 - **Checks its own work.** Tell Graft your project's checks (type check, lint, tests) and it runs them after every change. When one fails, the agent reads the output and fixes the cause, up to two rounds.
+- **Splits work between agents.** A task that divides runs as a group: explorers side by side, then an implementer, a tester and reviewers, each with its own context and model. The Agents panel shows the group as a live graph, and every agent can be opened or stopped.
+- **Keeps going until it is done.** Give a mission an objective and the commands that must pass. Graft works turn after turn, keeps a notebook, and only your commands decide when it is finished.
 - **Runs untrusted code in a sandbox.** Turn on the sandbox for a project and its commands run in a Docker or Podman container: only the project folder is shared, and your files, keys and credentials stay out of reach.
 - **Tests what it builds.** The agent opens your dev server in the built-in browser, clicks through it like a person, reads the console and takes screenshots.
 - **Builds websites.** Describe a site in the Sites tab and Graft designs and builds it, then hosts it on your computer with a live preview.
-- **Works with the apps you build with.** One-click integrations for Blender, Roblox Studio, Unity, Godot, Figma, a Playwright browser, GitHub, Sentry, Linear, Notion and Context7, plus any MCP server.
+- **Makes the pictures too.** Ask for images and Graft generates them with an image model from your provider, or with your own ComfyUI.
+- **Works with the apps you build with.** One-click integrations for Blender, Roblox Studio, Unity, Godot, Figma, a Playwright browser, GitHub, Sentry, Linear, Notion, Context7 and Ghidra, plus any MCP server.
 - **Stays out of your way.** A command palette for everything, `!` to run a shell command from the message box, `↑` for earlier messages, and `/commit`, `/pr` and `/review` when you want them.
 - **Chats too.** Web search with cited sources, files to download, a JavaScript sandbox for calculations, read aloud, and incognito chats that never touch the disk.
 - **Keeps your data yours.** Keys are encrypted with your system keyring, and Graft asks providers not to train on your conversations.
@@ -84,11 +87,18 @@ You can add more providers at any time in **Settings → Providers**, and connec
 
 ### Code sessions
 
-- An agent loop with tools to read, write and edit files, search with ripgrep, run shell commands (including background commands), fetch pages, search the web, track tasks and delegate to read-only sub-agents.
+- An agent loop with tools to read, write and edit files, search with ripgrep, look up the code's structure, run shell commands (including background commands), fetch pages, search the web, track tasks, and delegate to sub-agents and groups of agents.
+- **Groups of agents:** the agent can run a task as a graph of agents with roles (planner, explorer, researcher, architect, implementer, tester, debugger, browser tester, security, performance, UI and final reviewers, documentation). Agents that only read run side by side. An agent that changes files works alone, unless each writer is given its own paths (files, folders or patterns): writers whose paths can't name the same file then work at the same time, each kept to its own paths and reading a file itself before it changes it. Each has a fresh context, the tools of its role, a time limit, an optional token budget, retries after provider failures, and optionally a command that must pass before its work counts. The **Agents panel** draws the graph live; an agent opens to its model and why it was chosen, tools, files, tokens, cost, check, brief, report, failed attempts and steps, and has its own Stop. **Settings → Models → Agents** sets a model per kind of work, or lets Graft send quick reading to the cheapest capable model.
+- **Missions:** `/mission` starts an objective Graft keeps working on, turn after turn. You say what done means and which commands must pass; only you set those. The agent keeps a notebook of discoveries, decisions and blockers that is handed back every turn, so it outlives a compacted context. Reporting done runs your commands: a failure goes back to the agent with its output. A mission pauses when you stop a turn, when the agent says it is blocked, when a turn fails, or at its turn limit; it survives a restart, and it can be resumed, stopped and copied as Markdown from the bar above the message box.
+- **Code structure:** the `Symbols` tool answers in one step where a name is defined, every file that uses it (tests marked), what imports a file (following `tsconfig` path aliases) and which tests cover it. It reads the text with patterns for JavaScript and TypeScript, Python, Go, Rust, Java, Kotlin, C#, C and C++, Ruby, PHP and Swift, so it works on a project that doesn't build.
+- **Generated images:** with an image model set up in **Settings → Images** (OpenRouter, OpenAI or Gemini) or your own ComfyUI switched on, the agent makes pictures when you ask for them and saves them in the project; ComfyUI can also run the workflows you saved, including video. It asks first in Ask mode, never overwrites a file unasked, and shows what each picture cost.
+- **Fast turns:** the tool calls of one reply run together when they can: neighbouring reads and searches overlap even with an edit among them, and every step still sees the edits before it. A reply that fills the model's context window makes room and carries on instead of stopping.
 - **Permission modes:** *Ask* (approve edits and commands), *Auto-edit* (edit project files freely), *Plan* (read and plan until you approve), *Auto* (approve low-risk actions) and *Bypass* (no prompts; only deny rules still block). Bypass has to be switched on in Settings first. Allow, ask and deny rules can be set per user and per project.
+- **Edits that land:** an edit has to name one place in the file. When a model gets only the indentation wrong, Graft still finds the block by its text and fits the new lines to the file; with two candidates it asks for more context instead of guessing.
 - **Git:** an optional worktree per session, hidden checkpoints before every turn, and rewind for files, the conversation or both. Diff and commit from the app, and open a pull request.
 - **A transcript in the style of a terminal agent.** Each turn's work folds into one line, such as "Ran 3 commands, created a.ts, edited 2 files +75 −4 · 2m 50s". A card lists the files the turn changed, each opening to its diff. While a turn runs, a live status line shows elapsed time, context size and background tasks.
-- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, a browser for local apps, and background tasks.
+- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, a browser for local apps, the agent graph, and background tasks.
+- **Files you can see and take:** the Files panel shows pictures (with their size in pixels), plays clips and sound, and highlights text. Each file and folder has a menu, from its … button or a right-click: copy its path or its path in the project, copy a picture itself, show it in its folder, open it with its own app or your editor, or add it to your message. A picture the agent reads shows in the conversation too. Scripts and programs are never opened by a click.
 - **Checks after changes:** in **Customize → Checks**, list the commands that tell whether the project still works; Graft suggests them from `package.json` scripts (with your package manager), Cargo, Go and Python config. They run after any turn that changed files, show live in the transcript, and a failure goes back to the agent with its output and a reminder to fix the cause rather than weaken the check. Checks only run in projects you trust.
 - **A browser for developers:** the Browser panel has a console with an error badge, find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Pick an element, take a screenshot or grab the console and it lands in your message. With no page open, it lists dev servers running on your computer and in the session's sandbox.
 - **The agent tests in the browser:** the Browser tool opens a page, reads it as text plus numbered links, buttons and fields, clicks with real mouse events, types the way frameworks expect, waits for text, reads the console and takes screenshots. Opening a local dev server needs no approval in Auto-edit; other sites ask.
@@ -96,7 +106,8 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
-- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test` and `/init` send carefully written prompts; `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
+- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/test`, `/decompile` and `/init` send carefully written prompts; `/mission`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
+- **Decompilation:** `/decompile` rebuilds compiled code as source one function at a time: a fresh agent per function, the project's own match check as the judge, a limit on attempts, and no editing of the target or the comparison tools. With the Ghidra integration connected, the agent imports binaries, decompiles functions and follows cross-references there.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
 
 ### Sites
@@ -136,8 +147,11 @@ Settings → Integrations adds well-known MCP servers in one step. Graft checks 
 | Figma | Read frames, components and design tokens | The Figma desktop app with its MCP server on (Windows, macOS) |
 | Playwright browser | Drive a real browser: open, click, type, read and screenshot pages | Node.js |
 | GitHub, Context7, Sentry, Linear, Notion | Work with issues, pull requests, docs and pages | A token or a sign-in |
+| Ghidra | Import and decompile programs, follow cross-references and call graphs, rename as it learns | uv, Ghidra and the Java JDK it asks for |
 
 Any other MCP server can be added by hand, for all projects or for one. Graft follows each server as it changes: tools that appear after it connects (Roblox Studio offers them once Studio attaches) show up on their own, long jobs that report progress aren't cut off, and a server that crashes reconnects. Chats can use the apps you connect for all projects, asking before each action.
+
+Graft uses what a server offers beyond tools. What a server says about using itself goes into the prompt, set apart as the server's own words (never as rules). The resources it publishes can be listed and read by the agent, and its prompts appear in the `/` menu as `/mcp__server__prompt`. Results that are only structured data are shown, and a program started on this computer is told which project folders are open (a server across the internet is not). When a setup has more tools than are worth sending with every request (GitHub's alone has dozens), the tools wait: the prompt names the servers, and the agent finds and loads what it needs with a search.
 
 ### Chats
 
@@ -152,6 +166,7 @@ Any other MCP server can be added by hand, for all projects or for one. Graft fo
 ### Models and providers
 
 - A catalog generated from [models.dev](https://models.dev) with 200+ providers, plus Ollama and custom endpoints. Each model's context window, tool use, vision, effort levels and prices come from the catalog and the provider's own model list.
+- **OpenAI's Responses API** for the models only it serves (the `-pro` and Codex models and deep research): the summary of their reasoning is shown as they think, and the reasoning is kept across tool calls. Tested against recordings of the API, not a live account.
 - **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions.
 - Reasoning carried across tool calls for models that need it. Prompt caching for Claude models, both on Anthropic and through OpenRouter. Cost tracking that counts cached tokens at their own rates and uses the charged amount when the provider reports it.
 
@@ -159,7 +174,7 @@ Any other MCP server can be added by hand, for all projects or for one. Graft fo
 
 - **Personalization:** tell Graft what it should know about you and how to respond, and choose a response style: balanced, concise, explanatory or learning. Every chat and code session uses it; incognito chats never do.
 - **Command palette** (`Ctrl+Shift+P`, or `>` in search): start sessions, switch palettes and themes, open any settings page, export, compact, rewind and more, with fuzzy search and your recent commands first.
-- **Appearance:** six palettes (Graft, Midnight, Slate, Grove, Dune and High contrast), each in light and dark, seven accent colours, and calm motion that respects *Reduce motion*.
+- **Appearance:** six palettes (Graft, Midnight, Slate, Grove, Dune and High contrast), each in light and dark, seven accent colours, and short, quiet motion. **Motion** follows your system, or is set to On or Reduced for Graft alone.
 
 ### Web search engines
 
@@ -187,6 +202,7 @@ Any other MCP server can be added by hand, for all projects or for one. Graft fo
 - File contents, tool output, web pages and MCP output are treated as untrusted and can never change permission rules.
 - Destructive commands, such as force pushes, hard resets and recursive deletes, always ask first. The one exception is Bypass mode, which you have to switch on yourself and which can keep these checks ("Keep safety checks in Bypass").
 - **The sandbox** (optional, per project) runs commands in a container that sees only the project folder, with `.git` and `.graft` read-only. See [Sandbox](#sandbox).
+- **File previews** are served one file at a time through a private address that can't reach the files beside it, under a policy that blocks network access.
 - **The Browser panel** runs pages in their own in-memory session with no preload script, every permission denied, downloads blocked and only `http` and `https` allowed. Graft's own page scripts run in an isolated world the page can't see.
 
 ## Keyboard shortcuts
@@ -224,6 +240,7 @@ npm run dev        # run Graft with hot reload
 | `npm run typecheck` | Strict TypeScript checks for every project |
 | `npm run lint` | ESLint with zero warnings allowed |
 | `npm test` | Unit tests (Vitest) |
+| `GRAFT_LIVE_MCP=1 npx vitest run tests/unit/mcp.live.test.ts` | Starts real MCP servers through Graft's manager and checks the integrations catalogue against npm, PyPI and the remote endpoints (needs the network, Node.js and uv) |
 | `npm run test:e2e` | End-to-end tests that drive the built app (Playwright) |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds installers with electron-builder |
 | `npm run dist:linux:docker` | Builds and smoke-tests the Linux installers in a Docker container, from any OS |
@@ -271,7 +288,8 @@ tests/         unit tests (Vitest) and end-to-end tests (Playwright)
 
 - Every IPC channel is declared once in `src/shared/ipc/contracts.ts`, and its input and output are validated with Zod on both sides.
 - Provider adapters cover Anthropic, OpenAI-style chat completions (OpenAI, OpenRouter and every compatible provider), Gemini and Ollama, all behind one streaming interface.
-- Each session runs its own agent loop, so sessions work concurrently. Sessions and settings are stored in SQLite with versioned migrations.
+- Each session runs its own agent loop, so sessions work concurrently. Sessions, settings, agent runs and missions are stored in SQLite with versioned migrations.
+- A group of agents is a graph run by a scheduler that knows nothing about models (`src/main/agent/orchestrator.ts`); `agentGroup.ts` turns each node into an agent loop with its role's tools and model. A mission's rules are pure functions (`mission.ts`) that the session carries out.
 
 ## Acknowledgements
 

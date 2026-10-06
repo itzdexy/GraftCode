@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.6.8",
+    "date": "2026-10-04",
+    "items": [
+      "Agents can write side by side. Give each agent its own files or folders and they work at the same time, each kept to its own paths and reading a file itself before it changes it; an agent with no paths of its own still works alone. The Agents panel shows who may change what.",
+      "Faster turns. When the agent asks for several things at once, neighbouring reads and searches run together even with an edit among them, and every step still sees what came before it. A reply that fills the model’s context window now makes room and carries on instead of stopping.",
+      "OpenAI’s -pro, Codex and deep-research models work. They are only served by OpenAI’s Responses API, which Graft now speaks, with a summary of their reasoning shown as they think; the Codex models are in the model list too. This is tested against recordings of the API, not against a live account.",
+      "The model catalog is refreshed from models.dev: 212 providers and 7,553 models, including the newest Claude, Gemini, Grok, GLM, Qwen and DeepSeek releases. What a model costs and can do comes from it and from each provider’s own list.",
+      "MCP does more than tools. Graft passes on what a server says about using itself (marked as the server’s words, never as rules), lets the agent list and read the resources a server publishes, offers its prompts as /mcp__server__prompt commands, shows results that are only structured data, and tells programs running on this computer which project folders are open. A setup with many tools (GitHub’s alone has dozens) no longer weighs on every request: the agent finds and loads what it needs with a search, and the prompt says which servers are waiting.",
+      "When an edit misses, the error shows the lines the file really has at the nearest match, so the agent can fix it without reading the file again."
+    ]
+  },
+  {
+    "version": "0.6.7",
+    "date": "2026-10-04",
+    "items": [
+      "Pictures show in the Files panel. Click an image and you see it, with its size in pixels, instead of “Too large to preview” or “Binary file”; switch between fitting the panel and its actual size. Clips and sound play there too, and an SVG shows as the picture or as its source.",
+      "Every file and folder has a menu, from its … button or a right-click: copy its path, copy its path within the project, copy a picture itself to paste elsewhere, show it in its folder, open it with its own app or in your editor, or add it to your message. The preview keeps Copy path and Show in folder one click away. Scripts and programs are never opened by a click.",
+      "When the agent reads a picture, the step in the conversation now shows the picture, with the same actions, instead of the word “Image”."
+    ]
+  },
+  {
+    "version": "0.6.6",
+    "date": "2026-10-04",
+    "items": [
+      "Agents: for work that splits up, Graft can run a group of agents, such as explorers side by side, then an implementer, a tester and reviewers. Each one gets a role, a context of its own, its own model, a time limit and (if you set one) a token budget, and can be given a command that has to pass before its work counts. The new Agents panel draws the group as a graph while it runs: click an agent to see its model and why it was chosen, its tools, the files it changed, tokens, cost, report, failed attempts and every step, or to stop just that one. Settings → Models → Agents chooses a model for each kind of work.",
+      "Missions: type /mission, give an objective, say what done means and list the commands that must pass. Graft then keeps working turn after turn and keeps a notebook of what it finds and decides. It counts the mission as done only when your commands pass; a failed one goes back to the agent with its output. A mission pauses when you stop it, when the agent needs something only you can give, or at its turn limit, and it is still there after a restart.",
+      "Generated images: when you ask for them, Graft makes pictures for a site or a project with an image model from OpenRouter, OpenAI or Gemini, or with your own ComfyUI, including the workflows you saved and video nodes if you have them. Set it up in Settings → Images. Nothing is generated unless you ask, and what each picture cost is shown.",
+      "The agent sees how the code fits together: one step now answers where a name is defined, every file that uses it, what imports a file and which tests cover it, in JavaScript and TypeScript, Python, Go, Rust, Java, Kotlin, C#, C and C++, Ruby, PHP and Swift.",
+      "Reverse engineering: a Ghidra integration (Settings → Integrations) to import and decompile programs, and /decompile, which rebuilds compiled code one function at a time and counts a function only when the project’s own check says it matches.",
+      "Motion: menus, dialogs, panels and steps open and close with short, quiet animations, and replies stream in smoothly instead of in bursts; long replies no longer slow the app down. Settings → Appearance → Motion chooses System, On or Reduced, and On works even when Windows has animations turned off.",
+      "Fixes: a finished reply no longer jumps while checks run after it, and each settings page opens at its top instead of where the last one was scrolled to."
+    ]
+  },
+  {
+    "version": "0.6.5",
+    "date": "2026-10-04",
+    "items": [
+      "Edits land more often, especially with local and smaller models. When a model quotes the right lines with the wrong indentation (tabs read as spaces, a block one level off), Graft now finds the one block with that text, makes the change and fits the new lines to the file’s indentation, instead of sending the model back to read the file again. It never guesses between two candidates, and the diff you approve shows exactly what will change.",
+      "A conversation that outgrows the model no longer ends the turn. When a provider refuses a request as too long (common with custom endpoints and local models, where the real limit is unknown or smaller than listed), Graft summarizes the conversation and sends the request again. It does this when “compact automatically” is on."
+    ]
+  },
+  {
     "version": "0.6.4",
     "date": "2026-10-03",
     "items": [

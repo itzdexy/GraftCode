@@ -115,7 +115,7 @@ export function AskUserCard({ sessionId, request }: { sessionId: string; request
       role="group"
       aria-label={`Question ${index + 1} of ${total}`}
       onKeyDown={onKeyDown}
-      className="rounded-lg border border-border-card bg-sunken px-12 pt-10 pb-12"
+      className="motion-rise rounded-lg border border-border-card bg-sunken px-12 pt-10 pb-12"
     >
       <div className="flex items-center gap-8">
         <span className="inline-flex h-18 shrink-0 items-center rounded-xs bg-counter-bg px-6 text-xs font-medium text-counter-fg">

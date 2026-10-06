@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, nativeTheme, powerSaveBlocker, protocol, safeStorage } from 'electron';
+import { app, BrowserWindow, nativeImage, nativeTheme, powerSaveBlocker, protocol, safeStorage } from 'electron';
 import type { AppInfo } from '@shared/ipc/contracts';
 import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
@@ -177,7 +177,15 @@ function services(): Promise<Services> {
       decryptString: (buffer) => safeStorage.decryptString(buffer)
     },
     onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total }),
-    catalogFile: resourcePath('catalog', 'models.json')
+    catalogFile: resourcePath('catalog', 'models.json'),
+    // A preview no wider than 512px: small enough to keep in the conversation, clear enough to judge the picture.
+    thumbnail: (data) => {
+      const image = nativeImage.createFromBuffer(data);
+      if (image.isEmpty()) return null;
+      const { width } = image.getSize();
+      const small = width > 512 ? image.resize({ width: 512, quality: 'good' }) : image;
+      return { mediaType: 'image/jpeg', data: small.toJPEG(78).toString('base64') };
+    }
   })
     .then((s) => {
       applySystemSettings(s.settings.get());
@@ -321,6 +329,7 @@ async function sessions(): Promise<SessionManager> {
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     chatFiles: s.chatFiles,
     runCode: runInSandbox,
+    media: s.media,
     emitEvent: (sessionId, event) => {
       emit({ type: 'session:event', sessionId, event });
       if (event.type === 'turn-end') void refreshSiteThumbnail(sessionId);

@@ -4,6 +4,8 @@ import { StoredMessageSchema } from './messages';
 import { PermissionRequestSchema, QuestionRequestSchema } from './permissions';
 import { ErrorInfoSchema, QueuedInputSchema, SessionStatusSchema, SessionUsageSchema } from './sessions';
 import { TodoItemSchema } from './toolDisplay';
+import { AgentRunSchema } from './agentRuns';
+import { MissionSchema } from './missions';
 
 /**
  * Events a running session streams to the renderer. Completed messages
@@ -36,6 +38,10 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   /** The project's checks started; their report arrives as a "check" message. */
   z.object({ type: z.literal('checks'), commands: z.array(z.string()), round: z.number().int() }),
   z.object({ type: z.literal('compacted'), summaryMessageId: z.string() }),
+  /** An agent of a group (RunAgents) was created or changed: its whole current state. */
+  z.object({ type: z.literal('agent-run'), run: AgentRunSchema }),
+  /** The session's mission was started or changed (its whole current state), or went away with a rewind (null). */
+  z.object({ type: z.literal('mission'), mission: MissionSchema.nullable() }),
   z.object({ type: z.literal('mode'), permissionMode: PermissionModeSchema }),
   z.object({ type: z.literal('title'), title: z.string() }),
   z.object({

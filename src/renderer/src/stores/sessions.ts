@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
+import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { StoredMessage } from '@shared/schemas/messages';
+import type { Mission } from '@shared/schemas/missions';
 import type { PermissionRequest, QuestionRequest } from '@shared/schemas/permissions';
 import type { QueuedInput, SessionDetail, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { errorText, invoke } from '../lib/ipc';
+import { createDeltaBuffer } from './deltaBuffer';
 
 export interface Notice {
   id: number;
@@ -35,6 +38,10 @@ export interface SessionView {
   shellCommand: string | null;
   /** The project's checks running now, after the turn changed files. */
   checking: { commands: string[]; round: number; startedAt: number } | null;
+  /** The agents of every group this session ran (RunAgents), oldest first: the Agents panel draws them. */
+  agentRuns: AgentRun[];
+  /** The session's newest mission, whatever its state; null when it has none. */
+  mission: Mission | null;
 }
 
 const EMPTY_VIEW: SessionView = {
@@ -52,7 +59,9 @@ const EMPTY_VIEW: SessionView = {
   turnActive: false,
   turnStartedAt: null,
   shellCommand: null,
-  checking: null
+  checking: null,
+  agentRuns: [],
+  mission: null
 };
 
 let noticeSeq = 0;
@@ -101,6 +110,29 @@ function mergeNewer(snapshot: StoredMessage[], local: StoredMessage[]): StoredMe
   const last = snapshot.reduce((max, m) => Math.max(max, m.seq), -1);
   const newer = local.filter((m) => m.seq > last);
   return newer.length === 0 ? snapshot : [...snapshot, ...newer].sort((a, b) => a.seq - b.seq);
+}
+
+/** An agent's record takes the place of an earlier one; an older record arriving late changes nothing. */
+function upsertAgentRun(runs: AgentRun[], run: AgentRun): AgentRun[] {
+  const index = runs.findIndex((r) => r.id === run.id);
+  if (index === -1) return [...runs, run];
+  if ((runs[index]?.rev ?? -1) >= run.rev) return runs;
+  const next = [...runs];
+  next[index] = run;
+  return next;
+}
+
+/** The loaded agents plus what was heard by event while they loaded: for each agent, the later record. */
+export function mergeAgentRuns(snapshot: AgentRun[], local: AgentRun[]): AgentRun[] {
+  return local.length === 0 ? snapshot : local.reduce(upsertAgentRun, snapshot);
+}
+
+/** The loaded mission and the one heard of by event while it loaded: the later state of the same mission, or the newer mission. */
+function mergeMission(snapshot: Mission | null, local: Mission | null): Mission | null {
+  if (!local) return snapshot;
+  if (!snapshot) return local;
+  if (snapshot.id === local.id) return local.rev > snapshot.rev ? local : snapshot;
+  return local.createdAt > snapshot.createdAt ? local : snapshot;
 }
 
 function reduce(view: SessionView, event: AgentEvent): SessionView {
@@ -158,6 +190,14 @@ function reduce(view: SessionView, event: AgentEvent): SessionView {
       return { ...view, notices: [...view.notices, { id: ++noticeSeq, level: event.level, text: event.text, ...(event.action ? { action: event.action } : {}) }].slice(-6) };
     case 'retrying':
       return { ...view, retrying: { attempt: event.attempt, delayMs: event.delayMs, reason: event.reason } };
+    case 'agent-run': {
+      const agentRuns = upsertAgentRun(view.agentRuns, event.run);
+      return agentRuns === view.agentRuns ? view : { ...view, agentRuns };
+    }
+    case 'mission':
+      // An older state of the same mission arriving late changes nothing.
+      if (event.mission && view.mission && event.mission.id === view.mission.id && event.mission.rev <= view.mission.rev) return view;
+      return { ...view, mission: event.mission };
     case 'compacted':
     case 'status':
     case 'usage':
@@ -223,6 +263,8 @@ export const useSessions = create<SessionsState>((set, get) => ({
             messages: mergeNewer(detail.messages, current.messages),
             todos: detail.todos,
             queue: detail.queue,
+            agentRuns: mergeAgentRuns(detail.agentRuns, current.agentRuns),
+            mission: mergeMission(detail.mission, current.mission),
             permission: detail.pendingPermission,
             question: detail.pendingQuestion,
             turnActive: detail.summary.status === 'running' || detail.summary.status === 'needs-input',
@@ -242,6 +284,12 @@ export const useSessions = create<SessionsState>((set, get) => ({
   },
 
   applyEvent(sessionId, event) {
+    // Streamed text waits for the next frame (deltaBuffer); everything else applies now, after any text still waiting.
+    if (event.type === 'assistant-delta') {
+      deltas.push(sessionId, event);
+      return;
+    }
+    deltas.flush(sessionId);
     const views = get().views;
     const view = views[sessionId];
     const summaries = get().summaries;
@@ -264,6 +312,19 @@ export const useSessions = create<SessionsState>((set, get) => ({
     set({ views: { ...get().views, [sessionId]: { ...view, notices: view.notices.filter((n) => n.id !== noticeId) } } });
   }
 }));
+
+/** Streamed text for all sessions, applied once a frame. Without frames (unit tests) it applies at once. */
+const deltas = createDeltaBuffer(
+  (sessionId, pieces) => {
+    const views = useSessions.getState().views;
+    const view = views[sessionId];
+    if (view) useSessions.setState({ views: { ...views, [sessionId]: pieces.reduce(reduce, view) } });
+  },
+  (run) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
+  }
+);
 
 export function viewOf(state: Pick<SessionsState, 'views'>, id: string): SessionView {
   return state.views[id] ?? EMPTY_VIEW;

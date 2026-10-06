@@ -14,17 +14,8 @@ import { errorText, invoke } from '../../lib/ipc';
 import { useLoad, type Load } from '../../lib/useLoad';
 import { reportError } from '../../stores/toasts';
 import { IntegrationsGallery } from './IntegrationsGallery';
+import { serverSummary } from './mcpModel';
 import { MONO_AREA, parsePairs, Row, Section, SELECT } from './shared';
-
-const STATE_TEXT: Record<McpServerView['state'], string> = {
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  failed: 'Failed',
-  disabled: 'Off',
-  'needs-auth': 'Sign-in needed',
-  idle: 'Starts with a session in this project',
-  untrusted: 'Off until you trust this project'
-};
 
 const SCOPE_TEXT: Record<SettingsScope, string> = { user: 'All projects', project: 'Project (shared)', local: 'Project (this computer)' };
 
@@ -164,20 +155,16 @@ function ServerRow({ server, projectPath, onEdit, onChange }: { server: McpServe
       .catch((e: unknown) => reportError(label, e))
       .finally(() => setBusy(false));
   };
-  const summary =
-    server.state === 'connected'
-      ? server.tools.length === 0
-        ? `${STATE_TEXT.connected} · waiting for tools`
-        : `${STATE_TEXT.connected} · ${server.tools.length} ${server.tools.length === 1 ? 'tool' : 'tools'}`
-      : STATE_TEXT[server.state];
+  const summary = serverSummary(server);
+  const expandable = server.tools.length > 0 || server.prompts.length > 0;
   return (
     <Row className="flex-wrap">
       <StateDot state={server.state} />
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-8 text-left" disabled={server.tools.length === 0}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-8 text-left" disabled={!expandable}>
         <span className="text-base font-medium text-fg-strong">{server.name}</span>
         <Badge>{SCOPE_TEXT[server.scope]}</Badge>
         <span className="min-w-0 truncate text-sm text-fg-muted">{summary}</span>
-        {server.tools.length > 0 ? <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" /> : null}
+        {expandable ? <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" /> : null}
       </button>
       {server.state === 'needs-auth' ? (
         <Button size="sm" variant="secondary" leading={<KeyRound className="size-12" />} disabled={busy} onClick={() => act("Couldn't sign in", () => invoke('mcp:authorize', { name: server.name }))}>
@@ -211,6 +198,16 @@ function ServerRow({ server, projectPath, onEdit, onChange }: { server: McpServe
               <span className="shrink-0 font-mono text-fg-secondary">{t.name}</span>
               {t.readOnly ? <Badge>read-only</Badge> : null}
               <span className="min-w-0 truncate text-fg-muted">{t.description}</span>
+            </li>
+          ))}
+          {server.prompts.map((p) => (
+            <li key={p.command} className="flex gap-8 py-2 text-sm">
+              <span className="shrink-0 font-mono text-fg-secondary">
+                /{p.command}
+                {p.argumentHint ? ` ${p.argumentHint}` : ''}
+              </span>
+              <Badge>prompt</Badge>
+              <span className="min-w-0 truncate text-fg-muted">{p.description}</span>
             </li>
           ))}
         </ul>

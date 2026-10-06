@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, FileCode2, FilePlus2 } from 'lucide-react';
+import { Collapse } from '../../components/Collapse';
 import { cn } from '../../lib/cn';
 import { EditDiff } from './ToolDetail';
 import { DiffCount } from './ToolGroup';
@@ -24,13 +25,11 @@ function FileRow({ file }: { file: EditedFile }) {
         <DiffCount added={file.added} removed={file.removed} pill />
         <ChevronRight className={cn('size-14 shrink-0 text-icon-muted transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? (
-        <div className="flex flex-col gap-6 px-12 pb-8">
-          {file.patches.map((patch, i) => (
-            <EditDiff key={i} patch={patch} />
-          ))}
-        </div>
-      ) : null}
+      <Collapse open={open} className="flex flex-col gap-6 px-12 pb-8">
+        {file.patches.map((patch, i) => (
+          <EditDiff key={i} patch={patch} />
+        ))}
+      </Collapse>
     </li>
   );
 }

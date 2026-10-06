@@ -1,9 +1,9 @@
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
 import { DEFAULT_APP_SETTINGS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
 import { Button } from '../../components/Button';
-import { Switch } from '../../components/Field';
 import { Slider } from '../../components/Slider';
 import { cn } from '../../lib/cn';
+import { useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { Group, saveSettings, SettingRow } from './common';
 import { ACCENTS, PALETTES } from './sections';
@@ -12,6 +12,12 @@ const WIDTHS = [
   { value: 'narrow', label: 'Narrow' },
   { value: 'medium', label: 'Medium' },
   { value: 'wide', label: 'Wide' }
+] as const;
+
+const MOTIONS = [
+  { value: 'system', label: 'System' },
+  { value: 'on', label: 'On' },
+  { value: 'reduced', label: 'Reduced' }
 ] as const;
 
 const THEMES = [
@@ -150,8 +156,14 @@ function SizeRow({ label, description, value, min, max, fallback, onChange }: { 
   );
 }
 
+/** What the operating system is called in the Motion hint. */
+function systemName(): string {
+  return window.graft.platform === 'win32' ? 'Windows' : window.graft.platform === 'darwin' ? 'macOS' : 'Your system';
+}
+
 export function AppearanceSection() {
   const appearance = useApp((s) => s.settings?.appearance);
+  const systemStill = useSystemReducedMotion();
   if (!appearance) return null;
   const defaults = DEFAULT_APP_SETTINGS.appearance;
 
@@ -201,9 +213,28 @@ export function AppearanceSection() {
           onChange={(codeFontSize) => saveSettings({ appearance: { codeFontSize } })}
         />
         <SettingRow
-          label="Reduce motion"
-          description="Turns off animations such as the thinking mark and menu transitions."
-          control={<Switch label="Reduce motion" checked={appearance.reducedMotion} onChange={(reducedMotion) => saveSettings({ appearance: { reducedMotion } })} />}
+          label="Motion"
+          description={
+            appearance.motion === 'system' && systemStill
+              ? `${systemName()} has animations turned off, so Graft keeps still. Choose On to animate here anyway.`
+              : 'Menus opening, steps folding and replies streaming in. System follows your operating system’s animation setting.'
+          }
+          control={
+            <div role="radiogroup" aria-label="Motion" className="flex rounded-md border border-border p-2">
+              {MOTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={appearance.motion === value}
+                  onClick={() => saveSettings({ appearance: { motion: value } })}
+                  className={cn('h-24 rounded-sm px-10 text-sm transition-ui', appearance.motion === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
         />
       </Group>
     </div>

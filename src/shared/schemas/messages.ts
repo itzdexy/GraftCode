@@ -83,7 +83,8 @@ export const FileAttachmentSchema = z.object({
 });
 export type FileAttachment = z.infer<typeof FileAttachmentSchema>;
 
-export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice', 'shell', 'check']);
+/** "mission": what starts each turn of a mission after its first (the mission restated); the transcript shows it as a marker, not as something the user wrote. */
+export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice', 'shell', 'check', 'mission']);
 export type MessageKind = z.infer<typeof MessageKindSchema>;
 
 /** The project's checks after a turn changed files (meta of a "check" message): each command run, in order. */
@@ -136,7 +137,9 @@ export const MessageMetaSchema = z.object({
   /** Names of text files attached to this message. */
   attachments: z.array(z.string()).optional(),
   shell: UserShellSchema.optional(),
-  check: CheckReportSchema.optional()
+  check: CheckReportSchema.optional(),
+  /** On a "mission" message: the turn it starts, of how many, and whether it follows checks that failed. */
+  mission: z.object({ turn: z.number().int(), of: z.number().int(), afterChecks: z.boolean() }).optional()
 });
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;
 

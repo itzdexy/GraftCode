@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, dialog, Notification, shell as electronShell, type BrowserWindow } from 'electron';
+import { app, clipboard, ClipboardItem, dialog, nativeImage, Notification, shell as electronShell, type BrowserWindow } from 'electron';
 import { GraftError } from '@shared/errors';
 import { fuzzyScore } from '@shared/fuzzy';
 import { dataHandling } from '@shared/privacy';
@@ -33,7 +33,7 @@ import { localServers } from '../browser/servers';
 import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
-import { listDirectory, readPreview } from '../files/fileTree';
+import { listDirectory, mediaFile, openableFile, readPreview } from '../files/fileTree';
 import type { PtyManager } from '../pty/ptyManager';
 import { deleteAgent, deleteCommand, deleteSkill, listAgents, listCommands, listMemory, listSkills, saveAgent, saveCommand, saveMemory, saveSkill } from '../customize/customize';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS } from '../tools/builtin';
@@ -41,6 +41,8 @@ import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
 import { canOpen } from '../chat/chatFiles';
 import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
+import { DEFAULT_IMAGE_MODEL } from '../media/images';
+import type { MediaService } from '../media/mediaService';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
 import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
@@ -51,6 +53,7 @@ import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
+import { mcpPromptCommand, promptHint } from '../mcp/names';
 import type { SessionManager } from '../agent/sessionManager';
 import { writeExport } from '../app/dataExport';
 import { log } from '../app/log';
@@ -156,6 +159,31 @@ function chatFile(s: Services, sessionId: string, name: string): string {
   const file = s.chatFiles.find(sessionId, name);
   if (!file) throw new GraftError('file_missing', `${name} is no longer in this chat.`);
   return file;
+}
+
+/** What Settings → Images shows: the engine in use, and what ComfyUI has installed when it is on. */
+async function mediaStatus(media: MediaService) {
+  const client = media.comfy();
+  const workflows = media.workflows(null).map((w) => w.name);
+  let comfy = null;
+  if (client) {
+    try {
+      const status = await client.status(AbortSignal.timeout(20_000));
+      comfy = {
+        reachable: true,
+        error: null,
+        version: status.version,
+        devices: status.devices.map((d) => d.name),
+        checkpoints: status.models.checkpoints ?? [],
+        modelFolders: Object.fromEntries(Object.entries(status.models).map(([folder, files]) => [folder, files.length])),
+        video: status.videoNodes,
+        workflows
+      };
+    } catch (error) {
+      comfy = { reachable: false, error: (error as Error).message, version: null, devices: [], checkpoints: [], modelFolders: {}, video: [], workflows };
+    }
+  }
+  return { engine: media.imageEngine(), providers: media.providerKinds(), defaults: { ...DEFAULT_IMAGE_MODEL }, comfy };
 }
 
 function searchStatus(s: Services) {
@@ -286,6 +314,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'providers:list': async () => (await ctx.services()).registry.summaries(),
     'providers:presets': async () => (await ctx.services()).catalog.presets(),
 
+    'media:status': async () => mediaStatus((await ctx.services()).media),
     'search:status': async () => searchStatus(await ctx.services()),
     'search:setKey': async ({ engine, key }) => {
       const s = await ctx.services();
@@ -494,6 +523,20 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).interrupt(id);
       return { ok: true as const };
     },
+    'sessions:stopAgent': async ({ id, runId }) => ({ stopped: (await ctx.sessions()).stopAgent(id, runId) }),
+    'sessions:startMission': async ({ id, ...input }) => (await ctx.sessions()).startMission(id, input),
+    'sessions:pauseMission': async ({ id }) => {
+      (await ctx.sessions()).pauseMission(id);
+      return { ok: true as const };
+    },
+    'sessions:resumeMission': async ({ id, extraTurns }) => {
+      (await ctx.sessions()).resumeMission(id, extraTurns);
+      return { ok: true as const };
+    },
+    'sessions:cancelMission': async ({ id }) => {
+      (await ctx.sessions()).cancelMission(id);
+      return { ok: true as const };
+    },
     'sessions:respondPermission': async ({ sessionId, ...response }) => {
       (await ctx.sessions()).respondPermission(sessionId, response);
       return { ok: true as const };
@@ -631,13 +674,22 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'commands:list': async ({ projectPath }) => {
       const s = await ctx.services();
-      return listSlashCommands(s.paths.graftHome, projectPath).map(({ name, description, argumentHint, source, path }) => ({
+      const own = listSlashCommands(s.paths.graftHome, projectPath).map(({ name, description, argumentHint, source, path }) => ({
         name,
         description,
         argumentHint,
         source,
         path
       }));
+      // Prompts the connected servers publish are commands too: /mcp__server__prompt.
+      const prompts = (await ctx.mcp()).prompts(projectPath).map((p) => ({
+        name: mcpPromptCommand(p.server, p.name),
+        description: p.description || `Prompt from the ${p.server} server`,
+        argumentHint: promptHint(p) || null,
+        source: 'mcp' as const,
+        path: null
+      }));
+      return [...own, ...prompts];
     },
     'files:search': async ({ root, query }) => {
       if (!fs.existsSync(root)) return [];
@@ -650,6 +702,18 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'files:list': async ({ sessionId, dir }) => listDirectory(await workDirFor(sessionId), dir),
     'files:read': async ({ sessionId, path }) => readPreview(await workDirFor(sessionId), path),
+    'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
+    'files:open': async ({ sessionId, path }) => {
+      const failure = await electronShell.openPath(await openableFile(await workDirFor(sessionId), path));
+      if (failure) throw new GraftError('open_failed', failure);
+    },
+    'files:copyImage': async ({ sessionId, path }) => {
+      const { file, kind } = await mediaFile(await workDirFor(sessionId), path);
+      const image = kind === 'image' ? nativeImage.createFromPath(file) : null;
+      if (!image || image.isEmpty()) throw new GraftError('copy_failed', 'This kind of picture can’t be put on the clipboard. Copy its path, or open it and copy it from there.');
+      // As PNG, which every app that takes a pasted picture reads.
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
+    },
     'pty:create': async ({ sessionId, cols, rows }) => (await ctx.ptys()).create(sessionId, await workDirFor(sessionId), cols, rows),
     'pty:list': async ({ sessionId }) => (await ctx.ptys()).list(sessionId),
     'pty:snapshot': async ({ id }) => (await ctx.ptys()).snapshot(id),
@@ -839,7 +903,9 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
             state,
             error: matches ? st.error : null,
             hint: matches ? st.hint : null,
-            tools: matches ? st.tools.map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly })) : []
+            tools: matches ? st.tools.map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly })) : [],
+            prompts: matches ? st.prompts.map((p) => ({ command: mcpPromptCommand(p.server, p.name), description: p.description, argumentHint: promptHint(p) || null })) : [],
+            resources: matches ? st.resources : false
           });
         }
       }

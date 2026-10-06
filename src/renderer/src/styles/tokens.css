@@ -98,12 +98,24 @@
   --g-controls-left: 0px;
   --g-controls-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
 
-  /* Motion (120–250ms). Zeroed when reduced motion is requested. */
+  /*
+   * Motion (120–250ms). Zeroed when reduced motion is requested.
+   * Things arrive easing out and leave faster, easing in. The spring is a
+   * damped spring sampled into linear() (2% overshoot, settles in ~440ms),
+   * for things that follow the hand: thumbs, toggles, the send button.
+   */
   --g-duration-fast: 120ms;
   --g-duration-base: 180ms;
   --g-duration-slow: 250ms;
+  --g-duration-exit: 110ms;
+  --g-duration-spring: 440ms;
   --g-ease: cubic-bezier(0.2, 0, 0, 1);
   --g-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --g-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --g-ease-spring: linear(
+    0, 0.0637, 0.2061, 0.3743, 0.5371, 0.6781, 0.7911, 0.876, 0.936, 0.9756, 0.9998, 1.0128, 1.0183, 1.0192, 1.0174, 1.0145, 1.0112, 1.0082,
+    1.0056, 1.0035, 1
+  );
 
   /* Stacking */
   --g-z-sticky: 10;
@@ -335,16 +347,24 @@
   --g-overlay: rgb(20 20 19 / 0.35);
 }
 
-/* Reduced motion: from the OS, or from Settings → Appearance (data-reduced-motion). */
+/*
+ * Reduced motion. Settings → Appearance → Motion marks the page:
+ * data-motion="reduced" keeps it still, data-motion="full" animates even when
+ * the operating system asks for less, and no mark (System) follows the system.
+ */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion='full']) {
     --g-duration-fast: 0ms;
     --g-duration-base: 0ms;
     --g-duration-slow: 0ms;
+    --g-duration-exit: 0ms;
+    --g-duration-spring: 0ms;
   }
 }
-:root[data-reduced-motion='true'] {
+:root[data-motion='reduced'] {
   --g-duration-fast: 0ms;
   --g-duration-base: 0ms;
   --g-duration-slow: 0ms;
+  --g-duration-exit: 0ms;
+  --g-duration-spring: 0ms;
 }

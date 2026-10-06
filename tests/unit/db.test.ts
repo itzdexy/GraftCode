@@ -153,6 +153,24 @@ describe('app settings', () => {
     expect(settings.get().appearance.theme).toBe('system');
     expect(settings.get().profile.name).toBe('Kai');
   });
+
+  it('follows the system for motion until told otherwise', () => {
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance.motion).toBe('system');
+    settings.update({ appearance: { motion: 'on' } });
+    expect(new AppSettingsService(db).get().appearance.motion).toBe('on');
+  });
+
+  it('keeps motion reduced for someone who had switched "Reduce motion" on', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ theme: 'dark', reducedMotion: true }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance).toMatchObject({ theme: 'dark', motion: 'reduced' });
+  });
+
+  it('follows the system when the old "Reduce motion" switch was off', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ reducedMotion: false }));
+    expect(new AppSettingsService(db).get().appearance.motion).toBe('system');
+  });
 });
 
 describe('key store', () => {

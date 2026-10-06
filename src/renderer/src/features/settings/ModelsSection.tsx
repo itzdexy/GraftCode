@@ -9,6 +9,7 @@ import { findModel, useApp } from '../../stores/app';
 import { defaultLevels, EffortChoice } from '../models/EffortChoice';
 import { allModelsOf } from '../models/modelChoice';
 import { ModelListbox } from '../models/ModelListbox';
+import { AgentsSettings } from './AgentsSettings';
 import { Group, saveSettings, SettingRow, SwitchRow } from './common';
 
 function parseCount(text: string, min: number, max: number): number | undefined | null {
@@ -161,6 +162,8 @@ export function ModelsSection() {
           onChange={(autoCompact) => saveSettings({ behavior: { autoCompact } })}
         />
       </Group>
+
+      <AgentsSettings models={models} />
 
       <Group title="Custom model IDs" description="Add models a provider doesn't list, such as fine-tunes or models on a local server.">
         {providers.length === 0 ? <p className="px-14 py-12 text-base text-fg-muted">Add a provider first.</p> : null}

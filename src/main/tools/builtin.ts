@@ -1,23 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { askUserTool, exitPlanModeTool, taskTool, todoWriteTool } from './agentTools';
+import { askUserTool, exitPlanModeTool, missionUpdateTool, runAgentsTool, taskTool, todoWriteTool } from './agentTools';
 import { editTool, multiEditTool } from './fs/edit';
 import { readTool } from './fs/read';
 import { writeTool } from './fs/write';
 import { ToolRegistry } from './registry';
 import { globTool } from './search/glob';
 import { grepTool } from './search/grep';
+import { symbolsTool } from './search/symbols';
 import { killShellTool, shellOutputTool, shellTool } from './shell/shellTools';
 import { webFetchTool } from './web/webFetch';
 import { webSearchTool } from './web/webSearch';
 import { computerTool } from './computer';
 import { browserTool } from './browserTool';
 import { createFileTool, runCodeTool } from './chat/chatTools';
+import { comfyTool, generateImageTool } from './media';
+import { toolSearchTool } from './toolSearch';
 
 /** Tool names by role; sub-agents and plan mode filter with these. */
-export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'] as const;
+export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'Symbols', 'WebFetch', 'WebSearch'] as const;
 /** Tools a sub-agent may never use (no nesting, no user interaction). */
-export const PARENT_ONLY_TOOLS = ['Task', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'Browser'] as const;
+export const PARENT_ONLY_TOOLS = ['Task', 'RunAgents', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'MissionUpdate', 'Browser', 'ToolSearch'] as const;
 /** Tools offered in chats only; code sessions have Write and Shell instead. */
 export const CHAT_ONLY_TOOLS = ['CreateFile', 'RunCode'] as const;
 
@@ -29,6 +32,7 @@ export function createBuiltinRegistry(): ToolRegistry {
   registry.register(multiEditTool);
   registry.register(globTool);
   registry.register(grepTool);
+  registry.register(symbolsTool);
   registry.register(shellTool);
   registry.register(shellOutputTool);
   registry.register(killShellTool);
@@ -38,10 +42,15 @@ export function createBuiltinRegistry(): ToolRegistry {
   registry.register(browserTool);
   registry.register(todoWriteTool);
   registry.register(taskTool);
+  registry.register(runAgentsTool);
+  registry.register(missionUpdateTool);
   registry.register(askUserTool);
   registry.register(exitPlanModeTool);
   registry.register(createFileTool);
   registry.register(runCodeTool);
+  registry.register(generateImageTool);
+  registry.register(comfyTool);
+  registry.register(toolSearchTool);
   return registry;
 }
 

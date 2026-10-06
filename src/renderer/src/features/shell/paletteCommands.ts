@@ -25,7 +25,9 @@ import {
   Shrink,
   Square,
   Sun,
+  Target,
   Terminal,
+  Workflow,
   Files,
   FlaskConical,
   GitCompare,
@@ -44,7 +46,7 @@ import { usePanels } from '../../stores/panels';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { useRewind } from '../session/RewindDialog';
-import { compact, interrupt } from '../session/sessionControls';
+import { compact, interrupt, openMissionDialog } from '../session/sessionControls';
 import { useSystemPrompt } from '../session/SystemPromptDialog';
 import { ACCENTS, PALETTES, SETTINGS_SECTIONS } from '../settings/sections';
 import { duplicateSession, exportSession, setPinned } from './sessionActions';
@@ -132,6 +134,8 @@ function sessionCommands(session: SessionSummary, ctx: PaletteContext): PaletteC
       { id: 'panel.browser', title: 'Toggle browser', group, keywords: 'preview localhost web', icon: Globe, run: () => panels.toggle(session.id, 'browser') },
       ...sandboxCommand(session, group),
       { id: 'panel.tasks', title: 'Background tasks', group, keywords: 'shells processes', icon: ListChecks, run: () => panels.toggle(session.id, 'tasks') },
+      { id: 'panel.agents', title: 'Agents', group, keywords: 'graph orchestration group sub-agents parallel', icon: Workflow, run: () => panels.toggle(session.id, 'agents') },
+      { id: 'session.mission', title: 'Start a mission…', group, keywords: 'goal objective autonomous loop keep going until done', icon: Target, run: () => openMissionDialog(session, '') },
       {
         id: 'session.editor',
         title: 'Open folder in editor',
@@ -189,13 +193,14 @@ export function paletteCommands(ctx: PaletteContext): PaletteCommand[] {
     for (const a of ACCENTS) {
       commands.push({ id: `accent.${a.id}`, title: `Accent: ${a.label}`, group: 'Appearance', keywords: 'color highlight', icon: Palette, checked: appearance.accent === a.id, run: () => save({ appearance: { accent: a.id } }) });
     }
-    commands.push({
-      id: 'appearance.motion',
-      title: appearance.reducedMotion ? 'Turn animations back on' : 'Reduce motion',
-      group: 'Appearance',
-      keywords: 'animations accessibility',
-      run: () => save({ appearance: { reducedMotion: !appearance.reducedMotion } })
-    });
+    const motions = [
+      { id: 'system', title: 'Follow the system' },
+      { id: 'on', title: 'On' },
+      { id: 'reduced', title: 'Reduced' }
+    ] as const;
+    for (const m of motions) {
+      commands.push({ id: `motion.${m.id}`, title: `Motion: ${m.title}`, group: 'Appearance', keywords: 'animations accessibility reduce', checked: appearance.motion === m.id, run: () => save({ appearance: { motion: m.id } }) });
+    }
   }
 
   for (const section of SETTINGS_SECTIONS) {

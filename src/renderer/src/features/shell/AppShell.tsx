@@ -3,6 +3,7 @@ import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ErrorState, LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
+import { usePresence } from '../../lib/motion';
 import { useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useNav, type Route } from '../../stores/nav';
@@ -10,6 +11,7 @@ import { useSessions } from '../../stores/sessions';
 import { useUi } from '../../stores/ui';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
+import { MissionDialog } from '../session/MissionDialog';
 import { RewindDialog } from '../session/RewindDialog';
 import { SessionView } from '../session/SessionView';
 import { SystemPromptDialog } from '../session/SystemPromptDialog';
@@ -27,6 +29,9 @@ const SitesView = lazy(() => import('../sites/SitesView').then((m) => ({ default
 const ScheduledView = lazy(() => import('../scheduled/ScheduledView').then((m) => ({ default: m.ScheduledView })));
 const CustomizeView = lazy(() => import('../customize/CustomizeView').then((m) => ({ default: m.CustomizeView })));
 const SettingsView = lazy(() => import('../settings/SettingsView').then((m) => ({ default: m.SettingsView })));
+
+/** Matches --g-duration-base, the time the sidebar takes to slide away. */
+const SIDEBAR_EXIT_MS = 180;
 
 function routeKey(route: Route): string {
   if (route.name === 'session') return `session:${route.id}`;
@@ -63,6 +68,8 @@ function Later({ children }: { children: JSX.Element }) {
 /** Main window after onboarding: sidebar, the routed view, and app-wide dialogs and shortcuts. */
 export function AppShell() {
   const collapsed = useApp((s) => s.settings?.ui.sidebarCollapsed ?? false);
+  // The sidebar stays while it slides away (see .graft-slide-x), then leaves the page.
+  const sidebarPresent = usePresence(!collapsed, SIDEBAR_EXIT_MS);
   const route = useNav((s) => s.route);
   const loaded = useSessions((s) => s.loaded);
   const loadError = useSessions((s) => s.loadError);
@@ -85,7 +92,10 @@ export function AppShell() {
 
   return (
     <div className="flex h-full bg-bg">
-      {collapsed ? null : <Sidebar />}
+      <div className="graft-slide-x h-full shrink-0" data-state={collapsed ? 'closed' : 'open'}>
+        {/* The column can only narrow around something without a width of its own; the sidebar keeps its width inside. */}
+        <div>{sidebarPresent ? <Sidebar /> : null}</div>
+      </div>
       <main className="flex min-w-0 flex-1 flex-col">
         <ErrorBoundary label="This view" resetKey={routeKey(route)}>
           {loadError ? (
@@ -99,6 +109,7 @@ export function AppShell() {
       <CommandPalette />
       <SessionDialogs />
       <RewindDialog />
+      <MissionDialog />
       <SystemPromptDialog />
       <InfoDialogs />
     </div>

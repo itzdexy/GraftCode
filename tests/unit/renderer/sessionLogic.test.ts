@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
 import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
-import { activityTitle, buildTranscript, callParts, diffTotals, groupActivity, madeFiles, summarizeCalls, type ActivityItem, type ToolCall } from '../../../src/renderer/src/features/session/transcriptModel';
+import {
+  activityTitle,
+  buildTranscript,
+  callParts,
+  describeCall,
+  diffTotals,
+  groupActivity,
+  madeFiles,
+  summarizeCalls,
+  type ActivityItem,
+  type ToolCall
+} from '../../../src/renderer/src/features/session/transcriptModel';
 import { evictViews, MAX_CACHED_VIEWS, viewOf } from '../../../src/renderer/src/stores/sessions';
 
 let seq = 0;
@@ -81,6 +92,28 @@ describe('transcript model', () => {
     expect(live?.kind === 'text' && [live.live, live.endOfTurn]).toEqual([true, false]);
   });
 
+  it('gives a streamed reply the same key once it is stored, so it stays in place instead of arriving again', () => {
+    const user = msg('user', [{ type: 'text', text: 'go' }]);
+    const live = buildTranscript([user], { streaming: { messageId: 'reply', text: 'Almost', thinking: 'hmm' }, running: {} });
+    const stored: StoredMessage = { ...msg('assistant', [{ type: 'thinking', text: 'hmm' }, { type: 'text', text: 'Almost done.' }]), id: 'reply' };
+    const done = buildTranscript([user, stored], NO_LIVE);
+    const keyOf = (items: ReturnType<typeof buildTranscript>, kind: 'text' | 'thinking'): string | undefined => items.find((i) => i.kind === kind)?.key;
+    expect(keyOf(done, 'text')).toBe(keyOf(live, 'text'));
+    expect(keyOf(done, 'thinking')).toBe(keyOf(live, 'thinking'));
+  });
+
+  it('keeps every item key distinct when a message has several text blocks', () => {
+    const items = buildTranscript(
+      [
+        msg('user', [{ type: 'text', text: 'go' }]),
+        msg('assistant', [{ type: 'text', text: 'First.' }, { type: 'tool_use', id: 'k1', name: 'Read', input: { file_path: 'a.ts' } }, { type: 'text', text: 'Second.' }])
+      ],
+      NO_LIVE
+    );
+    const keys = items.map((i) => i.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it('summarizes groups in plain language with failure counts', () => {
     expect(summarizeCalls([call('Read', { file_path: 'src/a.ts' }), call('Read', { file_path: 'src/b.ts' })])).toBe('Read 2 files');
     expect(
@@ -149,6 +182,65 @@ describe('turn activity', () => {
     expect(summarizeCalls(calls)).toBe('Ran 2 commands, read x.ts, searched for “p”, listed files 2 times');
   });
 
+  it('shows each later turn of a mission as a marker, never as something the user wrote', () => {
+    const messages: StoredMessage[] = [
+      msg('user', [{ type: 'text', text: 'Add rate limiting\n\n---\n\nThis is a mission…' }], { typed: 'Add rate limiting' }),
+      msg('assistant', [{ type: 'text', text: 'Looked around.' }]),
+      msg('user', [{ type: 'text', text: '[Mission, turn 2 of 10] Keep working on the mission.…' }], { kind: 'mission', mission: { turn: 2, of: 10, afterChecks: false } }),
+      msg('assistant', [{ type: 'text', text: 'Done.' }]),
+      msg('user', [{ type: 'text', text: '[Mission, turn 3 of 10] You reported the mission done, but…' }], { kind: 'mission', mission: { turn: 3, of: 10, afterChecks: true } })
+    ];
+    const items = buildTranscript(messages, NO_LIVE);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'text', 'mission', 'text', 'mission']);
+    expect(items[0]).toMatchObject({ kind: 'user', text: 'Add rate limiting' });
+    expect(items[2]).toMatchObject({ kind: 'mission', turn: 2, of: 10, afterChecks: false });
+    expect(items[4]).toMatchObject({ kind: 'mission', turn: 3, of: 10, afterChecks: true });
+  });
+
+  it('words what the agent records in a mission', () => {
+    const note = call('MissionUpdate', { note: { kind: 'decision', text: 'Use a token bucket.' } }, { display: { kind: 'mission', action: 'note', noteKind: 'decision', text: 'Use a token bucket.' } });
+    expect(callParts(note)).toMatchObject({ verb: 'Noted a decision', target: 'Use a token bucket.' });
+    expect(callParts(call('MissionUpdate', { status: 'done', summary: 'All in.' })).verb).toBe('Reported the mission done');
+    expect(callParts(call('MissionUpdate', { status: 'blocked', summary: 'Need a key.' }))).toMatchObject({ verb: 'Paused the mission', target: 'Need a key.' });
+    expect(summarizeCalls([note, note, call('Read', { file_path: 'x.ts' })])).toBe('Read x.ts, noted 2 things for the mission');
+  });
+
+  it('words a look at the code’s structure by what was asked', () => {
+    expect(callParts(call('Symbols', { action: 'outline', path: 'src/main/agent/mission.ts' }))).toMatchObject({ verb: 'Outlining', target: 'mission.ts' });
+    const found = { display: { kind: 'grep' as const, pattern: 'uses of allow', count: 3, preview: '' } };
+    expect(callParts(call('Symbols', { action: 'references', name: 'allow' }, found))).toMatchObject({ verb: 'Found uses of', target: 'allow', mono: true });
+    expect(callParts(call('Symbols', { action: 'definition', name: 'allow' }, found))).toMatchObject({ verb: 'Found the definition of', target: 'allow' });
+    expect(callParts(call('Symbols', { action: 'importers', path: 'src/a.ts' }, found))).toMatchObject({ verb: 'Found what imports', target: 'a.ts' });
+    expect(callParts(call('Symbols', { action: 'tests', path: 'src/a.ts' }, found))).toMatchObject({ verb: 'Found the tests of', target: 'a.ts' });
+    expect(summarizeCalls([call('Symbols', { action: 'tests', path: 'src/a.ts' }, found), call('Symbols', { action: 'outline', path: 'src/a.ts' }, found)])).toBe('Looked up the code’s structure 2 times');
+  });
+
+  it('words a search for tools, and what an agent reads from an MCP server’s resources', () => {
+    expect(callParts(call('ToolSearch', { query: 'create issue' }))).toMatchObject({ verb: 'Searching tools for', target: '“create issue”' });
+    expect(callParts(call('ToolSearch', { query: 'create issue' }, { display: { kind: 'text', text: 'Loaded 1 tool' } }))).toMatchObject({ verb: 'Searched tools for' });
+    expect(callParts(call('mcp__resources__list', { server: 'docs' }))).toMatchObject({ verb: 'Listing MCP resources', target: 'docs' });
+    expect(callParts(call('mcp__resources__read', { server: 'docs', uri: 'notes://readme' }))).toMatchObject({ verb: 'Reading', target: 'notes://readme', mono: true });
+    expect(describeCall(call('mcp__resources__read', { server: 'docs', uri: 'notes://readme' }))).toBe('Reading notes://readme from docs');
+    expect(summarizeCalls([call('ToolSearch', { query: 'issue' }), call('mcp__resources__read', { server: 'docs', uri: 'a' }), call('mcp__resources__read', { server: 'docs', uri: 'b' })])).toBe(
+      'Looked for a tool, looked at 2 MCP resources'
+    );
+  });
+
+  it('words a group of agents by how many ran and what for', () => {
+    const agents = [
+      { id: 'a', role: 'explorer', task: 'Map the routes', prompt: 'Look.' },
+      { id: 'b', role: 'implementer', task: 'Add the endpoint', prompt: 'Build.', depends_on: ['a'] }
+    ];
+    const running = call('RunAgents', { goal: 'Add rate limiting', agents });
+    expect(callParts(running)).toMatchObject({ verb: 'Running 2 agents', target: 'Add rate limiting' });
+    expect(describeCall(running)).toBe('Running 2 agents: Add rate limiting');
+    const done = call('RunAgents', { goal: 'Add rate limiting', agents }, { display: { kind: 'agents', goal: 'Add rate limiting', agents: [] } });
+    expect(callParts(done)).toMatchObject({ verb: 'Ran 2 agents', target: 'Add rate limiting' });
+    expect(callParts(call('RunAgents', { goal: 'Look around', agents: agents.slice(0, 1) })).verb).toBe('Running an agent');
+    expect(summarizeCalls([done, call('Read', { file_path: 'x.ts' })])).toBe('Ran 2 agents, read x.ts');
+    expect(summarizeCalls([done, done])).toBe('Ran 2 groups of agents');
+  });
+
   it('words each step as what was done, then what it was done to', () => {
     expect(callParts(call('Edit', { file_path: 'src/main/agent/session.ts' }, { display: { kind: 'edit', path: 'src/main/agent/session.ts', created: false, patch: '', added: 3, removed: 1 } }))).toEqual({
       verb: 'Edited',
@@ -170,6 +262,26 @@ describe('turn activity', () => {
     const working = groupActivity(buildTranscript(messages, NO_LIVE), true);
     expect(working.map((i) => i.kind)).toEqual(['user', 'activity']);
     expect((working[1] as ActivityItem).steps[0]?.kind).toBe('text');
+  });
+
+  it('keeps a finished reply as the answer while the turn wraps up, instead of folding it into the work', () => {
+    // The reply is stored, but the turn is still open (hooks, the project's checks).
+    const items = groupActivity(buildTranscript(turn(), NO_LIVE), true);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    const answer = items[2];
+    expect(answer?.kind === 'text' && answer.text).toBe('Done.');
+    expect((items[1] as ActivityItem).steps.map((s) => s.kind)).toEqual(['text', 'tool', 'tool']);
+  });
+
+  it('turns a reply back into narration when the turn goes on working after it', () => {
+    const messages = [
+      ...turn(),
+      { ...msg('user', [{ type: 'text', text: 'The checks failed; fix them.' }], { kind: 'reminder' }), createdAt: 64_000 },
+      { ...msg('assistant', [{ type: 'tool_use', id: 'fix', name: 'Edit', input: { file_path: 'src/old.ts' } }]), createdAt: 65_000 }
+    ];
+    const items = groupActivity(buildTranscript(messages, NO_LIVE), true);
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity']);
+    expect((items[1] as ActivityItem).steps.map((s) => s.kind)).toEqual(['text', 'tool', 'tool', 'text', 'tool']);
   });
 
   it('pairs a provider search with its results and counts the sites', () => {

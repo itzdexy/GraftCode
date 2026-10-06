@@ -127,8 +127,15 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
 
   // Both providers' models are offered as the default.
   await openSettings(w, 'Models');
-  await expect(w.getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);
+  await expect(w.getByRole('listbox', { name: 'Default model' }).getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);
   await shot(w, 'settings-models');
+  // Agents: each kind of work can be given a model from either provider, or left to routing.
+  const coder = w.getByRole('combobox', { name: 'Coder' });
+  await expect(coder.getByRole('option', { name: /Graft Test Large/ })).toHaveCount(2);
+  await expect(coder.getByRole('option').first()).toHaveText('The session’s model');
+  await w.getByRole('radiogroup', { name: 'Models for agents' }).getByRole('radio', { name: 'Automatic' }).click();
+  await expect(coder.getByRole('option').first()).toHaveText('Automatic');
+  await shot(w, 'settings-agents');
   // Updates are on by default; a development build explains where they come from.
   await openSettings(w, 'About');
   await expect(w.getByText('Updates are delivered to installed builds.')).toBeVisible();

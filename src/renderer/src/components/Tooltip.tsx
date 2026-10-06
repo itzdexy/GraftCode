@@ -20,7 +20,7 @@ export function Tooltip({ content, shortcut, side = 'bottom', children }: Toolti
           side={side}
           sideOffset={6}
           collisionPadding={8}
-          className="z-[var(--g-z-toast)] flex max-w-[320px] items-center gap-6 rounded-sm border border-border bg-surface px-8 py-4 text-xs text-fg shadow-popover"
+          className="overlay-tip z-[var(--g-z-toast)] flex max-w-[320px] items-center gap-6 rounded-sm border border-border bg-surface px-8 py-4 text-xs text-fg shadow-popover"
         >
           <span>{content}</span>
           {shortcut ? <Kbd>{shortcut}</Kbd> : null}

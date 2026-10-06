@@ -5,7 +5,7 @@
  * so the renderer only ever names an integration, never a command.
  */
 
-export type IntegrationCategory = 'Game engines and 3D' | 'Design and browser' | 'Developer tools';
+export type IntegrationCategory = 'Game engines and 3D' | 'Design and browser' | 'Developer tools' | 'Reverse engineering';
 
 /** A runtime the server needs on this computer: uv runs Python servers, Node runs npm ones. */
 export type IntegrationRuntime = 'uv' | 'node';
@@ -194,10 +194,29 @@ export const INTEGRATIONS: readonly Integration[] = [
     signIn: true,
     steps: ['After you add it, click Sign in next to the server to connect your Notion workspace.'],
     docs: 'https://developers.notion.com/docs/mcp'
+  },
+  {
+    id: 'ghidra',
+    name: 'Ghidra',
+    category: 'Reverse engineering',
+    description: 'Study compiled programs: import a binary, decompile its functions to C, follow cross-references and call graphs, search strings, and rename things as you learn what they are.',
+    serverName: 'ghidra',
+    troubleshoot:
+      'Check that the folder below is the one Ghidra is installed in (it contains ghidraRun) and that the Java JDK Ghidra asks for is installed. The first start is slow: it downloads the server and starts Ghidra.',
+    // The launch from the server's own documentation; it reads where Ghidra is from GHIDRA_INSTALL_DIR.
+    launch: everywhere(uvx('pyghidra-mcp', '--transport', 'stdio')),
+    runtime: 'uv',
+    steps: [
+      'Install Ghidra from its releases page, `github.com/NationalSecurityAgency/ghidra/releases`, with the Java JDK that page asks for.',
+      'Give the folder Ghidra is installed in below: the one that contains `ghidraRun`.',
+      'Ask Graft to import a program and decompile it. Type `/decompile` for the one-function-at-a-time workflow that checks each result.'
+    ],
+    fields: [{ key: 'GHIDRA_INSTALL_DIR', label: 'Ghidra folder', placeholder: 'C:\\ghidra_PUBLIC', help: 'The folder that contains ghidraRun.', kind: 'env' }],
+    docs: 'https://github.com/clearbluejar/pyghidra-mcp'
   }
 ];
 
-export const INTEGRATION_CATEGORIES: readonly IntegrationCategory[] = ['Game engines and 3D', 'Design and browser', 'Developer tools'];
+export const INTEGRATION_CATEGORIES: readonly IntegrationCategory[] = ['Game engines and 3D', 'Design and browser', 'Developer tools', 'Reverse engineering'];
 
 /** How to install a runtime, per platform. */
 export const RUNTIME_HELP: Record<IntegrationRuntime, { name: string; install: Record<'win32' | 'darwin' | 'linux', string> }> = {

@@ -3,6 +3,8 @@ import { EffortLevelSchema, ModelRefSchema, PermissionModeSchema, UsageSchema } 
 import { StoredMessageSchema } from './messages';
 import { TodoItemSchema } from './toolDisplay';
 import { PermissionRequestSchema, QuestionRequestSchema } from './permissions';
+import { AgentRunSchema } from './agentRuns';
+import { MissionSchema } from './missions';
 
 export const SessionStatusSchema = z.enum(['idle', 'running', 'needs-input', 'error']);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
@@ -64,6 +66,10 @@ export const SessionDetailSchema = z.object({
   todos: z.array(TodoItemSchema),
   pendingPermission: PermissionRequestSchema.nullable(),
   pendingQuestion: QuestionRequestSchema.nullable(),
-  queue: z.array(QueuedInputSchema)
+  queue: z.array(QueuedInputSchema),
+  /** Agents run as groups in this session, for the agent graph. */
+  agentRuns: z.array(AgentRunSchema).default([]),
+  /** The session's newest mission, whatever its state; null when it never had one. */
+  mission: MissionSchema.nullable().default(null)
 });
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;

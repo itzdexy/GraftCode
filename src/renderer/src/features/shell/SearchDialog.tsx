@@ -6,6 +6,7 @@ import { Spinner } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { relativeTime } from '../../lib/format';
 import { errorText, invoke } from '../../lib/ipc';
+import { usePresence } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { useNav } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
@@ -183,17 +184,19 @@ function SearchPanel() {
 export function SearchDialog() {
   const isOpen = useUi((s) => s.searchOpen);
   const setOpen = useUi((s) => s.setSearchOpen);
+  // The panel stays while the dialog fades out, then is dropped so each opening starts fresh.
+  const present = usePresence(isOpen);
   return (
     <RD.Root open={isOpen} onOpenChange={setOpen}>
       <RD.Portal>
-        <RD.Overlay className="fixed inset-0 z-[var(--g-z-dialog)] bg-overlay data-[state=open]:animate-[graft-fade_var(--g-duration-base)_var(--g-ease)]" />
+        <RD.Overlay className="overlay-scrim fixed inset-0 z-[var(--g-z-dialog)] bg-overlay" />
         <RD.Content
           aria-label="Search sessions"
-          className="fixed top-[12vh] left-1/2 z-[var(--g-z-dialog)] flex max-h-[70vh] w-[min(620px,calc(100vw-48px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-popover outline-none data-[state=open]:animate-[graft-menu-in_var(--g-duration-base)_var(--g-ease)]"
+          className="overlay-quick fixed top-[12vh] left-1/2 z-[var(--g-z-dialog)] flex max-h-[70vh] w-[min(620px,calc(100vw-48px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-popover outline-none"
         >
           <RD.Title className="sr-only">Search sessions</RD.Title>
           <RD.Description className="sr-only">Search chat and session titles and messages.</RD.Description>
-          {isOpen ? <SearchPanel /> : null}
+          {present ? <SearchPanel /> : null}
         </RD.Content>
       </RD.Portal>
     </RD.Root>

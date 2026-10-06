@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, File, Folder, FolderOpen } from 'lucide-react';
+import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize } from 'lucide-react';
 import type { TreeEntryView, FilePreviewView } from '@shared/schemas/panels';
+import { IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
+import { useLoad } from '../../lib/useLoad';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
+import { previewNote } from './fileActions';
+import { FileMenu, useFileActions } from './FileMenu';
+
+/** Files the tree marks as pictures or clips, by name (the preview itself asks the main process). */
+const LOOKS_LIKE_MEDIA = /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg|mp4|webm)$/i;
 
 type DirState = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; entries: TreeEntryView[] };
 
@@ -54,6 +61,8 @@ function TreeLevel({
 }) {
   const [load, setLoad] = useState<DirState>({ state: 'loading' });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** The row whose menu is open (a right-click opens it too). */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,41 +107,60 @@ function TreeLevel({
         const mark = entry.type === 'file' ? marks.files.get(entry.path) : marks.dirs.has(entry.path) ? '•' : undefined;
         return (
           <li key={entry.path} role="treeitem" aria-expanded={entry.type === 'dir' ? open : undefined} aria-selected={selected === entry.path}>
-            <button
-              type="button"
-              onClick={() => {
-                if (entry.type === 'dir') {
-                  setExpanded((s) => {
-                    const next = new Set(s);
-                    if (next.has(entry.path)) next.delete(entry.path);
-                    else next.add(entry.path);
-                    return next;
-                  });
-                } else {
-                  onOpen(entry.path);
-                }
+            <div
+              className="group/row relative"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenuFor(entry.path);
               }}
-              className={cn('flex h-24 w-full items-center gap-6 rounded-sm pr-6 text-left text-base', selected === entry.path ? 'bg-selected text-fg-strong' : 'text-fg-secondary hover:bg-hover')}
-              style={pad}
             >
-              {entry.type === 'dir' ? (
-                <>
-                  <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" />
-                  {open ? <FolderOpen className="size-14 shrink-0 text-icon" aria-hidden="true" /> : <Folder className="size-14 shrink-0 text-icon" aria-hidden="true" />}
-                </>
-              ) : (
-                <>
-                  <span className="size-12 shrink-0" aria-hidden="true" />
-                  <File className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
-                </>
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-              {mark ? (
-                <span className={cn('shrink-0 font-mono text-2xs', mark === 'D' ? 'text-diff-del' : mark === 'U' || mark === 'A' ? 'text-diff-add' : 'text-amber-fg')} title="Changed">
-                  {mark}
-                </span>
-              ) : null}
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (entry.type === 'dir') {
+                    setExpanded((s) => {
+                      const next = new Set(s);
+                      if (next.has(entry.path)) next.delete(entry.path);
+                      else next.add(entry.path);
+                      return next;
+                    });
+                  } else {
+                    onOpen(entry.path);
+                  }
+                }}
+                className={cn('flex h-24 w-full items-center gap-6 rounded-sm pr-6 text-left text-base', selected === entry.path ? 'bg-selected text-fg-strong' : 'text-fg-secondary hover:bg-hover')}
+                style={pad}
+              >
+                {entry.type === 'dir' ? (
+                  <>
+                    <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" />
+                    {open ? <FolderOpen className="size-14 shrink-0 text-icon" aria-hidden="true" /> : <Folder className="size-14 shrink-0 text-icon" aria-hidden="true" />}
+                  </>
+                ) : (
+                  <>
+                    <span className="size-12 shrink-0" aria-hidden="true" />
+                    {LOOKS_LIKE_MEDIA.test(entry.name) ? <FileImage className="size-14 shrink-0 text-icon-muted" aria-hidden="true" /> : <File className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />}
+                  </>
+                )}
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                {mark ? (
+                  <span className={cn('shrink-0 font-mono text-2xs', mark === 'D' ? 'text-diff-del' : mark === 'U' || mark === 'A' ? 'text-diff-add' : 'text-amber-fg')} title="Changed">
+                    {mark}
+                  </span>
+                ) : null}
+              </button>
+              {/* Shown on hover and focus, and while its menu is open; it sits over the change mark. */}
+              <FileMenu
+                sessionId={sessionId}
+                target={{ path: entry.path, type: entry.type }}
+                open={menuFor === entry.path}
+                onOpenChange={(next) => setMenuFor(next ? entry.path : null)}
+                className={cn(
+                  'absolute top-2 right-2 bg-sunken opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',
+                  menuFor === entry.path && 'opacity-100'
+                )}
+              />
+            </div>
             {entry.type === 'dir' && open ? (
               <TreeLevel sessionId={sessionId} dir={entry.path} depth={depth + 1} marks={marks} selected={selected} onOpen={onOpen} refreshKey={refreshKey} />
             ) : null}
@@ -145,11 +173,51 @@ function TreeLevel({
 
 type Preview = { state: 'loading'; path: string } | { state: 'error'; path: string; message: string } | { state: 'ready'; preview: FilePreviewView };
 
-function PreviewPane({ preview }: { preview: FilePreviewView }) {
+interface Pixels {
+  width: number;
+  height: number;
+}
+
+/** A picture, clip or sound from the session's folder, loaded through an address that serves that one file. */
+function MediaPreview({ sessionId, preview, opened, fit, onPixels }: { sessionId: string; preview: FilePreviewView; opened: number; fit: boolean; onPixels: (pixels: Pixels) => void }) {
+  // `opened` counts the clicks on the file, so opening it again loads it again (it may have been made anew).
+  const { load } = useLoad(() => invoke('files:previewUrl', { sessionId, path: preview.path }), `${preview.path}:${String(preview.size)}:${String(opened)}`);
+  if (load.status === 'loading') return <LoadingState />;
+  if (load.status === 'error') return <ErrorState message={load.message} />;
+  const name = preview.path.slice(preview.path.lastIndexOf('/') + 1);
+  if (preview.media === 'video') {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <video key={load.data.url} src={load.data.url} controls className="max-h-full max-w-full rounded-sm" aria-label={`Preview of ${name}`} />
+      </div>
+    );
+  }
+  if (preview.media === 'audio') {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <audio key={load.data.url} src={load.data.url} controls aria-label={`Preview of ${name}`} />
+      </div>
+    );
+  }
+  return (
+    <div className={cn('graft-checker flex items-center justify-center p-12', fit ? 'h-full' : 'min-h-full min-w-max')}>
+      <img
+        src={load.data.url}
+        alt={`Preview of ${name}`}
+        draggable={false}
+        onLoad={(event) => onPixels({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+        className={cn('motion-pop', fit ? 'max-h-full max-w-full object-contain' : 'max-w-none')}
+      />
+    </div>
+  );
+}
+
+function PreviewPane({ sessionId, preview, opened, fit, source, onPixels }: { sessionId: string; preview: FilePreviewView; opened: number; fit: boolean; source: boolean; onPixels: (pixels: Pixels) => void }) {
   const language = useMemo(() => languageForPath(preview.path), [preview.path]);
   const lines = useHighlight(preview.content ?? '', language, preview.content !== null);
+  if (preview.tooLarge) return <p className="px-10 py-8 text-base text-fg-muted">Too large to preview ({Math.round(preview.size / 1024)} KB). Show it in its folder to open it.</p>;
+  if (preview.media && !(source && preview.content !== null)) return <MediaPreview sessionId={sessionId} preview={preview} opened={opened} fit={fit} onPixels={onPixels} />;
   if (preview.binary) return <p className="px-10 py-8 text-base text-fg-muted">Binary file ({Math.round(preview.size / 1024)} KB).</p>;
-  if (preview.tooLarge) return <p className="px-10 py-8 text-base text-fg-muted">Too large to preview ({Math.round(preview.size / 1024)} KB).</p>;
   return (
     <pre className="selectable min-h-full px-10 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] text-fg">
       <code>
@@ -159,31 +227,72 @@ function PreviewPane({ preview }: { preview: FilePreviewView }) {
   );
 }
 
-/** Read-only file tree of the session folder with git status marks and a highlighted preview. */
+/** How the previewed picture is shown; it starts over with each file. */
+interface ViewState {
+  path: string;
+  /** Scaled to fit the panel, or at its own size with scrolling. */
+  fit: boolean;
+  /** An SVG's source instead of the picture. */
+  source: boolean;
+  pixels: Pixels | null;
+}
+
+/** File tree of the session folder with git status marks, a preview (text, pictures, clips) and each file's actions. */
 export function FilesView({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
   const marks = useGitMarks(sessionId, refreshKey);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [opened, setOpened] = useState(0);
+  const [view, setView] = useState<ViewState | null>(null);
+  const run = useFileActions(sessionId);
 
   const open = (path: string): void => {
     setPreview({ state: 'loading', path });
+    setOpened((n) => n + 1);
     invoke('files:read', { sessionId, path })
       .then((p) => setPreview({ state: 'ready', preview: p }))
       .catch((error: unknown) => setPreview({ state: 'error', path, message: errorText(error) }));
   };
 
   const selected = preview ? (preview.state === 'ready' ? preview.preview.path : preview.path) : null;
+  const ready = preview?.state === 'ready' ? preview.preview : null;
+  const shown: ViewState = view && view.path === selected ? view : { path: selected ?? '', fit: true, source: false, pixels: null };
+  const picture = ready?.media === 'image' && !ready.tooLarge;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className={cn('min-h-0 overflow-y-auto p-4', preview ? 'max-h-[45%] shrink-0' : 'flex-1')}>
         <TreeLevel sessionId={sessionId} dir="" depth={0} marks={marks} selected={selected} onOpen={open} refreshKey={refreshKey} />
       </div>
-      {preview ? (
+      {preview && selected !== null ? (
         <div className="flex min-h-0 flex-1 flex-col border-t border-border-panel">
-          <p className="flex h-24 shrink-0 items-center truncate px-10 font-mono text-2xs text-fg-muted">{selected}</p>
+          <div className="flex h-28 shrink-0 items-center gap-2 pr-4 pl-10">
+            <p className="selectable min-w-0 flex-1 truncate font-mono text-2xs text-fg-muted" title={selected}>
+              {selected}
+            </p>
+            {ready ? <span className="shrink-0 px-4 text-2xs text-fg-faint tabular-nums">{previewNote(ready, shown.pixels)}</span> : null}
+            {picture && ready.content !== null ? (
+              <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
+                {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
+              </IconButton>
+            ) : null}
+            {picture && !shown.source ? (
+              <IconButton label={shown.fit ? 'Actual size' : 'Fit to panel'} size="xs" onClick={() => setView({ ...shown, fit: !shown.fit })}>
+                {shown.fit ? <Maximize className="size-13" /> : <Minimize className="size-13" />}
+              </IconButton>
+            ) : null}
+            <IconButton label="Copy path" size="xs" onClick={() => run('copy-path', { path: selected, type: 'file' })}>
+              <Copy className="size-13" />
+            </IconButton>
+            <IconButton label="Show in folder" size="xs" onClick={() => run('reveal', { path: selected, type: 'file' })}>
+              <FolderOpen className="size-13" />
+            </IconButton>
+            <FileMenu sessionId={sessionId} target={{ path: selected, type: 'file' }} />
+          </div>
           <div className="min-h-0 flex-1 overflow-auto bg-code-block">
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
-            {preview.state === 'ready' ? <PreviewPane preview={preview.preview} /> : null}
+            {ready ? (
+              <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
+            ) : null}
           </div>
         </div>
       ) : null}

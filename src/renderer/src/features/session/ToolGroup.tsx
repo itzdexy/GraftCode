@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { Collapse } from '../../components/Collapse';
 import { Ring } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { ToolCallBody } from './ToolDetail';
@@ -58,11 +59,9 @@ export function CallRow({ call }: { call: ToolCall }) {
         {failed ? <span className="shrink-0 text-danger">Failed</span> : declined ? <span className="shrink-0 text-amber-fg">Declined</span> : null}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? (
-        <div className="pt-2 pb-8 pl-4">
-          <ToolCallBody call={call} />
-        </div>
-      ) : null}
+      <Collapse open={open} className="pt-2 pb-8 pl-4">
+        <ToolCallBody call={call} />
+      </Collapse>
     </div>
   );
 }
@@ -84,7 +83,7 @@ export function ToolGroup({ calls }: { calls: ToolCall[] }) {
         <span className="min-w-0">{running && !open ? running.running?.summary || summary : summary}</span>
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      {open ? (
+      <Collapse open={open}>
         <ul className="mt-2 ml-5 flex flex-col gap-1 border-l border-border pl-10">
           {calls.map((call) => (
             <li key={call.id}>
@@ -92,7 +91,7 @@ export function ToolGroup({ calls }: { calls: ToolCall[] }) {
             </li>
           ))}
         </ul>
-      ) : null}
+      </Collapse>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EffortLevelSchema, ModelRefSchema, PermissionModeSchema, RECOMMENDED_EFFORT } from './common';
+import { MODEL_ROLES, ModelRoleSchema, type ModelRoleId } from './agentRuns';
 
 export const NicknameSchema = z
   .string()
@@ -49,6 +50,9 @@ export const PALETTE_IDS = ['graft', 'midnight', 'slate', 'grove', 'dune', 'cont
 export type PaletteId = (typeof PALETTE_IDS)[number];
 export const ACCENT_IDS = ['leaf', 'ocean', 'iris', 'rose', 'gold', 'teal', 'mono'] as const;
 export type AccentId = (typeof ACCENT_IDS)[number];
+/** Settings → Appearance → Motion. */
+export const MOTION_SETTINGS = ['system', 'on', 'reduced'] as const;
+export type MotionSetting = (typeof MOTION_SETTINGS)[number];
 
 /** Settings → Personalization: how answers are written, in chats and code sessions. */
 export const RESPONSE_STYLES = ['default', 'concise', 'explanatory', 'learning'] as const;
@@ -62,6 +66,10 @@ export const SEARCH_ENGINE_IDS = ['exa', 'duckduckgo', 'openrouter', 'anthropic'
 export type SearchEngineId = (typeof SEARCH_ENGINE_IDS)[number];
 export const SearchEngineSettingSchema = z.enum(['auto', ...SEARCH_ENGINE_IDS, 'off']);
 export type SearchEngineSetting = z.infer<typeof SearchEngineSettingSchema>;
+
+/** Engines that can make pictures for the GenerateImage tool (Settings → Images). */
+export const IMAGE_ENGINE_SETTINGS = ['auto', 'off', 'openrouter', 'openai', 'gemini', 'comfyui'] as const;
+export type ImageEngineSetting = (typeof IMAGE_ENGINE_SETTINGS)[number];
 
 export const OnboardingStepSchema = z.enum(['name', 'avatar', 'provider', 'key', 'defaults', 'done']);
 export type OnboardingStep = z.infer<typeof OnboardingStepSchema>;
@@ -82,7 +90,8 @@ export const AppSettingsSchema = z.object({
     accent: z.enum(ACCENT_IDS),
     uiFontSize: z.number().int().min(11).max(18),
     codeFontSize: z.number().int().min(10).max(20),
-    reducedMotion: z.boolean(),
+    /** "system" follows the operating system's animation setting; "on" animates even when it asks for less. */
+    motion: z.enum(MOTION_SETTINGS),
     /** Width of the transcript and composer column. */
     transcriptWidth: z.enum(['narrow', 'medium', 'wide'])
   }),
@@ -137,6 +146,30 @@ export const AppSettingsSchema = z.object({
     /** A SearXNG instance with its JSON API on. */
     searxngUrl: z.url({ protocol: /^https?$/ }).max(500).nullable()
   }),
+  /** Groups of agents (RunAgents): which model each kind of work runs on, and their limits. */
+  agents: z.object({
+    /** "session": every agent uses the session's model unless its role has one. "auto": quick and research work goes to the cheapest capable model of the same provider. */
+    routing: z.enum(['session', 'auto']),
+    /** A model per kind of work; null leaves it to routing. */
+    roles: z.record(ModelRoleSchema, ModelRefSchema.nullable()),
+    /** Most agents working at once. */
+    maxParallel: z.number().int().min(1).max(8),
+    /** Tokens one agent may spend before it is stopped; null sets no limit. */
+    tokenBudget: z.number().int().min(10_000).max(50_000_000).nullable(),
+    /** Extra attempts after a provider failure. */
+    retries: z.number().int().min(0).max(3)
+  }),
+  /** Generated images and video: the image model the agent uses, and the user's own ComfyUI. */
+  media: z.object({
+    /** "auto" uses ComfyUI when it is on, else the first provider that makes images. */
+    imageEngine: z.enum(IMAGE_ENGINE_SETTINGS),
+    /** A model id for the chosen provider; empty uses that provider's default. */
+    imageModel: z.string().max(200),
+    comfyEnabled: z.boolean(),
+    comfyUrl: z.url({ protocol: /^https?$/ }).max(500),
+    /** Checkpoint for plain text-to-image; empty uses the first one installed. */
+    comfyCheckpoint: z.string().max(300)
+  }),
   /** Read aloud: a natural voice from OpenRouter's speech models, or this computer's own voices. */
   voice: z.object({
     engine: z.enum(['natural', 'system']),
@@ -166,7 +199,7 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, reducedMotion: false, transcriptWidth: 'narrow' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
   defaults: { model: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
@@ -176,6 +209,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sandbox: { image: 'node:22-bookworm', network: true, memoryMb: 4096, cpus: 2 },
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
+  agents: { routing: 'session', roles: Object.fromEntries(MODEL_ROLES.map((role) => [role, null])) as Record<ModelRoleId, null>, maxParallel: 4, tokenBudget: null, retries: 1 },
+  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '' },
   personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
@@ -198,6 +233,8 @@ export const AppSettingsPatchSchema = z.object({
   sandbox: AppSettingsSchema.shape.sandbox.partial().optional(),
   search: AppSettingsSchema.shape.search.partial().optional(),
   voice: AppSettingsSchema.shape.voice.partial().optional(),
+  media: AppSettingsSchema.shape.media.partial().optional(),
+  agents: AppSettingsSchema.shape.agents.partial().optional(),
   personalization: AppSettingsSchema.shape.personalization.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()

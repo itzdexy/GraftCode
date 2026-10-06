@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { MISSION_LIMITS, MissionNoteKindSchema } from '@shared/schemas/missions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { errorResult, textResult, type ToolDefinition } from './types';
 
@@ -141,6 +142,101 @@ export const TaskInput = z.object({
     )
 });
 export type TaskInput = z.infer<typeof TaskInput>;
+
+export const RunAgentsInput = z.object({
+  goal: z.string().min(1).max(300).describe('What this group of agents achieves together, in one line.'),
+  agents: z
+    .array(
+      z.object({
+        id: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+          .describe('A short id other agents can depend on, e.g. "explore-auth".'),
+        role: z.string().min(1).max(64).describe('The agent\'s role (listed in the system prompt), or the name of a custom agent.'),
+        task: z.string().min(1).max(120).describe('Three to ten words naming its task.'),
+        prompt: z.string().min(1).max(20_000).describe('Complete, self-contained instructions. The agent sees nothing else, except the reports of the agents it depends on.'),
+        depends_on: z.array(z.string().max(32)).max(12).optional().describe('Ids of agents whose reports this one needs. It starts when they have finished.'),
+        writes: z
+          .array(z.string().min(1).max(300))
+          .max(20)
+          .optional()
+          .describe('For an agent that changes files: the files, folders or patterns (relative to the project) it may change, e.g. ["src/api/**", "docs/api.md"]. Agents whose paths do not overlap work at the same time; without writes, an agent that changes files works alone and may change anything.'),
+        verify: z
+          .string()
+          .min(1)
+          .max(2000)
+          .optional()
+          .describe('A command that must succeed (exit code 0) for this agent\'s work to count as done, e.g. "npm test -- health". When it fails, its output goes back to the agent to fix.')
+      })
+    )
+    .min(1)
+    .max(24)
+});
+export type RunAgentsInput = z.infer<typeof RunAgentsInput>;
+
+export const runAgentsTool: ToolDefinition<RunAgentsInput> = {
+  name: 'RunAgents',
+  description: [
+    'Run several agents as one group. Each has a role, a fresh context of its own and one task; agents that depend on nothing run in parallel,',
+    'and an agent with depends_on starts once those have finished and receives their reports.',
+    'Use it for work that splits up: explorers side by side, then implementers, then a tester and reviewers.',
+    'Agents with a writing role (implementer, tester, debugger, docs) change files and run commands. Split a large change between several of them by giving each its own writes paths, so they work at the same time without touching the same file.',
+    'Give an agent a verify command when its result can be checked by a command. The user sees the group as a graph and can open every agent.',
+    'It returns each agent\'s report; read them and decide what happens next.'
+  ].join(' '),
+  input: RunAgentsInput,
+  permissionClass: 'none',
+  concurrencySafe: () => false,
+  timeoutMs: 6 * 60 * 60_000,
+  describe: (input) => Promise.resolve({ summary: `Ran ${input.agents.length === 1 ? 'an agent' : `${input.agents.length} agents`}: ${input.goal}` }),
+  async execute(input, ctx) {
+    const { report, agents } = await ctx.runAgents(input);
+    const failed = agents.length > 0 && agents.every((a) => a.status !== 'done');
+    return textResult(report, { kind: 'agents', goal: input.goal, agents }, failed);
+  }
+};
+
+export const MissionUpdateInput = z.object({
+  note: z
+    .object({
+      kind: MissionNoteKindSchema.describe('"discovery": something you learned. "decision": a choice you made and why. "blocker": something in the way. "progress": what is finished.'),
+      text: z.string().min(1).max(MISSION_LIMITS.note)
+    })
+    .optional()
+    .describe('A note for the mission notebook. It is handed back to you at the start of every turn.'),
+  status: z
+    .enum(['done', 'blocked'])
+    .optional()
+    .describe('"done": everything the mission asks for is finished and you checked it; Graft then runs the mission\'s checks. "blocked": you need something only the user can give.'),
+  summary: z.string().max(MISSION_LIMITS.summary).optional().describe('With "done": what was achieved. With "blocked": exactly what you need from the user.')
+});
+export type MissionUpdateInput = z.infer<typeof MissionUpdateInput>;
+
+export const missionUpdateTool: ToolDefinition<MissionUpdateInput> = {
+  name: 'MissionUpdate',
+  description: [
+    'Keep the mission\'s notebook and report where the mission stands.',
+    'A note records a discovery, a decision, a blocker or progress; the notebook comes back to you every turn, so it outlives your context.',
+    'Status "done" with a summary asks Graft to run the mission\'s checks, which decide whether it is finished.',
+    'Status "blocked" with a summary pauses the mission until the user resumes it.'
+  ].join(' '),
+  input: MissionUpdateInput,
+  permissionClass: 'none',
+  concurrencySafe: () => false,
+  timeoutMs: 10_000,
+  describe: (input) =>
+    Promise.resolve({
+      summary: input.status === 'done' ? 'Reported the mission done' : input.status === 'blocked' ? 'Paused the mission: it needs you' : `Noted: ${(input.note?.text ?? '').slice(0, 80)}`
+    }),
+  execute(input, ctx) {
+    if (!ctx.mission) return Promise.resolve(errorResult('There is no mission running in this session.'));
+    const { reply, isError } = ctx.mission.update(input);
+    if (isError) return Promise.resolve(errorResult(reply));
+    return Promise.resolve(
+      textResult(reply, { kind: 'mission', action: input.status ?? 'note', noteKind: input.status ? null : (input.note?.kind ?? null), text: (input.status ? input.summary : input.note?.text) ?? '' })
+    );
+  }
+};
 
 export const taskTool: ToolDefinition<TaskInput> = {
   name: 'Task',

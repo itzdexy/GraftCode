@@ -161,6 +161,7 @@ const MIME: Record<string, string> = {
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
   '.ttf': 'font/ttf',
@@ -174,16 +175,28 @@ const MIME: Record<string, string> = {
 /**
  * Maps unguessable tokens to an artifact's folder. A preview URL is
  * graft-artifact://<token>/<file>; relative assets resolve inside that
- * folder only.
+ * folder only. A token made for one file (a picture in the Files panel)
+ * serves that file and nothing beside it.
  */
 const MAX_PREVIEW_TOKENS = 64;
 
 export class ArtifactServer {
-  private readonly roots = new Map<string, string>();
+  private readonly roots = new Map<string, { root: string; only: string | null }>();
 
+  /** An address for a page and whatever it links to in its own folder. */
   urlFor(file: string): string {
+    return this.grant(file, false);
+  }
+
+  /** An address for one file alone. */
+  urlForFile(file: string): string {
+    return this.grant(file, true);
+  }
+
+  private grant(file: string, alone: boolean): string {
+    const resolved = path.resolve(file);
     const token = randomBytes(16).toString('hex');
-    this.roots.set(token, path.dirname(path.resolve(file)));
+    this.roots.set(token, { root: path.dirname(resolved), only: alone ? resolved : null });
     // Each preview gets a fresh token; forget the oldest so the map stays small.
     while (this.roots.size > MAX_PREVIEW_TOKENS) {
       const oldest = this.roots.keys().next().value;
@@ -201,11 +214,12 @@ export class ArtifactServer {
     } catch {
       return new Response('Bad request', { status: 400 });
     }
-    const root = this.roots.get(url.hostname);
-    if (!root) return new Response('Not found', { status: 404 });
+    const granted = this.roots.get(url.hostname);
+    if (!granted) return new Response('Not found', { status: 404 });
+    const { root, only } = granted;
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
     const file = path.resolve(root, rel);
-    if (!isInsideReal(root, file)) return new Response('Forbidden', { status: 403 });
+    if (!isInsideReal(root, file) || (only !== null && file !== only)) return new Response('Forbidden', { status: 403 });
     let data: Buffer;
     try {
       data = await fs.promises.readFile(file);

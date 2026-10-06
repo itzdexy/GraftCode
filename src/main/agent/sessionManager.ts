@@ -5,6 +5,7 @@ import { dataHandling } from '@shared/privacy';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import type { EffortLevel, ModelRef, PermissionMode } from '@shared/schemas/common';
 import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from '@shared/schemas/messages';
+import type { MissionStart } from '@shared/schemas/missions';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { RewindMode, RewindPreview, RewindResult } from '@shared/schemas/rewind';
 import type { SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
@@ -27,10 +28,14 @@ import { HookRunner } from './hooks';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
 import { generateTitle, titleModel } from './title';
+import type { McpPromptInfo } from '../mcp/mcpManager';
 
 export interface McpToolSource {
   toolNames(projectRoot: string | null): string[];
   serverNames(projectRoot: string | null): string[];
+  instructions(projectRoot: string | null): Array<{ server: string; text: string }>;
+  prompts(projectRoot: string | null): McpPromptInfo[];
+  getPrompt(server: string, name: string, args: Record<string, string>, projectRoot: string | null): Promise<{ text: string; description: string | null }>;
   /** Connects a trusted project's own servers (no-op for untrusted projects). */
   useProject(root: string, trusted: boolean): Promise<void>;
 }
@@ -53,6 +58,7 @@ export interface SessionManagerDeps {
   /** Files chats make for download; deleted with their chat. */
   chatFiles: ChatFiles | null;
   runCode: SessionDeps['runCode'];
+  media: SessionDeps['media'];
   /** The Browser panel for the agent's Browser tool; absent where there is none. */
   browser?: SessionDeps['browser'];
   /** Sites from the Sites tab, for the prompt of a session that builds one. */
@@ -85,6 +91,8 @@ export class SessionManager {
     for (const s of this.deps.repo.list({ includeArchived: true })) {
       if (s.status === 'running' || s.status === 'needs-input') this.deps.repo.updateSession(s.id, { status: 'idle' });
     }
+    this.deps.repo.recoverAgentRuns();
+    this.deps.repo.recoverMissions();
   }
 
   setActive(id: string | null): void {
@@ -127,13 +135,15 @@ export class SessionManager {
     return {
       store,
       models: {
-        resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) })
+        resolve: async (ref, signal) => ({ provider: d.registry.get(ref.providerId), model: await d.registry.resolveModel(ref, signal) }),
+        candidates: async (signal) => (await d.registry.allModels(signal ? { signal } : {})).flatMap((p) => p.models)
       },
       providerName: (providerId) => d.registry.providerName(providerId),
       search: d.search,
       computer: d.computer,
       chatFiles: d.chatFiles,
       runCode: d.runCode,
+      media: d.media,
       ...(d.browser ? { browser: d.browser } : {}),
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
@@ -144,6 +154,9 @@ export class SessionManager {
       tools: d.tools,
       mcpToolNames: (root) => d.mcp?.toolNames(root) ?? [],
       mcpServerNames: (root) => d.mcp?.serverNames(root) ?? [],
+      mcpInstructions: (root) => d.mcp?.instructions(root) ?? [],
+      mcpPrompts: (root) => d.mcp?.prompts(root) ?? [],
+      mcpPrompt: (server, name, args, root) => (d.mcp ? d.mcp.getPrompt(server, name, args, root) : Promise.reject(new Error('No MCP servers are connected.'))),
       shells: d.shells,
       shellLabel: d.shell.label,
       settings: d.settingsFiles,
@@ -171,7 +184,8 @@ export class SessionManager {
           incognitoLocalOnly: s.privacy.incognitoLocalOnly,
           computerUse: s.behavior.computerUse,
           personalization: s.personalization,
-          maxSteps: s.behavior.maxSteps
+          maxSteps: s.behavior.maxSteps,
+          agents: s.agents
         };
       },
       gitInfo: async (cwd) => {
@@ -367,6 +381,26 @@ export class SessionManager {
 
   interrupt(id: string): void {
     this.live.get(id)?.interrupt();
+  }
+
+  stopAgent(id: string, runId: string): boolean {
+    return this.live.get(id)?.stopAgent(runId) ?? false;
+  }
+
+  startMission(id: string, input: MissionStart): { queued: boolean } {
+    return this.get(id).startMission(input);
+  }
+
+  pauseMission(id: string): void {
+    this.get(id).pauseMission();
+  }
+
+  resumeMission(id: string, extraTurns?: number): void {
+    this.get(id).resumeMission(extraTurns);
+  }
+
+  cancelMission(id: string): void {
+    this.get(id).cancelMission();
   }
 
   respondPermission(sessionId: string, response: PermissionResponse): void {

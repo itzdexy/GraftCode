@@ -219,10 +219,15 @@
   .app-drag :is(button, input, textarea, select, a, [role='button'], [role='radio'], [role='menuitem'], [tabindex]) {
     -webkit-app-region: no-drag;
   }
+  /* Tailwind moves and scales with the translate, scale and rotate properties, so they are listed beside transform. */
   .transition-ui {
     transition-duration: var(--g-duration-fast);
     transition-timing-function: var(--g-ease);
-    transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+    transition-property: color, background-color, border-color, opacity, box-shadow, transform, translate, scale, rotate;
+  }
+  /* A button gives a little under the pointer, so a click is felt before its result shows. */
+  .pressable:active:not(:disabled) {
+    scale: 0.97;
   }
   .scrollbar-stable {
     scrollbar-gutter: stable;
@@ -262,6 +267,142 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/*
+ * Things that open over the page. Menus, popovers and tooltips grow from the
+ * control that opened them (Radix gives the origin) and step a few pixels
+ * away from it; dialogs settle into place. All of them leave faster than they
+ * came, so closing never feels like waiting.
+ */
+@keyframes graft-pop-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--g-pop-x, 0), var(--g-pop-y, 0)) scale(0.96);
+  }
+}
+@keyframes graft-pop-out {
+  to {
+    opacity: 0;
+    transform: translate(var(--g-pop-x, 0), var(--g-pop-y, 0)) scale(0.97);
+  }
+}
+@keyframes graft-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes graft-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
+@keyframes graft-dialog-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@layer utilities {
+  .overlay-pop {
+    transform-origin: var(--radix-popper-transform-origin, center);
+  }
+  .overlay-pop[data-side='bottom'] {
+    --g-pop-y: -4px;
+  }
+  .overlay-pop[data-side='top'] {
+    --g-pop-y: 4px;
+  }
+  .overlay-pop[data-side='left'] {
+    --g-pop-x: 4px;
+  }
+  .overlay-pop[data-side='right'] {
+    --g-pop-x: -4px;
+  }
+  .overlay-pop[data-state='open'],
+  .overlay-pop[data-state='delayed-open'] {
+    animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
+  }
+  .overlay-pop[data-state='closed'] {
+    animation: graft-pop-out var(--g-duration-exit) var(--g-ease-in) forwards;
+  }
+  .overlay-scrim[data-state='open'] {
+    animation: graft-fade var(--g-duration-base) var(--g-ease);
+  }
+  .overlay-scrim[data-state='closed'] {
+    animation: graft-fade-out var(--g-duration-exit) var(--g-ease-in) forwards;
+  }
+  .overlay-dialog[data-state='open'] {
+    animation: graft-dialog-in var(--g-duration-base) var(--g-ease-out);
+  }
+  .overlay-dialog[data-state='closed'] {
+    animation: graft-dialog-out var(--g-duration-exit) var(--g-ease-in) forwards;
+  }
+  /* A tooltip fades in after its delay; one that follows another within the skip delay is there at once. */
+  .overlay-tip[data-state='delayed-open'] {
+    animation: graft-fade var(--g-duration-fast) var(--g-ease);
+  }
+  /* Opened from the keyboard and used many times a day: these appear almost at once. */
+  .overlay-quick[data-state='open'] {
+    animation: graft-pop-in 90ms var(--g-ease-out);
+  }
+  .overlay-quick[data-state='closed'] {
+    animation: graft-fade-out 70ms var(--g-ease-in) forwards;
+  }
+}
+
+/*
+ * Sections that open in place (a step's details, a diff, a thought) grow to
+ * their own height and fold back. The row goes from 0fr to 1fr, so no height
+ * is measured in script; Collapse.tsx keeps the content until it has folded.
+ */
+.graft-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--g-duration-base) var(--g-ease-out),
+    opacity var(--g-duration-base) var(--g-ease-out);
+}
+.graft-collapse > * {
+  min-height: 0;
+  /* Clipped while it moves, with room for a focus ring on the first and last rows. */
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+@starting-style {
+  .graft-collapse--enter {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+.graft-collapse[data-state='closed'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition-duration: var(--g-duration-exit);
+  transition-timing-function: var(--g-ease-in);
+}
+
+/*
+ * The sidebar slides under the page's left edge and back: its column goes from
+ * its own width to nothing, and the sidebar keeps its width while it is covered.
+ */
+.graft-slide-x {
+  display: grid;
+  grid-template-columns: 1fr;
+  transition: grid-template-columns var(--g-duration-slow) var(--g-ease-out);
+}
+.graft-slide-x > * {
+  min-width: 0;
+  /* The resize handle reaches a few pixels past the sidebar's edge. */
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+.graft-slide-x[data-state='closed'] {
+  grid-template-columns: 0fr;
+  transition-duration: var(--g-duration-base);
+  transition-timing-function: var(--g-ease);
 }
 
 /*
@@ -309,6 +450,24 @@
     opacity: 0.35;
   }
 }
+@keyframes graft-step {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+@keyframes graft-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+@keyframes graft-toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px) scale(0.98);
+  }
+}
 
 @layer utilities {
   .motion-rise {
@@ -323,6 +482,27 @@
   }
   .motion-pulse {
     animation: graft-pulse 1600ms ease-in-out infinite;
+  }
+  /* A step joining a block that is still working: it is there at once, and settles in from just below. */
+  .motion-step {
+    animation: graft-step 200ms var(--g-ease-out) both;
+  }
+  /* A toast comes up from the corner and leaves towards the edge it sits by. */
+  .graft-toast {
+    animation: graft-slide-up 260ms var(--g-ease-out) both;
+  }
+  .graft-toast[data-state='closed'] {
+    animation: graft-toast-out var(--g-duration-exit) var(--g-ease-in) forwards;
+  }
+  /* Small things the user just added (an attachment, a chip): they pop into place. */
+  .motion-pop {
+    animation: graft-pop var(--g-duration-base) var(--g-ease-out) both;
+  }
+  /* The list of commands and files above the message box grows up from it. */
+  .motion-menu-up {
+    --g-pop-y: 4px;
+    transform-origin: bottom center;
+    animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
   }
   .motion-stagger > * {
     animation: graft-rise 420ms var(--g-ease-out) both;
@@ -443,28 +623,93 @@
     var(--g-shadow-composer),
     0 0 0 3px color-mix(in srgb, var(--g-accent) 12%, transparent);
 }
+/*
+ * Its button turns from send into stop in place: the arrow shrinks out as the
+ * square grows in, and the whole button springs back from a press.
+ */
 .send-button {
-  transition-property: color, background-color, transform;
+  transition:
+    background-color var(--g-duration-fast) var(--g-ease),
+    color var(--g-duration-fast) var(--g-ease),
+    scale var(--g-duration-spring) var(--g-ease-spring);
 }
 .send-button:active:not(:disabled) {
-  transform: scale(0.88);
+  scale: 0.9;
+  transition-duration: var(--g-duration-fast);
+}
+.send-button__send,
+.send-button__stop {
+  transition:
+    opacity var(--g-duration-fast) var(--g-ease),
+    scale var(--g-duration-base) var(--g-ease-out);
+}
+.send-button[data-mode='send'] .send-button__stop,
+.send-button[data-mode='stop'] .send-button__send {
+  opacity: 0;
+  scale: 0.4;
 }
 
+/* Reduced motion (see tokens.css): the system's request unless Motion is On, or Motion set to Reduced. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion='full']) *,
+  :root:not([data-motion='full']) *::before,
+  :root:not([data-motion='full']) *::after {
     animation-duration: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0ms !important;
   }
 }
-:root[data-reduced-motion='true'] *,
-:root[data-reduced-motion='true'] *::before,
-:root[data-reduced-motion='true'] *::after {
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
   animation-duration: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0ms !important;
+}
+
+/*
+ * A reply streams in like ink settling: each word fades up as it arrives
+ * (Markdown.tsx wraps the words only while the reply streams). No fill mode,
+ * so a word that has arrived carries no animation afterwards.
+ */
+/* Behind a previewed picture: a quiet checkerboard, so transparent parts read as transparent. */
+.graft-checker {
+  background: repeating-conic-gradient(var(--g-surface-control) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+}
+
+/*
+ * The Agents panel: a line from each agent to what it waits for. Dashed until
+ * the agent above is done; once its report has gone down the line it is solid,
+ * and it moves while the agent below works on it.
+ */
+.agent-edge {
+  fill: none;
+  stroke: var(--g-border-strong);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 4;
+  transition: stroke var(--g-duration-base) var(--g-ease-out);
+}
+.agent-edge--settled {
+  stroke-dasharray: none;
+}
+.agent-edge--flowing {
+  stroke: var(--g-blue);
+  stroke-dasharray: 4 5;
+  animation: graft-flow 700ms linear infinite;
+}
+@keyframes graft-flow {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+@keyframes graft-word-in {
+  from {
+    opacity: 0;
+  }
+}
+.graft-word {
+  animation: graft-word-in 300ms var(--g-ease);
 }
 
 /* Rendered markdown in transcripts. Tailwind's preflight resets margins and list styles. */

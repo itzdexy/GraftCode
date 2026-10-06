@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { INTEGRATIONS } from '../../src/shared/integrations';
+import { INTEGRATION_CATEGORIES, INTEGRATIONS } from '../../src/shared/integrations';
 import { findCommand, integrationSetup, integrationStatus } from '../../src/main/mcp/integrations';
 import { resolveSecrets, secretId, secretRefs, serverKey } from '../../src/main/mcp/mcpConfig';
 
@@ -57,6 +57,20 @@ describe('integrations', () => {
     expect(roblox.config).toMatchObject({ type: 'stdio', command: 'cmd.exe', args: ['/c', `${winEnv.LOCALAPPDATA}\\Roblox\\mcp.bat`] });
     const godot = integrationSetup('godot', { GODOT_PATH: '  C:\\Godot\\godot.exe ' }, 'linux', { PATH: '' }, files([]));
     expect(godot.config).toMatchObject({ type: 'stdio', command: 'npx', args: ['-y', '@coding-solo/godot-mcp'], env: { GODOT_PATH: 'C:\\Godot\\godot.exe' } });
+  });
+
+  it('sets Ghidra up for reverse engineering: the documented server, with the folder Ghidra is installed in', () => {
+    const ghidra = INTEGRATIONS.find((i) => i.id === 'ghidra')!;
+    expect(ghidra.category).toBe('Reverse engineering');
+    expect(INTEGRATION_CATEGORIES).toContain('Reverse engineering');
+    const status = Object.fromEntries(integrationStatus('win32', winEnv, files([])).map((s) => [s.id, s.blocker]));
+    expect(status.ghidra).toEqual({ kind: 'runtime', runtime: 'uv' });
+    const uvx = path.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
+    const setup = integrationSetup('ghidra', { GHIDRA_INSTALL_DIR: ' C:\\ghidra ' }, 'win32', winEnv, files([uvx]));
+    // The launch its own documentation gives: uvx pyghidra-mcp --transport stdio, with GHIDRA_INSTALL_DIR set.
+    expect(setup.config).toEqual({ type: 'stdio', command: uvx, args: ['pyghidra-mcp', '--transport', 'stdio'], env: { GHIDRA_INSTALL_DIR: 'C:\\ghidra' }, keepEnv: [], cwd: null, enabled: true });
+    expect(setup.secrets).toEqual({});
+    expect(() => integrationSetup('ghidra', {}, 'linux', { PATH: '' }, files([]))).toThrow(/Enter the ghidra folder first/);
   });
 
   it('keeps tokens in the key store and only a reference to them in the settings', () => {

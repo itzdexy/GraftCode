@@ -34,7 +34,7 @@ export function renderTranscript(history: LlmMessage[], budgetChars: number): st
       else if (b.type === 'tool_result') {
         const text = b.content.map((c) => (c.type === 'text' ? c.text : '[image]')).join('\n');
         lines.push(`[${b.isError ? 'error' : 'result'}] ${clip(text, 1500)}`);
-      } else if (b.type === 'provider') lines.push(`[${b.summary}]`);
+      } else if (b.type === 'provider' && b.summary.length > 0) lines.push(`[${b.summary}]`);
     }
     if (lines.length > 0) parts.push(`## ${m.role === 'user' ? 'User' : 'Assistant'}\n${lines.join('\n')}`);
   }

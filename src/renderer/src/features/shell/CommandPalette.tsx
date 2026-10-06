@@ -4,6 +4,7 @@ import { Check, ChevronRight } from 'lucide-react';
 import { Kbd } from '../../components/Badge';
 import { cn } from '../../lib/cn';
 import { fuzzyFilter } from '../../lib/fuzzy';
+import { usePresence } from '../../lib/motion';
 import { shortcutText } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useNav } from '../../stores/nav';
@@ -174,17 +175,19 @@ function PalettePanel() {
 export function CommandPalette() {
   const isOpen = useUi((s) => s.paletteOpen);
   const setOpen = useUi((s) => s.setPaletteOpen);
+  // The panel stays while the palette fades out, then is dropped so each opening starts fresh.
+  const present = usePresence(isOpen);
   return (
     <RD.Root open={isOpen} onOpenChange={(open) => setOpen(open)}>
       <RD.Portal>
-        <RD.Overlay className="fixed inset-0 z-[var(--g-z-dialog)] bg-overlay data-[state=open]:animate-[graft-fade_var(--g-duration-base)_var(--g-ease)]" />
+        <RD.Overlay className="overlay-scrim fixed inset-0 z-[var(--g-z-dialog)] bg-overlay" />
         <RD.Content
           aria-label="Command palette"
-          className="fixed top-[12vh] left-1/2 z-[var(--g-z-dialog)] flex max-h-[70vh] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-popover outline-none data-[state=open]:animate-[graft-menu-in_var(--g-duration-base)_var(--g-ease)]"
+          className="overlay-quick fixed top-[12vh] left-1/2 z-[var(--g-z-dialog)] flex max-h-[70vh] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-popover outline-none"
         >
           <RD.Title className="sr-only">Command palette</RD.Title>
           <RD.Description className="sr-only">Search for a command and press Enter to run it.</RD.Description>
-          {isOpen ? <PalettePanel /> : null}
+          {present ? <PalettePanel /> : null}
         </RD.Content>
       </RD.Portal>
     </RD.Root>

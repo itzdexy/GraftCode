@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type P
 import { LoadingState } from '../../components/States';
 import { useApp } from '../../stores/app';
 import { panelsOf, PANEL_MIN_WIDTH, usePanels, type PanelId } from '../../stores/panels';
+import { AgentsPanel } from './AgentsPanel';
 import { BrowserPanelView } from './BrowserPanel';
 import { ChangesPanel } from './ChangesPanel';
 import { TasksPanel } from './TasksPanel';
@@ -74,6 +75,8 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
         return <BrowserPanelView key={id} sessionId={sessionId} onClose={onClose} />;
       case 'tasks':
         return <TasksPanel key={id} sessionId={sessionId} wide={wide} onToggleWide={() => usePanels.getState().toggleWide()} onClose={onClose} />;
+      case 'agents':
+        return <AgentsPanel key={id} sessionId={sessionId} wide={wide} onToggleWide={() => usePanels.getState().toggleWide()} onClose={onClose} />;
     }
   };
 

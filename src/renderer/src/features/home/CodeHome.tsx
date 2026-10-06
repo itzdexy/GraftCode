@@ -8,9 +8,11 @@ import { LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { relativeTime } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
+import { motionTip, useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { useNav } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
+import { reportError } from '../../stores/toasts';
 import { useUi, type CodeContext } from '../../stores/ui';
 import { Composer } from '../composer/Composer';
 import { ContextUsage } from '../composer/ContextUsage';
@@ -118,6 +120,8 @@ export function CodeHome() {
   const defaults = useDefaults(project);
   const branches = useBranches(context?.projectPath);
   const isRepo = branches.status === 'ready' && branches.list.isRepo;
+  const motion = useApp((s) => s.settings?.appearance.motion ?? 'system');
+  const systemStill = useSystemReducedMotion();
 
   const sessions = useMemo(() => homeSessions(Object.values(summaries), 'code', HOME_LIST_LIMIT), [summaries]);
 
@@ -157,7 +161,13 @@ export function CodeHome() {
           useUi.getState().focusComposer?.();
         },
         openSearch: () => useUi.getState().setSearchOpen(true),
-        focusComposer: () => useUi.getState().focusComposer?.()
+        focusComposer: () => useUi.getState().focusComposer?.(),
+        motion: motionTip(motion, systemStill, window.graft.platform === 'win32' ? 'Windows' : window.graft.platform === 'darwin' ? 'macOS' : 'Your system', () => {
+          useApp
+            .getState()
+            .updateSettings({ appearance: { motion: 'on' } })
+            .catch((e: unknown) => reportError("Couldn't turn animations on", e));
+        })
       })
     : [];
 

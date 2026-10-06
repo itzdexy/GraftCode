@@ -1,16 +1,22 @@
 import { useMemo } from 'react';
 import { SearchResultList } from '../web/SearchResults';
-import { CircleCheck, CircleDashed, CircleDot, FileText } from 'lucide-react';
+import { CircleCheck, CircleDashed, CircleDot, Copy, FileText, FolderOpen } from 'lucide-react';
 import type { ToolResultBlock } from '@shared/schemas/messages';
 import type { TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import { Badge } from '../../components/Badge';
+import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
+import { useLoad } from '../../lib/useLoad';
+import { useNav } from '../../stores/nav';
+import { usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { countChanges, parsePatch } from '../diff/diffModel';
 import { CodeBlock } from './CodeBlock';
+import { AGENT_STATUS_LABEL, AgentStatusGlyph, isAgentStatus } from '../panels/AgentStatus';
+import { FileMenu, useFileActions } from '../panels/FileMenu';
 import { fileSize } from './FilesCard';
 import { Markdown } from './Markdown';
 import type { ToolCall } from './transcriptModel';
@@ -22,6 +28,12 @@ function resultText(result: ToolResultBlock): string {
     .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
     .map((b) => b.text)
     .join('\n');
+}
+
+/** Opens the Agents panel of the session on screen (a transcript is only ever shown for that one). */
+function showAgents(): void {
+  const route = useNav.getState().route;
+  if (route.name === 'session') usePanels.getState().show(route.id, 'agents');
 }
 
 function revealLog(path: string): void {
@@ -47,6 +59,50 @@ export function TodoList({ todos, className }: { todos: TodoItem[]; className?: 
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * A picture the agent read: shown from what the model was sent, or, for a
+ * model that can't see pictures, loaded from the session's folder. Its path
+ * can be copied and its folder opened from here.
+ */
+function ReadImage({ path, result }: { path: string; result: ToolResultBlock }) {
+  const sessionId = useNav((s) => (s.route.name === 'session' ? s.route.id : null));
+  const run = useFileActions(sessionId ?? '');
+  const sent = result.content.find((b) => b.type === 'image');
+  // Paths outside the session's folder are shown as "~/…" or in full; only a path inside it can be loaded and acted on.
+  const inside = sessionId !== null && !/^(~|[\\/]|[A-Za-z]:)/.test(path);
+  const { load } = useLoad(() => (sent || !inside ? Promise.resolve(null) : invoke('files:previewUrl', { sessionId, path })), `${sessionId ?? ''}:${path}:${sent ? 'sent' : 'load'}`);
+  const src = sent?.type === 'image' ? `data:${sent.mediaType};base64,${sent.data}` : load.status === 'ready' ? (load.data?.url ?? null) : null;
+  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+  return (
+    <div className="flex flex-col gap-6">
+      {src ? (
+        <img src={src} alt={`The picture ${name}`} className="graft-checker block max-h-[320px] w-auto max-w-full self-start rounded-sm border border-border-card object-contain" />
+      ) : (
+        <p className="flex items-center gap-6 text-sm text-fg-muted">
+          <FileText className="size-12" aria-hidden="true" />
+          {load.status === 'loading' ? 'Loading the picture…' : 'Image'}
+        </p>
+      )}
+      <div className="flex items-center gap-2">
+        <span className="selectable min-w-0 truncate font-mono text-2xs text-fg-faint" title={path}>
+          {path}
+        </span>
+        {inside ? (
+          <>
+            <IconButton label="Copy path" size="xs" onClick={() => run('copy-path', { path, type: 'file' })}>
+              <Copy className="size-12" />
+            </IconButton>
+            <IconButton label="Show in folder" size="xs" onClick={() => run('reveal', { path, type: 'file' })}>
+              <FolderOpen className="size-12" />
+            </IconButton>
+            <FileMenu sessionId={sessionId} target={{ path, type: 'file' }} />
+          </>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -86,10 +142,11 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
     case 'kill-shell':
       return <p className="text-sm text-fg-muted">{display.killed ? `Stopped ${display.shellId}.` : `${display.shellId} had already finished.`}</p>;
     case 'read':
+      if (display.image) return <ReadImage path={display.path} result={result} />;
       return (
         <p className="flex items-center gap-6 text-sm text-fg-muted">
           <FileText className="size-12" aria-hidden="true" />
-          {display.image ? 'Image' : `Lines ${display.startLine}–${display.endLine} of ${display.totalLines}`}
+          Lines {display.startLine}–{display.endLine} of {display.totalLines}
         </p>
       );
     case 'edit':
@@ -157,6 +214,22 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
         </div>
       );
     }
+    case 'media':
+      return (
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-fg-muted">
+            {display.model || display.engine}
+            {display.costUsd !== null && display.costUsd > 0 ? ` · $${display.costUsd.toFixed(display.costUsd < 0.1 ? 3 : 2)}` : ''}
+            {display.files.length > 0 ? ` · ${display.files.map((f) => f.path).join(', ')}` : ''}
+          </p>
+          {display.prompt ? <p className="selectable text-sm whitespace-pre-wrap text-fg-secondary">{display.prompt}</p> : null}
+          <div className="flex flex-wrap gap-6">
+            {display.files.map((file) =>
+              file.thumb ? <img key={file.path} src={`data:image/jpeg;base64,${file.thumb}`} alt={`Generated: ${file.path}`} className="max-h-[200px] rounded-sm border border-border-card object-contain" /> : null
+            )}
+          </div>
+        </div>
+      );
     case 'todos':
       return <TodoList todos={display.todos} />;
     case 'task':
@@ -166,6 +239,34 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
             {display.toolCalls} tool {display.toolCalls === 1 ? 'call' : 'calls'}
           </p>
           <Markdown text={display.summary} variant="code" />
+        </div>
+      );
+    case 'mission':
+      return (
+        <p className="selectable text-sm whitespace-pre-wrap text-fg-secondary">
+          {display.action === 'note' && display.noteKind ? <span className="text-fg-muted">{display.noteKind}: </span> : null}
+          {display.text}
+        </p>
+      );
+    case 'agents':
+      return (
+        <div className="flex flex-col gap-6">
+          <ul aria-label="Agents" className="flex flex-col gap-3">
+            {display.agents.map((agent) => (
+              <li key={agent.nodeId} className="flex items-center gap-6 text-sm">
+                {isAgentStatus(agent.status) ? <AgentStatusGlyph status={agent.status} /> : null}
+                <span className="min-w-0 truncate text-fg-secondary">{agent.title}</span>
+                <span className="shrink-0 text-2xs text-fg-faint tabular-nums">
+                  {agent.role}
+                  {isAgentStatus(agent.status) && agent.status !== 'done' ? ` · ${AGENT_STATUS_LABEL[agent.status].toLowerCase()}` : ''}
+                  {agent.durationMs !== null ? ` · ${formatDuration(agent.durationMs)}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button type="button" onClick={showAgents} className="self-start text-sm text-link hover:underline">
+            Open the agent graph
+          </button>
         </div>
       );
     case 'question':

@@ -24,6 +24,8 @@ import { detectShell, type ShellSpec } from '../tools/shell/detect';
 import { ShellManager } from '../tools/shell/shellManager';
 import { SandboxManager } from '../sandbox/sandbox';
 import { SiteServer } from '../sites/siteServer';
+import type { ImageProviderKind } from '../media/images';
+import { MediaService, type ProviderImageAccess } from '../media/mediaService';
 import { starterPage, SitesStore } from '../sites/sites';
 import { log } from './log';
 import type { GraftPaths } from './paths';
@@ -38,6 +40,8 @@ export interface Services {
   catalog: ProviderCatalog;
   /** Engine behind the WebSearch tool (Settings → Web search). */
   search: SearchService;
+  /** Image models and ComfyUI behind the GenerateImage and ComfyUI tools (Settings → Images). */
+  media: MediaService;
   projects: ProjectsRepo;
   sessionsRepo: SessionsRepo;
   checkpoints: CheckpointService;
@@ -105,6 +109,38 @@ function searchService(settings: AppSettingsService, keys: KeyStore, registry: P
   });
 }
 
+const IMAGE_PROVIDERS: readonly string[] = ['openrouter', 'openai', 'gemini'] satisfies ImageProviderKind[];
+
+/**
+ * Generated media. Providers that make images are the vendors' own endpoints
+ * with a key (a custom or local server may not have an images endpoint); the
+ * default model's provider comes first, so "auto" spends on the key the user
+ * already works with.
+ */
+function mediaService(settings: AppSettingsService, keys: KeyStore, registry: ProviderRegistry, graftHome: string, thumbnail: MediaThumbnail | undefined): MediaService {
+  return new MediaService({
+    settings: () => settings.get().media,
+    graftHome,
+    ...(thumbnail ? { thumbnail } : {}),
+    providers: () => {
+      const preferred = settings.get().defaults.model?.providerId ?? null;
+      const usable = registry.summaries().filter((p) => p.enabled && p.hasKey && IMAGE_PROVIDERS.includes(p.kind));
+      return [...usable.filter((p) => p.id === preferred), ...usable.filter((p) => p.id !== preferred)].flatMap((p): ProviderImageAccess[] => {
+        let apiKey: string | null;
+        try {
+          apiKey = keys.get(p.id);
+        } catch {
+          apiKey = null;
+        }
+        return apiKey ? [{ kind: p.kind as ImageProviderKind, apiKey, baseUrl: p.baseUrl }] : [];
+      });
+    }
+  });
+}
+
+/** Makes a small JPEG of a picture for the transcript (Electron's image code, passed in so this module stays free of Electron). */
+export type MediaThumbnail = (data: Buffer) => { mediaType: 'image/jpeg'; data: string } | null;
+
 async function locate(binary: string): Promise<string | null> {
   const finder = process.platform === 'win32' ? 'where' : 'which';
   try {
@@ -127,6 +163,8 @@ export async function initServices(options: {
   onProgress: ProgressFn;
   /** Provider and model catalog shipped with the app (resources/catalog/models.json). */
   catalogFile?: string | null;
+  /** Previews of generated pictures; absent where images can't be resized. */
+  thumbnail?: MediaThumbnail;
 }): Promise<Services> {
   const { paths, onProgress } = options;
   const total = 6;
@@ -178,6 +216,7 @@ export async function initServices(options: {
     registry,
     catalog,
     search: searchService(settings, keys, registry),
+    media: mediaService(settings, keys, registry, paths.graftHome, options.thumbnail),
     projects: new ProjectsRepo(db),
     sessionsRepo: new SessionsRepo(db),
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),

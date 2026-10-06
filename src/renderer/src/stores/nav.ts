@@ -10,6 +10,7 @@ export type SettingsSection =
   | 'models'
   | 'permissions'
   | 'sandbox'
+  | 'media'
   | 'privacy'
   | 'search'
   | 'voice'

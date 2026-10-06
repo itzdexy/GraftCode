@@ -2,14 +2,11 @@ import { Download, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText
 import type { MadeFile } from '@shared/schemas/toolDisplay';
 import { canOpenChatFile } from '@shared/chatFileTypes';
 import { IconButton } from '../../components/Button';
+import { fileSize } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
 import { reportError, useToasts } from '../../stores/toasts';
 
-export function fileSize(bytes: number): string {
-  if (bytes < 1024) return `${String(bytes)} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
+export { fileSize };
 
 function iconFor(file: MadeFile): typeof FileText {
   if (file.mime.startsWith('image/')) return FileImage;

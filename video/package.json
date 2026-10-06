@@ -1,0 +1,11 @@
+{
+  "name": "graft-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Graft's launch film: the real renderer, shot frame by frame.",
+  "scripts": {
+    "app": "node ../node_modules/vite/bin/vite.js build --config film/vite.config.mjs",
+    "film": "node film/film.mjs",
+    "sheet": "node film/film.mjs --sheet"
+  }
+}

@@ -66,8 +66,10 @@ export function codeHomeTips(options: {
   prefill: (text: string) => void;
   openSearch: () => void;
   focusComposer: () => void;
+  /** The tip from motionTip, when the system keeps Graft still. */
+  motion: Tip | null;
 }): Tip[] {
-  const tips: Tip[] = [];
+  const tips: Tip[] = options.motion ? [options.motion] : [];
   if (options.isRepo && !options.worktreeOn) {
     tips.push({
       id: 'code-worktree',

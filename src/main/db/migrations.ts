@@ -155,5 +155,34 @@ UPDATE providers SET preset = CASE kind
   ELSE NULL
 END;
 `
+  },
+  {
+    version: 3,
+    name: 'agent runs',
+    sql: `
+CREATE TABLE agent_runs (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  group_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_agent_runs_session ON agent_runs (session_id, created_at);
+`
+  },
+  {
+    version: 4,
+    name: 'missions',
+    sql: `
+CREATE TABLE missions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_missions_session ON missions (session_id, created_at);
+`
   }
 ];

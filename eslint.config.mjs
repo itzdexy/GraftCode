@@ -14,7 +14,9 @@ export default defineConfig(
       'test-results/**',
       'playwright-report/**',
       'build/**',
-      'resources/**'
+      'resources/**',
+      // The launch film is its own package: page scripts and a film script (video/README.md).
+      'video/**'
     ]
   },
   js.configs.recommended,

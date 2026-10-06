@@ -6,11 +6,13 @@ import type { ModelInfo } from '../../src/shared/schemas/models';
 import type { SessionSummary } from '../../src/shared/schemas/sessions';
 import type { HookEvent } from '../../src/shared/schemas/config';
 import { MemorySessionStore } from '../../src/main/db/memorySessionStore';
+import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import { EMPTY_SESSION_USAGE } from '../../src/main/db/sessionsRepo';
 import { AgentSession, type SessionDeps, type SessionPreferences } from '../../src/main/agent/session';
 import { HookRunner } from '../../src/main/agent/hooks';
 import { SettingsStore, type ScopedHook } from '../../src/main/permissions/settingsStore';
 import { createBuiltinRegistry } from '../../src/main/tools/builtin';
+import type { ToolDefinition } from '../../src/main/tools/types';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { FakeProvider, fakeModel, type FakeStep } from './fakeProvider';
 import { makeTempDir } from './tmp';
@@ -60,6 +62,9 @@ export interface HarnessOptions {
   /** Chat file store and code sandbox (default: none). */
   chatFiles?: SessionDeps['chatFiles'];
   runCode?: SessionDeps['runCode'];
+  media?: SessionDeps['media'];
+  /** Settings → Models → Agents (default: session model, four at once, one retry, no budget). */
+  agents?: Partial<SessionPreferences['agents']>;
   /** Settings → Personalization (default: empty). */
   personalization?: SessionPreferences['personalization'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
@@ -68,6 +73,14 @@ export interface HarnessOptions {
   sandbox?: SessionDeps['sandbox'];
   /** A shell manager of the test's own (default: a plain one). */
   shells?: SessionDeps['shells'];
+  /** MCP tools connected for the session (default: none). */
+  mcpTools?: Array<ToolDefinition<Record<string, unknown>>>;
+  /** What connected MCP servers add: their notes, their prompts, and what filling one in gives (default: no servers). */
+  mcp?: {
+    instructions?: Array<{ server: string; text: string }>;
+    prompts?: McpPromptInfo[];
+    getPrompt?: (server: string, name: string, args: Record<string, string>) => Promise<{ text: string; description: string | null }>;
+  };
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -108,6 +121,8 @@ export function makeHarness(options: HarnessOptions): Harness {
   const titles: string[] = [];
   const shell = detectShell(process.platform, process.env);
   const settings = new SettingsStore(home);
+  const registry = createBuiltinRegistry();
+  for (const tool of options.mcpTools ?? []) registry.upsert(tool);
   const deps: SessionDeps = {
     store,
     retryPolicy: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 20, maxRetryAfterMs: 20 },
@@ -116,17 +131,22 @@ export function makeHarness(options: HarnessOptions): Harness {
         const found = models.find((m) => m.ref.modelId === ref.modelId);
         if (!found) return Promise.reject(new Error(`unknown model ${ref.modelId}`));
         return Promise.resolve({ provider, model: found });
-      }
+      },
+      candidates: () => Promise.resolve(models)
     },
     providerName: () => 'Fake Provider',
     search: options.search ?? { active: () => null, search: () => Promise.reject(new Error('No web search engine in this test.')) },
     computer: options.computer ?? null,
     chatFiles: options.chatFiles ?? null,
     runCode: options.runCode ?? null,
+    media: options.media ?? null,
     dataHandling: () => options.dataHandling ?? 'unknown',
-    tools: createBuiltinRegistry(),
-    mcpToolNames: () => [],
-    mcpServerNames: () => [],
+    tools: registry,
+    mcpToolNames: () => (options.mcpTools ?? []).map((t) => t.name),
+    mcpServerNames: () => [...new Set((options.mcpTools ?? []).flatMap((t) => (t.mcp ? [t.mcp.server] : [])))],
+    mcpInstructions: () => options.mcp?.instructions ?? [],
+    mcpPrompts: () => options.mcp?.prompts ?? [],
+    mcpPrompt: (server, name, args) => (options.mcp?.getPrompt ? options.mcp.getPrompt(server, name, args) : Promise.reject(new Error('No MCP prompts in this test.'))),
     shells: options.shells ?? makeShellManager(path.join(home, 'shell-logs')),
     ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     shellLabel: shell.label,
@@ -149,7 +169,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       incognitoLocalOnly: options.incognitoLocalOnly ?? false,
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
-      maxSteps: options.maxSteps ?? null
+      maxSteps: options.maxSteps ?? null,
+      agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents }
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),

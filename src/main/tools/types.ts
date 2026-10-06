@@ -9,6 +9,9 @@ import type { ComputerControl } from '../computer/desktop';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
 import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
+import type { MediaAccess } from '../media/mediaService';
+import type { AgentGroupInput } from '../agent/agentGroup';
+import type { MissionUpdateInput } from '../agent/mission';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 /** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
@@ -38,6 +41,8 @@ export interface ToolContext extends DescribeContext {
   sessionId: string;
   toolUseId: string;
   signal: AbortSignal;
+  /** The project whose MCP servers this session may use (its settings folder); null for chats, which use the user's own. */
+  mcpRoot: string | null;
   files: FileStateTracker;
   shells: ShellManager;
   /** Path to the ripgrep binary. */
@@ -50,6 +55,8 @@ export interface ToolContext extends DescribeContext {
   askUser(questions: Question[]): Promise<QuestionAnswer[] | null>;
   approvePlan(plan: string): Promise<{ approved: boolean; feedback: string | null }>;
   runSubagent(input: { description: string; prompt: string; type: SubagentType }): Promise<{ text: string; toolCalls: number }>;
+  /** Runs a group of agents (RunAgents) and returns their combined report with how each one ended. */
+  runAgents(input: AgentGroupInput): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }> }>;
   /** Project notes (GRAFT.md) for directories first touched by these paths, or null. */
   notesForPaths(paths: string[]): string | null;
   /** Screen, mouse and keyboard when computer use is on (Settings → Permissions); null otherwise. */
@@ -62,6 +69,30 @@ export interface ToolContext extends DescribeContext {
   runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
   /** The Browser panel, for the Browser tool; null outside code sessions or without a window. */
   browser: AgentBrowser | null;
+  /** Image models and ComfyUI (Settings → Images); null where generated media isn't available. */
+  media: MediaAccess | null;
+  /** The session's mission while one is open (MissionUpdate); null otherwise, and always for sub-agents. */
+  mission: { update(input: MissionUpdateInput): { reply: string; isError: boolean } } | null;
+  /** Adds money a tool spent on the user's key (a generated image) to the session's cost. */
+  spend(costUsd: number): void;
+  /** MCP tools that wait to be loaded; null when the session offers all of them. */
+  deferredTools: DeferredTools | null;
+}
+
+/** An MCP tool whose definition is not sent with every request: found by searching, then loaded. */
+export interface DeferredTool {
+  name: string;
+  server: string;
+  description: string;
+}
+
+/** The tools of a big MCP setup that wait to be loaded (ToolSearch); null when every tool is offered. */
+export interface DeferredTools {
+  find(query: string, limit: number): DeferredTool[];
+  /** Offers these tools from the next request on, for the rest of the session. */
+  load(names: string[]): void;
+  /** What is waiting, for when a search finds nothing. */
+  summary(): string;
 }
 
 /** The Browser panel as the agent drives it. Pages are isolated from the user's files and accounts. */

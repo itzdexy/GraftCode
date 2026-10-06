@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode, type Usage } from '@shared/schemas/common';
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
+import { MISSION_LIMITS, missionOpen, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
 import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
@@ -24,18 +25,38 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { AgentBrowser, SubagentType, ToolContext } from '../tools/types';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
 import type { ChatFile } from '../chat/chatFiles';
+import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { summarizeSession, summaryMessageText } from './compaction';
-import { runChecks } from './checks';
+import { checksSummary, runChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { toLlmHistory, withSentTimes } from './history';
 import { runAgentLoop, type LoopHost, type PermissionAnswer, type PermissionPrompt } from './loop';
+import type { McpPromptInfo } from '../mcp/mcpManager';
+import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
 import { expandMentions } from './mentions';
 import { BUILTIN_AGENTS, loadAgents, subagentTools } from './agents';
+import { runAgentGroup, type AgentGroupInput, type AgentGroupSettings } from './agentGroup';
+import type { GraphControl } from './orchestrator';
+import {
+  afterMissionChecks,
+  afterMissionTurn,
+  applyMissionUpdate,
+  cancelMission,
+  createMission,
+  missionBrief,
+  missionCheckFailure,
+  missionContinuation,
+  pauseMission,
+  resumeMission,
+  type MissionUpdateInput,
+  type TurnEnd
+} from './mission';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import {
   commitPrompt,
+  decompilePrompt,
   expandCommand,
   explainPrompt,
   INIT_PROMPT,
@@ -51,10 +72,13 @@ import {
 } from './slashCommands';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
-import { shouldCompact } from './tokens';
+import { estimateTextTokens, shouldCompact } from './tokens';
+import { searchTools, type SearchableTool } from '../tools/toolSearch';
 
 export interface ModelResolver {
   resolve(ref: ModelRef, signal?: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo }>;
+  /** Every model the user can use now, for choosing an agent's model. Absent: only the session's model is known. */
+  candidates?(signal?: AbortSignal): Promise<ModelInfo[]>;
 }
 
 export interface SessionPreferences {
@@ -77,6 +101,8 @@ export interface SessionPreferences {
   personalization: Personalization;
   /** Settings → Permissions → Steps per turn; null means no limit. */
   maxSteps: number | null;
+  /** Settings → Models → Agents: how groups of agents are routed and limited. */
+  agents: AgentGroupSettings;
 }
 
 export interface SessionDeps {
@@ -88,6 +114,11 @@ export interface SessionDeps {
   /** MCP tools/servers visible to a session in this project (user servers plus the project's own). */
   mcpToolNames(projectRoot: string | null): string[];
   mcpServerNames(projectRoot: string | null): string[];
+  /** What the servers visible to the project say about using themselves. */
+  mcpInstructions(projectRoot: string | null): Array<{ server: string; text: string }>;
+  /** The prompts those servers publish (slash commands), and the filling in of one. */
+  mcpPrompts(projectRoot: string | null): McpPromptInfo[];
+  mcpPrompt(server: string, name: string, args: Record<string, string>, projectRoot: string | null): Promise<{ text: string; description: string | null }>;
   shells: ShellManager;
   shellLabel: string;
   settings: SettingsStore;
@@ -115,6 +146,8 @@ export interface SessionDeps {
   };
   /** Files chats make for the user to download (CreateFile, RunCode); null where unavailable. */
   chatFiles: { save(sessionId: string, name: string, data: Buffer): ChatFile } | null;
+  /** Image models and ComfyUI for the GenerateImage and ComfyUI tools (Settings → Images); null where unavailable. */
+  media: MediaAccess | null;
   /** RunCode's sandbox: JavaScript in an isolated page; null where unavailable. */
   runCode: ((code: string, timeoutMs: number, signal: AbortSignal) => Promise<CodeRun>) | null;
   /** The Browser panel for the Browser tool (null while there's no window). Absent: no Browser tool. */
@@ -137,10 +170,17 @@ interface InternalQueued {
   images: ImageBlock[];
   files: FileAttachment[];
   createdAt: number;
+  /** A turn of a mission: its start, a later turn (with what the agent is told), or the checks on a report of "done". */
+  mission?: { kind: 'start'; input: MissionStart } | { kind: 'step'; text: string; turn: number; of: number } | { kind: 'verify' };
 }
+
+/** How long one of a mission's checks may run. */
+const MISSION_CHECK_TIMEOUT_SEC = 600;
 
 /** A sub-agent's steps when Settings sets no limit: it reports back on one delegated task, so it stays bounded. */
 const SUBAGENT_ITERATIONS = 200;
+/** MCP tool definitions weighing more than this (or a tenth of the model's window) wait to be loaded with ToolSearch. */
+const DEFER_MCP_TOKENS = 10_000;
 const DELTA_FLUSH_MS = 40;
 /** "!" commands from the message box: how long they may run, and how much of their output the transcript keeps. */
 const USER_SHELL_TIMEOUT_MS = 300_000;
@@ -164,10 +204,15 @@ export class AgentSession {
   private pendingPermission: { request: PermissionRequest; resolve: (a: PermissionAnswer) => void } | null = null;
   private pendingQuestion: { request: QuestionRequest; resolve: (a: QuestionAnswer[] | null) => void } | null = null;
   private readonly sessionAllow: string[] = [];
+  /** The groups of agents running now, by the RunAgents call that started each: how one agent of a group is stopped. */
+  private readonly agentGroups = new Map<string, GraphControl>();
   readonly files: FileStateTracker;
   private memory: MemoryLoader | null = null;
   private system: string | null = null;
   private toolNames: string[] | null = null;
+  /** The MCP tools of a setup too big to send with every request wait to be loaded; once they do, they do for the session. */
+  private mcpDeferred = false;
+  private readonly loadedMcp = new Set<string>();
   private promptKey: string | null = null;
   private modelKey: string | null = null;
   /** Thinking in messages before this seq is never replayed (model switch, tool set change). */
@@ -177,6 +222,10 @@ export class AgentSession {
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
   private deltaTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  /** How the last turn ended, for what a mission does next. */
+  private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
+  /** The permission request on screen and those behind it (see prompt). */
+  private promptChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     summary: SessionSummary,
@@ -207,7 +256,9 @@ export class AgentSession {
       todos: this.deps.store.getTodos(this.id),
       pendingPermission: this.pendingPermission?.request ?? null,
       pendingQuestion: this.pendingQuestion?.request ?? null,
-      queue: this.publicQueue()
+      queue: this.publicQueue(),
+      agentRuns: this.deps.store.listAgentRuns(this.id),
+      mission: this.deps.store.getMission(this.id)
     };
   }
 
@@ -367,6 +418,7 @@ export class AgentSession {
       reason = 'error';
       this.notice('error', `Couldn't run the command: ${(error as Error).message}`);
     } finally {
+      this.lastTurn = { end: reason, error: null };
       this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason });
     }
@@ -485,6 +537,15 @@ export class AgentSession {
   truncateFrom(seq: number): StoredMessage[] {
     if (this.running) throw new GraftError('busy', 'Stop the session before rewinding it.');
     const removed = this.deps.store.deleteMessagesFrom(this.id, seq);
+    // The agents those turns started go with them.
+    const first = removed[0];
+    if (first) {
+      this.deps.store.deleteAgentRunsFrom(this.id, first.createdAt);
+      const before = this.deps.store.getMission(this.id);
+      this.deps.store.deleteMissionsFrom(this.id, first.createdAt);
+      const after = this.deps.store.getMission(this.id);
+      if (after?.id !== before?.id) this.emit({ type: 'mission', mission: after });
+    }
     this.files.clear();
     return removed;
   }
@@ -505,6 +566,154 @@ export class AgentSession {
     await this.deps.shells.disposeSession(this.id);
   }
 
+  // ---- missions -----------------------------------------------------------
+
+  private saveMission(mission: Mission): void {
+    this.deps.store.saveMission(mission);
+    this.emit({ type: 'mission', mission });
+  }
+
+  private missionItem(mission: NonNullable<InternalQueued['mission']>, text = ''): InternalQueued {
+    return { id: randomUUID(), text, images: [], files: [], createdAt: Date.now(), mission };
+  }
+
+  /**
+   * Starts a mission: the objective goes to the agent with how a mission works,
+   * and from then on a turn that ends without finishing it is followed by the
+   * next, until its checks pass, it is paused, or it runs out of turns.
+   */
+  startMission(input: MissionStart): { queued: boolean } {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    if (this.summary.kind !== 'code' || !this.projectRoot()) throw new GraftError('mission_unavailable', 'Missions run in code sessions that have a project folder.');
+    const current = this.deps.store.getMission(this.id);
+    if ((current && missionOpen(current.status)) || this.queue.some((q) => q.mission?.kind === 'start')) {
+      throw new GraftError('mission_exists', 'This session already has a mission. Finish or stop it before starting another.');
+    }
+    const item = this.missionItem({ kind: 'start', input }, input.objective);
+    if (this.running) {
+      this.queue.push(item);
+      this.emit({ type: 'queue', queue: this.publicQueue() });
+      return { queued: true };
+    }
+    this.start(item);
+    return { queued: false };
+  }
+
+  /** Pauses the mission. A turn that is running finishes its work; nothing follows it until the mission is resumed. */
+  pauseMission(): void {
+    const mission = this.deps.store.getMission(this.id);
+    if (mission?.status !== 'active') throw new GraftError('no_mission', 'There is no mission running to pause.');
+    this.saveMission(pauseMission(mission, 'You paused it.', Date.now()));
+  }
+
+  /** Resumes a paused mission; one that had used all of its turns gets `extraTurns` more. */
+  resumeMission(extraTurns: number = MISSION_LIMITS.moreTurns): void {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    const mission = this.deps.store.getMission(this.id);
+    if (mission?.status !== 'paused') throw new GraftError('no_mission', 'There is no paused mission to resume.');
+    this.saveMission(resumeMission(mission, extraTurns, Date.now()));
+    // While a turn runs, its end carries the mission on.
+    if (this.running) return;
+    this.lastTurn = { end: 'completed', error: null };
+    const follow = this.missionFollowUp();
+    if (follow) this.start(follow);
+  }
+
+  /** Ends the mission for good, and stops the turn that is working on it. */
+  cancelMission(): void {
+    const mission = this.deps.store.getMission(this.id);
+    if (!mission || !missionOpen(mission.status)) throw new GraftError('no_mission', 'There is no mission to stop.');
+    this.saveMission(cancelMission(mission, Date.now()));
+    this.queue = this.queue.filter((q) => !q.mission);
+    this.interrupt();
+  }
+
+  /** A MissionUpdate call from the agent. */
+  private updateMission(input: MissionUpdateInput): { reply: string; isError: boolean } {
+    const mission = this.deps.store.getMission(this.id);
+    if (!mission) return { reply: 'There is no mission running in this session.', isError: true };
+    const next = applyMissionUpdate(mission, input, Date.now());
+    if (next.mission !== mission) this.saveMission(next.mission);
+    if (!next.isError && input.status === 'blocked') this.deps.notify(this.summary, 'needs-input', `Mission blocked: ${input.summary ?? ''}`.slice(0, 200));
+    return { reply: next.reply, isError: next.isError };
+  }
+
+  /**
+   * What the mission does now that a turn ended: it pauses (a stop, a failure,
+   * no turns left), ends (done, with nothing to check), or goes on, in which
+   * case this returns the turn to start.
+   */
+  private missionFollowUp(): InternalQueued | null {
+    // A session being closed leaves its mission as it is: it comes back paused the next time Graft starts.
+    if (this.disposed) return null;
+    const mission = this.deps.store.getMission(this.id);
+    if (!mission) return null;
+    const next = afterMissionTurn(mission, this.lastTurn.end, Date.now(), this.lastTurn.error ?? undefined);
+    if (next.mission !== mission) this.saveMission(next.mission);
+    switch (next.action) {
+      case 'none':
+        return null;
+      case 'stop':
+        this.deps.notify(this.summary, 'needs-input', `Mission paused: ${next.mission.reason ?? ''}`.slice(0, 200));
+        return null;
+      case 'done':
+        this.missionDone(next.mission);
+        return null;
+      case 'verify':
+        return this.missionItem({ kind: 'verify' });
+      case 'continue':
+        return this.missionItem({ kind: 'step', text: missionContinuation(next.mission), turn: next.mission.turns, of: next.mission.maxTurns });
+    }
+  }
+
+  private missionDone(mission: Mission): void {
+    this.deps.log('info', 'Mission done', { session: this.id, turns: mission.turns });
+    this.deps.notify(this.summary, 'finished', `Mission done: ${mission.objective}`.slice(0, 200));
+  }
+
+  /**
+   * Runs the mission's checks on the agent's report of "done". Returns what
+   * the agent is told when they fail, or null when the turn has nothing more
+   * to do (they passed, the mission paused, or the turn was stopped).
+   */
+  private async verifyMission(turnId: string, signal: AbortSignal): Promise<{ text: string; turn: number; of: number } | null> {
+    const mission = this.deps.store.getMission(this.id);
+    if (mission?.status !== 'active' || !mission.claimed) return null;
+    const round = (mission.verification?.round ?? 0) + 1;
+    this.emit({ type: 'checks', commands: mission.checks, round });
+    let report: CheckReport;
+    try {
+      await this.syncSandbox();
+      report = await runChecks({ commands: mission.checks, fix: true, timeoutSec: MISSION_CHECK_TIMEOUT_SEC }, round, {
+        sessionId: this.id,
+        cwd: this.workingDir(),
+        signal,
+        shells: this.deps.shells
+      });
+    } catch (error) {
+      if (signal.aborted) return null;
+      const reason = `Its checks couldn't run: ${(error as Error).message}`;
+      this.saveMission(pauseMission(mission, reason, Date.now()));
+      this.deps.notify(this.summary, 'needs-input', `Mission paused: ${reason}`.slice(0, 200));
+      return null;
+    }
+    // Stopped part-way: the turn ends as interrupted, which pauses the mission with its report still standing.
+    if (signal.aborted) return null;
+    const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text: checksSummary(report) }], { turnId, kind: 'check', check: report });
+    this.emit({ type: 'message', message: stored });
+    const next = afterMissionChecks(mission, report, Date.now());
+    this.saveMission(next.mission);
+    if (next.action === 'done') {
+      this.missionDone(next.mission);
+      return null;
+    }
+    if (next.action === 'stop') {
+      this.deps.notify(this.summary, 'needs-input', `Mission paused: ${next.mission.reason ?? ''}`.slice(0, 200));
+      return null;
+    }
+    return { text: missionCheckFailure(next.mission, report), turn: next.mission.turns, of: next.mission.maxTurns };
+  }
+
   // ---- turn orchestration -------------------------------------------------
 
   private start(item: InternalQueued): void {
@@ -516,11 +725,15 @@ export class AgentSession {
     this.controller = null;
     // "Send now" messages the turn ended before reading go first in line.
     if (this.steering.length > 0) this.queue.unshift(...this.steering.splice(0));
+    // A turn that was stopped, failed or stopped itself pauses a mission, whatever is queued behind it.
+    const finished = this.lastTurn.end === 'completed';
+    if (!finished) this.missionFollowUp();
     if (this.disposed || this.status === 'error') {
       this.emit({ type: 'queue', queue: this.publicQueue() });
       return;
     }
-    const next = this.queue.shift();
+    // What the user sent meanwhile is answered first; the mission picks up after it.
+    const next = this.queue.shift() ?? (finished ? this.missionFollowUp() : null);
     if (next) {
       this.emit({ type: 'queue', queue: this.publicQueue() });
       this.start(next);
@@ -611,6 +824,33 @@ export class AgentSession {
     }
   }
 
+  /** Runs a prompt a connected MCP server publishes: the server fills it in and the result is sent as the user's message. */
+  private async runMcpPrompt(command: string, args: string, typed: string): Promise<{ text: string; typed: string } | null> {
+    const root = this.settingsRoot();
+    const prompt = this.deps.mcpPrompts(root).find((p) => mcpPromptCommand(p.server, p.name) === command);
+    if (!prompt) {
+      this.commandOutput(`No MCP prompt is called /${command}. Type / to see the prompts your connected servers offer.`);
+      return null;
+    }
+    const values = promptArguments(args, prompt.arguments.map((a) => a.name));
+    const missing = prompt.arguments.filter((a) => a.required && values[a.name] === undefined);
+    if (missing.length > 0) {
+      this.commandOutput(`/${command} needs ${missing.map((a) => `<${a.name}>`).join(', ')}. Usage: /${command} ${promptHint(prompt)}`);
+      return null;
+    }
+    try {
+      const filled = await this.deps.mcpPrompt(prompt.server, prompt.name, values, root);
+      if (filled.text.length === 0) {
+        this.commandOutput(`The ${prompt.server} server returned an empty prompt for /${command}.`);
+        return null;
+      }
+      return { text: filled.text, typed };
+    } catch (error) {
+      this.commandOutput(`The ${prompt.server} server couldn't fill in /${command}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
   private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null } | null> {
     const slash = parseSlash(item.text);
     if (!slash) return { text: item.text, typed: null };
@@ -623,6 +863,7 @@ export class AgentSession {
       this.commandOutput(`/${slash.name} opens in the app: type it on its own, or use the command palette (Ctrl+Shift+P).`);
       return null;
     }
+    if (slash.name.startsWith('mcp__')) return this.runMcpPrompt(slash.name, slash.args, item.text);
     switch (slash.name) {
       case 'clear': {
         const ids = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted).map((m) => m.id);
@@ -645,7 +886,10 @@ export class AgentSession {
         return null;
       }
       case 'help': {
-        const lines = listCommands(this.deps.graftHome, this.projectRoot()).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`);
+        const lines = [
+          ...listCommands(this.deps.graftHome, this.projectRoot()).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
+          ...this.deps.mcpPrompts(this.settingsRoot()).map((p) => `- /${mcpPromptCommand(p.server, p.name)}${promptHint(p) ? ` ${promptHint(p)}` : ''} — ${p.description || `Prompt from the ${p.server} server`}`)
+        ];
         this.commandOutput(
           `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
         );
@@ -661,6 +905,8 @@ export class AgentSession {
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'test':
         return { text: testPrompt(slash.args), typed: item.text };
+      case 'decompile':
+        return { text: decompilePrompt(slash.args), typed: item.text };
       case 'commit':
         return { text: commitPrompt(slash.args), typed: item.text };
       case 'pr':
@@ -733,6 +979,18 @@ export class AgentSession {
     return { files, code: files && this.deps.runCode !== null };
   }
 
+  /**
+   * Generated media for this session and model: the image engine behind
+   * GenerateImage, and whether ComfyUI is connected. Incognito chats get
+   * neither, so nothing they write goes to an image provider.
+   */
+  private mediaFor(model: ModelInfo): { image: string | null; comfy: boolean } {
+    const media = this.deps.media;
+    if (!media || !model.supportsTools || this.summary.incognito) return { image: null, comfy: false };
+    const engine = media.imageEngine();
+    return { image: engine ? (engine.engine === 'comfyui' ? 'ComfyUI on this computer' : engine.model) : null, comfy: media.comfy() !== null };
+  }
+
   /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
   private privacy(): RequestPrivacy {
     const incognito = this.summary.incognito;
@@ -758,9 +1016,12 @@ export class AgentSession {
     const web = this.webTools(model);
     const work = this.chatWork(model);
     const computer = this.computerFor(model);
+    const media = this.mediaFor(model);
     // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
-    const mcpTools = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : summary.incognito || !model.supportsTools ? [] : this.deps.mcpToolNames(null);
+    const mcpTools = this.mcpToolsFor(model);
     const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
+    const mission = summary.kind === 'code' ? this.deps.store.getMission(this.id) : null;
+    const onMission = mission !== null && missionOpen(mission.status);
     const builtins =
       summary.kind === 'code'
         ? this.deps.tools
@@ -770,11 +1031,67 @@ export class AgentSession {
                 !n.startsWith('mcp__') &&
                 !chatOnly.has(n) &&
                 (n !== 'WebSearch' || web.clientSearch) &&
+                n !== 'ToolSearch' &&
                 (n !== 'Computer' || computer) &&
-                (n !== 'Browser' || this.deps.browser !== undefined)
+                (n !== 'Browser' || this.deps.browser !== undefined) &&
+                (n !== 'GenerateImage' || media.image !== null) &&
+                (n !== 'ComfyUI' || media.comfy) &&
+                (n !== 'MissionUpdate' || onMission)
             )
-        : [...(web.fetch ? ['WebFetch'] : []), ...(web.clientSearch ? ['WebSearch'] : []), ...(work.files ? ['CreateFile'] : []), ...(work.code ? ['RunCode'] : [])];
-    return [...builtins, ...mcpTools];
+        : [
+            ...(web.fetch ? ['WebFetch'] : []),
+            ...(web.clientSearch ? ['WebSearch'] : []),
+            ...(work.files ? ['CreateFile'] : []),
+            ...(work.code ? ['RunCode'] : []),
+            // A chat keeps what it makes in its own files, so pictures need those.
+            ...(work.files && media.image !== null ? ['GenerateImage'] : [])
+          ];
+    const { offered } = this.splitMcp(mcpTools, model);
+    return [...builtins, ...(this.mcpDeferred ? ['ToolSearch'] : []), ...offered];
+  }
+
+  /** The MCP tools this session can use: a code session's own and the user's, a chat's user-level ones, none in incognito. */
+  private mcpToolsFor(model: ModelInfo): string[] {
+    const summary = this.summary;
+    return summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : summary.incognito || !model.supportsTools ? [] : this.deps.mcpToolNames(null);
+  }
+
+  /**
+   * MCP tools whose definitions would weigh on every request (a big setup: GitHub's
+   * has dozens) are not sent until the agent searches for them with ToolSearch.
+   * The choice is made once, so the tools and the prompt stay the same between turns.
+   */
+  private splitMcp(mcpTools: string[], model: ModelInfo): { offered: string[]; deferred: string[] } {
+    if (mcpTools.length === 0) return { offered: [], deferred: [] };
+    if (!this.mcpDeferred) {
+      const weight = estimateTextTokens(JSON.stringify(this.deps.tools.specs(mcpTools)));
+      if (weight > Math.min(DEFER_MCP_TOKENS, Math.floor(model.contextWindow * 0.1))) this.mcpDeferred = true;
+    }
+    if (!this.mcpDeferred) return { offered: mcpTools, deferred: [] };
+    return { offered: mcpTools.filter((n) => this.loadedMcp.has(n)), deferred: mcpTools.filter((n) => !this.loadedMcp.has(n)) };
+  }
+
+  /** How many tools of each server are waiting, for the prompt. */
+  private deferredByServer(model: ModelInfo): Array<{ server: string; count: number }> {
+    const { deferred } = this.splitMcp(this.mcpToolsFor(model), model);
+    const counts = new Map<string, number>();
+    for (const name of deferred) {
+      const server = this.deps.tools.get(name)?.mcp?.server ?? 'other';
+      counts.set(server, (counts.get(server) ?? 0) + 1);
+    }
+    return [...counts].map(([server, count]) => ({ server, count }));
+  }
+
+  /** The tools waiting to be loaded, as ToolSearch searches them. */
+  private deferredEntries(): SearchableTool[] {
+    const summary = this.summary;
+    const names = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : this.deps.mcpToolNames(null);
+    return names
+      .filter((n) => !this.loadedMcp.has(n))
+      .flatMap((name) => {
+        const tool = this.deps.tools.get(name);
+        return tool ? [{ name, server: tool.mcp?.server ?? '', description: tool.description }] : [];
+      });
   }
 
   /** Builds the system prompt for this model; code sessions read project notes through the given loader. */
@@ -799,10 +1116,13 @@ export class AgentSession {
         webSearch: web.native || web.clientSearch,
         computer: this.computerFor(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
+        mcpNotes: this.deps.mcpInstructions(this.settingsRoot()),
+        deferredTools: this.deferredByServer(model),
         agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
-        site: (await this.deps.site?.(root)) ?? null
+        site: (await this.deps.site?.(root)) ?? null,
+        media: this.mediaFor(model)
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -813,7 +1133,10 @@ export class AgentSession {
       web: { search: web.native || web.clientSearch, fetch: web.fetch },
       workspace: this.chatWork(model),
       personalization: summary.incognito ? null : prefs.personalization,
-      mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null)
+      mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
+      mcpNotes: summary.incognito ? [] : this.deps.mcpInstructions(null),
+      deferredTools: this.deferredByServer(model),
+      images: this.chatWork(model).files ? this.mediaFor(model).image : null
     });
   }
 
@@ -874,7 +1197,8 @@ export class AgentSession {
     const turnId = randomUUID();
     this.setStatus('running');
     this.emit({ type: 'turn-start', turnId });
-    let endReason: 'completed' | 'interrupted' | 'error' | 'guard' = 'completed';
+    let endReason: TurnEnd = 'completed';
+    let failure: string | null = null;
     try {
       const summary = this.summary;
       const root = this.projectRoot();
@@ -883,8 +1207,24 @@ export class AgentSession {
       const hooks = summary.kind === 'code' ? this.deps.hooks(settingsRoot, trusted) : null;
 
       let userText: string | null = null;
-      if (item) {
-        const handled = await this.handleSlash(item);
+      let starting: Mission | null = null;
+      const missionTurn = item?.mission;
+      if (missionTurn && missionTurn.kind !== 'start') {
+        // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
+        const step = missionTurn.kind === 'verify' ? await this.verifyMission(turnId, signal) : missionTurn;
+        if (step === null) {
+          if (signal.aborted) endReason = 'interrupted';
+          return;
+        }
+        const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text: step.text }], {
+          turnId,
+          kind: 'mission',
+          mission: { turn: step.turn, of: step.of, afterChecks: missionTurn.kind === 'verify' }
+        });
+        this.emit({ type: 'message', message: stored });
+      } else if (item) {
+        if (missionTurn) starting = createMission(this.id, missionTurn.input, randomUUID(), Date.now());
+        const handled = starting ? { text: missionBrief(starting), typed: starting.objective } : await this.handleSlash(item);
         if (!handled) return;
         userText = handled.text;
         // A session that starts in Taproot (or reopens in it) gets the briefing with its first message.
@@ -909,6 +1249,8 @@ export class AgentSession {
         };
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
         this.emit({ type: 'message', message: stored });
+        // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
+        if (starting) this.saveMission({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
       }
 
       const { provider, model, ref } = await this.resolveModel(signal);
@@ -957,12 +1299,15 @@ export class AgentSession {
       );
       endReason = result.reason;
       if (result.reason === 'error' && result.error) {
+        failure = result.error.message;
         this.setStatus('error', result.error);
         this.deps.notify(this.summary, 'error', result.error.message);
         return;
       }
-      if (result.reason === 'completed' && userText !== null) this.maybeTitle(userText);
-      if (result.reason === 'completed' || result.reason === 'guard') this.deps.notify(this.summary, 'finished', result.finalText.slice(0, 140));
+      if (result.reason === 'completed' && userText !== null) this.maybeTitle(starting ? starting.objective : userText);
+      // A turn of a mission that is still going isn't the end of anything: the mission says when it is done or needs the user.
+      const onMission = this.deps.store.getMission(this.id)?.status === 'active';
+      if ((result.reason === 'completed' || result.reason === 'guard') && !onMission) this.deps.notify(this.summary, 'finished', result.finalText.slice(0, 140));
     } catch (error) {
       if (signal.aborted) {
         endReason = 'interrupted';
@@ -973,10 +1318,12 @@ export class AgentSession {
         error instanceof GraftError
           ? { code: error.code, message: error.message }
           : { code: (error as { code?: string }).code ?? 'internal', message: (error as Error).message };
+      failure = info.message;
       this.deps.log('error', 'Turn failed', { session: this.id, message: info.message });
       this.setStatus('error', info);
       this.deps.notify(this.summary, 'error', info.message);
     } finally {
+      this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
     }
@@ -1102,7 +1449,17 @@ export class AgentSession {
     };
   }
 
+  /**
+   * Asks the user about one action. Agents working side by side can each need
+   * an answer at the same moment, and there is one card: requests wait their turn.
+   */
   private prompt(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer> {
+    const asked = this.promptChain.then(() => this.promptNow(request, signal));
+    this.promptChain = asked.catch(() => undefined);
+    return asked;
+  }
+
+  private promptNow(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer> {
     return new Promise((resolve) => {
       if (signal.aborted) {
         resolve({ decision: 'deny' });
@@ -1143,8 +1500,8 @@ export class AgentSession {
       describeContext: () => describeContext,
       hooks,
       todos: () => this.deps.store.getTodos(this.id),
-      maybeCompact: async (_history, tokens, signal) => {
-        if (!this.deps.preferences().autoCompact || !shouldCompact(tokens, model.contextWindow)) return null;
+      maybeCompact: async (_history, tokens, signal, overflow) => {
+        if (!this.deps.preferences().autoCompact || !(overflow || shouldCompact(tokens, model.contextWindow))) return null;
         return this.compact('', signal);
       },
       onUsage: (usage: Usage, contextTokens: number | null, costUsd: number | null) => {
@@ -1219,6 +1576,7 @@ export class AgentSession {
     return {
       sessionId: this.id,
       toolUseId,
+      mcpRoot: this.summary.kind === 'code' ? this.settingsRoot() : null,
       cwd,
       projectRoot: root ?? cwd,
       platform: this.deps.platform,
@@ -1272,12 +1630,100 @@ export class AgentSession {
         return { approved: true, feedback: null };
       },
       runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
+      runAgents: (input) => this.runAgents(input, toolUseId, signal, model, provider, hooks, root, trusted),
       notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
       computer: this.deps.computer,
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
       runCode: work.code ? this.deps.runCode : null,
-      browser: this.summary.kind === 'code' ? this.agentBrowser() : null
+      browser: this.summary.kind === 'code' ? this.agentBrowser() : null,
+      media: this.summary.incognito ? null : this.deps.media,
+      mission: this.summary.kind === 'code' ? { update: (input) => this.updateMission(input) } : null,
+      spend: (costUsd) => {
+        const current = this.summary.usage;
+        const next = { ...current, costUsd: (current.costUsd ?? 0) + costUsd };
+        this.deps.store.updateSession(this.id, { usage: next });
+        this.emit({ type: 'usage', usage: next });
+      },
+      deferredTools: this.mcpDeferred
+        ? {
+            find: (query, limit) => searchTools(this.deferredEntries(), query, limit),
+            load: (names) => {
+              for (const name of names) {
+                this.loadedMcp.add(name);
+                // The running turn offers them from its next request on.
+                if (this.toolNames && !this.toolNames.includes(name)) this.toolNames.push(name);
+              }
+            },
+            summary: () => {
+              const waiting = this.deferredByServer(model);
+              return waiting.length > 0 ? `Waiting to be loaded: ${waiting.map((w) => `${w.server} (${String(w.count)})`).join(', ')}.` : 'Nothing is waiting to be loaded.';
+            }
+          }
+        : null
+    };
+  }
+
+  /** Stops one agent of a group that is running (the Agents panel's Stop); the rest of the group goes on. False when it already ended. */
+  stopAgent(runId: string): boolean {
+    const run = this.deps.store.listAgentRuns(this.id).find((r) => r.id === runId);
+    return run ? (this.agentGroups.get(run.groupId)?.stop(run.nodeId) ?? false) : false;
+  }
+
+  /** Runs a group of agents for the RunAgents tool; each agent's record is saved with the session and shown in the agent graph. */
+  private async runAgents(
+    input: AgentGroupInput,
+    parentToolUseId: string,
+    signal: AbortSignal,
+    model: ModelInfo,
+    provider: LLMProvider,
+    hooks: HookRunner | null,
+    root: string | null,
+    trusted: boolean
+  ): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }> }> {
+    const prefs = this.deps.preferences();
+    const { report, runs } = await runAgentGroup(
+      input,
+      parentToolUseId,
+      {
+        onControl: (control) => this.agentGroups.set(parentToolUseId, control),
+        sessionId: this.id,
+        system: this.system ?? '',
+        toolNames: this.toolNames ?? this.deps.tools.names(),
+        customAgents: loadAgents(this.deps.graftHome, this.projectRoot()),
+        sessionModel: model,
+        sessionProvider: provider,
+        settings: prefs.agents,
+        registry: this.deps.tools,
+        privacy: this.privacy(),
+        maxSteps: prefs.maxSteps ?? SUBAGENT_ITERATIONS,
+        ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {}),
+        candidates: async (s) => (await this.deps.models.candidates?.(s)) ?? [model],
+        resolve: (ref, s) => this.deps.models.resolve(ref, s),
+        loopHost: (m, p) => this.makeHost(m, p, hooks, root, trusted),
+        // Taproot is the main agent's way of working; an agent of a group gets the strongest plain effort instead.
+        effort: (m) => {
+          const effort = this.effortFor(m);
+          return effort === 'taproot' ? (m.effort?.levels.includes('max') ? 'max' : (m.effort?.default ?? null)) : effort;
+        },
+        save: (run) => {
+          this.deps.store.saveAgentRun(run);
+          this.emit({ type: 'agent-run', run });
+        },
+        progress: (text) => this.emit({ type: 'tool-progress', toolUseId: parentToolUseId, chunk: text }),
+        notice: (event) => this.emit(event)
+      },
+      signal
+    ).finally(() => this.agentGroups.delete(parentToolUseId));
+    return {
+      report,
+      agents: runs.map((run) => ({
+        nodeId: run.nodeId,
+        title: run.title,
+        role: run.roleLabel,
+        status: run.status,
+        durationMs: run.startedAt !== null && run.endedAt !== null ? run.endedAt - run.startedAt : null
+      }))
     };
   }
 
