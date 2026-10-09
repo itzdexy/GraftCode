@@ -4,13 +4,13 @@
 
 # Graft
 
-**An open-source desktop coding agent and AI chat that runs on your own keys.**
+**Your code. Your models. Your rules.**
 
-Write and fix code, chat, research the web and run long tasks with the models you choose:
-Anthropic, OpenAI, Google, OpenRouter, local models through Ollama or LM Studio, and 200+ other providers.
-Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and Linux.
+An open-source desktop AI coding agent and chat that works with your choice of models. Graft can edit code, run checks, show diffs and rewind changes. Bring your own provider keys or use local models, set permissions, and connect tools through MCP.
 
-**[Download the latest release](https://github.com/itzdexy/GraftCode/releases/latest)** · [What it does](#what-graft-does) · [Build from source](#build-from-source)
+**[Download for Windows or Linux](https://github.com/itzdexy/GraftCode/releases/latest)** · [See screenshots](#a-look-around) · [Install and first run](#install) · [Build from source](#build-from-source)
+
+<sub>Windows installers are not yet code-signed. macOS currently requires a source build. Third-party model providers may charge for API usage.</sub>
 
 [![Release](https://img.shields.io/github/v/release/itzdexy/GraftCode?display_name=tag&sort=semver)](https://github.com/itzdexy/GraftCode/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/itzdexy/GraftCode/total)](https://github.com/itzdexy/GraftCode/releases)
@@ -298,6 +298,12 @@ tests/         unit tests (Vitest) and end-to-end tests (Playwright)
 - Provider adapters cover Anthropic, OpenAI-style chat completions (OpenAI, OpenRouter and every compatible provider), Gemini and Ollama, all behind one streaming interface.
 - Each session runs its own agent loop, so sessions work concurrently. Sessions, settings, agent runs and missions are stored in SQLite with versioned migrations.
 - A group of agents is a graph run by a scheduler that knows nothing about models (`src/main/agent/orchestrator.ts`); `agentGroup.ts` turns each node into an agent loop with its role's tools and model. A mission's rules are pure functions (`mission.ts`) that the session carries out.
+
+## Help Graft grow
+
+Try Graft on a real project and [report issues or onboarding friction](https://github.com/itzdexy/GraftCode/issues). Reproducible examples, technical feedback and contributions are welcome.
+
+Maintainers: see the [launch playbook](docs/LAUNCH_PLAYBOOK.md) for demo ideas, outreach drafts, launch readiness and success metrics.
 
 ## Acknowledgements
 
