@@ -1,6 +1,6 @@
 # Graft upgrade progress
 
-Baseline and current committed source: `975da44`, version 0.6.14.
+Baseline source: `975da44`, version 0.6.14. Current build: 0.6.15.
 Branch: `codex/graft-polish-reliability`.
 
 ## Audit and evidence
@@ -31,7 +31,7 @@ Branch: `codex/graft-polish-reliability`.
 - Relevant provider/agent/session-store suite: 154 tests passed. Five truncated
   stream fixtures and two partial-thinking cases failed before their fixes.
 
-## Interface and workspace implementation (desktop verification in progress)
+## Interface and workspace implementation
 
 - Existing shared motion tokens now cover queued rows, loading/error/empty states
   and restrained control feedback. Reduced motion removes stagger delays;
@@ -52,14 +52,26 @@ measured 38.37 ms before versus 0.88 ms using the completed-turn cache in the sa
 process. This is a microbenchmark of projection CPU work, not startup, total UI
 latency or an app-wide speedup claim.
 
-## Known issues under investigation
+## Verification and diagnosed failures
 
-The first full unit run passed 978 tests but failed one Windows language-server
-fixture cleanup after cancellation with EPERM. Child shutdown ownership is under
-investigation. Initial new desktop fixtures had incorrect alias-reference/menu/
-project expectations; those were corrected from actual UI and TypeScript evidence,
-without weakening the existing regression tests. The entire original workspace
-suite remains intact.
+The first full unit run failed one Windows language-server cleanup with EPERM.
+A deterministic nested-process regression independently proved that disposal could
+resolve while an owned descendant remained alive. Windows now stops that owned tree
+before the wrapper exits and waits for actual close; manager disposal also drains
+retired clients. Both active/evicted descendant regressions pass, and the complete
+unit suite now passes 982 tests with 28 skipped. The original one-off EPERM did not
+capture process IDs, so its exclusive cause cannot be proved.
+
+All six new/extended desktop cases pass across scoped runs: motion preferences,
+original-copy/Unicode guidance, editor saves/recovery/intelligence, and tab restart
+recovery. Initial new fixtures had incorrect alias-reference/menu/project/composer
+expectations and lacked an async clipboard wait; these were corrected from actual
+UI evidence without weakening existing regression coverage. The entire original
+workspace suite remains intact. Typecheck, lint and the final production build pass.
+
+Local commits: `8e1f533` (terminal confirmation/session recovery) and `0a22580`
+(Windows language-server shutdown). Windows 0.6.15 packaging completed. Full desktop
+and packaged/installed verification are being completed before readiness is claimed.
 
 ## Next actions
 

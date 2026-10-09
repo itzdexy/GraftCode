@@ -19,6 +19,19 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.15 interface and recovery implementation (2026-10-09)
+
+- Require provider terminal confirmation before incomplete tool calls can execute;
+  preserve interrupted output and prevent stale session snapshots replacing newer events.
+- Show guidance for leaked model control tokens while retaining the original response.
+- Extend bounded, reduced-motion-aware animations and pause hidden status clocks.
+- Reuse completed transcript turns during streaming; the 500-turn projection
+  microbenchmark measured 38.37 ms versus 0.88 ms for 120 updates in one process.
+- Add persistent file tabs with draft-safe closing, references and symbol information.
+- Fix owned Windows language-server tree shutdown and drain evicted clients.
+- Verification and installer status: see `UPGRADE_TEST_REPORT.md` and
+  `UPGRADE_PROGRESS.md`; the larger brief is still incomplete.
+
 ### 0.6.14 source implementation (2026-10-09)
 
 - Added independent Models.dev refresh with validated, atomic metadata snapshots,
@@ -468,8 +481,9 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    last three rounds each added to it.
 2. Expand recovery and cleanup controls for the writing-agent worktrees introduced
    in 0.6.14; then best-of-N.
-3. Expand the TypeScript LSP and single-pane editor foundation to indexing, tabs,
-   layouts and semantic edits.
+3. Expand the TypeScript LSP and tabbed editor foundation to indexing, splits,
+   dockable layouts and semantic edits. Tabs and their preview/edit mode persistence
+   are implemented in 0.6.15.
 4. A backup model for agents of a group; spend by day. Persisted context cutoffs
    shipped in 0.6.14.
 5. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation

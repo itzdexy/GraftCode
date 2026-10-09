@@ -30,7 +30,7 @@ export function QueueBar({ sessionId, queue }: { sessionId: string; queue: Queue
       {queue.map((q) => {
         const command = q.text.startsWith('/');
         return (
-          <li key={q.id} className="flex h-30 items-center gap-8 rounded-md pr-2 pl-9 text-base">
+          <li key={q.id} data-steer={q.steer} className="graft-queue-item flex min-h-30 items-center gap-8 rounded-md pr-2 pl-9 text-base">
             <span className={cn('shrink-0 font-medium', q.steer ? 'text-accent' : 'text-fg')}>
               {q.steer ? 'Next step' : single ? '1 message queued' : 'Queued'}
             </span>

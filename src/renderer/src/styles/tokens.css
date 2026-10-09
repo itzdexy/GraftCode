@@ -101,14 +101,14 @@
   /*
    * Motion (120–250ms). Zeroed when reduced motion is requested.
    * Things arrive easing out and leave faster, easing in. The spring is a
-   * damped spring sampled into linear() (2% overshoot, settles in ~440ms),
+   * damped spring sampled into linear() (2% overshoot, settles in 280ms),
    * for things that follow the hand: thumbs, toggles, the send button.
    */
   --g-duration-fast: 120ms;
   --g-duration-base: 180ms;
   --g-duration-slow: 250ms;
   --g-duration-exit: 110ms;
-  --g-duration-spring: 440ms;
+  --g-duration-spring: 280ms;
   --g-ease: cubic-bezier(0.2, 0, 0, 1);
   --g-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --g-ease-in: cubic-bezier(0.4, 0, 1, 1);

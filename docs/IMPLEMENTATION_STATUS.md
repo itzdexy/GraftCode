@@ -1,7 +1,7 @@
 # Graft Code implementation record
 
 Updated 2026-10-09. Base: `d236a2949cee1ecbce4c8915deee56bc181e23bc`
-(Graft 0.6.13), implemented as Graft 0.6.14. Release publication is separate from
+(Graft 0.6.13), extended through Graft 0.6.15. Release publication is separate from
 the verified local installer. The full eight-milestone
 assignment is not complete. Checkboxes describe verified implementation, not proposals.
 
@@ -286,8 +286,9 @@ capability guarantees still need additional implementation and live account test
 
 - [x] Monaco single-pane editing, revision-checked saves and keyboard actions.
 - [x] Persistent draft recovery with original revisions, app restart and deleted-file/conflict verification.
-- [ ] Editable tabs/splits, integrated editor diffs and agent-aware updates.
-- [ ] Persistent layouts and keyboard-driven open/edit/test workflows.
+- [x] Draft-safe file tabs, persistent preview/edit modes and keyboard tab navigation (0.6.15).
+- [x] Editor references and symbol information using the existing trusted LSP (0.6.15).
+- [ ] Splits, dockable layouts, integrated editor diffs and agent-aware updates.
 
 ### 6. Research and advanced agents — pending
 
@@ -306,6 +307,10 @@ capability guarantees still need additional implementation and live account test
 - [ ] Remaining advisory remediation, cross-platform execution and measured performance.
 - [ ] Release readiness, installer/signing/update verification and complete operational docs.
 
+The 0.6.15 execution/recovery, motion, transcript optimization and Windows LSP
+shutdown changes are recorded in `UPGRADE_PROGRESS.md`; current verification is
+in `UPGRADE_TEST_REPORT.md`.
+
 Next dependency-ordered work: expand provider lifecycle/compatibility and writer
-recovery controls, then editor tabs/layouts/indexing and advanced-agent capabilities. Never check
+recovery controls, then editor splits/indexing and advanced-agent capabilities. Never check
 off an exit criterion on a proposal alone.

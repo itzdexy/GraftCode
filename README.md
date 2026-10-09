@@ -77,8 +77,25 @@ under **Unsaved drafts** after reopening the session. The original revision is
 retained, so recovery cannot silently overwrite external edits. Backup failures
 are shown; wait for **Draft backed up on this device** before relying on recovery.
 Recovery copies contain source text in the local session database and are removed
-when saved/discarded or when their session is deleted. Tabs, splits, completion,
-rename/refactoring and persistent editor layouts remain outstanding.
+when saved/discarded or when their session is deleted. Splits, completion and
+rename/refactoring remain outstanding.
+
+### Motion, response recovery and file tabs (0.6.15)
+
+Files now keeps tabs and their preview/edit modes between session visits. Closing
+a tab keeps its unsaved draft available for recovery. **References** (Shift+F12)
+and **Symbol info** (Ctrl/Cmd+K, then Ctrl/Cmd+I) query the current trusted
+TypeScript/JavaScript draft through the bundled language server.
+
+Shared controls, queues and status transitions use bounded animations.
+**Settings → Appearance → Motion → On** enables them; System follows your OS and
+Reduced removes animation delays. Completed conversation turns are reused during
+streaming to reduce transcript processing work.
+
+Interrupted provider streams preserve partial output and cannot execute unfinished
+tool calls. Responses containing repeated model control tokens show endpoint
+troubleshooting guidance while preserving the original text. This warning does
+not repair an incompatible endpoint's model template or change the selected model.
 
 The [implementation record](docs/IMPLEMENTATION_STATUS.md) tracks verified changes,
 security boundaries and the remaining development milestones.

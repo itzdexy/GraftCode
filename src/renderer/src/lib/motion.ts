@@ -75,6 +75,24 @@ export function reducedMotion(): boolean {
   return marked === 'reduced' || (marked !== 'full' && systemReducedMotion());
 }
 
+/** Updates elapsed labels once a second only while the page is visible, catching up when it returns. */
+export function subscribeVisibleClock(tick: () => void): () => void {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const sync = (): void => {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+    if (document.hidden) return;
+    tick();
+    timer = setInterval(tick, 1000);
+  };
+  sync();
+  document.addEventListener('visibilitychange', sync);
+  return () => {
+    if (timer !== undefined) clearInterval(timer);
+    document.removeEventListener('visibilitychange', sync);
+  };
+}
+
 /**
  * A list as it should be shown: its items, plus the ones just removed for as
  * long as their leaving takes to show (`leaving` is true for those).
