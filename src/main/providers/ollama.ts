@@ -198,6 +198,7 @@ export class OllamaProvider implements LLMProvider {
     let thinking = '';
     const calls: Array<{ name: string; args: unknown }> = [];
     let doneReason: string | undefined;
+    let completed = false;
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     for await (const raw of parseNdjson(response.body)) {
       if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
@@ -222,12 +223,18 @@ export class OllamaProvider implements LLMProvider {
       for (const call of m?.tool_calls ?? []) {
         if (call.function?.name) calls.push({ name: call.function.name, args: call.function.arguments ?? {} });
       }
-      if (chunk.done) {
+      if (chunk.done === true) {
+        completed = true;
         doneReason = chunk.done_reason;
         usage.inputTokens = chunk.prompt_eval_count ?? 0;
         usage.outputTokens = chunk.eval_count ?? 0;
+        break;
       }
     }
+    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+    // A closed connection is not a completed reply. The loop retains text
+    // deltas on failure, but tools are emitted only after Ollama's done:true.
+    if (!completed) throw new ProviderError('network', 'The reply stopped before it was complete. Ollama did not confirm completion.');
     if (thinking.length > 0) yield { type: 'block', block: { type: 'thinking', text: thinking, display: 'summary', origin: 'ollama' } };
     if (text.length > 0) yield { type: 'block', block: { type: 'text', text } };
     for (const call of calls) {

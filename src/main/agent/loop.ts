@@ -387,6 +387,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     host.emit({ type: 'assistant-start', messageId });
     const blocks: ContentBlock[] = [];
     let pendingText = '';
+    let pendingThinking = '';
     let finish: FinishReason = 'other';
     let responseUsage: Usage | null = null;
     let responseCost: number | null = null;
@@ -417,11 +418,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             host.emit({ type: 'assistant-delta', messageId, kind: 'text', text: event.text });
             break;
           case 'thinking-delta':
+            pendingThinking += event.text;
             host.emit({ type: 'assistant-delta', messageId, kind: 'thinking', text: event.text });
             break;
           case 'block':
             blocks.push(event.block);
             if (event.block.type === 'text') pendingText = '';
+            if (event.block.type === 'thinking') pendingThinking = '';
             break;
           case 'usage':
             responseUsage = event.usage;
@@ -435,6 +438,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     } catch (error) {
       failure = error instanceof ProviderError ? error : new ProviderError('unknown', (error as Error).message, { retryable: false, cause: error });
     }
+    // A failed or cancelled stream may never emit its final blocks. Retain the
+    // summaries already visible in the UI, without inventing provider signatures.
+    if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
     if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
 
     // Some servers send no usage at all, or zeros (an OpenAI-compatible endpoint that

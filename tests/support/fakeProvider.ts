@@ -20,6 +20,7 @@ export interface FakeFailure {
   error: ProviderError;
   /** Emit this much of `text` before failing (mid-stream failure). */
   partialText?: string;
+  partialThinking?: string;
 }
 export type FakeStep = FakeReply | FakeFailure | ((request: StreamRequest) => FakeReply | FakeFailure);
 
@@ -86,6 +87,7 @@ export class FakeProvider implements LLMProvider {
     if (raw === undefined) throw new Error(`FakeProvider script exhausted after ${this.step - 1} calls`);
     const step = typeof raw === 'function' ? raw(request) : raw;
     if ('error' in step) {
+      if (step.partialThinking) yield { type: 'thinking-delta', text: step.partialThinking };
       if (step.partialText) yield { type: 'text-delta', text: step.partialText };
       throw step.error;
     }

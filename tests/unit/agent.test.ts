@@ -344,6 +344,19 @@ describe('cancellation, retries and errors', () => {
     expect(last.meta.error).toMatchObject({ code: 'network' });
   });
 
+  it.each(['network', 'aborted'] as const)('preserves visible partial thinking and text on %s without claiming completion', async (code) => {
+    const h = harness({ script: [{ error: new ProviderError(code, 'Stream interrupted'), partialThinking: 'Checking the types', partialText: 'Partial answer' }] });
+    h.session.send('check this');
+    await h.session.idle();
+    const last = h.store.listMessages('session-1').at(-1)!;
+    expect(last.content).toEqual([
+      { type: 'thinking', text: 'Checking the types', display: 'summary', origin: 'openai-compatible' },
+      { type: 'text', text: 'Partial answer' }
+    ]);
+    expect(code === 'aborted' ? last.meta.interrupted : last.meta.error?.code).toBe(code === 'aborted' ? true : code);
+    expect(h.events.find(e => e.type === 'turn-end')).toMatchObject({ reason: code === 'aborted' ? 'interrupted' : 'error' });
+  });
+
   it('stops a loop that keeps repeating the same calls', async () => {
     const same = { toolCalls: [{ name: 'Glob', input: { pattern: '*.md' } }] };
     const h = harness({ script: [same, same, same, same, same, same, same, same] });

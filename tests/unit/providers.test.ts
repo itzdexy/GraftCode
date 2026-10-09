@@ -64,6 +64,18 @@ describe('SSE and NDJSON parsing', () => {
       for await (const v of parseNdjson(streamOf('{"a":\n'))) void v;
     }).rejects.toThrow(/Malformed streaming JSON/);
   });
+
+  it('preserves Unicode when UTF-8 characters are split across individual bytes', async () => {
+    const text = 'Hello 你好 مرحبا 👋 <|open|> example <|close|>';
+    const payload = JSON.stringify({ choices: [{ delta: { content: text } }] });
+    const events = [];
+    for await (const event of parseSse(streamOf(`data: ${payload}\r\n\r\n`, 1))) events.push(event);
+    expect(events).toEqual([{ event: null, data: payload }]);
+    expect(JSON.parse(events[0]!.data) as unknown).toEqual({ choices: [{ delta: { content: text } }] });
+    const lines = [];
+    for await (const line of parseNdjson(streamOf(`${JSON.stringify({ message: { content: text } })}\n`, 1))) lines.push(line);
+    expect(lines).toEqual([{ message: { content: text } }]);
+  });
 });
 
 describe('error normalization and retry', () => {
@@ -367,6 +379,54 @@ describe('OpenAI-style chat adapter', () => {
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
   });
 
+  it.each([
+    { end: 'EOF', args: '{"path":"a.ts"}' },
+    { end: '[DONE]', args: '{"path":"a.ts"}' },
+    { end: 'EOF', args: '{"path":"a' },
+    { end: '[DONE]', args: '{"path":"a' }
+  ])('rejects $end without a finish reason and never offers unfinished tools ($args)', async ({ end, args }) => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+      { data: { choices: [{ index: 0, delta: { content: 'Reading the file.' } }] } },
+      { data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'Read', arguments: args } }] } }] } },
+      ...(end === '[DONE]' ? [{ data: '[DONE]' }] : [])
+    ]));
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const seen: StreamEvent[] = [];
+    const retries: number[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request(), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'network' });
+    expect(seen).toEqual([{ type: 'text-delta', text: 'Reading the file.' }]);
+    expect(retries).toEqual([]);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it('accepts a finish reason without [DONE] and preserves multilingual text and literal control-like strings', async () => {
+    const text = 'Hello 你好 مرحبا 👋 <|open|> example <|close|>';
+    server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+      { data: { choices: [{ index: 0, delta: { content: text }, finish_reason: 'stop' }] } }
+    ]));
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const events = await collect(provider.streamText(request(), new AbortController().signal));
+    expect(events).toContainEqual({ type: 'block', block: { type: 'text', text } });
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('reports explicit cancellation as aborted rather than an incomplete stream', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+      { data: { choices: [{ index: 0, delta: { content: 'Partial' } }] } }
+    ]));
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const controller = new AbortController();
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request(), controller.signal, () => undefined)) {
+        if (event.type === 'text-delta') controller.abort();
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+  });
+
   it('verifies OpenRouter keys against an authenticated endpoint and maps catalog metadata', async () => {
     server.route('GET', '/api/v1/key', (req, res) =>
       req.headers.authorization === 'Bearer good' ? json(res, 200, { data: { label: 'k' } }) : json(res, 401, { error: { message: 'No auth credentials found' } })
@@ -485,6 +545,44 @@ describe('Ollama adapter', () => {
   });
   afterEach(async () => {
     await server.close();
+  });
+
+  it('rejects EOF without done:true, keeps partial text and never offers unfinished tools or retries it', async () => {
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [
+      { message: { role: 'assistant', content: 'Reading the file.' }, done: false },
+      { message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'Read', arguments: { path: 'a.ts' } } }] }, done: false }
+    ]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const seen: StreamEvent[] = [];
+    const retries: number[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request(), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'network' });
+    expect(seen).toEqual([{ type: 'text-delta', text: 'Reading the file.' }]);
+    expect(retries).toEqual([]);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it('accepts done:true without an optional done_reason and preserves multilingual content', async () => {
+    const text = 'Hello 你好 مرحبا 👋 <|open|> example <|close|>';
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: text }, done: true }]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const events = await collect(provider.streamText(request(), new AbortController().signal));
+    expect(events).toContainEqual({ type: 'block', block: { type: 'text', text } });
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('reports explicit cancellation as aborted rather than an incomplete stream', async () => {
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'Partial' }, done: false }]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const controller = new AbortController();
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request(), controller.signal, () => undefined)) {
+        if (event.type === 'text-delta') controller.abort();
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'aborted' });
   });
 
   it('reads capabilities from /api/show and streams NDJSON with tool calls', async () => {
