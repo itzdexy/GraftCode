@@ -56,3 +56,10 @@ under `dist/upgrade-backup-0.6.14-20261009`; it must not be published.
 This is a verified local Windows upgrade, not completion of the larger brief or
 a signed, cross-platform public release. The previous GitHub CI run
 `38001350984` could not start steps because account billing was locked.
+
+The new [CI run 38003950510](https://github.com/itzdexy/GraftCode/actions/runs/38003950510)
+for pushed commit `a28c0941d16fa4e233728c46b5eaa261cd03ca52` also failed before
+any step started. Its Windows job annotation confirms: “The job was not started
+because your account is locked due to a billing issue.” This is an unresolved
+GitHub account blocker, not a passing CI result. Local unit, desktop and native
+packaged/installed results above are the verification evidence.
