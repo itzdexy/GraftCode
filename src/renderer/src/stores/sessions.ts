@@ -102,16 +102,6 @@ function upsertMessage(messages: StoredMessage[], message: StoredMessage): Store
   return next;
 }
 
-/**
- * The detail snapshot plus any messages that arrived by event after it was
- * taken (events and the reply travel separately, so either can come first).
- */
-function mergeNewer(snapshot: StoredMessage[], local: StoredMessage[]): StoredMessage[] {
-  const last = snapshot.reduce((max, m) => Math.max(max, m.seq), -1);
-  const newer = local.filter((m) => m.seq > last);
-  return newer.length === 0 ? snapshot : [...snapshot, ...newer].sort((a, b) => a.seq - b.seq);
-}
-
 /** An agent's record takes the place of an earlier one; an older record arriving late changes nothing. */
 function upsertAgentRun(runs: AgentRun[], run: AgentRun): AgentRun[] {
   const index = runs.findIndex((r) => r.id === run.id);
@@ -125,14 +115,6 @@ function upsertAgentRun(runs: AgentRun[], run: AgentRun): AgentRun[] {
 /** The loaded agents plus what was heard by event while they loaded: for each agent, the later record. */
 export function mergeAgentRuns(snapshot: AgentRun[], local: AgentRun[]): AgentRun[] {
   return local.length === 0 ? snapshot : local.reduce(upsertAgentRun, snapshot);
-}
-
-/** The loaded mission and the one heard of by event while it loaded: the later state of the same mission, or the newer mission. */
-function mergeMission(snapshot: Mission | null, local: Mission | null): Mission | null {
-  if (!local) return snapshot;
-  if (!snapshot) return local;
-  if (snapshot.id === local.id) return local.rev > snapshot.rev ? local : snapshot;
-  return local.createdAt > snapshot.createdAt ? local : snapshot;
 }
 
 function reduce(view: SessionView, event: AgentEvent): SessionView {
@@ -223,7 +205,37 @@ function applyToSummary(summary: SessionSummary | undefined, event: AgentEvent):
   }
 }
 
-export const useSessions = create<SessionsState>((set, get) => ({
+type LoadUpdate = AgentEvent | { type: 'summary'; summary: SessionSummary };
+const DETAIL_EVENTS = new Set<AgentEvent['type']>([
+  'message', 'todos', 'queue', 'permission', 'permission-resolved', 'question', 'question-resolved',
+  'agent-run', 'mission', 'status', 'usage', 'mode', 'title', 'turn-start', 'turn-end'
+]);
+const MAX_PENDING_UPDATES = 512;
+
+export const useSessions = create<SessionsState>((set, get) => {
+  // Only the newest request owns a view. Cached records from before that request
+  // are not an overlay: main may have deleted them in a rewind.
+  const loads = new Map<string, { updates: Map<string, LoadUpdate> }>();
+  const remember = (id: string, update: LoadUpdate): void => {
+    const load = loads.get(id);
+    if (!load) return;
+    const key = update.type === 'message' ? `message:${update.message.id}`
+      : update.type === 'agent-run' ? `agent-run:${update.run.id}`
+        : update.type === 'permission-resolved' || update.type === 'question-resolved' ? `${update.type}:${update.requestId}`
+          : update.type === 'turn-start' || update.type === 'turn-end' ? 'turn' : update.type;
+    const previous = load.updates.get(key);
+    if (update.type === 'agent-run' && previous?.type === 'agent-run' && previous.run.rev >= update.run.rev) return;
+    if (update.type === 'mission' && previous?.type === 'mission' && previous.mission && update.mission &&
+        previous.mission.id === update.mission.id && previous.mission.rev >= update.mission.rev) return;
+    // Keep the latest value in event order, without buffering streaming deltas.
+    load.updates.delete(key);
+    load.updates.set(key, update);
+    if (load.updates.size <= MAX_PENDING_UPDATES) return;
+    loads.delete(id);
+    const current = get().views[id];
+    if (current) set({ views: { ...get().views, [id]: { ...current, loading: false, error: 'The session changed too much while loading. Reopen it to refresh.' } } });
+  };
+  return {
   summaries: {},
   loaded: false,
   loadError: null,
@@ -242,44 +254,62 @@ export const useSessions = create<SessionsState>((set, get) => ({
   },
 
   async open(id, options = {}) {
+    deltas.flush(id);
+    const load = { updates: new Map<string, LoadUpdate>() };
+    loads.set(id, load);
     const existing = options.reset ? undefined : get().views[id];
     const cached = evictViews({ ...get().views, [id]: { ...(existing ?? EMPTY_VIEW), loading: true, error: null } }, get().viewOrder, id);
     set({ views: cached.views, viewOrder: cached.order });
+    for (const loadingId of loads.keys()) if (!(loadingId in cached.views)) loads.delete(loadingId);
     try {
       const detail: SessionDetail = await invoke('sessions:get', { id });
+      if (loads.get(id) !== load) return;
       const current = get().views[id];
-      // Evicted while loading (many sessions opened quickly): keep only the summary.
-      if (!current) {
-        set({ summaries: { ...get().summaries, [id]: detail.summary } });
-        return;
+      if (!current) return;
+      let summary = detail.summary;
+      let snapshot: SessionView = {
+        ...EMPTY_VIEW, messages: detail.messages, todos: detail.todos, queue: detail.queue,
+        agentRuns: detail.agentRuns, mission: detail.mission,
+        permission: detail.pendingPermission, question: detail.pendingQuestion
+      };
+      for (const update of load.updates.values()) {
+        if (update.type === 'summary') summary = update.summary;
+        else {
+          snapshot = reduce(snapshot, update);
+          summary = applyToSummary(summary, update) ?? summary;
+        }
       }
+      const active = load.updates.has('turn') ? current.turnActive : summary.status === 'running' || summary.status === 'needs-input';
       set({
-        summaries: { ...get().summaries, [id]: detail.summary },
+        summaries: { ...get().summaries, [id]: summary },
         views: {
           ...get().views,
           [id]: {
             ...current,
             loading: false,
-            messages: mergeNewer(detail.messages, current.messages),
-            todos: detail.todos,
-            queue: detail.queue,
-            agentRuns: mergeAgentRuns(detail.agentRuns, current.agentRuns),
-            mission: mergeMission(detail.mission, current.mission),
-            permission: detail.pendingPermission,
-            question: detail.pendingQuestion,
-            turnActive: detail.summary.status === 'running' || detail.summary.status === 'needs-input',
-            turnStartedAt:
-              detail.summary.status === 'running' || detail.summary.status === 'needs-input' ? (current.turnStartedAt ?? Date.now()) : null
+            messages: snapshot.messages,
+            todos: snapshot.todos,
+            queue: snapshot.queue,
+            agentRuns: snapshot.agentRuns,
+            mission: snapshot.mission,
+            permission: snapshot.permission,
+            question: snapshot.question,
+            turnActive: active,
+            turnStartedAt: active ? (current.turnStartedAt ?? Date.now()) : null
           }
         }
       });
     } catch (error) {
+      if (loads.get(id) !== load) return;
       const current = get().views[id];
       if (current) set({ views: { ...get().views, [id]: { ...current, loading: false, error: errorText(error) } } });
+    } finally {
+      if (loads.get(id) === load) loads.delete(id);
     }
   },
 
   applySummary(summary) {
+    remember(summary.id, { type: 'summary', summary });
     set({ summaries: { ...get().summaries, [summary.id]: summary } });
   },
 
@@ -290,6 +320,9 @@ export const useSessions = create<SessionsState>((set, get) => ({
       return;
     }
     deltas.flush(sessionId);
+    // Resolutions must be remembered even when the initial view has not loaded
+    // its prompt yet. The overlay separately keeps the greatest record revision.
+    if (DETAIL_EVENTS.has(event.type)) remember(sessionId, event);
     const views = get().views;
     const view = views[sessionId];
     const summaries = get().summaries;
@@ -301,6 +334,8 @@ export const useSessions = create<SessionsState>((set, get) => ({
   },
 
   remove(id) {
+    deltas.flush(id);
+    loads.delete(id);
     const { [id]: _removed, ...summaries } = get().summaries;
     const { [id]: _view, ...views } = get().views;
     set({ summaries, views, viewOrder: get().viewOrder.filter((x) => x !== id) });
@@ -311,7 +346,8 @@ export const useSessions = create<SessionsState>((set, get) => ({
     if (!view) return;
     set({ views: { ...get().views, [sessionId]: { ...view, notices: view.notices.filter((n) => n.id !== noticeId) } } });
   }
-}));
+  };
+});
 
 /** Streamed text for all sessions, applied once a frame. Without frames (unit tests) it applies at once. */
 const deltas = createDeltaBuffer(

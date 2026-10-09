@@ -604,8 +604,15 @@ export class OpenAiChatProvider implements LLMProvider {
           if (typeof fn?.arguments === 'string') slot.args += fn.arguments;
         }
       }
-      if (typeof choice.finish_reason === 'string') finish = choice.finish_reason;
+      if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) finish = choice.finish_reason;
     }
+
+    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+    // EOF or [DONE] closes the transport, but only the choice's finish reason
+    // confirms this reply is complete. Keep streamed text visible on failure;
+    // never offer accumulated tool calls from an unconfirmed reply to the loop.
+    // Servers may omit [DONE] when they do send a finish reason.
+    if (finish === null) throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
 
     if (thinking.length > 0) yield { type: 'block', block: { type: 'thinking', text: thinking, display: 'summary', origin: this.kind } };
     const replay = this.replayFor(modelId, details, thinking, interleaved);
