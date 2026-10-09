@@ -81,6 +81,7 @@ backup IDs and SQLite integrity `ok`; schema remains 7.
 
 This Windows upgrade is locally verified and installed. Public release publication,
 code signing, macOS/Linux execution and live paid-provider generation are not verified.
-The prior GitHub CI attempt was blocked by account billing before its steps ran;
+GitHub main was fast-forwarded to the verified upgrade. New CI run `38003950510`
+also failed before any steps started, with the account billing-lock annotation;
 local checks provide the current execution evidence. See `TESTING_APP.md` to try it.
 The larger milestones listed in `UPGRADE_MASTER_PLAN.md` remain incomplete.
