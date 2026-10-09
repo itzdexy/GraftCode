@@ -69,12 +69,18 @@ expectations and lacked an async clipboard wait; these were corrected from actua
 UI evidence without weakening existing regression coverage. The entire original
 workspace suite remains intact. Typecheck, lint and the final production build pass.
 
-Local commits: `8e1f533` (terminal confirmation/session recovery) and `0a22580`
-(Windows language-server shutdown). Windows 0.6.15 packaging completed. Full desktop
-and packaged/installed verification are being completed before readiness is claimed.
+Local implementation commits: `8e1f533` (terminal confirmation/session recovery),
+`0a22580` (Windows language-server shutdown), and `1deda08` (interface/workspace).
+The complete desktop suite passed 48 tests with 5 skipped. Packaged and installed
+smoke tests each passed both cases, exercising native SQLite, search, terminal,
+Monaco and LSP. The NSIS installer exited 0; installed executable is 0.6.15.
+The original profile still has all 12 sessions and 3 providers, with zero missing
+backup IDs and SQLite integrity `ok`; schema remains 7.
 
 ## Next actions
 
-Complete regression tests and rendered flow checks; measure performance;
-run build and packaged checks; update this record with actual changes and commits.
+This Windows upgrade is locally verified and installed. Public release publication,
+code signing, macOS/Linux execution and live paid-provider generation are not verified.
+The prior GitHub CI attempt was blocked by account billing before its steps ran;
+local checks provide the current execution evidence. See `TESTING_APP.md` to try it.
 The larger milestones listed in `UPGRADE_MASTER_PLAN.md` remain incomplete.
