@@ -1,10 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
+import type * as ChildProcessModule from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageServers } from '../../src/main/languages/servers';
 import { semanticCodeTool } from '../../src/main/tools/search/semantic';
 import { makeTempDir, removeDir } from '../support/tmp';
 import { makeToolContext } from '../support/toolContext';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcessModule>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
+}
 
 let dir: string;
 let servers: LanguageServers;
@@ -17,6 +29,70 @@ beforeEach(() => {
 afterEach(async () => { await servers.dispose(); removeDir(dir); });
 
 describe('real TypeScript language-server queries', () => {
+  it.skipIf(process.platform !== 'win32').each(['active', 'evicted'] as const)('awaits owned descendants before resolving Windows server disposal (%s client)', async (state) => {
+    const actual = await vi.importActual<typeof ChildProcessModule>('node:child_process');
+    const pidFile = path.join(dir, 'owned-child.pid');
+    // A real protocol server whose child deliberately survives shutdown models
+    // tsserver's asynchronous kill and the wrapper's forced-exit path. Its child
+    // inherits the project cwd, which Windows keeps locked until that child exits.
+    const fixture = `
+      const { spawn } = require('node:child_process');
+      const fs = require('node:fs');
+      const { createMessageConnection } = require(${JSON.stringify(require.resolve('vscode-jsonrpc/node'))});
+      const owned = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true, stdio: 'ignore' });
+      fs.writeFileSync(${JSON.stringify(pidFile)}, String(owned.pid));
+      const connection = createMessageConnection(process.stdin, process.stdout);
+      connection.onRequest('initialize', () => ({ capabilities: {} }));
+      connection.onRequest('textDocument/documentSymbol', () => []);
+      connection.onRequest('shutdown', () => new Promise(() => {}));
+      connection.onNotification('exit', () => {});
+      connection.listen();
+    `;
+    let wrapperPid: number | undefined;
+    vi.mocked(spawn).mockImplementationOnce((command, _args, options) => {
+      const child = actual.spawn(command, ['-e', fixture], options ?? {});
+      wrapperPid = child.pid;
+      return child;
+    });
+    let ownedPid: number | undefined;
+    try {
+      await servers.query(dir, { action: 'outline', file: 'library.ts' }, new AbortController().signal);
+      ownedPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      expect(processAlive(ownedPid)).toBe(true);
+      if (state === 'evicted') {
+        // Two quick, real protocol wrappers evict the hung first client. They
+        // finish before its shutdown deadline, so disposal must also await the
+        // retired client rather than only those still in the two-client cache.
+        const quickFixture = `
+          const { createMessageConnection } = require(${JSON.stringify(require.resolve('vscode-jsonrpc/node'))});
+          const connection = createMessageConnection(process.stdin, process.stdout);
+          connection.onRequest('initialize', () => ({ capabilities: {} }));
+          connection.onRequest('textDocument/documentSymbol', () => []);
+          connection.onRequest('shutdown', () => null);
+          connection.onNotification('exit', () => process.exit(0));
+          connection.listen();
+        `;
+        for (const name of ['second', 'third']) {
+          const project = path.join(dir, name); fs.mkdirSync(project);
+          fs.writeFileSync(path.join(project, 'library.ts'), 'export const value = 1;');
+          vi.mocked(spawn).mockImplementationOnce((command, _args, options) => actual.spawn(command, ['-e', quickFixture], options ?? {}));
+          await servers.query(project, { action: 'outline', file: 'library.ts' }, new AbortController().signal);
+        }
+        expect(processAlive(wrapperPid!)).toBe(true);
+      }
+      await servers.dispose();
+      expect(processAlive(wrapperPid!)).toBe(false);
+      expect(processAlive(ownedPid)).toBe(false);
+    } finally {
+      // Cleanup only this fixture's recorded child when testing the old bug.
+      if (ownedPid && processAlive(ownedPid)) {
+        process.kill(ownedPid);
+        const deadline = Date.now() + 5000;
+        while (processAlive(ownedPid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+  });
+
   it('resolves imported aliases, tracks references without conflating shadowed variables, and reports types', async () => {
     const signal = new AbortController().signal;
     const definition = await servers.query(dir, { action: 'definition', file: 'main.ts', line: 2, column: 23 }, signal);
