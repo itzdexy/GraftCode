@@ -33,6 +33,8 @@ function meta(partial: Partial<CatalogModel>): CatalogModel {
     pricing: null,
     releasedAt: null,
     deprecated: false,
+    missing: false,
+    capabilities: { tools: true, vision: false, reasoning: true, audio: null, structured: null },
     ...partial
   };
 }

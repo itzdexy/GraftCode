@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize, Pencil, Save } from 'lucide-react';
 import type { TreeEntryView, FilePreviewView } from '@shared/schemas/panels';
-import { IconButton } from '../../components/Button';
+import type { CodeLocation } from '@shared/schemas/semantic';
+import { Button, IconButton } from '../../components/Button';
 import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { languageForPath } from '../../lib/highlight';
@@ -11,6 +12,10 @@ import { useLoad } from '../../lib/useLoad';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
+import { useEditorDrafts } from './editorDrafts';
+import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
+
+const TextEditor = lazy(() => import('./TextEditor'));
 
 /** Files the tree marks as pictures or clips, by name (the preview itself asks the main process). */
 const LOOKS_LIKE_MEDIA = /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg|mp4|webm)$/i;
@@ -239,28 +244,95 @@ interface ViewState {
 
 /** File tree of the session folder with git status marks, a preview (text, pictures, clips) and each file's actions. */
 export function FilesView({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
-  const marks = useGitMarks(sessionId, refreshKey);
+  const [recoveredSession, setRecoveredSession] = useState<string | null>(null);
+  const [recoveryFailure, setRecoveryFailure] = useState<{ sessionId: string; message: string } | null>(null);
+  const recovered = recoveredSession === sessionId;
+  const recoveryError = recoveryFailure?.sessionId === sessionId ? recoveryFailure.message : null;
+  useEffect(() => {
+    let active = true;
+    void recoverEditorDrafts(sessionId).catch((error: unknown) => { if (active) setRecoveryFailure({ sessionId, message: errorText(error) }); })
+      .finally(() => { if (active) setRecoveredSession(sessionId); });
+    return () => { active = false; void flushEditorRecovery(sessionId); };
+  }, [sessionId]);
+  const [saved, setSaved] = useState(0);
+  const treeRefresh = useMemo(() => [refreshKey, saved], [refreshKey, saved]);
+  const marks = useGitMarks(sessionId, treeRefresh);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [opened, setOpened] = useState(0);
   const [view, setView] = useState<ViewState | null>(null);
   const run = useFileActions(sessionId);
+  const request = useRef(0);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [position, setPosition] = useState<CodeLocation | null>(null);
 
-  const open = (path: string): void => {
+  const open = (path: string, location: CodeLocation | null = null, recovery = false): void => {
+    const next = ++request.current;
     setPreview({ state: 'loading', path });
     setOpened((n) => n + 1);
+    setEditing(null);
+    setSaveError(null);
+    setPosition(location);
     invoke('files:read', { sessionId, path })
-      .then((p) => setPreview({ state: 'ready', preview: p }))
-      .catch((error: unknown) => setPreview({ state: 'error', path, message: errorText(error) }));
+      .then((p) => {
+        if (next !== request.current) return;
+        const restored = useEditorDrafts.getState().drafts[`${sessionId}:${path}`];
+        if (recovery && restored && (!p.revision || p.content === null)) {
+          setPreview({ state: 'ready', preview: { path, content: restored.original, revision: restored.revision, media: null, size: restored.original.length, binary: false, tooLarge: false } });
+          setEditing(`${sessionId}:${path}`); setSaveError('The current file cannot be edited as UTF-8 text. Your recovered draft is kept and can be copied.');
+          return;
+        }
+        setPreview({ state: 'ready', preview: p });
+        if ((location || recovery) && p.revision && p.content !== null) {
+          const key = `${sessionId}:${path}`;
+          useEditorDrafts.getState().open(key, p); setEditing(key);
+        }
+      })
+      .catch((error: unknown) => {
+        if (next !== request.current) return;
+        const key = `${sessionId}:${path}`, savedDraft = useEditorDrafts.getState().drafts[key];
+        if (recovery && savedDraft) {
+          setPreview({ state: 'ready', preview: { path, content: savedDraft.original, revision: savedDraft.revision, media: null, size: savedDraft.original.length, binary: false, tooLarge: false } });
+          setEditing(key); setSaveError(`${errorText(error)} Your recovered draft is kept; copy its text if the original file was removed.`);
+        } else setPreview({ state: 'error', path, message: errorText(error) });
+      });
   };
 
   const selected = preview ? (preview.state === 'ready' ? preview.preview.path : preview.path) : null;
   const ready = preview?.state === 'ready' ? preview.preview : null;
+  const draftKey = `${sessionId}:${selected ?? ''}`;
+  const draft = useEditorDrafts((s) => s.drafts[draftKey]);
+  const recovery = useEditorDrafts((s) => s.recovery[draftKey]);
+  const drafts = useEditorDrafts((s) => s.drafts);
+  const recoveryPaths = Object.entries(drafts).filter(([key, value]) => key.startsWith(`${sessionId}:`) && value.content !== value.original).map(([key]) => key.slice(sessionId.length + 1));
+  const edit = editing === draftKey && !!draft && !!ready;
+  const dirty = !!draft && draft.content !== draft.original;
+  const save = async (): Promise<void> => {
+    if (!draft || !selected || saving || !dirty) return;
+    const path = selected;
+    const key = draftKey;
+    const next = request.current;
+    setSaving(true); setSaveError(null);
+    try {
+      const result = await invoke('files:save', { sessionId, path, content: draft.content, revision: draft.revision });
+      if (result.revision) useEditorDrafts.getState().saved(key, draft.content, result.revision);
+      if (next === request.current) setPreview({ state: 'ready', preview: result });
+      setSaved((n) => n + 1);
+    } catch (error) { if (next === request.current) setSaveError(errorText(error)); }
+    finally { setSaving(false); }
+  };
   const shown: ViewState = view && view.path === selected ? view : { path: selected ?? '', fit: true, source: false, pixels: null };
   const picture = ready?.media === 'image' && !ready.tooLarge;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {recoveryError ? <p role="alert" className="px-10 py-6 text-sm text-danger">{recoveryError}</p> : null}
+      {recovered && recoveryPaths.length ? <div aria-label="Unsaved drafts" className="max-h-[20%] shrink-0 overflow-auto border-b border-border px-8 py-4">
+        <p className="text-2xs text-fg-muted">Unsaved drafts</p>
+        {recoveryPaths.map((path) => <button key={path} aria-label={`Open draft ${path}`} className="block w-full truncate py-4 text-left font-mono text-2xs text-fg-muted hover:text-fg" onClick={() => open(path, null, true)}>{path}</button>)}
+      </div> : null}
       <div className={cn('min-h-0 overflow-y-auto p-4', preview ? 'max-h-[45%] shrink-0' : 'flex-1')}>
-        <TreeLevel sessionId={sessionId} dir="" depth={0} marks={marks} selected={selected} onOpen={open} refreshKey={refreshKey} />
+        {recovered ? <TreeLevel sessionId={sessionId} dir="" depth={0} marks={marks} selected={selected} onOpen={open} refreshKey={refreshKey} /> : <LoadingState label="Recovering editor drafts…" />}
       </div>
       {preview && selected !== null ? (
         <div className="flex min-h-0 flex-1 flex-col border-t border-border-panel">
@@ -269,6 +341,12 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
               {selected}
             </p>
             {ready ? <span className="shrink-0 px-4 text-2xs text-fg-faint tabular-nums">{previewNote(ready, shown.pixels)}</span> : null}
+            {dirty ? <span className="text-2xs text-amber-fg" aria-label="Unsaved changes">Unsaved</span> : null}
+            {ready?.revision && ready.content !== null ? <IconButton label={edit ? 'Preview file' : 'Edit file'} size="xs" active={edit} onClick={() => {
+              if (edit) setEditing(null);
+              else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); }
+            }}><Pencil className="size-13" /></IconButton> : null}
+            {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={() => void save()}><Save className="size-13" /></IconButton> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
@@ -287,10 +365,18 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             </IconButton>
             <FileMenu sessionId={sessionId} target={{ path: selected, type: 'file' }} />
           </div>
+          {saveError ? <div role="alert" className="flex shrink-0 flex-wrap items-center gap-6 border-t border-border px-10 py-6">
+            <p className="flex-1 text-sm text-danger">{saveError}</p>
+            <Button size="xs" variant="ghost" onClick={() => { useEditorDrafts.getState().discard(draftKey); setEditing(null); open(selected); }}>Discard draft and reload</Button>
+          </div> : null}
+          {dirty ? <p role={recovery?.state === 'error' ? 'alert' : 'status'} className="shrink-0 px-10 py-4 text-2xs text-fg-muted">
+            {recovery?.state === 'error' ? `Draft recovery failed: ${recovery.message ?? 'unknown error'}. Your draft remains in memory.` : recovery?.state === 'backed-up' ? 'Draft backed up on this device.' : 'Backing up draft…'}
+          </p> : null}
           <div className="min-h-0 flex-1 overflow-auto bg-code-block">
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
-            {ready ? (
+            {edit && draft ? <Suspense fallback={<LoadingState label="Loading editor…" />}><TextEditor key={`${sessionId}:${selected}:${opened}`} sessionId={sessionId} file={selected} value={draft.content} position={position} onNavigate={(location) => open(location.file, location)}
+              onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={() => void save()} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}
           </div>

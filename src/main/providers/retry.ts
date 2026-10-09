@@ -80,6 +80,9 @@ export async function* streamWithRetry(
       const error = normalize(raw);
       if (signal.aborted || error.code === 'aborted') throw new ProviderError('aborted', 'Request cancelled.', { cause: raw });
       if (yielded || !error.retryable || attempt > policy.maxRetries) throw error;
+      // A server's minimum wait cannot be shortened to fit our retry budget.
+      // Surface the rate limit instead of sending another request too early.
+      if (error.retryAfterMs !== undefined && error.retryAfterMs > policy.maxRetryAfterMs) throw error;
       const delayMs = backoffDelay(attempt, error, policy);
       onRetry({ attempt, delayMs, error });
       await sleep(delayMs, signal);

@@ -23,7 +23,7 @@ export interface RoleDefinition {
   timeoutMinutes: number;
 }
 
-const READ = ['Read', 'Glob', 'Grep', 'Symbols', 'WebFetch', 'WebSearch'];
+const READ = ['Read', 'Glob', 'Grep', 'Symbols', 'SemanticCode', 'WebFetch', 'WebSearch'];
 const COMMANDS = ['Shell', 'ShellOutput', 'KillShell'];
 /** The main agent's own tools: no agent in a group delegates further, asks the user or rewrites the task list. */
 const MAIN_ONLY = new Set(['Task', 'RunAgents', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'MissionUpdate']);

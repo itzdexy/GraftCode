@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
+import { SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
+import { EditorDraftSchema, StoredEditorDraftSchema } from '../schemas/editorDrafts';
 import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema, SEARCH_ENGINE_IDS } from '../schemas/appSettings';
 import {
   BootstrapSchema,
@@ -192,6 +195,8 @@ export const contracts = {
   // Providers & models
   'providers:list': channel(Void, z.array(ProviderSummarySchema)),
   'providers:presets': channel(Void, z.array(ProviderPresetSchema)),
+  'catalog:status': channel(Void, CatalogSyncStatusSchema),
+  'catalog:refresh': channel(Void, CatalogSyncStatusSchema),
   'providers:verify': channel(
     z.object({
       kind: ProviderKindSchema,
@@ -319,6 +324,10 @@ export const contracts = {
   // Side panels
   'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
   'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
+  'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
+  'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024) }), SemanticResultSchema),
+  'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),
   /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
   /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */

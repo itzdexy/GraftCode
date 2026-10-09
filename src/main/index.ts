@@ -180,6 +180,7 @@ function services(): Promise<Services> {
     },
     onProgress: (step, label, done, total) => emit({ type: 'init:progress', step, label, done, total }),
     catalogFile: resourcePath('catalog', 'models.json'),
+    onCatalogChanged: (status) => emit({ type: 'catalog:changed', status }),
     // A preview no wider than 512px: small enough to keep in the conversation, clear enough to judge the picture.
     thumbnail: (data) => {
       const image = nativeImage.createFromBuffer(data);
@@ -191,6 +192,14 @@ function services(): Promise<Services> {
   })
     .then((s) => {
       applySystemSettings(s.settings.get());
+      const configureCatalog = (): void => {
+        const prefs = s.settings.get().modelCatalog;
+        s.catalogSync.configure(process.env.GRAFT_E2E !== '1' && prefs.enabled, prefs.intervalHours);
+      };
+      s.catalogSync.listen(s.settings.onChange((settings, previous) => {
+        if (settings.modelCatalog.enabled !== previous.modelCatalog.enabled || settings.modelCatalog.intervalHours !== previous.modelCatalog.intervalHours) configureCatalog();
+      }));
+      configureCatalog();
       s.shells.on('change', (sessionId: string) => emit({ type: 'shells:changed', sessionId }));
       s.shells.on('error-log', (message: string) => log.warn('shell', message));
       // Scheduled sessions run while the app is open.
@@ -388,6 +397,11 @@ function openMainWindow(): void {
 }
 
 async function shutdown(): Promise<void> {
+  const drain = async (stage: string, action: () => Promise<void> | undefined): Promise<void> => {
+    log.debug('app', 'Shutdown stage started', { stage });
+    await action();
+    log.debug('app', 'Shutdown stage finished', { stage });
+  };
   try {
     updates.dispose();
     desktop?.dispose();
@@ -395,13 +409,15 @@ async function shutdown(): Promise<void> {
     tray.destroy();
     scheduler?.stop();
     browserPanel?.close();
-    await ptyManager?.disposeAll();
-    await mcpManager?.disposeAll();
-    await sessionManager?.disposeAll();
+    await drain('terminals', () => ptyManager?.disposeAll());
+    await drain('mcp', () => mcpManager?.disposeAll());
+    await drain('sessions', () => sessionManager?.disposeAll());
     if (servicesPromise) {
       const s = await servicesPromise;
-      await s.siteServer.close();
-      await s.shells.disposeAll();
+      s.catalogSync.dispose();
+      await drain('language-servers', () => s.languages.dispose());
+      await drain('sites', () => s.siteServer.close());
+      await drain('shells', () => s.shells.disposeAll());
       s.db.close();
     }
   } catch (error) {

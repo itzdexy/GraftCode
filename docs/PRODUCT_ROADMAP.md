@@ -19,6 +19,36 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.14 source implementation (2026-10-09)
+
+- Added independent Models.dev refresh with validated, atomic metadata snapshots,
+  offline fallback, automatic cadence and real controls in Settings → Providers.
+- Persisted provider-discovered model metadata; omissions, authentication failures
+  and outages now retain explanations without claiming retirement. Model selection
+  and routing skip unavailable retained entries; public catalogs remain unverified.
+- Persisted context-pruning cutoffs across restart and rewind. Added content revision
+  checks for file tools, full-key provider fingerprints, broader credential redaction
+  and Retry-After handling that does not retry earlier than the provider permits.
+- Fixed Sites shutdown waiting on incomplete HTTP requests. Added shutdown-stage
+  diagnostics, cross-platform CI checks and a validation gate before release packaging.
+- Isolated writing group agents and general/custom writing Tasks in private worktrees;
+  integrated revision-checked binary patches without changing user staging, and
+  retained conflicts with persistent Agents-panel recovery details.
+- Added native OpenAI API shutdown-date evidence with origin/date validation,
+  retained retirement state and explicit replacement guidance. Other providers'
+  authoritative lifecycle integration remains outstanding.
+- Added actual local TypeScript/JavaScript language intelligence for agents and
+  the Monaco file editor, including unsaved diagnostics, F12 navigation and trust.
+- Added revision-checked editor saves and durable local draft recovery, retaining
+  buffers and original revisions across restart and external changes.
+- Fixed sanitizer, image-parser and HTTP-cache dependency advisories, replacing
+  Monaco's embedded sanitizer in the actual renderer bundle. Eight builder-chain
+  moderate advisories remain.
+- Baseline: 864 unit tests passed. Implementation: 939 passed, 28 skipped. The
+  final desktop/package verification, installation outcome and remaining scope are recorded in
+  [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). This is not a completed
+  eight-milestone upgrade or a published release.
+
 ### 0.6.13 (2026-10-06)
 
 - **What fills the context** (`src/main/agent/contextBreakdown.ts`). The next request is

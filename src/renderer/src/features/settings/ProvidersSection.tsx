@@ -16,6 +16,7 @@ import { describeVerifyFailure } from '../onboarding/KeyStep';
 import { ProviderPicker, type PickedProvider } from '../providers/ProviderPicker';
 import { targetFor, urlPlaceholder, type ProviderTarget } from '../providers/targets';
 import { ConfirmDialog, Group } from './common';
+import { CatalogSection } from './CatalogSection';
 
 type Failure = Extract<VerifyResult, { ok: false }>;
 type Check = { state: 'idle' } | { state: 'checking' } | { state: 'ok'; modelCount: number; inputs: string } | { state: 'failed'; failure: Failure };
@@ -319,6 +320,7 @@ export function ProvidersSection() {
 
   return (
     <div className="flex flex-col gap-24">
+      <CatalogSection />
       <Group
         description="Each provider is a key or endpoint. Models from every enabled provider appear in the model menus."
         actions={

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.14",
+    "date": "2026-10-09",
+    "items": [
+      "Edit project files in the Files panel with Monaco. Ctrl/Cmd+S checks the disk revision before saving, and unsaved drafts are backed up on this device for recovery after restarting. External changes keep your draft and require review.",
+      "Local TypeScript and JavaScript intelligence: agents can query definitions, references, types, outlines and diagnostics. In a trusted project, Check types checks the editor draft and F12 opens its definition.",
+      "Model metadata updates independently of app updates. Settings → Providers has automatic refresh controls, offline fallback and refresh status. Missing models and connection failures retain metadata without silently changing your selected model.",
+      "Native OpenAI shutdown announcements show the date and prevent selecting models after their dated UTC day has passed. Pick replacements explicitly; a missing catalog entry alone cannot confirm retirement.",
+      "Writing group agents and writing Tasks work in private checkouts. Successful patches integrate only if destination files still match; conflicts retain a checkout and patch with recovery details in the Agents panel.",
+      "Reliability fixes preserve context pruning across restarts, protect file-tool revisions, respect Retry-After, strengthen credential redaction and prevent preview-server connections from holding up shutdown. Targeted dependency fixes include the editor’s embedded sanitizer."
+    ]
+  },
+  {
     "version": "0.6.13",
     "date": "2026-10-06",
     "items": [

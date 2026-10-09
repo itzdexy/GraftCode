@@ -32,7 +32,7 @@ export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!/^[1-9]$/.test(event.key)) return;
     const model = quick[Number(event.key) - 1];
-    if (!model) return;
+    if (!model || model.availability?.selectable === false) return;
     event.preventDefault();
     onSelect(model);
     setOpen(false);
@@ -58,6 +58,8 @@ export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel
           return (
             <MenuItem
               key={`${m.ref.providerId}/${m.ref.modelId}`}
+              disabled={m.availability?.selectable === false}
+              title={m.availability?.reason ?? undefined}
               onSelect={() => onSelect(m)}
               trailing={
                 selected ? (
@@ -88,7 +90,7 @@ export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel
                   <div key={g.providerId} role="group" aria-label={providerLabel(g.providerId)}>
                     {more.length > 1 || providers.length > 1 ? <MenuLabel>{providerLabel(g.providerId)}</MenuLabel> : null}
                     {g.models.map((m) => (
-                      <MenuItem key={m.ref.modelId} onSelect={() => onSelect(m)}>
+                      <MenuItem key={m.ref.modelId} disabled={m.availability?.selectable === false} title={m.availability?.reason ?? undefined} onSelect={() => onSelect(m)}>
                         {m.label}
                       </MenuItem>
                     ))}

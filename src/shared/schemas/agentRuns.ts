@@ -43,6 +43,12 @@ export const AgentTimelineEntrySchema = z.object({
 });
 export type AgentTimelineEntry = z.infer<typeof AgentTimelineEntrySchema>;
 
+export const AgentWorkspaceSchema = z.object({
+  path: z.string(), branch: z.string(), baseCommit: z.string(),
+  state: z.enum(['working', 'integrated', 'retained']), patchPath: z.string().nullable()
+});
+export type AgentWorkspace = z.infer<typeof AgentWorkspaceSchema>;
+
 export const AgentRunSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
@@ -83,6 +89,7 @@ export const AgentRunSchema = z.object({
   /** Tool name → times used. */
   toolsUsed: z.record(z.string(), z.number().int()),
   filesChanged: z.array(z.string()),
+  workspace: AgentWorkspaceSchema.optional(),
   /** The agent's final report. */
   result: z.string(),
   error: z.string().nullable(),

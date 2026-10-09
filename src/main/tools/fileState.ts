@@ -1,9 +1,11 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { pathKeyFor } from './paths';
 
 interface Seen {
   mtimeMs: number;
   size: number;
+  digest: string;
 }
 
 export type FreshCheck = { ok: true } | { ok: false; reason: 'not-read' | 'modified' | 'missing' };
@@ -23,9 +25,10 @@ export class FileStateTracker {
     return pathKeyFor(p, this.platform);
   }
 
-  record(p: string): void {
+  record(p: string, content?: Uint8Array): void {
     const stat = fs.statSync(p);
-    this.seen.set(this.key(p), { mtimeMs: stat.mtimeMs, size: stat.size });
+    const digest = createHash('sha256').update(content ?? fs.readFileSync(p)).digest('hex');
+    this.seen.set(this.key(p), { mtimeMs: stat.mtimeMs, size: stat.size, digest });
     this.touched.add(p);
   }
 
@@ -39,6 +42,9 @@ export class FileStateTracker {
       return { ok: false, reason: 'missing' };
     }
     if (stat.mtimeMs !== seen.mtimeMs || stat.size !== seen.size) return { ok: false, reason: 'modified' };
+    try {
+      if (createHash('sha256').update(fs.readFileSync(p)).digest('hex') !== seen.digest) return { ok: false, reason: 'modified' };
+    } catch { return { ok: false, reason: 'missing' }; }
     return { ok: true };
   }
 

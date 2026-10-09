@@ -184,5 +184,29 @@ CREATE TABLE missions (
 ) STRICT;
 CREATE INDEX idx_missions_session ON missions (session_id, created_at);
 `
+  },
+  {
+    version: 5,
+    name: 'durable context pruning',
+    sql: `ALTER TABLE sessions ADD COLUMN prune_before_seq INTEGER NOT NULL DEFAULT 0 CHECK (prune_before_seq >= 0);`
+  },
+  {
+    version: 6,
+    name: 'provider model metadata snapshots',
+    sql: `CREATE TABLE provider_model_snapshots (
+      provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+      data TEXT NOT NULL
+    ) STRICT;`
+  },
+  {
+    version: 7,
+    name: 'editor draft recovery',
+    sql: `CREATE TABLE editor_drafts (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, path)
+    ) STRICT;`
   }
 ];

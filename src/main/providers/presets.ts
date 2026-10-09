@@ -3,6 +3,7 @@ import type { EffortLevel, ProviderKind } from '@shared/schemas/common';
 import type { EffortSupport, ModelInfo, ProviderPreset } from '@shared/schemas/models';
 import { isLocalUrl } from '@shared/privacy';
 import { effortSupport } from './catalog';
+import { CatalogDataSchema, type CatalogData, type RawModel, type RawProvider } from './catalogData';
 
 /**
  * Provider presets and model metadata from resources/catalog/models.json
@@ -10,37 +11,6 @@ import { effortSupport } from './catalog';
  * first use; a missing or unreadable file leaves the catalog empty so live
  * list-models data still works.
  */
-
-/** Compact model record as written by the generator (see compactModel there). */
-interface RawModel {
-  id: string;
-  n: string;
-  f?: string;
-  t?: 1;
-  v?: 1;
-  r?: 1;
-  e?: string[];
-  b?: [number, number];
-  g?: 1;
-  i?: string;
-  c?: number;
-  o?: number;
-  /** [input, output, cache read, cache write] in USD per million tokens. */
-  p?: Array<number | null>;
-  d?: string;
-  s?: string;
-}
-
-interface RawProvider {
-  id: string;
-  name: string;
-  kind: ProviderKind;
-  api: string | null;
-  env: string[];
-  doc: string | null;
-  key: 'required' | 'optional';
-  models: RawModel[];
-}
 
 export interface CatalogModel {
   id: string;
@@ -63,6 +33,9 @@ export interface CatalogModel {
   pricing: { input: number; output: number; cacheRead: number | null; cacheWrite: number | null } | null;
   releasedAt: number | null;
   deprecated: boolean;
+  missing: boolean;
+  /** Null means the source has not supplied this capability. */
+  capabilities: { tools: boolean | null; vision: boolean | null; reasoning: boolean | null; audio: boolean | null; structured: boolean | null };
 }
 
 /** Ollama runs locally and has its own adapter; it isn't in the generated catalog. */
@@ -99,7 +72,10 @@ function toModel(raw: RawModel): CatalogModel {
         ? { input: raw.p[0], output: raw.p[1], cacheRead: raw.p[2] ?? null, cacheWrite: raw.p[3] ?? null }
         : null,
     releasedAt: Number.isFinite(released) ? released : null,
-    deprecated: raw.s === 'deprecated'
+    deprecated: raw.s === 'deprecated',
+    missing: raw.missing === true,
+    capabilities: { tools: raw.t === undefined ? null : raw.t === 1, vision: raw.v === undefined ? null : raw.v === 1,
+      reasoning: raw.r === undefined ? null : raw.r === 1, audio: raw.audio ?? null, structured: raw.structured ?? null }
   };
 }
 
@@ -130,6 +106,8 @@ function modelName(id: string): string {
 }
 
 export class ProviderCatalog {
+  private generation = 0;
+  private current: CatalogData | null = null;
   /** How many providers give each context size for a model name; built on first use. */
   private sizes: Map<string, Map<number, number>> | null = null;
   private data: { providers: RawProvider[]; byId: Map<string, RawProvider>; models: Map<string, Map<string, RawModel>> } | null = null;
@@ -139,26 +117,45 @@ export class ProviderCatalog {
     private readonly log: (message: string) => void = () => undefined
   ) {}
 
+  get revision(): number { return this.generation; }
+
+  snapshot(): CatalogData {
+    this.load();
+    return this.current ?? { providers: [] };
+  }
+
+  /** Swap only after the entire candidate has passed validation and been persisted. */
+  replace(candidate: CatalogData): void {
+    const parsed = CatalogDataSchema.parse(candidate);
+    this.current = parsed;
+    this.index(parsed.providers);
+    this.sizes = null;
+    this.generation++;
+  }
+
+  private index(providers: RawProvider[]): NonNullable<ProviderCatalog['data']> {
+    this.data = { providers, byId: new Map(providers.map((p) => [p.id, p])),
+      models: new Map(providers.map((p) => [p.id, new Map(p.models.map((m) => [m.id, m]))])) };
+    return this.data;
+  }
+
   private load(): NonNullable<ProviderCatalog['data']> {
     if (this.data) return this.data;
     let providers: RawProvider[] = [];
     if (this.file) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')) as { providers?: RawProvider[] };
-        providers = Array.isArray(parsed.providers) ? parsed.providers : [];
+        this.current = CatalogDataSchema.parse(JSON.parse(fs.readFileSync(this.file, 'utf8')));
+        providers = this.current.providers;
       } catch (error) {
         this.log(`Provider catalog unavailable (${this.file}): ${(error as Error).message}`);
       }
     }
-    const byId = new Map(providers.map((p) => [p.id, p]));
-    const models = new Map(providers.map((p) => [p.id, new Map(p.models.map((m) => [m.id, m]))]));
-    this.data = { providers, byId, models };
-    return this.data;
+    return this.index(providers);
   }
 
   /** Every preset, including built-in Ollama, sorted by name. */
   presets(): ProviderPreset[] {
-    const list = this.load().providers.map(
+    const list = this.load().providers.filter((p) => p.models.length === 0 || p.models.some((m) => !m.missing)).map(
       (p): ProviderPreset => ({
         id: p.id,
         name: p.name,
@@ -167,7 +164,7 @@ export class ProviderCatalog {
         key: p.key,
         docUrl: p.doc,
         envVars: p.env,
-        modelCount: p.models.length,
+        modelCount: p.models.filter((m) => !m.missing).length,
         local: p.api !== null && isLocalUrl(p.api)
       })
     );
@@ -241,7 +238,7 @@ export class ProviderCatalog {
 
   /** The catalog's model list for a preset (used when a provider has no list-models endpoint). */
   models(presetId: string): CatalogModel[] {
-    return (this.load().byId.get(presetId)?.models ?? []).map(toModel);
+    return (this.load().byId.get(presetId)?.models ?? []).filter((m) => !m.missing).map(toModel);
   }
 }
 

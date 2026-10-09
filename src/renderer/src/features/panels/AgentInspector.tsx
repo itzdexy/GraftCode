@@ -137,6 +137,12 @@ export function AgentInspector({
           <span className="tabular-nums">{run.costUsd !== null ? money(run.costUsd) : tokens > 0 ? 'This model has no published price' : 'Nothing yet'}</span>
         </Fact>
         <Fact label="Runs">{runsNote(run)}</Fact>
+        {run.workspace ? <Fact label="Checkout">
+          <p>{run.workspace.state === 'integrated' ? 'Changes integrated' : run.workspace.state === 'retained' ? 'Retained for review' : 'Private writer checkout'}</p>
+          <p className="selectable break-all font-mono text-2xs">{run.workspace.path}</p>
+          <p className="selectable break-all text-2xs">{run.workspace.branch}</p>
+          {run.workspace.patchPath ? <p className="selectable break-all text-2xs">Patch: {run.workspace.patchPath}</p> : null}
+        </Fact> : null}
         {run.writes.length > 0 ? (
           <Fact label="May change">
             <span className="flex flex-wrap gap-x-8 gap-y-2">

@@ -23,6 +23,20 @@ function devCsp(): Plugin {
   };
 }
 
+/** Monaco 0.57 also embeds DOMPurify 3.4.15: an npm override alone cannot fix that copy. */
+function patchedEditorSanitizer(): Plugin {
+  return {
+    name: 'graft-patched-editor-sanitizer',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (source === './dompurify/dompurify.js' && importer?.replaceAll('\\', '/').endsWith('/monaco-editor/esm/vs/base/browser/domSanitize.js')) {
+        return resolve(__dirname, 'node_modules/dompurify/dist/purify.es.mjs');
+      }
+      return null;
+    }
+  };
+}
+
 export default defineConfig({
   main: {
     resolve: { alias: sharedAlias },
@@ -41,10 +55,12 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
+    // Keep Monaco's embedded sanitizer visible to the scoped replacement in dev too.
+    optimizeDeps: { exclude: ['monaco-editor'] },
     resolve: {
       alias: { ...sharedAlias, '@renderer': resolve(__dirname, 'src/renderer/src') }
     },
-    plugins: [react(), tailwindcss(), devCsp()],
+    plugins: [react(), tailwindcss(), devCsp(), patchedEditorSanitizer()],
     build: {
       // Smaller to load and parse at startup; stack traces in logs still name the files.
       minify: 'esbuild',

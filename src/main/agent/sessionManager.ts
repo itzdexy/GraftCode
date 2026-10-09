@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import { GraftError } from '@shared/errors';
 import { dataHandling } from '@shared/privacy';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
@@ -28,6 +29,7 @@ import { HookRunner } from './hooks';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
 import { generateTitle, titleModel } from './title';
+import { AgentWorkspaces } from './workspaces';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 
 export interface McpToolSource {
@@ -84,8 +86,11 @@ export class SessionManager {
   private readonly incognito = new MemorySessionStore();
   private activeId: string | null = null;
   private windowFocused = true;
+  private readonly workspaces: AgentWorkspaces;
 
-  constructor(private readonly deps: SessionManagerDeps) {}
+  constructor(private readonly deps: SessionManagerDeps) {
+    this.workspaces = new AgentWorkspaces(deps.checkpoints, path.join(deps.paths.graftHome, 'agent-workspaces'));
+  }
 
   /** Sessions left running or waiting when the app last quit are idle now. */
   recoverStaleStatuses(): void {
@@ -160,6 +165,7 @@ export class SessionManager {
       mcpPrompts: (root) => d.mcp?.prompts(root) ?? [],
       mcpPrompt: (server, name, args, root) => (d.mcp ? d.mcp.getPrompt(server, name, args, root) : Promise.reject(new Error('No MCP servers are connected.'))),
       shells: d.shells,
+      workspaces: this.workspaces,
       shellLabel: d.shell.label,
       settings: d.settingsFiles,
       hooks: (root, trusted) => new HookRunner(() => d.settingsFiles.hooks(root, trusted), d.shell, () => root ?? process.cwd()),

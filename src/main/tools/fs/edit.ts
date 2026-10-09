@@ -196,7 +196,7 @@ async function runEdits(filePath: string, edits: EditSpec[], ctx: Parameters<Too
     replacements += outcome.replacements;
     if (outcome.note) looseNotes.push(outcome.note);
   }
-  await writeFileAtomic(abs, current);
+  await writeFileAtomic(abs, current, loaded);
   ctx.files.record(abs);
   const diff = unifiedDiff(shown, loaded, current);
   const message = `Edited ${shown}: ${replacements} replacement${replacements === 1 ? '' : 's'} (+${diff.added} −${diff.removed}).`;

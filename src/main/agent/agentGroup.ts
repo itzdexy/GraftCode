@@ -20,6 +20,8 @@ import { routeModel, type Route } from './modelRouter';
 import { runGraph, type GraphControl, type NodeState } from './orchestrator';
 import { resolveRole, type ResolvedRole } from './roles';
 import { outsideScope } from './writeScope';
+import type { AgentWorkspaces } from './workspaces';
+import { workspaceHost } from './workspaceHost';
 
 /**
  * A group of agents started by RunAgents. Each agent gets a role, a fresh
@@ -74,6 +76,7 @@ export interface GroupHost {
   resolve(ref: ModelRef, signal: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo }>;
   /** The loop host a sub-agent builds on: permission prompts, tool context, hooks, the session's usage. */
   loopHost(model: ModelInfo, provider: LLMProvider): LoopHost;
+  workspaces?: AgentWorkspaces;
   effort(model: ModelInfo): EffortLevel | null;
   /** Stores an agent's record and tells the interface. */
   save(run: AgentRun): void;
@@ -302,7 +305,23 @@ async function runAgent(
   let spent = 0;
   let overBudget = false;
   const scratch: StoredMessage[] = [];
-  const parent = host.loopHost(model, provider);
+  const original = host.loopHost(model, provider);
+  const lease = host.workspaces && role.tools.some((tool) => WRITE_TOOLS.includes(tool))
+    ? await host.workspaces.create(original.describeContext().cwd, signal) : null;
+  if (lease) change({ workspace: lease.info }, { kind: 'start', text: 'Working in a private checkout; integration checks for destination conflicts.' });
+  let privateHost: Awaited<ReturnType<typeof workspaceHost>> | null = null;
+  try { privateHost = lease ? await workspaceHost(original, lease) : null; }
+  catch (error) { if (lease) change({ workspace: host.workspaces?.retain(lease) }); throw error; }
+  const parent = privateHost?.host ?? original;
+  const finish = async (report: string): Promise<string> => {
+    if (lease && host.workspaces) {
+      // Stop private background commands before capturing the final changes.
+      await privateHost?.close();
+      const workspace = await host.workspaces.integrate(lease, writes, stop.signal, current()?.filesChanged ?? []);
+      change({ workspace }, { kind: 'end', text: 'Private changes integrated; patch retained for review.' });
+    }
+    return report;
+  };
   const where = parent.describeContext();
   // What the agent has read is its own: with a fresh context it has seen nothing, so it reads a file before it changes it.
   const ownFiles = new FileStateTracker(where.platform);
@@ -367,6 +386,7 @@ async function runAgent(
   const readsOnly = !role.tools.some((tool) => WRITE_TOOLS.includes(tool));
   const system = [
     host.system,
+    ...(lease ? [`# Private writer checkout\nYour working directory is ${lease.cwd}. Use relative paths here. Ignored/generated files and dependency folders are not copied. Changes are integrated only after destination and scope checks; failed work stays here for recovery.`] : []),
     `# Your role in this group: ${role.label}`,
     `You are one agent in a group working towards this goal: "${goal}". Your task: "${spec.task}". ${role.brief}`,
     `You start with a fresh context: you see this brief and nothing of the conversation, and the main agent sees only your final message.${readsOnly ? ' You may not change files.' : ''}`,
@@ -413,7 +433,7 @@ async function runAgent(
       const report = result.finalText.trim();
       if (result.reason === 'guard' && report.length === 0) throw new GraftError('agent_stuck', 'Stopped: it kept repeating the same steps without reporting.');
       if (report.length === 0) throw new GraftError('agent_silent', 'It finished without a report.');
-      if (!spec.verify) return report;
+      if (!spec.verify) return await finish(report);
 
       // The check decides, not the agent's word for it. It runs like any command of the turn: permission rules and hooks apply.
       const call: ToolUseBlock = { type: 'tool_use', id: `verify-${randomUUID()}`, name: 'Shell', input: { command: spec.verify, description: `Check for ${spec.id}` } };
@@ -423,7 +443,7 @@ async function runAgent(
       const passed = shell !== null && !shell.timedOut && shell.exitCode === 0;
       const output = (shell?.output ?? textOf(checked.content)).slice(-4_000);
       change({ verify: { command: spec.verify, passed, output, rounds: round } }, { kind: 'verify', text: passed ? `Check passed: ${spec.verify}` : `Check failed (round ${String(round)}): ${spec.verify}` });
-      if (passed) return report;
+      if (passed) return await finish(report);
       if (round >= VERIFY_ROUNDS) throw new GraftError('agent_check_failed', `Its check still fails after ${String(VERIFY_ROUNDS)} rounds: ${spec.verify}\n${output.slice(-1_500)}`);
       loopHost.append(
         'user',
@@ -433,5 +453,7 @@ async function runAgent(
     }
   } finally {
     signal.removeEventListener('abort', forward);
+    await privateHost?.close();
+    if (lease && lease.info.state !== 'integrated') change({ workspace: host.workspaces?.retain(lease) });
   }
 }

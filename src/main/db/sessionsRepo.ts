@@ -63,6 +63,8 @@ export interface SessionPatch {
 
 /** Persistence used by the agent runtime; implemented by SQLite and in memory (incognito, tests). */
 export interface SessionStore {
+  getPruneBeforeSeq(sessionId: string): number;
+  setPruneBeforeSeq(sessionId: string, seq: number): void;
   getSummary(sessionId: string): SessionSummary;
   updateSession(sessionId: string, patch: SessionPatch): SessionSummary;
   getTodos(sessionId: string): TodoItem[];
@@ -186,6 +188,17 @@ export function ftsPhrase(query: string): string {
 
 export class SessionsRepo implements SessionStore {
   constructor(private readonly db: Db) {}
+
+  getPruneBeforeSeq(sessionId: string): number {
+    this.getSummary(sessionId);
+    return (this.db.prepare('SELECT prune_before_seq AS seq FROM sessions WHERE id = ?').get(sessionId) as { seq: number }).seq;
+  }
+
+  setPruneBeforeSeq(sessionId: string, seq: number): void {
+    this.getSummary(sessionId);
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new GraftError('invalid_context_state', 'The pruning cutoff must be a nonnegative integer.');
+    this.db.prepare('UPDATE sessions SET prune_before_seq = ? WHERE id = ?').run(seq, sessionId);
+  }
 
   create(input: CreateSessionInput): SessionSummary {
     const id = randomUUID();
@@ -381,6 +394,7 @@ export class SessionsRepo implements SessionStore {
         .all(sessionId, fromSeq) as MessageRow[];
       for (const row of rows) this.db.prepare('DELETE FROM search_index WHERE message_id = ?').run(row.id);
       this.db.prepare('DELETE FROM messages WHERE session_id = ? AND seq >= ?').run(sessionId, fromSeq);
+      this.db.prepare('UPDATE sessions SET prune_before_seq = MIN(prune_before_seq, ?) WHERE id = ?').run(fromSeq, sessionId);
       return rows.map(toMessage);
     });
     return tx();
@@ -443,7 +457,8 @@ export class SessionsRepo implements SessionStore {
     for (const row of rows) {
       const run = storedAgentRun(row.data);
       if (!agentRunActive(run.status)) continue;
-      const stopped: AgentRun = { ...run, status: 'cancelled', rev: run.rev + 1, error: 'Graft was closed while this agent was working.', endedAt: run.endedAt ?? Date.now() };
+      const stopped: AgentRun = { ...run, status: 'cancelled', rev: run.rev + 1, error: 'Graft was closed while this agent was working.', endedAt: run.endedAt ?? Date.now(),
+        ...(run.workspace?.state === 'working' ? { workspace: { ...run.workspace, state: 'retained' as const } } : {}) };
       this.db.prepare('UPDATE agent_runs SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(stopped), Date.now(), row.id);
       recovered++;
     }

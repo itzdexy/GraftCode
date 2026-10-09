@@ -101,7 +101,7 @@ describe('a group of agents', () => {
         return { text: 'ok' };
       }
     });
-    expect(tools['Read the code']).toEqual(['Glob', 'Grep', 'Read', 'Symbols', 'WebFetch']);
+    expect(tools['Read the code']).toEqual(['Glob', 'Grep', 'Read', 'SemanticCode', 'Symbols', 'WebFetch']);
     expect(tools['Fix the bug']).toEqual(expect.arrayContaining(['Edit', 'Write', 'Shell']));
     expect(tools['Fix the bug']).not.toContain('RunAgents');
     expect(tools['Fix the bug']).not.toContain('Task');

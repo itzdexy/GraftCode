@@ -9,6 +9,7 @@ import { hostOf, joinUrl, request, requestJson } from './http';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { parseSse } from './sse';
+import { isOfficialOpenAiModels, openAiShutdownDate, withModelLifecycle } from './modelLifecycle';
 import type { FinishReason, LLMProvider, ProviderConnection, RequestPrivacy, StreamEvent, StreamRequest } from './types';
 
 type ChatKind = Extract<ProviderKind, 'openai' | 'openrouter' | 'openai-compatible'>;
@@ -131,6 +132,7 @@ function reported(model: unknown, paths: string[][], least: number): number | nu
 
 interface OpenAiModel {
   id: string;
+  shutdown_date?: unknown;
   created?: number;
   name?: string;
   description?: string;
@@ -332,15 +334,18 @@ export class OpenAiChatProvider implements LLMProvider {
   }
 
   async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const official = isOfficialOpenAiModels(this.base, this.kind);
     // OpenRouter's catalog is public, so confirm the key against an authenticated endpoint first.
     if (this.kind === 'openrouter') {
       await requestJson<unknown>({ url: joinUrl(this.base, 'key'), headers: this.headers(), ...(signal ? { signal } : {}) });
     }
     let listed: OpenAiModel[];
+    let catalogFallback = false;
     try {
       const body = await requestJson<{ data?: OpenAiModel[] }>({
         url: joinUrl(this.base, 'models'),
         headers: this.headers(),
+        ...(official ? { redirect: 'error' as const } : {}),
         ...(signal ? { signal } : {})
       });
       if (!Array.isArray(body.data)) {
@@ -355,18 +360,29 @@ export class OpenAiChatProvider implements LLMProvider {
       const first = known.find((m) => !m.deprecated) ?? known[0];
       if (!listMissing || !first) throw error;
       await this.ping(first.id, signal);
+      catalogFallback = true;
       listed = known.filter((m) => !m.deprecated).map((m) => ({ id: m.id }));
     }
-    const models = listed
+    const models: ModelInfo[] = listed
       .filter((m) => {
         if (this.kind === 'openai') return !NON_CHAT.test(m.id);
         if (this.kind === 'openai-compatible') return this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id);
         return true;
       })
-      .map((m) => this.toModelInfo(m));
+      .map((m): ModelInfo => {
+        const lifecycle = official ? openAiShutdownDate(m.shutdown_date) : undefined;
+        return withModelLifecycle({ ...this.toModelInfo(m), ...(lifecycle ? { lifecycle } : {}), availability: {
+          state: catalogFallback || this.kind === 'openrouter' ? 'cataloged-unverified' as const : 'available' as const,
+          source: catalogFallback ? 'catalog' as const : 'provider' as const, checkedAt: Date.now(),
+          reason: catalogFallback ? 'Catalog metadata; this provider has no model-list API. Account access to each model is unverified.'
+            : this.kind === 'openrouter' ? 'Public provider catalog; the key is valid, but account access to each model is unverified.' : null, selectable: true
+        } });
+      });
     const ids = new Set(models.map((m) => m.ref.modelId));
     for (const custom of this.customModels) {
-      if (!ids.has(custom.id)) models.push(this.toModelInfo({ id: custom.id }));
+      if (!ids.has(custom.id)) models.push({ ...this.toModelInfo({ id: custom.id }), availability: {
+        state: 'cataloged-unverified', source: 'custom', checkedAt: null, reason: 'Custom model ID; account access has not been verified.', selectable: true
+      } });
     }
     return arrangeModels(models);
   }
@@ -389,7 +405,7 @@ export class OpenAiChatProvider implements LLMProvider {
     let known: { context: number | null; output: number | null } = { context: meta?.context ?? null, output: meta?.output ?? null };
     let reasoning = meta?.reasoning ?? false;
     let vision = meta?.vision ?? false;
-    let tools = meta ? meta.tools : true;
+    let tools = meta?.capabilities.tools ?? true;
     let pricing = modelPricing(meta?.pricing ?? null);
     if (this.kind === 'openai' && !meta) {
       const hint = OPENAI_LIMITS.find((h) => h.prefix.test(m.id)) ?? { context: 128_000, output: 16_384, reasoning, vision: true };

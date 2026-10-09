@@ -54,6 +54,10 @@ export class HookRunner {
     private readonly platform: NodeJS.Platform = process.platform
   ) {}
 
+  inDirectory(cwd: string): HookRunner {
+    return new HookRunner(this.hooks, this.shell, () => cwd, this.platform);
+  }
+
   has(event: HookEvent): boolean {
     return (this.hooks()[event]?.length ?? 0) > 0;
   }

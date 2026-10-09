@@ -9,6 +9,7 @@ export interface HttpRequest {
   signal?: AbortSignal;
   /** Time to first byte; streaming bodies are then unbounded. */
   timeoutMs?: number;
+  redirect?: 'error' | 'follow' | 'manual';
 }
 
 export function hostOf(url: string): string {
@@ -44,7 +45,8 @@ export async function request(req: HttpRequest): Promise<Response> {
         ...req.headers
       },
       body: req.body === undefined ? undefined : json ? JSON.stringify(req.body) : (req.body as string),
-      signal: controller.signal
+      signal: controller.signal,
+      ...(req.redirect ? { redirect: req.redirect } : {})
     });
   } catch (error) {
     clearTimeout(timer);

@@ -10,7 +10,29 @@ export const EffortSupportSchema = z.object({
 });
 export type EffortSupport = z.infer<typeof EffortSupportSchema>;
 
+export const ModelAvailabilitySchema = z.object({
+  state: z.enum(['available', 'cataloged-unverified', 'not-accessible', 'deprecated', 'confirmed-retired', 'temporarily-unavailable', 'unknown']),
+  source: z.enum(['provider', 'catalog', 'custom', 'cache']),
+  checkedAt: z.number().int().nullable(), reason: z.string().nullable(), selectable: z.boolean()
+});
+export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
+
+export const ModelLifecycleSchema = z.object({
+  shutdownDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((date) => {
+    const time = Date.parse(`${date}T00:00:00Z`);
+    return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date;
+  }, 'Invalid shutdown date'),
+  source: z.literal('openai-models-api'),
+  sourceUrl: z.literal('https://api.openai.com/v1/models')
+});
+export type ModelLifecycle = z.infer<typeof ModelLifecycleSchema>;
+
 export const ModelInfoSchema = z.object({
+  availability: ModelAvailabilitySchema.optional(),
+  lifecycle: ModelLifecycleSchema.optional(),
+  /** Published catalog evidence; null means unknown rather than an inferred capability. */
+  catalogCapabilities: z.object({ tools: z.boolean().nullable(), vision: z.boolean().nullable(), reasoning: z.boolean().nullable(),
+    audio: z.boolean().nullable(), structured: z.boolean().nullable() }).optional(),
   ref: ModelRefSchema,
   label: z.string(),
   description: z.string(),

@@ -69,6 +69,8 @@ export class MockProvider {
 
   /** What the title model answers (session titles). */
   titleText = 'Scripted title';
+  /** Task-aware transport fixtures for agents whose requests can arrive in any order. */
+  respondToChat: ((body: unknown) => ScriptedTurn) | null = null;
 
   /** Queues assistant turns; each chat request (except title requests) consumes one. */
   script(...turns: ScriptedTurn[]): void {
@@ -135,7 +137,7 @@ export class MockProvider {
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') {
       const model = (body as { model?: string } | null)?.model;
-      const turn: ScriptedTurn = model === this.models[1] ? { text: this.titleText } : (this.turns.shift() ?? { text: 'Done.' });
+      const turn: ScriptedTurn = model === this.models[1] ? { text: this.titleText } : (this.respondToChat?.(body) ?? this.turns.shift() ?? { text: 'Done.' });
       await this.stream(res, turn);
       return;
     }

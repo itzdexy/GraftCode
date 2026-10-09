@@ -21,6 +21,7 @@ export const TreeEntrySchema = z.object({
 export type TreeEntryView = z.infer<typeof TreeEntrySchema>;
 
 export const FilePreviewSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   path: z.string(),
   content: z.string().nullable(),
   binary: z.boolean(),

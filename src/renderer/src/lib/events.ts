@@ -5,6 +5,7 @@ import { panelBus, usePanels } from '../stores/panels';
 import { useSessions } from '../stores/sessions';
 import { emitChanged } from './bus';
 import { onEvent } from './ipc';
+import { useEditorDrafts } from '../features/panels/editorDrafts';
 
 /** Routes main-process push events into the stores. Mounted once at the root. */
 export function useGraftEvents(): void {
@@ -22,6 +23,9 @@ export function useGraftEvents(): void {
             useApp.getState().setProviders(event.providers);
             if (useApp.getState().phase === 'ready') void useApp.getState().loadModels();
             break;
+          case 'catalog:changed':
+            useApp.getState().catalogChanged(event.status);
+            break;
           case 'session:event':
             useSessions.getState().applyEvent(event.sessionId, event.event);
             break;
@@ -29,6 +33,7 @@ export function useGraftEvents(): void {
             useSessions.getState().applySummary(event.summary);
             break;
           case 'session:removed':
+            useEditorDrafts.getState().forgetSession(event.sessionId);
             useSessions.getState().remove(event.sessionId);
             useNav.getState().forget(event.sessionId);
             break;

@@ -65,6 +65,7 @@ export function gitBinary(platform: NodeJS.Platform = process.platform, env: Nod
  */
 export function runGit(args: string[], options: GitOptions): Promise<GitResult> {
   return new Promise((resolve, reject) => {
+    options.signal?.throwIfAborted();
     // spawn reports a missing working folder as ENOENT too, which would read as "git is missing".
     if (!fs.existsSync(options.cwd)) {
       reject(new GraftError('folder_missing', `The folder ${options.cwd} doesn't exist anymore.`));
@@ -98,6 +99,11 @@ export function runGit(args: string[], options: GitOptions): Promise<GitResult> 
     child.on('close', (code) => {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', onAbort);
+      if (options.signal?.aborted) {
+        const reason: unknown = options.signal.reason;
+        reject(reason instanceof Error ? reason : new GraftError('interrupted', 'Git was interrupted.', { cause: reason }));
+        return;
+      }
       const result = { stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), code };
       if (code === 0 || options.allowFail) {
         resolve(result);

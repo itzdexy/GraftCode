@@ -24,7 +24,7 @@ export function resolveModel(groups: ProviderModels[], ref: ModelRef | null): Mo
 
 /** Up to nine featured models (number keys 1–9); the current model is always included. */
 export function quickModels(groups: ProviderModels[], current: ModelInfo | null, limit = 9): ModelInfo[] {
-  const featured = groups.flatMap((g) => g.models.filter((m) => m.featured));
+  const featured = groups.flatMap((g) => g.models.filter((m) => m.featured && m.availability?.selectable !== false));
   const list = featured.slice(0, limit);
   if (current && !list.some((m) => sameModel(m.ref, current.ref))) {
     if (list.length >= limit) list.pop();

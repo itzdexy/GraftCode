@@ -90,7 +90,7 @@ export const readTool: ToolDefinition<ReadInput> = {
 
     const buffer = await fs.promises.readFile(abs);
     if (looksBinary(buffer)) return errorResult(`${shown} is a binary file (${stat.size} bytes); its contents are not shown.`);
-    ctx.files.record(abs);
+    ctx.files.record(abs, buffer);
 
     const decoded = buffer.toString('utf8');
     const text = decoded.charCodeAt(0) === 0xfeff ? decoded.slice(1) : decoded;

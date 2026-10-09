@@ -54,7 +54,7 @@ export function ChatModelMenu({ model, effort, onModel, onEffort, disabled = fal
       <MenuContent align="end" className="w-[268px]">
         {featured.length === 0 ? <MenuLabel>{loading ? 'Loading models…' : 'No models available. Check your providers.'}</MenuLabel> : null}
         {featured.map((m) => (
-          <MenuItem key={`${m.ref.providerId}/${m.ref.modelId}`} description={m.description} checked={sameModel(m.ref, model?.ref)} onSelect={() => onModel(m)}>
+          <MenuItem key={`${m.ref.providerId}/${m.ref.modelId}`} disabled={m.availability?.selectable === false} title={m.availability?.reason ?? undefined} description={m.description} checked={sameModel(m.ref, model?.ref)} onSelect={() => onModel(m)}>
             {m.label}
           </MenuItem>
         ))}
@@ -97,7 +97,7 @@ export function ChatModelMenu({ model, effort, onModel, onEffort, disabled = fal
                   <div key={g.providerId} role="group" aria-label={providerLabel(g.providerId)}>
                     {more.length > 1 || providers.length > 1 ? <MenuLabel>{providerLabel(g.providerId)}</MenuLabel> : null}
                     {g.models.map((m) => (
-                      <MenuItem key={m.ref.modelId} onSelect={() => onModel(m)}>
+                      <MenuItem key={m.ref.modelId} disabled={m.availability?.selectable === false} title={m.availability?.reason ?? undefined} onSelect={() => onModel(m)}>
                         {m.label}
                       </MenuItem>
                     ))}

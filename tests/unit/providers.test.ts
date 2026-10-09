@@ -93,6 +93,14 @@ describe('error normalization and retry', () => {
 
   const fast = { maxRetries: 3, baseDelayMs: 1, maxDelayMs: 5, maxRetryAfterMs: 5 };
 
+  it('surfaces a server wait beyond the retry budget instead of retrying sooner than Retry-After', async () => {
+    const provider = new FakeProvider([{ error: new ProviderError('rate_limit', 'Wait before retrying.', { retryAfterMs: 120000 }) }, { text: 'must not run' }]);
+    const retries: number[] = [];
+    await expect(collect(streamWithRetry(provider, request(), new AbortController().signal, (info) => retries.push(info.attempt), fast))).rejects.toMatchObject({ code: 'rate_limit', retryAfterMs: 120000 });
+    expect(retries).toEqual([]);
+    expect(provider.remaining).toBe(1);
+  });
+
   it('retries overloaded/5xx before the first event, then succeeds', async () => {
     const provider = new FakeProvider([
       { error: new ProviderError('overloaded', 'busy') },
@@ -389,6 +397,7 @@ describe('OpenAI-style chat adapter', () => {
       description: 'A capable model for agents.',
       contextWindow: 262_144,
       maxOutputTokens: 65_536,
+      availability: { state: 'cataloged-unverified', source: 'provider', selectable: true },
       supportsVision: true,
       supportsTools: true,
       pricing: { input: 3, output: 15 }

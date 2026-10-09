@@ -35,7 +35,10 @@ import { contextBreakdown, contextLines } from './contextBreakdown';
 import { checksSummary, runChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { modelOrder, toLlmHistory, withSentTimes } from './history';
-import { PRUNE_KEEP_TOKENS, pruneCutoff, withPrunedOutput } from './prune';
+import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
+import { SessionContextState } from './contextState';
+import type { AgentWorkspaces } from './workspaces';
+import { workspaceHost } from './workspaceHost';
 import { runAgentLoop, type LoopHost, type LoopModel, type PermissionAnswer, type PermissionPrompt } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
@@ -129,6 +132,7 @@ export interface SessionDeps {
   mcpPrompts(projectRoot: string | null): McpPromptInfo[];
   mcpPrompt(server: string, name: string, args: Record<string, string>, projectRoot: string | null): Promise<{ text: string; description: string | null }>;
   shells: ShellManager;
+  workspaces?: AgentWorkspaces;
   shellLabel: string;
   settings: SettingsStore;
   hooks(projectRoot: string | null, trusted: boolean): HookRunner | null;
@@ -231,11 +235,7 @@ export class AgentSession {
   private modelKey: string | null = null;
   /** Thinking in messages before this seq is never replayed (model switch, tool set change). */
   private stripBeforeSeq = 0;
-  /**
-   * Tool output in messages before this seq is sent as a line saying it was removed (see prune.ts).
-   * Kept in memory only: after a restart the session removes it again when it next fills up.
-   */
-  private pruneBeforeSeq = 0;
+  private readonly contextState: SessionContextState;
   private notes: string[] = [];
   private prePlanMode: PermissionMode = 'auto-edit';
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
@@ -251,6 +251,7 @@ export class AgentSession {
     private readonly deps: SessionDeps
   ) {
     this.id = summary.id;
+    this.contextState = new SessionContextState(deps.store, summary.id);
     this.files = new FileStateTracker(deps.platform);
     this.status = summary.status === 'running' || summary.status === 'needs-input' ? 'idle' : summary.status;
   }
@@ -563,7 +564,7 @@ export class AgentSession {
    * Messages that a deleted summary or /clear had replaced are sent again.
    */
   private deleteMessagesFrom(seq: number): StoredMessage[] {
-    this.pruneBeforeSeq = Math.min(this.pruneBeforeSeq, seq);
+    this.contextState.rewind(seq);
     const removed = this.deps.store.deleteMessagesFrom(this.id, seq);
     // A summary, or the note /clear left, went with them: what it stood for is the conversation again.
     const stoodFor = removed.filter((m) => m.meta.kind === 'compaction-summary' || m.meta.cleared).map((m) => m.id);
@@ -905,7 +906,7 @@ export class AgentSession {
     switch (slash.name) {
       case 'clear': {
         const ids = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted).map((m) => m.id);
-        this.pruneBeforeSeq = 0;
+        this.contextState.setCutoff(0);
         this.files.clear();
         this.deps.store.updateSession(this.id, { todos: [] });
         this.emit({ type: 'todos', todos: [] });
@@ -1265,10 +1266,10 @@ export class AgentSession {
   }
 
   /** What is sent to the model: the stored messages, without stale thinking and without tool output before `pruneBefore`. */
-  private history(pruneBefore = this.pruneBeforeSeq): LlmMessage[] {
+  private history(pruneBefore = this.contextState.cutoff): LlmMessage[] {
     const messages = this.deps.store.listMessages(this.id);
     const floor = this.stripBeforeSeq;
-    const kept = withPrunedOutput(
+    const kept = this.contextState.output(
       messages.map((m) =>
         m.seq < floor && m.role === 'assistant' ? { ...m, content: m.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking') } : m
       ),
@@ -1285,10 +1286,10 @@ export class AgentSession {
   private pruneOutput(tokens: number, contextWindow: number): boolean {
     const messages = this.deps.store.listMessages(this.id).filter((m) => !m.meta.compacted);
     const cutoff = pruneCutoff(messages, Math.min(PRUNE_KEEP_TOKENS, Math.floor(contextWindow * 0.25)));
-    if (cutoff === null || cutoff <= this.pruneBeforeSeq) return false;
+    if (cutoff === null || cutoff <= this.contextState.cutoff) return false;
     const saving = estimateMessagesTokens(this.history()) - estimateMessagesTokens(this.history(cutoff));
     if (tokens - saving > contextWindow * PRUNE_TARGET) return false;
-    this.pruneBeforeSeq = cutoff;
+    this.contextState.setCutoff(cutoff);
     this.notice('info', 'Removed old tool output to make room.');
     return true;
   }
@@ -1743,6 +1744,7 @@ export class AgentSession {
       sessionId: this.id,
       toolUseId,
       mcpRoot: this.summary.kind === 'code' ? this.settingsRoot() : null,
+      trustedProject: trusted && this.summary.kind === 'code',
       cwd,
       projectRoot: root ?? cwd,
       platform: this.deps.platform,
@@ -1888,6 +1890,7 @@ export class AgentSession {
         candidates: async (s) => (await this.deps.models.candidates?.(s)) ?? [model],
         resolve: (ref, s) => this.deps.models.resolve(ref, s),
         loopHost: (m, p) => this.makeHost(m, p, hooks, root, trusted),
+        ...(this.deps.workspaces ? { workspaces: this.deps.workspaces } : {}),
         // Taproot is the main agent's way of working; an agent of a group gets the strongest plain effort instead.
         effort: (m) => {
           const effort = this.effortFor(m);
@@ -1935,9 +1938,19 @@ export class AgentSession {
     const toolNames = subagentTools(this.toolNames ?? this.deps.tools.names(), READ_ONLY_TOOLS, PARENT_ONLY_TOOLS, input.type, agent);
     const readOnly = toolNames.every((n) => (READ_ONLY_TOOLS as readonly string[]).includes(n));
     const role = agent ? `\n\n# Your role: ${agent.name}\n${agent.instructions}` : '';
-    const system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${readOnly ? ' You are read-only: research and report; do not try to change anything.' : ''}${role}`;
+    let system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${readOnly ? ' You are read-only: research and report; do not try to change anything.' : ''}${role}`;
     const scratch: StoredMessage[] = [];
-    const parent = this.makeHost(model, provider, hooks, root, trusted);
+    const original = this.makeHost(model, provider, hooks, root, trusted);
+    const lease = this.deps.workspaces && !readOnly && this.summary.kind === 'code'
+      ? await this.deps.workspaces.create(original.describeContext().cwd, signal) : null;
+    let privateHost: Awaited<ReturnType<typeof workspaceHost>> | null;
+    try { privateHost = lease ? await workspaceHost(original, lease) : null; }
+    catch (error) { if (lease) this.deps.workspaces?.retain(lease); throw error; }
+    if (lease) {
+      system += `\n\n# Private writer checkout\nYour working directory is ${lease.cwd}. Use relative paths here. Ignored files and dependency folders are not copied. Destination conflicts preserve your checkout for review.`;
+      this.notice('info', 'The delegated writer is using a private checkout.');
+    }
+    const parent = privateHost?.host ?? original;
     const host: LoopHost = {
       ...parent,
       append: (role, content, meta, id) => {
@@ -1956,34 +1969,48 @@ export class AgentSession {
       // A subagent's spend counts toward the session; its context size isn't the conversation's.
       onUsage: (usage, _tokens, costUsd) => parent.onUsage(usage, null, costUsd)
     };
-    const result = await runAgentLoop(
-      [{ role: 'user', content: [{ type: 'text', text: input.prompt }] }],
-      {
-        provider,
-        model,
-        registry: this.deps.tools,
-        toolNames,
-        system,
-        effort: this.effortFor(model) === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : model.effort?.default ?? null) : this.effortFor(model),
-        webSearch: false,
-        cacheKey: `${this.id}:${parentToolUseId}`,
-        privacy: this.privacy(),
-        turnId: parentToolUseId,
-        maxIterations: this.deps.preferences().maxSteps ?? SUBAGENT_ITERATIONS,
-        agentLabel: input.description,
-        taproot: false,
-        // The main turn runs the project's checks; a sub-agent's work is one task
-        // inside that turn and is covered by the same run.
-        checksFix: false,
-        stripThinking: false,
-        sessionId: this.id
-      },
-      host,
-      signal
-    );
-    if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
-    if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
-    return { text: result.finalText, toolCalls: result.toolCalls };
+    try {
+      const result = await runAgentLoop(
+        [{ role: 'user', content: [{ type: 'text', text: input.prompt }] }],
+        {
+          provider,
+          model,
+          registry: this.deps.tools,
+          toolNames,
+          system,
+          effort: this.effortFor(model) === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : model.effort?.default ?? null) : this.effortFor(model),
+          webSearch: false,
+          cacheKey: `${this.id}:${parentToolUseId}`,
+          privacy: this.privacy(),
+          turnId: parentToolUseId,
+          maxIterations: this.deps.preferences().maxSteps ?? SUBAGENT_ITERATIONS,
+          agentLabel: input.description,
+          taproot: false,
+          // The main turn runs the project's checks; a sub-agent's work is one task
+          // inside that turn and is covered by the same run.
+          checksFix: false,
+          stripThinking: false,
+          sessionId: this.id
+        },
+        host,
+        signal
+      );
+      if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
+      if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
+      if (lease && this.deps.workspaces) {
+        await privateHost?.close();
+        const touched = scratch.flatMap((m) => m.content.flatMap((b) => b.type === 'tool_result' && !b.isError && b.display?.kind === 'edit' ? [b.display.path] : []));
+        await this.deps.workspaces.integrate(lease, [], signal, touched);
+        this.files.clear();
+      }
+      return { text: result.finalText, toolCalls: result.toolCalls };
+    } finally {
+      await privateHost?.close();
+      if (lease && lease.info.state !== 'integrated') {
+        this.deps.workspaces?.retain(lease);
+        this.notice('warning', `The delegated writer's unfinished changes are retained at ${lease.cwd}.`);
+      }
+    }
   }
 }
 

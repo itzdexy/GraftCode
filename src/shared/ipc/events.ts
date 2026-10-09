@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
 import { AgentEventSchema } from '../schemas/agentEvents';
 import { AppSettingsSchema } from '../schemas/appSettings';
 import { ProviderSummarySchema } from '../schemas/models';
@@ -20,6 +21,7 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('settings:changed'), settings: AppSettingsSchema }),
   z.object({ type: z.literal('providers:changed'), providers: z.array(ProviderSummarySchema) }),
+  z.object({ type: z.literal('catalog:changed'), status: CatalogSyncStatusSchema }),
   z.object({ type: z.literal('session:event'), sessionId: z.string(), event: AgentEventSchema }),
   z.object({ type: z.literal('session:summary'), summary: SessionSummarySchema }),
   z.object({ type: z.literal('session:removed'), sessionId: z.string() }),

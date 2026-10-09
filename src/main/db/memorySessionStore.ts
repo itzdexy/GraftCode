@@ -17,6 +17,18 @@ export class MemorySessionStore implements SessionStore {
   private readonly todos = new Map<string, TodoItem[]>();
   private readonly agentRuns = new Map<string, AgentRun[]>();
   private readonly missions = new Map<string, Mission[]>();
+  private readonly pruneCutoffs = new Map<string, number>();
+
+  getPruneBeforeSeq(sessionId: string): number {
+    this.getSummary(sessionId);
+    return this.pruneCutoffs.get(sessionId) ?? 0;
+  }
+
+  setPruneBeforeSeq(sessionId: string, seq: number): void {
+    this.getSummary(sessionId);
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new GraftError('invalid_context_state', 'The pruning cutoff must be a nonnegative integer.');
+    this.pruneCutoffs.set(sessionId, seq);
+  }
 
   add(summary: SessionSummary): void {
     this.sessions.set(summary.id, summary);
@@ -29,6 +41,7 @@ export class MemorySessionStore implements SessionStore {
   }
 
   remove(sessionId: string): void {
+    this.pruneCutoffs.delete(sessionId);
     this.sessions.delete(sessionId);
     this.messages.delete(sessionId);
     this.todos.delete(sessionId);
@@ -124,6 +137,7 @@ export class MemorySessionStore implements SessionStore {
   }
 
   deleteMessagesFrom(sessionId: string, fromSeq: number): StoredMessage[] {
+    this.setPruneBeforeSeq(sessionId, Math.min(this.getPruneBeforeSeq(sessionId), fromSeq));
     const list = this.list_(sessionId);
     const kept = list.filter((m) => m.seq < fromSeq);
     const removed = list.filter((m) => m.seq >= fromSeq);

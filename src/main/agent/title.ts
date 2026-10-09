@@ -34,6 +34,7 @@ export function isFree(model: ModelInfo): boolean {
  * (or their own) instead of a cheap one that would be refused.
  */
 export function titleModel(current: ModelInfo, available: ModelInfo[]): ModelInfo {
+  available = available.filter((model) => model.availability?.selectable !== false);
   if (isFree(current)) return available.find((m) => isFree(m) && m.cheap) ?? current;
   return available.find((m) => m.cheap && m.featured && m.supportsTools) ?? available.find((m) => m.cheap) ?? current;
 }

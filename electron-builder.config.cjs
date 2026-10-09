@@ -59,7 +59,8 @@ module.exports = {
     { from: 'resources/catalog', to: 'catalog' }
   ],
   asar: true,
-  asarUnpack: ['**/node_modules/node-pty/**', '**/node_modules/better-sqlite3/**', '**/node_modules/@vscode/ripgrep-*/bin/**'],
+  asarUnpack: ['**/node_modules/node-pty/**', '**/node_modules/better-sqlite3/**', '**/node_modules/@vscode/ripgrep-*/bin/**',
+    '**/node_modules/typescript-language-server/**', '**/node_modules/typescript/**'],
   npmRebuild: false,
   publish: updateUrl ? [{ provider: 'generic', url: updateUrl }] : [{ provider: 'github', owner: 'itzdexy', repo: 'GraftCode', releaseType: 'release' }],
   win: {

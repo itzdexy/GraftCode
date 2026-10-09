@@ -164,6 +164,14 @@ describe('model choice', () => {
     { providerId: 'p2', models: [model('local', { featured: true, provider: 'p2' })] }
   ];
 
+  it('does not feature unavailable models but preserves an explicitly selected unavailable model for display', () => {
+    const retired = { ...model('retired', { featured: true }), availability: { state: 'confirmed-retired' as const, source: 'provider' as const, checkedAt: NOW, reason: 'Shutdown announced.', selectable: false } };
+    const list = [{ providerId: 'p1', models: [retired, model('replacement', { featured: true })] }];
+    expect(quickModels(list, null).map((m) => m.ref.modelId)).toEqual(['replacement']);
+    expect(quickModels(list, retired).map((m) => m.ref.modelId)).toEqual(['replacement', 'retired']);
+    expect(moreModels(list, quickModels(list, null))[0]?.models).toEqual([retired]);
+  });
+
   it('resolves a stored ref, falling back to the first featured model when it is stale', () => {
     expect(resolveModel(groups, { providerId: 'p1', modelId: 'old' })?.ref.modelId).toBe('old');
     expect(resolveModel(groups, { providerId: 'gone', modelId: 'x' })?.ref.modelId).toBe('big');

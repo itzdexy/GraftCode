@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sitesDir } from '../../src/main/app/paths';
@@ -90,6 +91,26 @@ describe('the sites store', () => {
 });
 
 describe('serving sites', () => {
+  it('shuts down even when a browser connection has incomplete HTTP headers', async () => {
+    const root = makeTempDir();
+    const server = new SiteServer(root, () => undefined);
+    cleanup.push(async () => { await server.close(); removeDir(root); });
+    const port = await server.start();
+    const socket = net.connect(port, '127.0.0.1');
+    try {
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+      socket.write('GET / HTTP/1.1\r\n');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const closed = await Promise.race([
+        server.close().then(() => true),
+        new Promise<boolean>((resolve) => { const timer = setTimeout(() => resolve(false), 750); timer.unref(); })
+      ]);
+      expect(closed).toBe(true);
+    } finally {
+      socket.destroy();
+    }
+  });
+
   it('only answers for its own *.localhost names', () => {
     expect(siteFromHost('peach-palace.localhost:4870', 4870)).toBe('peach-palace');
     expect(siteFromHost('Peach-Palace.LOCALHOST:4870', 4870)).toBe('peach-palace');

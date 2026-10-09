@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
+import { CatalogSynchronizer } from '../providers/catalogSync';
+import type { CatalogSyncStatus } from '@shared/schemas/catalogSync';
 import type { EnvironmentInfo } from '@shared/schemas/app';
 import { openDatabase, type Db } from '../db/database';
 import { ProjectsRepo } from '../db/projectsRepo';
@@ -10,7 +13,8 @@ import { CheckpointService } from '../git/checkpoints';
 import { DiffStatsCache } from '../git/diffStats';
 import { runGit } from '../git/git';
 import { SettingsStore } from '../permissions/settingsStore';
-import { ProviderRegistry } from '../providers/registry';
+import { createProvider, ProviderRegistry } from '../providers/registry';
+import { SqliteModelSnapshots } from '../providers/modelSnapshots';
 import { dataHandling } from '@shared/privacy';
 import type { ProviderSummary } from '@shared/schemas/models';
 import { PROVIDER_ENGINES, SearchService, searchReaderModel, type ProviderEngine } from '../tools/web/search';
@@ -29,6 +33,8 @@ import { MediaService, type ProviderImageAccess } from '../media/mediaService';
 import { starterPage, SitesStore } from '../sites/sites';
 import { log } from './log';
 import type { GraftPaths } from './paths';
+import { LanguageServers } from '../languages/servers';
+import { EditorDraftsRepo } from '../db/editorDraftsRepo';
 
 export interface Services {
   paths: GraftPaths;
@@ -38,6 +44,9 @@ export interface Services {
   providers: ProvidersRepo;
   registry: ProviderRegistry;
   catalog: ProviderCatalog;
+  catalogSync: CatalogSynchronizer;
+  languages: LanguageServers;
+  editorDrafts: EditorDraftsRepo;
   /** Engine behind the WebSearch tool (Settings → Web search). */
   search: SearchService;
   /** Image models and ComfyUI behind the GenerateImage and ComfyUI tools (Settings → Images). */
@@ -163,6 +172,7 @@ export async function initServices(options: {
   onProgress: ProgressFn;
   /** Provider and model catalog shipped with the app (resources/catalog/models.json). */
   catalogFile?: string | null;
+  onCatalogChanged?: (status: CatalogSyncStatus) => void;
   /** Previews of generated pictures; absent where images can't be resized. */
   thumbnail?: MediaThumbnail;
 }): Promise<Services> {
@@ -203,10 +213,13 @@ export async function initServices(options: {
   const settings = new AppSettingsService(db);
   const keys = new KeyStore(db, options.encryptor, () => settings.get().security.allowPlaintextKeys);
   const catalog = new ProviderCatalog(options.catalogFile ?? null, (message) => log.warn('providers', message));
+  const catalogSync = new CatalogSynchronizer({ file: path.join(paths.userData, 'model-catalog-v1.json'), catalog,
+    changed: options.onCatalogChanged, log: (message) => log.warn('catalog', message) });
   const providers = new ProvidersRepo(db);
-  const registry = new ProviderRegistry(providers, keys, catalog);
+  const registry = new ProviderRegistry(providers, keys, catalog, createProvider, new SqliteModelSnapshots(db, (message) => log.warn('providers', message)));
   const sandbox = new SandboxManager({ log: (level, message, fields) => log[level]('sandbox', message, fields) });
   const sites = new SitesStore(paths.sites);
+  const languages = new LanguageServers();
   const services: Services = {
     paths,
     db,
@@ -215,10 +228,13 @@ export async function initServices(options: {
     providers,
     registry,
     catalog,
+    catalogSync,
+    languages,
     search: searchService(settings, keys, registry),
     media: mediaService(settings, keys, registry, paths.graftHome, options.thumbnail),
     projects: new ProjectsRepo(db),
     sessionsRepo: new SessionsRepo(db),
+    editorDrafts: new EditorDraftsRepo(db),
     checkpoints: new CheckpointService(db, paths.checkpointsShadow),
     chatFiles: new ChatFiles(paths.chatFiles),
     diffStats: new DiffStatsCache(),
@@ -234,7 +250,7 @@ export async function initServices(options: {
         return site ? starterPage(site.name) : null;
       }
     ),
-    tools: createBuiltinRegistry(),
+    tools: createBuiltinRegistry(languages),
     settingsFiles: new SettingsStore(paths.graftHome),
     rgPath,
     ghPath,

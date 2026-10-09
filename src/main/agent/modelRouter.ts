@@ -41,7 +41,7 @@ function score(model: ModelInfo): number | null {
 }
 
 function capable(model: ModelInfo, needsVision: boolean): boolean {
-  return model.supportsTools && (!needsVision || model.supportsVision);
+  return model.availability?.selectable !== false && model.supportsTools && (!needsVision || model.supportsVision);
 }
 
 export function routeModel(input: RouteInput): Route {

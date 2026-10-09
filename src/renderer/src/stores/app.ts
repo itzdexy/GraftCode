@@ -4,6 +4,7 @@ import type { EnvironmentInfo, ProjectSummary } from '@shared/schemas/app';
 import type { ModelRef } from '@shared/schemas/common';
 import type { ModelInfo, ProviderPreset, ProviderSummary } from '@shared/schemas/models';
 import type { UpdateState } from '@shared/schemas/system';
+import type { CatalogSyncStatus } from '@shared/schemas/catalogSync';
 import { errorText, invoke } from '../lib/ipc';
 
 export interface ProviderModelsState {
@@ -34,6 +35,8 @@ interface AppState {
   update: UpdateState | null;
   /** Provider catalog for the pickers; loaded on first use. */
   presets: ProviderPreset[] | null;
+  catalogStatus: CatalogSyncStatus | null;
+  catalogChanged: (status: CatalogSyncStatus) => void;
   loadPresets: () => Promise<ProviderPreset[]>;
   boot: () => Promise<void>;
   setUpdate: (update: UpdateState) => void;
@@ -68,6 +71,17 @@ export const useApp = create<AppState>((set, get) => ({
   justOnboarded: false,
   update: null,
   presets: null,
+  catalogStatus: null,
+
+  catalogChanged(status) {
+    const previous = get().catalogStatus;
+    set({ catalogStatus: status });
+    if (status.state === 'current' && (previous?.fetchedAt !== status.fetchedAt || get().presets === null)) {
+      set({ presets: null });
+      void get().loadPresets().catch(() => undefined);
+      if (get().phase === 'ready') void get().loadModels();
+    }
+  },
 
   async loadPresets() {
     const cached = get().presets;

@@ -132,6 +132,7 @@ export const AppSettingsSchema = z.object({
     incognitoLocalOnly: z.boolean()
   }),
   updates: z.object({ enabled: z.boolean() }),
+  modelCatalog: z.object({ enabled: z.boolean(), intervalHours: z.number().int().min(1).max(168) }),
   /** The container a project's commands run in when its sandbox is on. */
   sandbox: z.object({
     /** An image reference; never starting with "-" so it can't pass for a command-line flag. */
@@ -210,6 +211,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },
+  modelCatalog: { enabled: true, intervalHours: 24 },
   sandbox: { image: 'node:22-bookworm', network: true, memoryMb: 4096, cpus: 2 },
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
@@ -234,6 +236,7 @@ export const AppSettingsPatchSchema = z.object({
   security: AppSettingsSchema.shape.security.partial().optional(),
   privacy: AppSettingsSchema.shape.privacy.partial().optional(),
   updates: AppSettingsSchema.shape.updates.partial().optional(),
+  modelCatalog: AppSettingsSchema.shape.modelCatalog.partial().optional(),
   sandbox: AppSettingsSchema.shape.sandbox.partial().optional(),
   search: AppSettingsSchema.shape.search.partial().optional(),
   voice: AppSettingsSchema.shape.voice.partial().optional(),

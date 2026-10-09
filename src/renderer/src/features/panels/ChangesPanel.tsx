@@ -373,7 +373,7 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
         </div>
       }
     >
-      {tab === 'changes' ? <ChangesView sessionId={sessionId} refreshKey={refreshKey} /> : <FilesView sessionId={sessionId} refreshKey={refreshKey} />}
+      {tab === 'changes' ? <ChangesView sessionId={sessionId} refreshKey={refreshKey} /> : <FilesView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} />}
     </PanelFrame>
   );
 }

@@ -40,6 +40,8 @@ export interface DescribeContext {
 }
 
 export interface ToolContext extends DescribeContext {
+  /** Only trusted code projects may start a bundled local language server. */
+  trustedProject?: boolean;
   sessionId: string;
   toolUseId: string;
   signal: AbortSignal;

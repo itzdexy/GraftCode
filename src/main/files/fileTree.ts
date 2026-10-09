@@ -1,11 +1,13 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { canOpenProjectFile } from '@shared/chatFileTypes';
 import { GraftError } from '@shared/errors';
 import { looksBinary } from '../tools/fs/read';
 import { isInsideReal } from '../tools/paths';
+import { writeFileAtomic } from '../tools/fs/write';
 
-/** Read-only browsing of a session's folder for the Files panel. */
+/** Browsing and revision-checked text editing in a session's Files panel. */
 
 export interface TreeEntry {
   name: string;
@@ -18,6 +20,8 @@ export interface TreeEntry {
 export type MediaKind = 'image' | 'video' | 'audio';
 
 export interface FilePreview {
+  /** Present only for complete, losslessly decoded UTF-8 text that can be edited. */
+  revision?: string;
   path: string;
   content: string | null;
   binary: boolean;
@@ -111,7 +115,29 @@ export async function readPreview(root: string, rel: string): Promise<FilePrevie
   if (stat.size > MAX_PREVIEW_BYTES) return { path: rel, content: null, binary: false, tooLarge: media ? stat.size > MAX_MEDIA_BYTES : true, size: stat.size, media };
   const buffer = await fs.promises.readFile(abs);
   if (looksBinary(buffer)) return { path: rel, content: null, binary: true, tooLarge: false, size: stat.size, media };
-  return { path: rel, content: buffer.toString('utf8'), binary: false, tooLarge: false, size: stat.size, media };
+  const content = buffer.toString('utf8');
+  const editable = Buffer.from(content, 'utf8').equals(buffer);
+  return { path: rel, content, binary: false, tooLarge: false, size: buffer.length, media,
+    ...(editable ? { revision: createHash('sha256').update(buffer).digest('hex') } : {}) };
+}
+
+/** User-initiated editor save, scoped to an existing text file and its loaded bytes. */
+export async function savePreview(root: string, rel: string, content: string, revision: string): Promise<FilePreview> {
+  const resolved = resolveInside(root, rel);
+  const file = fs.realpathSync(resolved);
+  if (!isInsideReal(root, file)) throw new GraftError('outside_folder', 'That path is outside the session folder.');
+  if (path.relative(fs.realpathSync(root), file).split(path.sep).some((part) => part.toLowerCase() === '.git')) {
+    throw new GraftError('protected_file', 'The editor cannot change Git metadata.');
+  }
+  const stat = fs.statSync(file);
+  if (!stat.isFile() || stat.size > MAX_PREVIEW_BYTES || Buffer.byteLength(content) > MAX_PREVIEW_BYTES) throw new GraftError('editor_file_limit', 'Editable files must be regular text files no larger than 512 KiB.');
+  const before = fs.readFileSync(file);
+  if (looksBinary(before) || !Buffer.from(before.toString('utf8'), 'utf8').equals(before)) throw new GraftError('editor_encoding', 'This file is not losslessly decoded UTF-8 text. Open it in an external editor.');
+  if (createHash('sha256').update(before).digest('hex') !== revision) throw new GraftError('file_changed', 'The file changed on disk after this draft was opened. Your draft is kept. Reload and review the latest file before saving.');
+  await writeFileAtomic(file, content, before.toString('utf8'));
+  const buffer = Buffer.from(content, 'utf8');
+  return { path: rel, content, binary: false, tooLarge: false, size: buffer.length, media: mediaKindOf(rel),
+    revision: createHash('sha256').update(buffer).digest('hex') };
 }
 
 async function statFile(abs: string, rel: string): Promise<fs.Stats | null> {

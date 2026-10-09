@@ -33,7 +33,7 @@ import { localServers } from '../browser/servers';
 import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
-import { listDirectory, mediaFile, openableFile, readPreview } from '../files/fileTree';
+import { listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
 import type { PtyManager } from '../pty/ptyManager';
 import { deleteAgent, deleteCommand, deleteSkill, listAgents, listCommands, listMemory, listSkills, saveAgent, saveCommand, saveMemory, saveSkill } from '../customize/customize';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS } from '../tools/builtin';
@@ -313,6 +313,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'providers:list': async () => (await ctx.services()).registry.summaries(),
     'providers:presets': async () => (await ctx.services()).catalog.presets(),
+    'catalog:status': async () => (await ctx.services()).catalogSync.status(),
+    'catalog:refresh': async () => (await ctx.services()).catalogSync.refresh(),
 
     'media:status': async () => mediaStatus((await ctx.services()).media),
     'search:status': async () => searchStatus(await ctx.services()),
@@ -703,6 +705,29 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'files:list': async ({ sessionId, dir }) => listDirectory(await workDirFor(sessionId), dir),
     'files:read': async ({ sessionId, path }) => readPreview(await workDirFor(sessionId), path),
+    'files:drafts': async ({ sessionId }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Editor recovery copies belong to code sessions.');
+      return (await ctx.services()).editorDrafts.list(sessionId);
+    },
+    'files:backupDraft': async ({ sessionId, path, draft }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Editor recovery copies belong to code sessions.');
+      (await ctx.services()).editorDrafts.save(sessionId, path, draft);
+    },
+    'files:semantic': async ({ sessionId, query, content }) => {
+      const summary = (await ctx.sessions()).summary(sessionId);
+      const s = await ctx.services();
+      if (summary.kind !== 'code' || !summary.projectId || !s.projects.get(summary.projectId)?.trusted) {
+        throw new GraftError('project_untrusted', 'Language intelligence requires a trusted code project. Review project trust in Settings before checking types or definitions.');
+      }
+      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content);
+    },
+    'files:save': async ({ sessionId, path, content, revision }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');
+      const dir = await workDirFor(sessionId);
+      const saved = await savePreview(dir, path, content, revision);
+      await changed(dir);
+      return saved;
+    },
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
     'files:open': async ({ sessionId, path }) => {
       const failure = await electronShell.openPath(await openableFile(await workDirFor(sessionId), path));

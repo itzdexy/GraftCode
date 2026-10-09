@@ -315,7 +315,7 @@ const FINISH_NOTICES: Partial<Record<FinishReason, { level: 'warning' | 'error';
 const OVERFLOW_MESSAGE = 'The conversation is too long for this model. Use /compact or start a new session.';
 
 /** Tools that don't change the project's files; a turn that used nothing else has nothing to verify or check. */
-const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Symbols', 'WebFetch', 'WebSearch', 'Browser', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
+const LOOKING_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Symbols', 'SemanticCode', 'WebFetch', 'WebSearch', 'Browser', 'Task', 'TodoWrite', 'AskUserQuestion', 'ShellOutput']);
 
 function changesSomething(call: ToolUseBlock): boolean {
   if (call.name === 'Shell') {

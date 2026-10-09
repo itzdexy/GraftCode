@@ -17,8 +17,10 @@ const KEY_PATTERNS = [
   /sk-[A-Za-z0-9_-]{12,}/g,
   /sk-ant-[A-Za-z0-9_-]{12,}/g,
   /AIza[0-9A-Za-z_-]{20,}/g,
-  /(bearer\s+)[A-Za-z0-9._-]{12,}/gi,
-  /(x-api-key["':\s]+)[A-Za-z0-9._-]{12,}/gi
+  /(bearer\s+)[A-Za-z0-9._-]+/gi,
+  /(x-api-key["':\s]+)[A-Za-z0-9._-]{12,}/gi,
+  /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret)["']?\s*[:=]\s*["']?)([^\s"'&,;]+)/gi,
+  /(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi
 ];
 
 export function redact(text: string): string {
@@ -47,7 +49,7 @@ function write(level: Level, scope: string, message: string, fields?: Fields): v
     ? ' ' +
       Object.entries(fields)
         .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .map(([k, v]) => `${k}=${JSON.stringify(/key|token|authorization|password|secret/i.test(k) ? '[redacted]' : v)}`)
         .join(' ')
     : '';
   const line = redact(`${new Date().toISOString()} ${level.toUpperCase()} [${scope}] ${message}${suffix}`);

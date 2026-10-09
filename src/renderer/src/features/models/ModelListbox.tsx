@@ -52,7 +52,7 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
       document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' });
     } else if (event.key === 'Enter') {
       const model = filtered[activeIndex];
-      if (model && !sameRef(model.ref, value)) {
+      if (model && model.availability?.selectable !== false && !sameRef(model.ref, value)) {
         event.preventDefault();
         onChange(model);
       }
@@ -91,9 +91,12 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
               id={optionId(i)}
               role="option"
               aria-selected={selected}
+              aria-disabled={m.availability?.selectable === false}
+              title={m.availability?.reason ?? undefined}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setActive(i);
+                if (m.availability?.selectable === false) return;
                 onChange(m);
               }}
               onMouseMove={() => setActive(i)}
@@ -106,7 +109,8 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-base text-fg">{m.label}</p>
-                <p className="truncate text-sm text-fg-muted">{[providerLabel(m.ref.providerId), m.description].filter(Boolean).join(' · ')}</p>
+                <p className="truncate text-sm text-fg-muted">{[providerLabel(m.ref.providerId), m.description,
+                  m.availability && m.availability.state !== 'available' ? m.availability.state.replaceAll('-', ' ') : null].filter(Boolean).join(' · ')}</p>
               </div>
               {selected ? <Check className="size-16 shrink-0 text-blue" aria-hidden="true" /> : null}
             </div>

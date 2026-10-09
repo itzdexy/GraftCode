@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { GraftError } from '@shared/errors';
 import type { ModelRef, ProviderKind } from '@shared/schemas/common';
 import type { ModelInfo, ProviderSummary, VerifyResult } from '@shared/schemas/models';
@@ -11,6 +12,8 @@ import { OllamaProvider } from './ollama';
 import { OpenAiChatProvider } from './openaiChat';
 import { modelPricing, NATIVE_PRESET, type ProviderCatalog } from './presets';
 import type { LLMProvider, ProviderConnection } from './types';
+import type { ModelSnapshot, ModelSnapshotStore } from './modelSnapshots';
+import { withModelLifecycle } from './modelLifecycle';
 
 export type ProviderFactory = (
   connection: ProviderConnection,
@@ -65,12 +68,24 @@ export function normalizeBaseUrl(raw: string | null | undefined): string | null 
 export class ProviderRegistry {
   private readonly instances = new Map<string, { fingerprint: string; provider: LLMProvider }>();
   private readonly cache = new Map<string, { at: number; models: ModelInfo[] }>();
+  private catalogRevision = -1;
+  private readonly previous = new Map<string, ModelSnapshot>();
+  private readonly versions = new Map<string, number>();
+
+  private checkCatalog(): void {
+    const revision = this.catalog?.revision ?? 0;
+    if (this.catalogRevision === revision) return;
+    this.instances.clear();
+    this.cache.clear();
+    this.catalogRevision = revision;
+  }
 
   constructor(
     private readonly repo: ProvidersRepo,
     private readonly keys: KeyStore,
     private readonly catalog: ProviderCatalog | null = null,
-    private readonly factory: ProviderFactory = createProvider
+    private readonly factory: ProviderFactory = createProvider,
+    private readonly snapshots: ModelSnapshotStore | null = null
   ) {}
 
   summaries(): ProviderSummary[] {
@@ -104,13 +119,14 @@ export class ProviderRegistry {
   }
 
   get(providerId: string): LLMProvider {
+    this.checkCatalog();
     const record = this.repo.require(providerId);
     const requirement = this.keyRequirement(record.kind, record.preset);
     const key = requirement === 'none' ? null : this.keys.get(providerId);
     if (requirement === 'required' && !key) {
       throw new GraftError('missing_key', `${record.label} has no API key. Add one in Settings → Providers.`);
     }
-    const fingerprint = JSON.stringify([record.kind, record.preset, record.baseUrl, key ? key.length : 0, key?.slice(-6) ?? '', record.customModels]);
+    const fingerprint = JSON.stringify([record.kind, record.preset, record.baseUrl, key ? createHash('sha256').update(key).digest('hex') : null, record.customModels]);
     const cached = this.instances.get(providerId);
     if (cached && cached.fingerprint === fingerprint) return cached.provider;
     const provider = this.factory({ id: record.id, kind: record.kind, preset: record.preset, apiKey: key, baseUrl: record.baseUrl }, record, this.catalog);
@@ -119,17 +135,46 @@ export class ProviderRegistry {
   }
 
   invalidate(providerId: string): void {
+    this.versions.set(providerId, (this.versions.get(providerId) ?? 0) + 1);
     this.instances.delete(providerId);
     this.cache.delete(providerId);
+    this.previous.delete(providerId);
+    this.snapshots?.delete(providerId);
   }
 
   async listModels(providerId: string, options: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<ModelInfo[]> {
+    options.signal?.throwIfAborted();
+    this.checkCatalog();
     const hit = this.cache.get(providerId);
-    if (hit && !options.refresh && Date.now() - hit.at < MODEL_CACHE_MS) return hit.models;
+    if (hit && !options.refresh && Date.now() - hit.at < MODEL_CACHE_MS) return hit.models.map((m) => withModelLifecycle(m));
+    const version = this.versions.get(providerId) ?? 0;
+    const revision = this.catalogRevision;
+    const previous = this.previous.get(providerId) ?? this.snapshots?.get(providerId);
     const listed = await this.get(providerId).listModels(options.signal);
-    const models = this.withCatalogPricing(providerId, listed);
-    this.cache.set(providerId, { at: Date.now(), models });
-    return models;
+    options.signal?.throwIfAborted();
+    const models = this.withCatalogPricing(providerId, listed).map((m): ModelInfo => {
+      const record = this.repo.get(providerId);
+      const preset = record?.preset ?? (record ? NATIVE_PRESET[record.kind] : null);
+      const metadata = this.catalog?.model(preset ?? null, m.ref.modelId);
+      return { ...m, ...(metadata ? { catalogCapabilities: metadata.capabilities } : {}),
+        availability: metadata?.deprecated ? { state: 'deprecated', source: 'catalog', checkedAt: Date.now(), reason: 'Marked deprecated in Models.dev; it may still be available.', selectable: true }
+          : m.availability ?? { state: 'available', source: 'provider', checkedAt: Date.now(), reason: null, selectable: true } };
+    });
+    const listedIds = new Set(models.map((m) => m.ref.modelId));
+    for (const m of previous?.models ?? []) {
+      if (listedIds.has(m.ref.modelId)) continue;
+      models.push({ ...m, availability: { state: 'unknown', source: 'cache', checkedAt: Date.now(),
+        reason: 'Previously listed, but omitted by the latest provider response. Retirement is unconfirmed. Refresh to retry.', selectable: false } });
+    }
+    // A response begun before a key/endpoint/catalog change must not repopulate the new cache.
+    if (version !== (this.versions.get(providerId) ?? 0) || revision !== (this.catalog?.revision ?? 0)) {
+      throw new GraftError('provider_changed', 'The provider configuration changed during model discovery. Refresh to retry.');
+    }
+    const snapshot = { at: Date.now(), models: models.map((m) => withModelLifecycle(m)) };
+    this.snapshots?.save(providerId, snapshot);
+    this.previous.set(providerId, snapshot);
+    this.cache.set(providerId, snapshot);
+    return snapshot.models;
   }
 
   /** Fills in prices the provider's own list doesn't report (Anthropic, Gemini) from the catalog. */
@@ -154,7 +199,13 @@ export class ProviderRegistry {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const code = error instanceof ProviderError || error instanceof GraftError ? error.code : 'unknown';
-          return { providerId: r.id, models: [], error: { code, message } };
+          const previous = this.previous.get(r.id) ?? this.snapshots?.get(r.id);
+          const models = (previous?.models ?? []).map((m): ModelInfo => withModelLifecycle({ ...m, availability: {
+            state: code === 'auth' || code === 'missing_key' ? 'not-accessible' : ['rate_limit', 'server', 'overloaded', 'network'].includes(code) ? 'temporarily-unavailable' : 'unknown',
+            source: 'cache', checkedAt: m.availability?.checkedAt ?? previous?.at ?? null,
+            reason: 'Provider discovery failed; retained metadata is not evidence of retirement. Check the connection and refresh.', selectable: false
+          } }));
+          return { providerId: r.id, models, error: { code, message } };
         }
       })
     );
@@ -163,8 +214,9 @@ export class ProviderRegistry {
   async resolveModel(ref: ModelRef, signal?: AbortSignal): Promise<ModelInfo> {
     const models = await this.listModels(ref.providerId, signal ? { signal } : {});
     const found = models.find((m) => m.ref.modelId === ref.modelId);
+    if (found?.availability?.selectable === false) throw new GraftError('model_unavailable', found.availability.reason ?? 'Refresh the model list or select a replacement.');
     if (found) return found;
-    throw new GraftError('model_not_found', `The model "${ref.modelId}" isn't available from this provider anymore. Pick another model.`);
+    throw new GraftError('model_not_found', `The provider did not list "${ref.modelId}". This does not confirm retirement. Retry or choose another model; your conversation and selection are preserved.`);
   }
 
   /** Verifies unsaved credentials with a real list-models call. Never throws. */

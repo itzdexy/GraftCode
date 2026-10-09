@@ -62,10 +62,17 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
 
   // Onboarding writes to SQLite and stores the provider.
   await completeOnboarding(app, mock, { project });
+  await w.evaluate(async (folder) => {
+    const bridge = (window as unknown as { graft: { invoke(channel: string, input?: unknown): Promise<{ ok: boolean; value: Array<{ id: string; path: string }> }> } }).graft;
+    const projects = (await bridge.invoke('projects:list')).value;
+    const selected = projects.find((p) => p.path === folder);
+    if (!selected || !(await bridge.invoke('projects:update', { id: selected.id, trusted: true })).ok) throw new Error('Could not trust packaged semantic fixture');
+  }, project);
 
   // A session: Grep runs the bundled ripgrep, Edit (after a Read) waits for approval and applies.
   mock.script(
-    { toolCalls: [{ name: 'Grep', input: { pattern: 'needle' } }, { name: 'Read', input: { file_path: 'notes.txt' } }] },
+    { toolCalls: [{ name: 'Grep', input: { pattern: 'needle' } }, { name: 'Read', input: { file_path: 'notes.txt' } },
+      { name: 'SemanticCode', input: { action: 'outline', file: 'src/app.ts' } }] },
     { toolCalls: [{ name: 'Edit', input: { file_path: 'notes.txt', old_string: 'hello', new_string: 'hello from the installer' } }] },
     { text: 'Found it and updated the notes.' }
   );
@@ -80,6 +87,18 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
   // The Grep result that went back to the model came from the bundled ripgrep.
   const toolResults = JSON.stringify((mock.chatRequests()[1]!.body as { messages: unknown[] }).messages.slice(-2));
   expect(toolResults).toContain('src/app.ts');
+  expect(toolResults).toContain('typescript-language-server');
+  expect(toolResults).toContain('needle');
+
+  // The editor and its worker load from the package and save through the native bridge.
+  await w.getByRole('button', { name: 'More actions' }).click();
+  await w.getByRole('menuitem', { name: /^Files/ }).click();
+  await w.getByRole('tree', { name: 'Files' }).getByRole('button', { name: /^notes.txt/ }).first().click();
+  await w.getByRole('button', { name: 'Edit file', exact: true }).click();
+  await w.getByRole('textbox', { name: 'Edit notes.txt' }).focus();
+  await w.keyboard.press('Control+A'); await w.keyboard.type('packaged editor'); await w.keyboard.press('Control+S');
+  await expect.poll(() => fs.readFileSync(path.join(project, 'notes.txt'), 'utf8')).toBe('packaged editor');
+  await w.keyboard.press('Control+Shift+F');
 
   // The terminal panel starts a real shell through node-pty.
   await w.getByRole('button', { name: 'Terminal', exact: true }).click();

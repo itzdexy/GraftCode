@@ -40,6 +40,14 @@ interface Target {
   env: Record<string, string>;
 }
 
+export interface WorkspaceSnapshot {
+  root: string;
+  gitDir: string;
+  commitSha: string;
+  shadow: boolean;
+  attrSource: boolean;
+}
+
 /** Heavy or generated folders never captured in shadow snapshots of non-git projects. */
 const SHADOW_EXCLUDES = [
   'node_modules/',
@@ -159,10 +167,9 @@ export class CheckpointService {
   private exclusive<T>(key: string, work: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(key) ?? Promise.resolve();
     const next = previous.then(work, work);
-    this.locks.set(
-      key,
-      next.catch(() => undefined)
-    );
+    const tail = next.catch(() => undefined);
+    this.locks.set(key, tail);
+    void tail.then(() => { if (this.locks.get(key) === tail) this.locks.delete(key); });
     return next;
   }
 
@@ -213,6 +220,10 @@ export class CheckpointService {
       'core.autocrlf=false',
       '-c',
       'core.safecrlf=false',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
       ...(target.attrSource ? [`--attr-source=${EMPTY_TREE}`] : []),
       ...(target.shadow ? ['-c', 'core.bare=false'] : []),
       ...args
@@ -224,18 +235,19 @@ export class CheckpointService {
    * Uses the session's private index, never the user's: the user's index
    * holds normalized content and must not be touched.
    */
-  private snapshot(target: Target, sessionId: string, message: string, parent: string | null): Promise<{ commit: string; tree: string }> {
+  private snapshot(target: Target, sessionId: string, message: string, parent: string | null, signal?: AbortSignal): Promise<{ commit: string; tree: string }> {
     const indexFile = this.indexFile(sessionId, target.gitDir);
     return this.exclusive(indexFile, async () => {
+      signal?.throwIfAborted();
       fs.mkdirSync(path.dirname(indexFile), { recursive: true });
       fs.rmSync(`${indexFile}.lock`, { force: true });
       const env = { ...target.env, GIT_INDEX_FILE: indexFile };
-      await git(this.args(target, ['add', '-A', '--', '.']), { cwd: target.root, env, timeoutMs: 600_000 });
-      const tree = (await git(this.args(target, ['write-tree']), { cwd: target.root, env })).trim();
+      await git(this.args(target, ['add', '-A', '--', '.']), { cwd: target.root, env, timeoutMs: 600_000, ...(signal ? { signal } : {}) });
+      const tree = (await git(this.args(target, ['write-tree']), { cwd: target.root, env, ...(signal ? { signal } : {}) })).trim();
       const commit = (
         await git(this.args(target, ['commit-tree', tree, '-m', message, ...(parent ? ['-p', parent] : [])]), {
           cwd: target.root,
-          env: { ...env, ...AUTHOR_ENV }
+          env: { ...env, ...AUTHOR_ENV }, ...(signal ? { signal } : {})
         })
       ).trim();
       return { commit, tree };
@@ -268,6 +280,17 @@ export class CheckpointService {
       .prepare('INSERT INTO checkpoints (id, session_id, message_id, repo_dir, git_dir, ref, commit_sha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, sessionId, messageId, target.root, target.gitDir, ref, commit, Date.now());
     return this.get(id);
+  }
+
+  /** A writer's byte-exact base/result, without adding a conversation checkpoint or touching the user's index. */
+  async captureWorkspace(key: string, workDir: string, source?: WorkspaceSnapshot, signal?: AbortSignal): Promise<WorkspaceSnapshot> {
+    signal?.throwIfAborted();
+    const target = source
+      ? { root: path.resolve(workDir), gitDir: source.gitDir, shadow: source.shadow, attrSource: source.attrSource,
+          env: { GIT_DIR: source.gitDir, GIT_WORK_TREE: path.resolve(workDir) } }
+      : await this.target(workDir);
+    const { commit } = await this.snapshot(target, `agent-${key}`, 'graft isolated agent workspace', null, signal);
+    return { root: target.root, gitDir: target.gitDir, commitSha: commit, shadow: target.shadow, attrSource: target.attrSource };
   }
 
   private async diff(target: Target, fromTree: string, toCommit: string): Promise<RewindChange[]> {

@@ -242,6 +242,11 @@ export class SiteServer {
     this.sweep = null;
     const server = this.server;
     this.server = null;
-    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server) await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Chromium may leave a speculative or partially received request open.
+      // This server only serves local previews; shutdown must also end those sockets.
+      server.closeAllConnections();
+    });
   }
 }

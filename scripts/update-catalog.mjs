@@ -46,7 +46,7 @@ const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
 const EFFORT_VALUES = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 function round(n) {
-  return typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 10_000) / 10_000 : undefined;
+  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
 }
 
 /** Compact model record; absent fields mean "unknown" or "no". */
@@ -59,9 +59,11 @@ function compactModel(m) {
   const interleaved = m.interleaved === true ? 'reasoning_content' : typeof m.interleaved?.field === 'string' ? m.interleaved.field : undefined;
   const out = { id: m.id, n: m.name ?? m.id };
   if (m.family) out.f = m.family;
-  if (m.tool_call) out.t = 1;
-  if (m.attachment || input.includes('image')) out.v = 1;
-  if (m.reasoning) out.r = 1;
+  if (typeof m.tool_call === 'boolean') out.t = m.tool_call ? 1 : 0;
+  if (typeof m.attachment === 'boolean' || m.modalities) out.v = m.attachment || input.includes('image') ? 1 : 0;
+  if (typeof m.reasoning === 'boolean') out.r = m.reasoning ? 1 : 0;
+  if (m.modalities) out.audio = input.includes('audio') || (m.modalities.output ?? []).includes('audio');
+  if (typeof m.structured_output === 'boolean') out.structured = m.structured_output;
   if (effort && effort.length > 0) out.e = effort;
   if (budget) out.b = [typeof budget.min === 'number' ? Math.max(0, budget.min) : 1024, typeof budget.max === 'number' ? budget.max : 32_000];
   if (toggle) out.g = 1;
@@ -98,7 +100,7 @@ async function main() {
     }
     const api = kind === 'openai-compatible' ? (COMPATIBLE_URLS[id] ?? p.api) : (p.api ?? null);
     const models = Object.values(p.models ?? {})
-      .filter((m) => m && typeof m.id === 'string' && !m.experimental)
+      .filter((m) => m && typeof m.id === 'string' && m.experimental !== true)
       .map(compactModel)
       .sort((a, b) => (b.d ?? '').localeCompare(a.d ?? '') || a.id.localeCompare(b.id));
     providers.push({

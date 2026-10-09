@@ -39,6 +39,50 @@ Connect it to Blender, Unity, Roblox Studio, GitHub and more. Windows, macOS and
 - **Chats too.** Web search with cited sources, files to download, a JavaScript sandbox for calculations, read aloud, and incognito chats that never touch the disk.
 - **Keeps your data yours.** Keys are encrypted with your system keyring, and Graft asks providers not to train on your conversations.
 
+### Model metadata and coding workspace (0.6.14)
+
+Settings → Providers → Model catalog refreshes metadata without an application
+update. Automatic refresh defaults to every 24 hours; you can change the interval,
+turn it off, or refresh manually. Graft starts with its bundled or last validated
+catalog when offline and retains it if a refresh fails. The metadata request sends
+no API keys, project files or conversations.
+
+Model lists distinguish public catalog entries, provider discovery, deprecation,
+account access failures and temporary outages. A missing entry does not prove
+retirement or change your conversation's selected model. Retained unavailable
+entries explain the problem and can recover on refresh. Catalog capabilities are
+metadata; they do not prove that your account can invoke a model.
+
+Native OpenAI shutdown announcements show their published date. A model whose dated
+UTC day has ended is disabled; choose a replacement explicitly. Proxies and missing
+entries cannot confirm OpenAI retirement.
+
+Writing group agents and general writing Tasks now work in separate private
+checkouts. Successful patches integrate only when their destination revisions still
+match. Conflicts retain the private checkout and patch for review, with recovery
+details in the Agents panel. This also works for folders without a Git repository.
+Ignored dependencies are not copied, and checkouts remain on disk for review.
+The optional command sandbox remains separate from worktree isolation.
+
+Code sessions now expose `SemanticCode`: local TypeScript/JavaScript definitions,
+references, hover, outlines and per-file diagnostics. It requires a trusted project,
+uses the bundled language server, and does not apply semantic edits.
+
+In the Files panel, choose **Edit file** to edit complete UTF-8 text up to 512 KiB.
+**Ctrl/Cmd+S** saves only if the disk revision still matches. **Check types**
+(Ctrl/Cmd+Shift+M) checks the current TypeScript/JavaScript draft; **F12** opens
+the definition at the cursor. Language intelligence requires project trust.
+Unsaved drafts are backed up to this device after a short typing pause and appear
+under **Unsaved drafts** after reopening the session. The original revision is
+retained, so recovery cannot silently overwrite external edits. Backup failures
+are shown; wait for **Draft backed up on this device** before relying on recovery.
+Recovery copies contain source text in the local session database and are removed
+when saved/discarded or when their session is deleted. Tabs, splits, completion,
+rename/refactoring and persistent editor layouts remain outstanding.
+
+The [implementation record](docs/IMPLEMENTATION_STATUS.md) tracks verified changes,
+security boundaries and the remaining development milestones.
+
 ## A look around
 
 <table>

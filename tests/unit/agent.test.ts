@@ -909,7 +909,7 @@ describe('agent tools that involve the user', () => {
     const child = h.provider.requests[1]!;
     expect(child.system).toContain('Delegated task');
     expect(child.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Where is the config loaded?' }] }]);
-    expect(child.tools.map((t) => t.name).sort()).toEqual(['Glob', 'Grep', 'Read', 'Symbols', 'WebFetch']);
+    expect(child.tools.map((t) => t.name).sort()).toEqual(['Glob', 'Grep', 'Read', 'SemanticCode', 'Symbols', 'WebFetch']);
     expect(JSON.stringify(h.provider.requests[2]!.messages.at(-1))).toContain('src/config.ts:12');
     expect(texts(h).filter((t) => t.includes('Report:'))).toEqual([]);
   });

@@ -16,6 +16,21 @@ permissions:
   contents: write
 
 jobs:
+  validate:
+    name: Validate before packaging
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:e2e
+
   draft:
     name: Draft the release
     if: github.event_name == 'push'
@@ -34,8 +49,8 @@ jobs:
 
   build:
     name: Build on ${{ matrix.os }}
-    needs: draft
-    if: ${{ !cancelled() && needs.draft.result != 'failure' }}
+    needs: [draft, validate]
+    if: ${{ !cancelled() && needs.draft.result != 'failure' && needs.validate.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
