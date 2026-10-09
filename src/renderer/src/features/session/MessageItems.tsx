@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronRight, Copy, FileText, Globe, Loader2, Pause, Pencil, Play, RotateCcw, RotateCw, Square, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
-import { IconButton } from '../../components/Button';
+import { Button, IconButton } from '../../components/Button';
 import { Badge } from '../../components/Badge';
 import { Collapse } from '../../components/Collapse';
 import { cn } from '../../lib/cn';
@@ -16,6 +16,7 @@ import { planShown } from './planModel';
 import { TodoList } from './ToolDetail';
 import type { TranscriptItem } from './transcriptModel';
 import { useSmoothText } from './useSmoothText';
+import { responseHasControlTokens } from './responseQuality';
 
 type Item<K extends TranscriptItem['kind']> = Extract<TranscriptItem, { kind: K }>;
 
@@ -175,8 +176,19 @@ interface ReplyActions {
 export function AssistantText({ item, variant, actions }: { item: Item<'text'>; variant: 'code' | 'chat'; actions: ReplyActions | null }) {
   const [copied, copy] = useCopy();
   const shown = useSmoothText(item.text, item.live);
+  const suspect = useMemo(() => responseHasControlTokens(item.text), [item.text]);
   return (
     <div className="flex flex-col gap-4">
+      {suspect ? (
+        <aside aria-label="Response quality warning" className="motion-rise rounded-md border border-border-card bg-surface px-12 py-10 text-sm">
+          <p className="font-medium text-amber-fg">This response contains model control tokens</p>
+          <p className="mt-4 text-fg-secondary">The endpoint may be using an incompatible chat template. Try another model, or check the endpoint’s template settings. Your original response is preserved below.</p>
+          <div className="mt-8 flex flex-wrap gap-6">
+            <Button size="sm" variant="secondary" onClick={() => copy(item.text)}>{copied ? 'Copied response' : 'Copy original response'}</Button>
+            {actions?.onRegenerate && !shown.streaming ? <Button size="sm" variant="secondary" onClick={actions.onRegenerate}>Retry response</Button> : null}
+          </div>
+        </aside>
+      ) : null}
       <Markdown text={shown.text} variant={variant} live={shown.streaming} />
       {actions && !shown.streaming ? (
         <div className="graft-fade-in -ml-4 flex gap-2">

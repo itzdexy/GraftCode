@@ -19,9 +19,13 @@
 | Motion unit tests | 6 passed, including visibility timer disposal/resume. |
 | Transcript projection / response quality / performance tests | 9 passed, including parity through rewind and live tool results. |
 | Workspace layout and draft unit tests | 10 passed. |
-| First full implementation unit run | 978 passed, 28 skipped; one LSP fixture cleanup failure (Windows EPERM), under investigation. |
-| Initial desktop fixtures | 2 passed, 3 failed from incorrect new fixture assumptions; corrected from actual traces and UI, confirmation run in progress. |
+| First full implementation unit run | 978 passed, 28 skipped; one LSP cleanup failure (Windows EPERM). |
+| LSP shutdown regression | Real owned descendant remained alive after forced disposal before fix; active and evicted client regressions pass after fix. 8 LSP tests pass; cancellation/isolation repeated independently 3 times. |
+| Final complete unit suite | 982 passed, 28 skipped; 79 files passed, 2 skipped. No cleanup retries weakened. |
+| Scoped desktop confirmation | All 6 cases passed across scoped runs. New fixture assumptions and async clipboard checks corrected; original workspace coverage retained. |
+| Final typecheck / lint | Passed, including node, renderer and E2E TypeScript. |
 | Production build | Passed for 0.6.15. Known Monaco large-chunk warning remains. |
+| Windows packaging | Completed; 0.6.15 NSIS installer and unpacked executable created. Desktop/packaged/installed final gates pending. |
 
 The benchmark command uses `--disableConsoleIntercept` to capture real measurements:
 500 turns, 120 live updates, full projection 38.37 ms versus cached projection

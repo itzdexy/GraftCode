@@ -3,6 +3,7 @@ import { Mark } from '../../brand/Mark';
 import { formatTokenCount } from '../../lib/format';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
+import { subscribeVisibleClock } from '../../lib/motion';
 import { panelBus, usePanels } from '../../stores/panels';
 import { durationText } from './transcriptModel';
 
@@ -22,9 +23,10 @@ export const THINKING_VERBS = [
 const ROTATE_MS = 2400;
 
 /** Background commands of a session that are still running; follows the shells panel's change events. */
-function useRunningTasks(sessionId: string): number {
+function useRunningTasks(sessionId: string, enabled: boolean): number {
   const [running, setRunning] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     let current = true;
     const load = (): void => {
       invoke('shells:list', { sessionId })
@@ -37,7 +39,7 @@ function useRunningTasks(sessionId: string): number {
       current = false;
       off();
     };
-  }, [sessionId]);
+  }, [sessionId, enabled]);
   return running;
 }
 
@@ -48,15 +50,12 @@ function useRunningTasks(sessionId: string): number {
  */
 export function StatusLine({ sessionId, startedAt, contextTokens, tasks }: { sessionId: string; startedAt: number | null; contextTokens: number; tasks: boolean }) {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const running = useRunningTasks(sessionId);
+  useEffect(() => subscribeVisibleClock(() => setNow(Date.now())), []);
+  const running = useRunningTasks(sessionId, tasks);
   const elapsed = startedAt === null ? 0 : Math.max(0, now - startedAt);
   const verb = THINKING_VERBS[Math.floor(elapsed / ROTATE_MS) % THINKING_VERBS.length] ?? THINKING_VERBS[0];
   return (
-    <div className="flex items-center gap-8 py-4 text-md text-fg-muted">
+    <div className="motion-rise flex min-w-0 flex-wrap items-center gap-x-8 gap-y-4 py-4 text-md text-fg-muted">
       <span role="status" className="sr-only">
         Graft is working
       </span>
@@ -81,7 +80,7 @@ export function StatusLine({ sessionId, startedAt, contextTokens, tasks }: { ses
           </button>
         </>
       ) : null}
-      <span key={verb} className="graft-verb graft-shimmer text-sm" aria-hidden="true">
+      <span key={verb} className="graft-verb inline-block min-w-[114px] text-sm text-fg-muted" aria-hidden="true">
         · {verb}…
       </span>
     </div>

@@ -12,6 +12,7 @@ import { useApp } from '../../stores/app';
 import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { Button } from '../../components/Button';
+import { Markdown } from '../session/Markdown';
 
 // Bundled Vite workers use local URLs allowed by the existing CSP; no CDN/eval is needed.
 const editorGlobal = globalThis as typeof globalThis & { MonacoEnvironment?: { getWorker(): Worker } };
@@ -31,13 +32,15 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
   const [status, setStatus] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<NonNullable<SemanticResult['diagnostics']>>([]);
+  const [references, setReferences] = useState<CodeLocation[]>([]);
+  const [hover, setHover] = useState<string | null>(null);
   const supported = /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(file);
-  const query = async (action: 'diagnostics' | 'definition'): Promise<void> => {
+  const query = async (action: 'diagnostics' | 'definition' | 'references' | 'hover'): Promise<void> => {
     const instance = editor.current, model = instance?.getModel();
     if (!instance || !model || busy.current || !supported) return;
     const version = epoch.current;
     const cursor = instance.getPosition();
-    busy.current = true; setPending(true); setFailure(null); setStatus(null);
+    busy.current = true; setPending(true); setFailure(null); setStatus(null); setReferences([]); setHover(null);
     try {
       const result = await invoke('files:semantic', { sessionId, query: { action, file, line: cursor?.lineNumber, column: cursor?.column },
         content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
@@ -45,6 +48,13 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
       if (action === 'definition') {
         if (result.locations?.[0]) callbacks.current.onNavigate(result.locations[0]);
         else setStatus('No definition found in this project.');
+      } else if (action === 'references') {
+        const locations = result.locations ?? [];
+        setReferences(locations);
+        setStatus(`${locations.length} reference${locations.length === 1 ? '' : 's'} found${result.truncated ? ' (truncated)' : ''}.`);
+      } else if (action === 'hover') {
+        setHover(result.hover || null);
+        setStatus(result.hover ? 'Symbol information from TypeScript.' : 'No symbol information at this position.');
       } else {
         const findings = result.diagnostics ?? [];
         setDiagnostics(findings);
@@ -72,12 +82,14 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     editor.current = instance;
     if (position) { instance.setPosition({ lineNumber: position.line, column: position.column }); instance.revealLineInCenter(position.line); instance.focus(); }
     const changes = model.onDidChangeContent(() => {
-      epoch.current++; setDiagnostics([]); setStatus(null); setFailure(null); monaco.editor.setModelMarkers(model, 'graft-typescript', []);
+      epoch.current++; setDiagnostics([]); setReferences([]); setHover(null); setStatus(null); setFailure(null); monaco.editor.setModelMarkers(model, 'graft-typescript', []);
       callbacks.current.onChange(model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true));
     });
     const save = instance.addAction({ id: 'graft.save', label: 'Save file', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => callbacks.current.onSave() });
     const check = instance.addAction({ id: 'graft.check', label: 'Check types', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM], run: () => runQuery.current('diagnostics') });
     const definition = instance.addAction({ id: 'graft.definition', label: 'Go to definition', keybindings: [monaco.KeyCode.F12], run: () => runQuery.current('definition') });
+    const referencesAction = instance.addAction({ id: 'graft.references', label: 'Find references', keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12], run: () => runQuery.current('references') });
+    const hoverAction = instance.addAction({ id: 'graft.hover', label: 'Symbol information', keybindings: [monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI)], run: () => runQuery.current('hover') });
     const theme = (): void => {
       const css = getComputedStyle(container.current!);
       const color = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback;
@@ -87,7 +99,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     };
     theme();
     const observer = new MutationObserver(theme); observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'data-accent'] });
-    return () => { observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    return () => { observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
     // The model owns edits. Recreate it only for another file; content changes flow through onChange.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
@@ -98,9 +110,16 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
       <div className="flex flex-wrap items-center gap-6">
         <Button size="xs" variant="ghost" disabled={pending} onClick={() => void query('diagnostics')} title="Check the current draft (Ctrl+Shift+M)">Check types</Button>
         <Button size="xs" variant="ghost" disabled={pending} onClick={() => void query('definition')} title="Go to definition at the cursor (F12)">Definition</Button>
+        <Button size="xs" variant="ghost" disabled={pending} onClick={() => void query('references')} title="Find references at the cursor (Shift+F12)">References</Button>
+        <Button size="xs" variant="ghost" disabled={pending} onClick={() => void query('hover')} title="Symbol information at the cursor (Ctrl+K, Ctrl+I)">Symbol info</Button>
         <p role="status" className="text-2xs text-fg-muted">{pending ? 'Checking language server…' : status}</p>
       </div>
       {failure ? <p role="alert" className="text-sm text-danger">{failure}</p> : null}
+      {hover ? <section aria-label="Symbol information" className="px-4 py-6"><Markdown text={hover} variant="code" /></section> : null}
+      {references.length ? <ul aria-label="Symbol references" className="text-2xs">
+        {references.slice(0, 100).map((location, i) => <li key={`${location.file}:${location.line}:${location.column}:${i}`}><button className="w-full truncate py-4 text-left font-mono text-fg-muted hover:text-fg" title={`${location.file}:${location.line}:${location.column}`} onClick={() => callbacks.current.onNavigate(location)}>{location.file}:{location.line}:{location.column}</button></li>)}
+        {references.length > 100 ? <li>Showing the first 100 references.</li> : null}
+      </ul> : null}
       {diagnostics.length ? <ul aria-label="Type diagnostics" className="text-2xs">
         {diagnostics.slice(0, 20).map((d, i) => <li key={i}><button className="w-full py-4 text-left text-fg-muted hover:text-fg" onClick={() => {
           editor.current?.setPosition({ lineNumber: d.line, column: d.column }); editor.current?.revealLineInCenter(d.line); editor.current?.focus();

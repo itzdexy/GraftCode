@@ -122,6 +122,17 @@ test('editor type checks unsaved drafts only after project trust and F12 opens t
   await expect(w.getByRole('status').filter({ hasText: 'Type check complete: 0 issues.' })).toBeVisible();
   await editor.focus(); await w.keyboard.press('Control+Home'); await w.keyboard.press('ArrowDown'); await w.keyboard.press('Home');
   for (let i = 0; i < 22; i++) await w.keyboard.press('ArrowRight');
+  await w.getByRole('button', { name: 'Symbol info', exact: true }).click();
+  await expect(w.getByRole('region', { name: 'Symbol information' })).toContainText('number');
+  await editor.focus(); await w.keyboard.press('Shift+F12');
+  await expect(w.getByRole('list', { name: 'Symbol references' })).toContainText('main.ts:2:');
+  // The queried symbol is the import alias: TypeScript references include its
+  // import and call sites; F12 below resolves its underlying library definition.
+  await expect(w.getByRole('list', { name: 'Symbol references' })).toContainText('main.ts:1:19');
+  await w.getByRole('list', { name: 'Symbol references' }).getByRole('button', { name: 'main.ts:1:19', exact: true }).click();
+  await expect(editor).toBeVisible();
+  await editor.focus(); await w.keyboard.press('Control+Home'); await w.keyboard.press('ArrowDown'); await w.keyboard.press('Home');
+  for (let i = 0; i < 22; i++) await w.keyboard.press('ArrowRight');
   await w.keyboard.press('F12');
   await expect(w.getByRole('textbox', { name: 'Edit library.ts' })).toBeVisible();
   await expect(w.locator('.monaco-editor .view-lines')).toContainText('export function twice');

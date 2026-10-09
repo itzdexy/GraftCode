@@ -19,7 +19,12 @@ export function Collapse({ open, children, className }: { open: boolean; childre
   }
   if (!present) return null;
   return (
-    <div className={cn('graft-collapse', toggled && 'graft-collapse--enter')} data-state={open ? 'open' : 'closed'}>
+    <div
+      className={cn('graft-collapse', toggled && 'graft-collapse--enter')}
+      data-state={open ? 'open' : 'closed'}
+      aria-hidden={!open || undefined}
+      {...(!open ? { inert: '' } : {})}
+    >
       <div className={className}>{children}</div>
     </div>
   );

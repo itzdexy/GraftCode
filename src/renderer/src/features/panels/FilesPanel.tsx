@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize, Pencil, Save } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize, Pencil, Save, X } from 'lucide-react';
 import type { TreeEntryView, FilePreviewView } from '@shared/schemas/panels';
 import type { CodeLocation } from '@shared/schemas/semantic';
 import { Button, IconButton } from '../../components/Button';
@@ -14,6 +14,7 @@ import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
+import { closeWorkspaceTab, loadWorkspaceLayout, openWorkspaceTab, saveWorkspaceLayout, setWorkspaceTabMode, type WorkspaceTab } from './workspaceLayout';
 
 const TextEditor = lazy(() => import('./TextEditor'));
 
@@ -244,16 +245,14 @@ interface ViewState {
 
 /** File tree of the session folder with git status marks, a preview (text, pictures, clips) and each file's actions. */
 export function FilesView({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
+  const [restoredLayout] = useState(() => loadWorkspaceLayout(sessionId));
+  const [layout, setLayout] = useState(restoredLayout);
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  useEffect(() => { saveWorkspaceLayout(sessionId, layout); }, [sessionId, layout]);
   const [recoveredSession, setRecoveredSession] = useState<string | null>(null);
   const [recoveryFailure, setRecoveryFailure] = useState<{ sessionId: string; message: string } | null>(null);
   const recovered = recoveredSession === sessionId;
   const recoveryError = recoveryFailure?.sessionId === sessionId ? recoveryFailure.message : null;
-  useEffect(() => {
-    let active = true;
-    void recoverEditorDrafts(sessionId).catch((error: unknown) => { if (active) setRecoveryFailure({ sessionId, message: errorText(error) }); })
-      .finally(() => { if (active) setRecoveredSession(sessionId); });
-    return () => { active = false; void flushEditorRecovery(sessionId); };
-  }, [sessionId]);
   const [saved, setSaved] = useState(0);
   const treeRefresh = useMemo(() => [refreshKey, saved], [refreshKey, saved]);
   const marks = useGitMarks(sessionId, treeRefresh);
@@ -267,7 +266,9 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   const [saveError, setSaveError] = useState<string | null>(null);
   const [position, setPosition] = useState<CodeLocation | null>(null);
 
-  const open = (path: string, location: CodeLocation | null = null, recovery = false): void => {
+  const open = useCallback((path: string, location: CodeLocation | null = null, recovery = false, mode: WorkspaceTab['mode'] = 'preview'): void => {
+    const requestedMode = location || recovery ? 'edit' : mode;
+    setLayout((current) => openWorkspaceTab(current, path, requestedMode));
     const next = ++request.current;
     setPreview({ state: 'loading', path });
     setOpened((n) => n + 1);
@@ -284,7 +285,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
           return;
         }
         setPreview({ state: 'ready', preview: p });
-        if ((location || recovery) && p.revision && p.content !== null) {
+        if (requestedMode === 'edit' && p.revision && p.content !== null) {
           const key = `${sessionId}:${path}`;
           useEditorDrafts.getState().open(key, p); setEditing(key);
         }
@@ -297,6 +298,45 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
           setEditing(key); setSaveError(`${errorText(error)} Your recovered draft is kept; copy its text if the original file was removed.`);
         } else setPreview({ state: 'error', path, message: errorText(error) });
       });
+  }, [sessionId]);
+
+  // Draft hydration comes first so a restored edit tab keeps its original revision.
+  useEffect(() => {
+    let active = true;
+    void recoverEditorDrafts(sessionId).catch((error: unknown) => { if (active) setRecoveryFailure({ sessionId, message: errorText(error) }); })
+      .finally(() => {
+        if (!active) return;
+        setRecoveredSession(sessionId);
+        const tab = restoredLayout.tabs.find((item) => item.path === restoredLayout.activePath);
+        if (tab) {
+          const previous = useEditorDrafts.getState().drafts[`${sessionId}:${tab.path}`];
+          open(tab.path, null, !!previous && previous.content !== previous.original && tab.mode === 'edit', tab.mode);
+        }
+      });
+    return () => { active = false; void flushEditorRecovery(sessionId); };
+  }, [restoredLayout, sessionId, open]);
+
+  const activateTab = (tab: WorkspaceTab): void => {
+    const previous = useEditorDrafts.getState().drafts[`${sessionId}:${tab.path}`];
+    open(tab.path, null, !!previous && previous.content !== previous.original && tab.mode === 'edit', tab.mode);
+  };
+  const closeTab = (path: string): void => {
+    const next = closeWorkspaceTab(layout, path);
+    setLayout(next);
+    // Closing a view never discards a draft or bypasses its separate recovery writes.
+    void flushEditorRecovery(sessionId);
+    if (layout.activePath !== path) return;
+    const adjacent = next.tabs.find((tab) => tab.path === next.activePath);
+    if (adjacent) { activateTab(adjacent); requestAnimationFrame(() => tabRefs.current.get(adjacent.path)?.focus()); }
+    else { request.current++; setPreview(null); setEditing(null); setSaveError(null); setPosition(null); }
+  };
+  const navigateTabs = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (event.key === 'Delete') { event.preventDefault(); const tab = layout.tabs[index]; if (tab) closeTab(tab.path); return; }
+    const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? layout.tabs.length - 1 : direction ? (index + direction + layout.tabs.length) % layout.tabs.length : -1;
+    const tab = layout.tabs[nextIndex];
+    if (!tab) return;
+    event.preventDefault(); activateTab(tab); tabRefs.current.get(tab.path)?.focus();
   };
 
   const selected = preview ? (preview.state === 'ready' ? preview.preview.path : preview.path) : null;
@@ -336,6 +376,25 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
       </div>
       {preview && selected !== null ? (
         <div className="flex min-h-0 flex-1 flex-col border-t border-border-panel">
+          <div role="tablist" aria-label="Open files" className="flex shrink-0 overflow-x-auto border-b border-border bg-sunken px-4 pt-3">
+            {layout.tabs.map((tab, index) => {
+              const current = tab.path === selected;
+              const buffer = drafts[`${sessionId}:${tab.path}`];
+              const unsaved = !!buffer && buffer.content !== buffer.original;
+              return <div key={tab.path} role="presentation" className={cn('motion-step flex min-w-0 shrink-0 items-center rounded-t-sm border-b-2', current ? 'border-accent bg-code-block' : 'border-transparent hover:bg-hover')}>
+                <button type="button" role="tab" id={`file-tab-${sessionId}-${index}`} aria-selected={current} aria-controls={`file-pane-${sessionId}`}
+                  aria-label={`${tab.path}${unsaved ? ' (unsaved changes)' : ''}`} tabIndex={current ? 0 : -1} title={tab.path}
+                  ref={(button) => { if (button) tabRefs.current.set(tab.path, button); else tabRefs.current.delete(tab.path); }}
+                  onClick={() => activateTab(tab)} onKeyDown={(event) => navigateTabs(event, index)}
+                  className={cn('flex h-28 max-w-[180px] items-center gap-6 px-8 text-xs transition-ui', current ? 'text-fg' : 'text-fg-muted')}>
+                  <File className="size-12 shrink-0" aria-hidden="true" /><span className="truncate">{tab.path.slice(tab.path.lastIndexOf('/') + 1)}</span>
+                  {unsaved ? <span className="size-5 shrink-0 rounded-full bg-amber" aria-hidden="true" /> : null}
+                </button>
+                <IconButton label={`Close tab ${tab.path}`} size="xs" tooltip={false} onClick={() => closeTab(tab.path)} className="mr-3"><X className="size-12" /></IconButton>
+              </div>;
+            })}
+          </div>
+          <div role="tabpanel" id={`file-pane-${sessionId}`} aria-labelledby={`file-tab-${sessionId}-${layout.tabs.findIndex((tab) => tab.path === selected)}`} className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-28 shrink-0 items-center gap-2 pr-4 pl-10">
             <p className="selectable min-w-0 flex-1 truncate font-mono text-2xs text-fg-muted" title={selected}>
               {selected}
@@ -343,8 +402,8 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             {ready ? <span className="shrink-0 px-4 text-2xs text-fg-faint tabular-nums">{previewNote(ready, shown.pixels)}</span> : null}
             {dirty ? <span className="text-2xs text-amber-fg" aria-label="Unsaved changes">Unsaved</span> : null}
             {ready?.revision && ready.content !== null ? <IconButton label={edit ? 'Preview file' : 'Edit file'} size="xs" active={edit} onClick={() => {
-              if (edit) setEditing(null);
-              else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); }
+              if (edit) { setEditing(null); setLayout((current) => setWorkspaceTabMode(current, selected, 'preview')); }
+              else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); setLayout((current) => setWorkspaceTabMode(current, selected, 'edit')); }
             }}><Pencil className="size-13" /></IconButton> : null}
             {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={() => void save()}><Save className="size-13" /></IconButton> : null}
             {picture && ready.content !== null ? (
@@ -379,6 +438,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
               onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={() => void save()} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}
+          </div>
           </div>
         </div>
       ) : null}

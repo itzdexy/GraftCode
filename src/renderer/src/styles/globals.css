@@ -229,6 +229,9 @@
   .pressable:active:not(:disabled) {
     scale: 0.97;
   }
+  .pressable {
+    transition-timing-function: var(--g-ease-out);
+  }
   .scrollbar-stable {
     scrollbar-gutter: stable;
   }
@@ -505,51 +508,25 @@
     animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
   }
   .motion-stagger > * {
-    animation: graft-rise 420ms var(--g-ease-out) both;
+    animation: graft-rise var(--g-duration-slow) var(--g-ease-out) both;
   }
   .motion-stagger > :nth-child(2) {
-    animation-delay: 70ms;
+    animation-delay: 30ms;
   }
   .motion-stagger > :nth-child(3) {
-    animation-delay: 140ms;
+    animation-delay: 60ms;
   }
   .motion-stagger > :nth-child(n + 4) {
-    animation-delay: 210ms;
+    animation-delay: 90ms;
   }
 }
 
 /*
  * Taproot, the deepest effort, grows a root: the slider's fill turns into a
- * leaf-to-gold gradient with a slow sheen, the thumb breathes, a small root
- * draws itself under the track, and the composer's label shimmers. With
- * reduced motion everything shows in its final, still state.
+ * leaf-to-gold gradient, the thumb settles into place, and a small root
+ * arrives under the track. Only opacity and transforms move; the gradients
+ * and shadows stay still so the control does not repaint continuously.
  */
-@keyframes graft-taproot-sheen {
-  from {
-    background-position: 0% 50%;
-  }
-  to {
-    background-position: 200% 50%;
-  }
-}
-@keyframes graft-taproot-breathe {
-  0%,
-  100% {
-    box-shadow:
-      var(--g-shadow-composer),
-      0 0 0 0 color-mix(in srgb, var(--g-accent) 0%, transparent);
-  }
-  50% {
-    box-shadow:
-      var(--g-shadow-composer),
-      0 0 0 5px color-mix(in srgb, var(--g-accent) 26%, transparent);
-  }
-}
-@keyframes graft-root-grow {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
 @keyframes graft-root-settle {
   from {
     opacity: 0;
@@ -562,36 +539,39 @@
 }
 .taproot-fill {
   background: linear-gradient(90deg, var(--g-accent), color-mix(in oklch, var(--g-accent) 45%, var(--g-amber)), var(--g-amber), var(--g-accent));
-  background-size: 200% 100%;
-  animation: graft-taproot-sheen 2.6s linear infinite;
 }
 .taproot-text {
   background: linear-gradient(90deg, var(--g-accent), var(--g-amber), var(--g-accent));
-  background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: graft-taproot-sheen 3.2s linear infinite;
 }
 .taproot-thumb {
-  animation: graft-taproot-breathe 1.9s ease-in-out infinite;
+  box-shadow: var(--g-shadow-composer), 0 0 0 3px color-mix(in srgb, var(--g-accent) 18%, transparent);
+  animation: graft-pop var(--g-duration-base) var(--g-ease-out);
 }
 .taproot-root path {
-  stroke-dasharray: 60;
-  stroke-dashoffset: 60;
-  animation: graft-root-grow 820ms var(--g-ease-out) forwards;
+  animation: graft-root-settle var(--g-duration-base) var(--g-ease-out) both;
 }
 .taproot-root path:nth-of-type(2) {
-  animation-delay: 260ms;
+  animation-delay: 40ms;
 }
 .taproot-root path:nth-of-type(3) {
-  animation-delay: 380ms;
+  animation-delay: 80ms;
 }
 .taproot-root path:nth-of-type(4) {
-  animation-delay: 520ms;
+  animation-delay: 120ms;
 }
 .taproot-note {
-  animation: graft-root-settle 420ms var(--g-ease-out) 300ms both;
+  animation: graft-root-settle var(--g-duration-base) var(--g-ease-out) 80ms both;
+}
+
+/* Queue changes arrive without replaying the surrounding composer. */
+.graft-queue-item {
+  animation: graft-step var(--g-duration-base) var(--g-ease-out);
+}
+.graft-queue-item[data-steer='true'] {
+  background: color-mix(in srgb, var(--g-accent) 5%, transparent);
 }
 
 /* The Browser panel's loading bar: an accent stripe running along a tinted track (just the track with reduced motion). */
@@ -657,6 +637,11 @@
     animation-duration: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0ms !important;
+    animation-delay: 0ms !important;
+  }
+  :root:not([data-motion='full']) .pressable:active,
+  :root:not([data-motion='full']) .send-button:active:not(:disabled) {
+    scale: 1;
   }
 }
 :root[data-motion='reduced'] *,
@@ -665,6 +650,11 @@
   animation-duration: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0ms !important;
+  animation-delay: 0ms !important;
+}
+:root[data-motion='reduced'] .pressable:active,
+:root[data-motion='reduced'] .send-button:active:not(:disabled) {
+  scale: 1;
 }
 
 /*

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.15",
+    "date": "2026-10-09",
+    "items": [
+      "Smoother transitions for controls, queued messages and loading states. Reduced motion now removes entrance delays too; status clocks pause while the app is hidden.",
+      "Long conversations reuse completed transcript turns while a reply streams, reducing repeated processing without dropping conversation history.",
+      "Keep several files open in tabs. Tab paths and editing modes survive restart; switching or closing a tab retains unsaved drafts for recovery.",
+      "In trusted TypeScript and JavaScript projects, References and Symbol info show real language-server results for the current draft. Shift+F12 finds references; F12 still opens definitions.",
+      "Responses containing repeated model control tokens show endpoint troubleshooting guidance while preserving the original output. Normal multilingual text and code examples remain unchanged.",
+      "Interrupted provider streams fail safely before tool execution. Already-visible partial thinking and text are retained, and late session loads cannot overwrite newer messages, approvals or queue state."
+    ]
+  },
+  {
     "version": "0.6.14",
     "date": "2026-10-09",
     "items": [

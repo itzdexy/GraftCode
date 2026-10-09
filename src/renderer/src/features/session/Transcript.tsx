@@ -27,7 +27,8 @@ import { RunningShell, ShellItem } from './ShellItem';
 import { SourcesCard } from './SourcesCard';
 import { StatusLine } from './ThinkingIndicator';
 import { ToolGroup } from './ToolGroup';
-import { buildTranscript, groupActivity, type TranscriptItem } from './transcriptModel';
+import { type TranscriptItem } from './transcriptModel';
+import { createTranscriptProjection } from './transcriptProjection';
 
 const STICK_THRESHOLD = 80;
 
@@ -83,9 +84,10 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
   // While a "!" command or the project's checks run no model is working, so the last turn stays as it finished.
   const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
+  const projectTranscript = useMemo(() => createTranscriptProjection(), []);
   const items = useMemo(
-    () => groupActivity(buildTranscript(view.messages, { streaming: view.streaming, running: view.running }), modelWorking),
-    [view.messages, view.streaming, view.running, modelWorking]
+    () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking),
+    [projectTranscript, view.messages, view.streaming, view.running, modelWorking]
   );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
   // What the conversation read and found, for the marks on citations; null when it never used the web.
