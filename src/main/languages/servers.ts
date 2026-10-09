@@ -1,10 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CancellationTokenSource, createMessageConnection, type MessageConnection } from 'vscode-jsonrpc/node';
 import { z } from 'zod';
 import { GraftError } from '@shared/errors';
+import { runFile } from '../tools/run';
 import type { CodeLocation, SemanticQuery, SemanticResult } from './types';
 
 const Position = z.object({ line: z.number().int().nonnegative(), character: z.number().int().nonnegative() });
@@ -62,6 +64,7 @@ class TypeScriptClient {
   private readonly documents = new Map<string, number>();
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private disposing: Promise<void> | undefined;
   active = 0;
   touched = Date.now();
 
@@ -209,18 +212,47 @@ class TypeScriptClient {
     return { ...base, locations, truncated: items.length > 1000 };
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    return this.disposing ??= this.close();
+  }
+
+  private async close(): Promise<void> {
     let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
     if (!this.closed) {
-      try { await Promise.race([this.connection.sendRequest('shutdown'), new Promise((resolve) => { shutdownTimer = setTimeout(resolve, 1000); })]); await this.connection.sendNotification('exit'); }
+      try {
+        await Promise.race([this.connection.sendRequest('shutdown'), new Promise((resolve) => { shutdownTimer = setTimeout(resolve, 1000); })]);
+        // On Windows, keep the wrapper alive until its tree has been stopped.
+        // Once exit closes the wrapper, taskkill can no longer find tsserver's
+        // parent chain, and its inherited project cwd can remain locked.
+        if (process.platform !== 'win32') await this.connection.sendNotification('exit');
+      }
       catch { /* a dead server still needs local transport cleanup */ }
       finally { if (shutdownTimer) clearTimeout(shutdownTimer); }
     }
     this.closed = true;
+    if (process.platform === 'win32' && this.child.pid !== undefined && this.child.exitCode === null && this.child.signalCode === null) {
+      const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+      try {
+        await runFile(path.join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(this.child.pid), '/T', '/F'],
+          { cwd: os.tmpdir(), timeoutMs: 3000, maxBuffer: 16 * 1024, env: serverEnvironment() });
+      } catch { /* Still close our direct child if the system utility is unavailable. */ }
+    }
     this.connection.dispose();
-    // Wait for graceful exit (and tsserver cleanup) before force-killing the wrapper.
+    // Killing is asynchronous. Do not resolve just because kill() was requested:
+    // close confirms process exit and stdio cleanup before callers release files.
+    if (!await this.waitForExit(2000)) {
+      this.child.kill();
+      if (!await this.waitForExit(2000)) throw new GraftError('language_server_close_timeout', 'Language server did not exit after shutdown.');
+    }
+  }
+
+  private async waitForExit(timeoutMs: number): Promise<boolean> {
     let exitTimer: ReturnType<typeof setTimeout> | undefined;
-    try { await Promise.race([this.exited, new Promise<void>((resolve) => { exitTimer = setTimeout(() => { this.child.kill(); resolve(); }, 2000); })]); }
+    try {
+      return await Promise.race([this.exited.then(() => true), new Promise<boolean>((resolve) => {
+        exitTimer = setTimeout(() => resolve(false), timeoutMs);
+      })]);
+    }
     finally { if (exitTimer) clearTimeout(exitTimer); }
   }
 }
@@ -228,15 +260,23 @@ class TypeScriptClient {
 /** Bounded, on-demand local LSP processes; each project/private writer gets separate documents. */
 export class LanguageServers {
   private readonly clients = new Map<string, TypeScriptClient>();
+  private readonly closing = new Set<Promise<void>>();
   private disposed = false;
   private readonly idle: ReturnType<typeof setInterval>;
   constructor() {
     this.idle = setInterval(() => {
       for (const [root, client] of this.clients) if (client.active === 0 && Date.now() - client.touched > 60_000) {
-        this.clients.delete(root); void client.dispose();
+        this.clients.delete(root); void this.retire(client);
       }
     }, 30_000);
     this.idle.unref();
+  }
+
+  private retire(client: TypeScriptClient): Promise<void> {
+    const operation = client.dispose();
+    this.closing.add(operation);
+    void operation.finally(() => this.closing.delete(operation)).catch(() => undefined);
+    return operation;
   }
 
   async query(root: string, input: SemanticQuery, signal: AbortSignal, buffer?: string): Promise<SemanticResult> {
@@ -248,12 +288,12 @@ export class LanguageServers {
     validatedFile(canonical, input.file);
     const key = process.platform === 'win32' ? canonical.toLowerCase() : canonical;
     let client = this.clients.get(key);
-    if (client && !client.alive) { this.clients.delete(key); void client.dispose(); client = undefined; }
+    if (client && !client.alive) { this.clients.delete(key); void this.retire(client); client = undefined; }
     if (!client) {
       if (this.clients.size >= 2) {
         const idle = [...this.clients].filter(([, c]) => c.active === 0).sort((a, b) => a[1].touched - b[1].touched)[0];
         if (!idle) throw new GraftError('language_server_busy', 'Two projects are using semantic servers. Retry after those queries finish.');
-        this.clients.delete(idle[0]); void idle[1].dispose();
+        this.clients.delete(idle[0]); void this.retire(idle[1]);
       }
       client = new TypeScriptClient(canonical); this.clients.set(key, client);
     }
@@ -261,7 +301,7 @@ export class LanguageServers {
     catch (error) {
       if (!client.alive || error instanceof GraftError && ['language_server_timeout', 'language_server_closed', 'language_diagnostics'].includes(error.code)) {
         if (this.clients.get(key) === client) this.clients.delete(key);
-        await client.dispose();
+        await this.retire(client);
       }
       throw error;
     }
@@ -271,6 +311,8 @@ export class LanguageServers {
     this.disposed = true;
     clearInterval(this.idle);
     const clients = [...this.clients.values()]; this.clients.clear();
-    await Promise.allSettled(clients.map((client) => client.dispose()));
+    for (const client of clients) void this.retire(client);
+    // Evicted, failed and idle clients are still ours until their shutdown ends.
+    while (this.closing.size > 0) await Promise.allSettled([...this.closing]);
   }
 }
