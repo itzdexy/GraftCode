@@ -193,9 +193,9 @@ Windows x64, system Node 26.7.0/npm 11.19.0. CI targets Node 24.
 | Implementation unit suite | 939 passed, 28 skipped (75 files passed, 2 skipped), including real LSP, durable editor recovery, migrations, model lifecycle and private writers. |
 | Targeted fixes | Sites partial-request regression failed before the fix and passed after; provider/redaction fixtures passed. |
 | Catalog Electron integration | Passed real main-process service, IPC, UI controls and restart persistence with only the HTTP transport replaced by a fixture. |
-| Full Electron suite | 45 passed, 5 skipped (3.9m), including catalog/lifecycle, private writers, semantic intelligence, keyboard editor saves and recovery across app restart. Final versioned-build rerun pending. |
+| Full Electron suite | Final 0.6.14 run: 45 passed, 5 skipped (3.9m), including catalog/lifecycle, private writers, semantic intelligence, keyboard editor saves and restart recovery. A preceding exact-version run had 44 passes and one transient Settings theme assertion failure; the affected case then passed once in isolation and three repeated runs, and passed in the final full suite. No fix is claimed for that transient failure. |
 | Production build | Passed after the implementation. |
-| Packaged Windows app | 0.6.14 x64 NSIS installer built; 2 packaged smoke tests passed, including SQLite/ripgrep/PTY, bundled LSP, Monaco saves, onboarding/session/settings and package contents. Installer ran successfully (exit 0) and the installed executable reports 0.6.14.0. Installed-app smoke verification pending. |
+| Packaged Windows app | 0.6.14 x64 NSIS installer built; 2 packaged and 2 installed-app smoke tests passed, including SQLite/ripgrep/PTY, bundled LSP, Monaco saves, onboarding/session/settings and package contents. Installer ran successfully (exit 0) and the installed executable reports 0.6.14.0. |
 | Workflow YAML | CI and release files parse successfully. Hosted matrix execution outstanding. |
 | Live source | Actual Models.dev response normalized successfully: 212 supported providers, 7,664 models at observation time. Counts change upstream. |
 
@@ -203,8 +203,8 @@ Hosted [CI run 37490772890](https://github.com/itzdexy/GraftCode/actions/runs/37
 at the baseline commit failed before any job step ran. Its check annotation says:
 “The job was not started because your account is locked due to a billing issue.”
 That requires GitHub account administration; changing application code cannot clear
-it. The user has now authorized committing/pushing the changes and running the
-new Windows installer; the outcome is recorded below after execution.
+it. The user authorized committing/pushing the changes and running the
+new Windows installer; local installation results are recorded below.
 macOS/Linux execution, signing/updater delivery, Docker-dependent tests
 and real paid-provider account verification remain outstanding in this environment.
 
@@ -214,9 +214,18 @@ The existing per-user installation was upgraded from 0.6.13 to 0.6.14 with the
 NSIS installer. A consistent read-only SQLite backup was made before the upgrade,
 under the ignored local `dist/upgrade-backup-0.6.13-20261009/` directory; it contains
 private session data and must not be committed. Before upgrade: schema 4, 10
-sessions, 3 providers. The installer preserves the existing user profile. Real
-profile startup/migration verification is pending; no release tag or public
-installer upload has been made.
+sessions, 3 providers. The installed app is running with a responsive Graft window
+and the existing real profile. Migration reached schema 7; SQLite `quick_check`
+returned `ok`, and comparison against the backup found zero missing original
+session or provider identifiers. There were 11 sessions and 3 providers at the
+final observation. No release tag or public installer upload has been made.
+
+Installer: `dist/Graft-Setup-0.6.14.exe`, 123,779,495 bytes, SHA-256
+`BFAF3D111398344046DACECFB3A52885EE5DBD3694E34A766C1AD31CDB2745CE`.
+The Windows installer remains unsigned. A disposable manual test project with
+an intentional addition bug, a Node test and a TypeScript error was prepared in
+the ignored `dist/manual-test-project/` directory; its README gives the agent,
+editor, type-check, draft-recovery and conflict test steps.
 
 ## Research record and application
 

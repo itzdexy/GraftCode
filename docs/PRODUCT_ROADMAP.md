@@ -428,7 +428,7 @@ praise and complain about (October 2026).
 | One function per fresh agent with a machine check | Decompilation projects driven by agents (compile, diff, feed the failure back, cap the attempts) | Shipped in 0.6.6 as `/decompile` on top of `verify` |
 | Prune old tool output before summarizing | OpenCode session compaction, Claude Code | Shipped in 0.6.12, as a view of the history: nothing stored changes |
 | Fallback model per session | Roo Code and Goose provider settings | Shipped in 0.6.12 as one backup model in Settings, used once a turn |
-| Worktree per agent that writes | Claude Code, Cursor | Open; unlocks parallel implementers and best-of-N |
+| Worktree per agent that writes | Claude Code, Cursor | Implemented for writing groups and Tasks in 0.6.14; stronger shell enforcement and recovery controls remain open |
 | Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
 | A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | Open; small. Graft notifies but has no sound |
@@ -450,7 +450,9 @@ round. What exists now and what does not:
   index, verification as a first-class step (agent checks, mission checks, project
   checks), generated media, an MCP platform with real tests, a transparent record of
   every agent's steps.
-- **Not started:** a Monaco-based editor, a dockable workspace, a project graph view, a
+- **Started in 0.6.14:** a Monaco single-pane editor with revision-checked saves,
+  unsaved TypeScript diagnostics, definition navigation and persistent draft recovery.
+- **Not started:** a dockable workspace, a project graph view, a
   model lab for comparing models on a task, a browser QA lab with visual regression,
   remote execution, a workflow engine driven by files in `.graft/`, context modes with a
   view of what was selected and left out, an observability area, a replay timeline
@@ -464,11 +466,12 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
 
 1. Split the loop host and the mission controller out of `session.ts` (1,980 lines): the
    last three rounds each added to it.
-2. A worktree per agent that writes, merged back by the main agent: parallel
-   implementers, then best-of-N.
-3. Diagnostics after edits (LSP), starting with TypeScript.
-4. Keep the cutoff for removed tool output across restarts; a backup model for agents of a
-   group; spend by day.
+2. Expand recovery and cleanup controls for the writing-agent worktrees introduced
+   in 0.6.14; then best-of-N.
+3. Expand the TypeScript LSP and single-pane editor foundation to indexing, tabs,
+   layouts and semantic edits.
+4. A backup model for agents of a group; spend by day. Persisted context cutoffs
+   shipped in 0.6.14.
 5. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation
    and @-mentioning resources.
 6. Diagrams and equations in replies; reading PDFs from the web.
