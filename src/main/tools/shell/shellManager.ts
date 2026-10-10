@@ -165,13 +165,17 @@ function taskkill(pids: number[], tree: boolean): Promise<void> {
 
 /**
  * Stops a command and everything it started. POSIX: signal the detached
- * process group. Windows: kill the launcher tree and, for Git Bash, every
- * MSYS process in the wrapper's group (found via ps.exe from the PID the
- * wrapper recorded at start).
+ * process group, and once more, harder, after a grace period. Windows: kill
+ * the launcher tree and, for Git Bash, every MSYS process in the wrapper's
+ * group (found via ps.exe from the PID the wrapper recorded at start).
+ *
+ * The command itself is stopped whatever else goes wrong. When its descendants
+ * could not be looked up, that is thrown afterwards: some may still be running,
+ * and a partial cleanup must not read as a complete one.
  */
 export async function killProcessTree(
   child: ChildProcess,
-  options: { platform: NodeJS.Platform; msysTools: string | null; pidFile: string | null }
+  options: { platform: NodeJS.Platform; msysTools: string | null; pidFile: string | null; onLateError?: (error: Error) => void }
 ): Promise<void> {
   const pid = child.pid;
   if (pid === undefined) return;
@@ -184,24 +188,41 @@ export async function killProcessTree(
       }
     };
     send('SIGTERM');
+    // The shell usually dies at once; what it started may ignore the signal. So the second one goes to the
+    // whole group whether or not its leader is still there. With nobody left in the group it does nothing.
     setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) send('SIGKILL');
+      try {
+        send('SIGKILL');
+      } catch (error) {
+        options.onLateError?.(error as Error);
+      }
     }, 2000).unref();
     return;
   }
   const winPids: number[] = [];
+  let unlisted: Error | null = null;
   if (options.msysTools && options.pidFile) {
     const recorded = await fs.promises.readFile(options.pidFile, 'utf8').then(
       (t) => Number(t.trim()),
       () => Number.NaN
     );
     if (Number.isInteger(recorded) && recorded > 0) {
-      const ps = await runFile(path.join(options.msysTools, 'ps.exe'), [], { cwd: os.tmpdir(), timeoutMs: 10_000 });
-      winPids.push(...msysTreeWinPids(ps.stdout, recorded));
+      const tool = path.join(options.msysTools, 'ps.exe');
+      try {
+        const ps = await runFile(tool, [], { cwd: os.tmpdir(), timeoutMs: 10_000 });
+        winPids.push(...msysTreeWinPids(ps.stdout, recorded));
+        if (ps.code !== 0) unlisted = new Error(`${tool} ended with ${ps.code === null ? 'a timeout' : `code ${String(ps.code)}`}`);
+      } catch (error) {
+        unlisted = new Error(`${tool} couldn't run: ${(error as Error).message}`);
+      }
     }
   }
-  await taskkill(winPids, false);
-  await taskkill([pid], true);
+  try {
+    await taskkill(winPids, false);
+  } finally {
+    await taskkill([pid], true);
+  }
+  if (unlisted) throw new Error(`Git Bash's processes couldn't be listed, so something the command started may still be running (${unlisted.message}).`);
 }
 
 /**
@@ -264,9 +285,10 @@ export class ShellManager extends EventEmitter {
 
   /** Kills a child and everything it started; failures are reported as error-log events. */
   private stop(child: ChildProcess, pidFile: string | null): Promise<void> {
-    return killProcessTree(child, { platform: this.platform, msysTools: this.msysTools, pidFile }).catch((error: unknown) => {
-      this.emit('error-log', `Failed to stop process ${String(child.pid)}: ${(error as Error).message}`);
-    });
+    const report = (error: Error): void => {
+      this.emit('error-log', `Failed to stop process ${String(child.pid)}: ${error.message}`);
+    };
+    return killProcessTree(child, { platform: this.platform, msysTools: this.msysTools, pidFile, onLateError: report }).catch((error: unknown) => report(error as Error));
   }
 
   cwdFor(sessionId: string, fallback: string): string {
