@@ -128,3 +128,59 @@ step from schema 7 to 8 is covered by `tests/unit/usageDays.test.ts` and
 published and no tag was made. GitHub Actions did not run (the account's billing
 lock); the changed workflows were parsed and their new step run by hand.
 
+## 0.6.17 round (2026-10-10)
+
+Branch `feat/claude-like-session-view`, local only: nothing of it was pushed, and no
+package was built. It sits on `origin/main` at `5f586fc` and contains
+`feat/reliability-security-upgrade` (0.6.16, `b51155e`), merged at `9e2e771`. The last
+commit that changes code or tests is `38605bb`; what follows it is Markdown only. Two
+systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm` container
+(Docker 29.8.0) packed from the working tree. Nothing here ran on macOS, on GitHub's
+runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `38605bb` | exit 0 |
+| `npx eslint . --max-warnings 0` | Windows, `38605bb` | exit 0 |
+| `npx vitest run` | Windows, `38605bb` | 88 files passed, 2 skipped; 1116 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, `38605bb` | exit 0 |
+| `npx playwright test` | Windows, `38605bb` | 51 passed, 5 skipped, 0 failed (4.1 min) |
+| `npx playwright test tests/e2e/editor.spec.ts -g "Monaco edits" --repeat-each=8` | Windows, `9e2e771` | 8 passed |
+| `npm run typecheck`, `npx eslint . --max-warnings 0` | Linux container, `9e2e771` and `38605bb` | exit 0, exit 0, both times |
+| `npx vitest run` | Linux container, `9e2e771` | 88 files passed, 2 skipped; 1106 tests passed, 37 skipped, 0 failed |
+| `npm run build`, `xvfb-run -a npx playwright test` | Linux container, `9e2e771` | exit 0; 51 passed, 5 skipped, 0 failed (4.1 min) |
+| `npx vitest run` | Linux container, `38605bb` | 88 files passed, 2 skipped; 1108 tests passed, 37 skipped, 0 failed |
+| `xvfb-run -a npx playwright test tests/e2e/semantic.spec.ts tests/e2e/editor.spec.ts` | Linux container, `38605bb` | 4 passed |
+
+`38605bb` differs from `9e2e771` in the language server client, the `SemanticCode` tool,
+the transcript's labels, one line of the system prompt and their tests, so on Linux the
+whole desktop suite was not repeated for it; the two specs that touch those parts were.
+
+What failed on the way, and where it came from:
+
+| Check | Where | Result | Cause |
+| --- | --- | --- | --- |
+| `npx playwright test`, branch at `0d2b2a1` (before the merge) | Windows | 47 passed, 1 failed, 5 skipped | `editor.spec.ts:12`, the save dropped right behind typing. The same test alone: 8 of 14 runs failed on the branch, 3 of 8 on its first commit `9488408`, 2 of 11 on a clean `origin/main`. So the fault is older than the branch and shows on Windows too, not only on Linux; whether the branch made it likelier or the computer was busier was not settled. Fixed by `f943cc8`, which the merge brought in: 8 of 8 afterwards. |
+| `npx vitest run` after the merge | Windows | `tests/unit/db.test.ts`: 1 failed | The test pins the whole `behavior` section, to which each round had added a default. Both are expected now. |
+| `npx vitest run`, eight full runs | Windows | 2 runs with 1 failure each | `languageServers.test.ts`: `EPERM` removing a test's folder while the language server that had just been ended still held it; `removeDir` retries longer now, and five further runs did not show it again. `computer.test.ts`: the real mouse pointer moved one pixel between a move and a read; not changed. |
+| Real-server test with the re-sync of open documents switched off | Windows | fails: 0 problems reported for a file whose import had changed on disk | It is what the fix is for (`refresh` in `languages/servers.ts`). |
+| `docker desktop start` | Windows | the engine took about nine minutes to answer the first time, twelve seconds the second | `wsl -l -v` hung meanwhile. Nothing was changed on the system; it was stopped again afterwards. |
+
+Skipped, and never counted as passed: the same cases as in the 0.6.16 round (desktop 5;
+unit 29 on Windows and 37 on Linux), for the same reasons. The opt-in suites
+(`mcp.live.test.ts`, `sandbox.docker.test.ts`, the packaged-app cases and the README
+screenshots) were not run in this round, and no installer was built or installed.
+
+Checked by hand in the renderer preview (scripted sessions, not a real provider): a
+diff with a made-up key covers it and the eye uncovers it; an approval for an edit
+shows the whole path and the change as it is; Verbose opens and folds rows already on
+screen; a session returns to where it was left, and to its latest message when that
+place is gone; the line of a block at work shows the turn's time and the context size.
+Not checked by hand: the running-tasks link on that line (the preview has no background
+commands) and the Changes panel's eye.
+
+Measured, not estimated: `out/main/index.js` is 1,107.35 kB against 1,094.43 kB at
+0.6.16 (+1.2%); the renderer's entry chunk 1,024.55 kB against 999.08 kB (+2.5%); the
+Monaco chunk is unchanged at 2,930.11 kB. No start-up time, memory or frame-rate
+measurement was taken, and no speed-up is claimed. The first check of an edit after a
+language server starts was not timed on a large project.
