@@ -119,6 +119,10 @@ from there every use of it, the classes that implement an interface and the
 declaration of a value's type. The answers come from the language server, so an
 imported or renamed symbol is followed and two things with one name are told apart.
 
+**Settings** has a search box above its pages, which stand under five headings. A
+word finds the setting on whichever page it is; taking it opens that page with the
+setting in view.
+
 Diffs mark the changed words inside a line and use syntax colours. API keys,
 tokens and passwords in command output, tool output and diffs are covered until
 the eye beside them is pressed. This changes what is shown, not what is stored

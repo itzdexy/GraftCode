@@ -1,0 +1,362 @@
+[
+  {
+    "section": "profile",
+    "label": "Picture"
+  },
+  {
+    "section": "personalization",
+    "label": "Response style"
+  },
+  {
+    "section": "personalization",
+    "label": "Style"
+  },
+  {
+    "section": "personalization",
+    "label": "About you and your preferences"
+  },
+  {
+    "section": "privacy",
+    "label": "Model training"
+  },
+  {
+    "section": "privacy",
+    "label": "Ask providers not to train on my data"
+  },
+  {
+    "section": "privacy",
+    "label": "Incognito chats"
+  },
+  {
+    "section": "privacy",
+    "label": "Use only models on this computer"
+  },
+  {
+    "section": "privacy",
+    "label": "Your providers"
+  },
+  {
+    "section": "providers",
+    "label": "Model catalog"
+  },
+  {
+    "section": "models",
+    "label": "Default model"
+  },
+  {
+    "section": "models",
+    "label": "Default effort"
+  },
+  {
+    "section": "models",
+    "label": "Backup model"
+  },
+  {
+    "section": "models",
+    "label": "Sessions"
+  },
+  {
+    "section": "models",
+    "label": "Start code sessions in a new worktree"
+  },
+  {
+    "section": "models",
+    "label": "Compact automatically"
+  },
+  {
+    "section": "models",
+    "label": "Check edits for errors"
+  },
+  {
+    "section": "models",
+    "label": "Custom model IDs"
+  },
+  {
+    "section": "models",
+    "label": "Agents"
+  },
+  {
+    "section": "models",
+    "label": "Models for agents"
+  },
+  {
+    "section": "models",
+    "label": "Agent limits"
+  },
+  {
+    "section": "models",
+    "label": "Agents working at once"
+  },
+  {
+    "section": "models",
+    "label": "Token budget for each agent"
+  },
+  {
+    "section": "models",
+    "label": "Tries again after a provider failure"
+  },
+  {
+    "section": "search",
+    "label": "Web access"
+  },
+  {
+    "section": "search",
+    "label": "Let models search and read the web"
+  },
+  {
+    "section": "search",
+    "label": "Search engine"
+  },
+  {
+    "section": "media",
+    "label": "Checkpoint for plain text-to-image"
+  },
+  {
+    "section": "media",
+    "label": "Image model"
+  },
+  {
+    "section": "media",
+    "label": "ComfyUI"
+  },
+  {
+    "section": "media",
+    "label": "Use ComfyUI"
+  },
+  {
+    "section": "media",
+    "label": "Connection"
+  },
+  {
+    "section": "voice",
+    "label": "Read aloud"
+  },
+  {
+    "section": "voice",
+    "label": "Voice"
+  },
+  {
+    "section": "voice",
+    "label": "Model"
+  },
+  {
+    "section": "voice",
+    "label": "Speaker"
+  },
+  {
+    "section": "voice",
+    "label": "Speed"
+  },
+  {
+    "section": "voice",
+    "label": "Try it"
+  },
+  {
+    "section": "permissions",
+    "label": "Modes"
+  },
+  {
+    "section": "permissions",
+    "label": "Default mode for new code sessions"
+  },
+  {
+    "section": "permissions",
+    "label": "Allow Bypass mode"
+  },
+  {
+    "section": "permissions",
+    "label": "Keep safety checks in Bypass"
+  },
+  {
+    "section": "permissions",
+    "label": "Steps per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Tokens per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Cost per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Time per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Computer use"
+  },
+  {
+    "section": "permissions",
+    "label": "Let the agent use this computer"
+  },
+  {
+    "section": "sandbox",
+    "label": "Projects"
+  },
+  {
+    "section": "sandbox",
+    "label": "Container"
+  },
+  {
+    "section": "sandbox",
+    "label": "Image"
+  },
+  {
+    "section": "sandbox",
+    "label": "Internet access"
+  },
+  {
+    "section": "sandbox",
+    "label": "Memory"
+  },
+  {
+    "section": "sandbox",
+    "label": "CPUs"
+  },
+  {
+    "section": "sandbox",
+    "label": "Storage"
+  },
+  {
+    "section": "sandbox",
+    "label": "Cached dependencies"
+  },
+  {
+    "section": "appearance",
+    "label": "Colors"
+  },
+  {
+    "section": "appearance",
+    "label": "Theme"
+  },
+  {
+    "section": "appearance",
+    "label": "Palette"
+  },
+  {
+    "section": "appearance",
+    "label": "Accent"
+  },
+  {
+    "section": "appearance",
+    "label": "Layout and text"
+  },
+  {
+    "section": "appearance",
+    "label": "Transcript width"
+  },
+  {
+    "section": "appearance",
+    "label": "Transcript view"
+  },
+  {
+    "section": "appearance",
+    "label": "Motion"
+  },
+  {
+    "section": "notifications",
+    "label": "Desktop notifications"
+  },
+  {
+    "section": "notifications",
+    "label": "Notifications"
+  },
+  {
+    "section": "notifications",
+    "label": "When a session needs your input"
+  },
+  {
+    "section": "notifications",
+    "label": "When a session finishes"
+  },
+  {
+    "section": "notifications",
+    "label": "When a session stops with an error"
+  },
+  {
+    "section": "notifications",
+    "label": "Play a sound"
+  },
+  {
+    "section": "notifications",
+    "label": "Test"
+  },
+  {
+    "section": "notifications",
+    "label": "Background"
+  },
+  {
+    "section": "notifications",
+    "label": "Keep running in the tray"
+  },
+  {
+    "section": "usage",
+    "label": "By day"
+  },
+  {
+    "section": "usage",
+    "label": "By model"
+  },
+  {
+    "section": "data",
+    "label": "Your data"
+  },
+  {
+    "section": "data",
+    "label": "Export everything"
+  },
+  {
+    "section": "data",
+    "label": "Data folder"
+  },
+  {
+    "section": "data",
+    "label": "Message history"
+  },
+  {
+    "section": "data",
+    "label": "API keys"
+  },
+  {
+    "section": "data",
+    "label": "Key storage"
+  },
+  {
+    "section": "data",
+    "label": "Store keys unencrypted"
+  },
+  {
+    "section": "data",
+    "label": "Reset"
+  },
+  {
+    "section": "data",
+    "label": "Clear session history"
+  },
+  {
+    "section": "data",
+    "label": "Run setup again"
+  },
+  {
+    "section": "about",
+    "label": "Updates"
+  },
+  {
+    "section": "about",
+    "label": "Check for updates automatically"
+  },
+  {
+    "section": "about",
+    "label": "Check now"
+  },
+  {
+    "section": "about",
+    "label": "Download it yourself"
+  },
+  {
+    "section": "about",
+    "label": "Version"
+  }
+]
