@@ -1,8 +1,8 @@
-import { Fragment, useMemo, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn';
-import type { Token } from '../../lib/highlight';
-import { useHighlight } from '../session/CodeBlock';
-import { inlineSpans, pieces, toSplitRows, type DiffRow, type Span } from './diffModel';
+import { highlightLines, type Token } from '../../lib/highlight';
+import { logError } from '../../lib/log';
+import { hunkTexts, inlineSpans, pieces, toSplitRows, type DiffRow, type Span } from './diffModel';
 
 interface DiffViewProps {
   rows: DiffRow[];
@@ -13,6 +13,8 @@ interface DiffViewProps {
   gutter?: 'both' | 'one';
   /** False leaves the "@@ -1,3 +1,4 @@" lines out and draws a rule between hunks instead. */
   hunkHeaders?: boolean;
+  /** Rows shown covered (see coveredRows), by index, with what each shows instead of its text. Nothing is covered when null or left out. */
+  covers?: ReadonlyMap<number, string> | null;
   /** Extra controls rendered at the end of each hunk header row (e.g. stage/revert). */
   hunkActions?: (hunk: number) => ReactNode;
   className?: string;
@@ -41,37 +43,40 @@ function HunkRow({ row, actions }: { row: DiffRow; actions?: ReactNode }) {
   );
 }
 
-/** What a row's text is drawn with: its syntax tokens, once they are in, and the words that changed in it. */
+/** What a row's text is drawn with: its syntax tokens, once they are in, the words that changed in it, and its cover while it is covered. */
 interface LineInk {
   tokens: Token[] | null;
   spans: Span[];
+  cover: string | null;
 }
 
-/**
- * Syntax tokens for every row. A patch holds two texts, the lines before
- * and the lines after, so each is highlighted as a whole and its tokens are
- * handed back to the rows they came from.
- */
+const NO_INK: LineInk = { tokens: null, spans: [], cover: null };
+
+/** Syntax tokens for every row: each hunk's two texts are highlighted whole and their tokens handed back to the rows they came from. */
 function useRowTokens(rows: DiffRow[], language: string | null): Array<Token[] | null> {
-  const sides = useMemo(() => {
-    const before: string[] = [];
-    const after: string[] = [];
-    const lineOf = rows.map((row) => {
-      if (row.type === 'del') return { side: 'before' as const, line: before.push(row.text) - 1 };
-      if (row.type === 'add') return { side: 'after' as const, line: after.push(row.text) - 1 };
-      if (row.type !== 'ctx') return null;
-      before.push(row.text);
-      return { side: 'after' as const, line: after.push(row.text) - 1 };
-    });
-    return { before: before.join('\n'), after: after.join('\n'), lineOf };
-  }, [rows]);
-  const on = language !== null && rows.length > 0;
-  const before = useHighlight(sides.before, language, on);
-  const after = useHighlight(sides.after, language, on);
-  return useMemo(() => sides.lineOf.map((at) => (at === null ? null : ((at.side === 'before' ? before : after)?.[at.line] ?? null))), [sides, before, after]);
+  const sides = useMemo(() => hunkTexts(rows), [rows]);
+  const [done, setDone] = useState<{ sides: typeof sides; language: string; lines: Array<{ before: Token[][] | null; after: Token[][] | null }> } | null>(null);
+  useEffect(() => {
+    if (language === null || sides.texts.length === 0) return;
+    let cancelled = false;
+    Promise.all(sides.texts.map(async (text) => ({ before: await highlightLines(text.before, language), after: await highlightLines(text.after, language) })))
+      .then((lines) => {
+        if (!cancelled) setDone({ sides, language, lines });
+      })
+      .catch((error: unknown) => logError('Syntax highlighting failed', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [sides, language]);
+  return useMemo(() => {
+    const lines = done && done.sides === sides && done.language === language ? done.lines : null;
+    return sides.placeOf.map((at) => (at === null || lines === null ? null : (lines[at.hunk]?.[at.side]?.[at.line] ?? null)));
+  }, [sides, done, language]);
 }
 
 function LineText({ text, ink, tone }: { text: string; ink: LineInk; tone: DiffRow['type'] }) {
+  // Covered, a line is plain: colours and marks would outline the very thing that is hidden.
+  if (ink.cover !== null) return <span title="Covered: this looks like a key, a token or a password">{ink.cover}</span>;
   if (text.length === 0) return <> </>;
   if (ink.tokens === null && ink.spans.length === 0) return <>{text}</>;
   const strong = tone === 'add' ? 'bg-diff-add-bg-strong' : tone === 'del' ? 'bg-diff-del-bg-strong' : '';
@@ -87,12 +92,15 @@ function LineText({ text, ink, tone }: { text: string; ink: LineInk; tone: DiffR
 }
 
 /** Unified or side-by-side diff; rows come from parsePatch / rowsFromHunks. */
-export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, hunkActions, className }: DiffViewProps) {
+export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, covers = null, hunkActions, className }: DiffViewProps) {
   const spans = useMemo(() => inlineSpans(rows), [rows]);
   const tokens = useRowTokens(rows, language);
   // Rows are looked up by identity, so the side-by-side pairs find the same ink as the unified rows.
-  const ink = useMemo(() => new Map(rows.map((row, i) => [row, { tokens: tokens[i] ?? null, spans: spans.get(i) ?? [] }])), [rows, tokens, spans]);
-  const inkOf = (row: DiffRow): LineInk => ink.get(row) ?? { tokens: null, spans: [] };
+  const ink = useMemo(
+    () => new Map(rows.map((row, i): [DiffRow, LineInk] => [row, { tokens: tokens[i] ?? null, spans: spans.get(i) ?? [], cover: covers?.get(i) ?? null }])),
+    [rows, tokens, spans, covers]
+  );
+  const inkOf = (row: DiffRow): LineInk => ink.get(row) ?? NO_INK;
 
   if (rows.length === 0) return <p className="px-10 py-8 text-sm text-fg-muted">No textual changes.</p>;
 

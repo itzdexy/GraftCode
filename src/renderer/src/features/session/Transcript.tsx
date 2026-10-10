@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -145,12 +145,22 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    // The place to return to can be reached only once the transcript is tall enough (its messages may still be loading).
-    if (el && restore.current !== null && el.scrollHeight - el.clientHeight >= restore.current) {
-      el.scrollTop = restore.current;
+    // Returned to once, as soon as there are messages to scroll (they may still be loading when the session opens).
+    if (el && restore.current !== null && items.length > 0) {
+      const saved = restore.current;
       restore.current = null;
-    } else if (stick.current) scrollToBottom();
-  }, [items, scrollToBottom]);
+      if (saved < el.scrollHeight - el.clientHeight - STICK_THRESHOLD) {
+        el.scrollTop = saved;
+        // No scroll event follows when the position did not change, and the jump-to-latest button depends on one.
+        el.dispatchEvent(new Event('scroll'));
+        return;
+      }
+      // What was open above that place has folded since: the place is gone, so start at the latest message as before.
+      leftAt.delete(summary.id);
+      stick.current = true;
+    }
+    if (stick.current) scrollToBottom();
+  }, [items, scrollToBottom, summary.id]);
 
   const onScroll = (): void => {
     const el = scrollRef.current;
@@ -178,8 +188,10 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   };
 
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
-  // Only the newest file card offers Undo: the snapshot from before its turn differs from now by exactly that turn.
-  const lastEdits = items.findLast((i) => i.kind === 'edits');
+  // Undo is offered on the file card of the last turn only. The snapshot it goes back to holds every file as it was
+  // before that turn, so after a later turn (which may have changed files by command, leaving no card) it would undo more.
+  const lastTurnAt = items.findLastIndex((i) => i.kind === 'user' || i.kind === 'shell' || i.kind === 'mission');
+  const lastEdits = items.slice(lastTurnAt + 1).findLast((i) => i.kind === 'edits');
   const undoTurn = (messageId: string | null): void => {
     if (messageId !== null) useRewind.getState().open({ sessionId: summary.id, messageId, chat: false, mode: 'files' });
   };
@@ -212,7 +224,15 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       case 'tools':
         return <ToolGroup calls={item.calls} />;
       case 'activity':
-        return grouping === 'summary' ? <ActivityGroup item={item} /> : <StepGroup item={item} verbose={grouping === 'verbose'} />;
+        return grouping === 'summary' ? (
+          <ActivityGroup item={item} />
+        ) : (
+          <StepGroup
+            item={item}
+            verbose={grouping === 'verbose'}
+            turn={{ sessionId: summary.id, startedAt: view.turnStartedAt, contextTokens: summary.usage.contextTokens, tasks: summary.kind === 'code' }}
+          />
+        );
       case 'edits':
         return <EditsCard files={item.files} onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null} />;
       case 'files':
@@ -273,7 +293,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
           <SourcesContext.Provider value={sources}>
             {items.map((item) => (
               <Arrival key={item.key} live={view.turnActive}>
-                {render(item)}
+                {/* Verbose opens rows by default, and a row on screen keeps the state it has: what an item holds is drawn afresh when Verbose goes on or off. */}
+                <Fragment key={grouping === 'verbose' ? 'opened' : 'folded'}>{render(item)}</Fragment>
               </Arrival>
             ))}
           </SourcesContext.Provider>
@@ -316,6 +337,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
           aria-label="Scroll to the latest message"
           onClick={() => {
             stick.current = true;
+            restore.current = null;
             scrollToBottom('smooth');
           }}
           className="absolute bottom-12 left-1/2 flex size-28 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-icon shadow-popover transition-ui hover:text-icon-strong"

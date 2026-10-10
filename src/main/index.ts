@@ -6,7 +6,7 @@ import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
-import { problemsIn } from './languages/problems';
+import { EditChecks } from './languages/problems';
 import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
@@ -316,6 +316,7 @@ async function sessions(): Promise<SessionManager> {
   if (sessionManager) return sessionManager;
   const s = await services();
   const m = await mcp();
+  const editChecks = new EditChecks(s.languages);
   sessionManager ??= new SessionManager({
     repo: s.sessionsRepo,
     projects: s.projects,
@@ -339,7 +340,7 @@ async function sessions(): Promise<SessionManager> {
       return { name: site.name, url: s.siteServer.url(site.slug) };
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
-    problems: (root, file, signal) => problemsIn(s.languages, root, file, signal),
+    problems: (root, file, signal) => editChecks.problemsIn(root, file, signal),
     chatFiles: s.chatFiles,
     documents: new DocumentMaker({ printPdf: printHtmlToPdf }),
     runCode: runInSandbox,

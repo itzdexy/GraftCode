@@ -43,8 +43,12 @@ export interface DescribeContext {
 export interface ToolContext extends DescribeContext {
   /** Only trusted code projects may start a bundled local language server. */
   trustedProject?: boolean;
-  /** The errors that server finds in a file right after it changed; null when it cannot say. Absent where edits are not checked. */
-  checkFile?(file: string): Promise<FileProblems | null>;
+  /**
+   * The errors that server finds in a file of the project at `root` right after it changed; null when it cannot say.
+   * Absent where edits are not checked. The root is the caller's `projectRoot`: an agent writing in a private
+   * checkout is checked there, not in the project it was cut from.
+   */
+  checkFile?(root: string, file: string): Promise<FileProblems | null>;
   sessionId: string;
   toolUseId: string;
   signal: AbortSignal;

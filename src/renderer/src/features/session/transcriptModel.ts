@@ -572,7 +572,7 @@ export function summarizeCalls(calls: ToolCall[], limit = Number.POSITIVE_INFINI
     const only = calls[0]!;
     const description = shellDescription(only);
     if (description && !commandFailed(only)) {
-      const told = inTense(description, only.result !== null);
+      const told = asItStands(only, description);
       return told.charAt(0).toUpperCase() + told.slice(1);
     }
   }
@@ -729,7 +729,7 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       const description = shellDescription(call);
       // A key typed into a command stays covered in its row; the call's details show what it printed.
       const command = maskSecrets(str('command').split('\n')[0] ?? '');
-      return description ? { verb: inTense(description, done), target: '', mono: false, title: command } : { verb: '', target: command, mono: true, title: command };
+      return description ? { verb: asItStands(call, description), target: '', mono: false, title: command } : { verb: '', target: command, mono: true, title: command };
     }
     case 'WebFetch': {
       const url = str('url');
@@ -740,7 +740,7 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       } catch {
         // Keep the raw string; the schema already checked it is a URL.
       }
-      return { verb: done ? 'Read' : 'Reading', target: shown, mono: false, title: url };
+      return { verb: done ? 'Read' : 'Reading', target: maskSecrets(shown), mono: false, title: maskSecrets(url) };
     }
     case 'Task':
       return { verb: 'Sub-agent', target: str('description'), mono: false, title: str('prompt') };
@@ -794,8 +794,8 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
     case 'Browser': {
       const action = str('action');
       const d = call.result?.display;
-      const target = action === 'open' ? (hostOf(str('url')) ?? str('url')) : d?.kind === 'browser' && d.title ? d.title : '';
-      return { verb: browserVerb(action, done), target, mono: false, title: d?.kind === 'browser' ? d.url : str('url') };
+      const target = action === 'open' ? (hostOf(str('url')) ?? maskSecrets(str('url'))) : d?.kind === 'browser' && d.title ? d.title : '';
+      return { verb: browserVerb(action, done), target, mono: false, title: maskSecrets(d?.kind === 'browser' ? d.url : str('url')) };
     }
     default:
       return { verb: describeCall(call), target: '', mono: false, title: call.name };
@@ -850,6 +850,16 @@ function computerVerb(action: string): string {
   return verbs[action] ?? 'Using the computer';
 }
 
+/**
+ * A command's description as things stand: under way while it runs, done
+ * once it has run, and as the model wrote it otherwise (waiting to be
+ * allowed, declined, never started).
+ */
+function asItStands(call: ToolCall, description: string): string {
+  if (call.result?.display?.kind === 'shell') return inTense(description, true);
+  return call.running ? inTense(description, false) : description;
+}
+
 /** The model's own description of a shell command, when it gave one. */
 export function shellDescription(call: ToolCall): string | null {
   if (call.name !== 'Shell') return null;
@@ -879,16 +889,16 @@ export function describeCall(call: ToolCall): string {
       return `${call.result ? 'Searched for' : 'Search'} “${str('pattern')}”${str('path') ? ` in ${str('path')}` : ''}`;
     case 'Shell': {
       const description = shellDescription(call);
-      return description ? inTense(description, call.result !== null) : maskSecrets(str('command').split('\n')[0] ?? '');
+      return description ? asItStands(call, description) : maskSecrets(str('command').split('\n')[0] ?? '');
     }
     case 'ShellOutput':
       return `Check background command ${str('shell_id')}`;
     case 'KillShell':
       return `Stop background command ${str('shell_id')}`;
     case 'WebFetch':
-      return `${call.result ? 'Read' : 'Reading'} ${str('url')}`;
+      return `${call.result ? 'Read' : 'Reading'} ${maskSecrets(str('url'))}`;
     case 'Browser':
-      return `${browserVerb(str('action'), call.result !== null)}${str('url') ? ` ${str('url')}` : ''}`;
+      return `${browserVerb(str('action'), call.result !== null)}${str('url') ? ` ${maskSecrets(str('url'))}` : ''}`;
     case 'WebSearch':
       return `${call.result ? 'Searched' : 'Searching'} the web for “${str('query')}”`;
     case 'Task':

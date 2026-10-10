@@ -11,7 +11,8 @@ import { errorText, invoke } from '../../lib/ipc';
 import { panelsOf, usePanels } from '../../stores/panels';
 import { reportError, useToasts } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
-import { rowsFromHunks } from '../diff/diffModel';
+import { coveredRows, rowsFromHunks } from '../diff/diffModel';
+import { SecretsToggle } from '../session/Output';
 import { FilesView } from './FilesPanel';
 import { PanelFrame } from './PanelFrame';
 
@@ -141,6 +142,8 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
   const [diff, setDiff] = useState<{ key: string; diff: FileDiffView } | { key: string; error: string } | null>(null);
   const [mode, setMode] = useState<'unified' | 'split'>('unified');
   const [confirm, setConfirm] = useState<Confirm>(null);
+  /** The file whose covered secrets the user asked to see; choosing another file covers again. */
+  const [uncovered, setUncovered] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
@@ -198,12 +201,16 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
     });
   };
 
+  const shown = diff && diffKey && diff.key === diffKey ? diff : null;
+  const rows = useMemo(() => (shown && 'diff' in shown ? rowsFromHunks(shown.diff.hunks) : []), [shown]);
+  // Keys, tokens and passwords in the lines stay covered until the eye is pressed, as they do in the transcript.
+  const covers = useMemo(() => coveredRows(rows), [rows]);
+  const fileKey = current ? `${current.path}:${String(current.staged)}` : null;
+  const revealed = fileKey !== null && uncovered === fileKey;
+
   if (load.state === 'loading') return <LoadingState label="Reading changes…" />;
   if (load.state === 'error') return <ErrorState message={load.message} onRetry={refresh} />;
   if (!load.status.isRepo) return <EmptyState title="Not a git repository" description="Changes appear here for folders under git." />;
-
-  const shown = diff && diffKey && diff.key === diffKey ? diff : null;
-  const rows = shown && 'diff' in shown ? rowsFromHunks(shown.diff.hunks) : [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -212,6 +219,7 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
           {files.length === 0 ? 'No changes' : `${files.length} changed ${files.length === 1 ? 'file' : 'files'}`}
           {load.status.branch ? ` on ${load.status.branch}` : ''}
         </span>
+        {covers.size > 0 ? <SecretsToggle shown={revealed} onChange={(on) => setUncovered(on ? fileKey : null)} /> : null}
         <IconButton label={mode === 'unified' ? 'Side-by-side diff' : 'Unified diff'} size="xs" onClick={() => setMode(mode === 'unified' ? 'split' : 'unified')}>
           {mode === 'unified' ? <Columns2 className="size-12" /> : <Rows3 className="size-12" />}
         </IconButton>
@@ -286,6 +294,7 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
               rows={rows}
               mode={mode}
               language={languageForPath(current.path)}
+              covers={revealed ? null : covers}
               hunkActions={(hunk) => (
                 <span className="flex shrink-0 gap-4 font-sans text-2xs">
                   {current.staged ? (

@@ -192,7 +192,7 @@ export function ModelsSection() {
         />
         <SwitchRow
           label="Check edits for errors"
-          description="After Graft changes a TypeScript or JavaScript file, the built-in language server checks that file and Graft sees its errors in the same step, instead of finding out from a build. Only in projects you trust."
+          description="After Graft changes a TypeScript or JavaScript file, the built-in language server checks that file and Graft sees its errors in the same step, instead of finding out from a build. Only in projects you trust, with their packages installed."
           checked={settings.behavior.checkEdits}
           onChange={(checkEdits) => saveSettings({ behavior: { checkEdits } })}
         />

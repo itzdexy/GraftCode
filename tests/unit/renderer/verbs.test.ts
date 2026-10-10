@@ -39,5 +39,19 @@ describe('a command’s description in the tense that fits', () => {
     expect(inTense('List of open ports', true)).toBe('List of open ports');
     // The whole word has to match: "Runtime" does not open with "Run".
     expect(inTense('Runtime check', true)).toBe('Runtime check');
+    // Words every object answers to are not verbs.
+    expect(inTense('Constructor usages in src', true)).toBe('Constructor usages in src');
+    expect(inTense('Constructors and prototypes', false)).toBe('Constructors and prototypes');
+    expect(inTense('toString overrides', true)).toBe('toString overrides');
+  });
+
+  it('leaves a description with two verbs joined as it was written', () => {
+    // Changing the first alone would give "Built and test the app".
+    for (const both of ['Build and test the app', 'Stage and commit the changes', 'Install dependencies and run the tests', 'Lint, then build', 'Format & lint the sources']) {
+      expect(inTense(both, true), both).toBe(both);
+      expect(inTense(both, false), both).toBe(both);
+    }
+    // "and" before a thing, not a verb, changes nothing about the first verb.
+    expect(inTense('Check the lockfile and the manifest', true)).toBe('Checked the lockfile and the manifest');
   });
 });

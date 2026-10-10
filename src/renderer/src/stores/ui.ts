@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { DEFAULT_FILTER, type SessionFilter } from '../features/shell/sessionLists';
-import { loadDrafts, saveDrafts } from '../lib/draftStore';
+import { loadDrafts, mayStore, saveDrafts, trackPrivate } from '../lib/draftStore';
 import { useSessions } from './sessions';
 
 export interface CodeContext {
@@ -50,16 +50,20 @@ interface UiState {
   takeInbox: (key: string) => { images: ImageBlock[]; files: FileAttachment[] } | null;
 }
 
+const storedDrafts = loadDrafts();
+/** Drafts that were in storage at start: allowed there before, so kept until their session is seen to go. */
+const storedAtStart = new Set(Object.keys(storedDrafts));
+/** Drafts holding text typed in private (see trackPrivate): never written down. */
+const privateDrafts = new Set<string>();
+
 /** Writes the drafts to storage a moment after the last keystroke. */
 let draftTimer: ReturnType<typeof setTimeout> | null = null;
-function storeDraftsSoon(read: () => { drafts: Record<string, string>; incognito: boolean }): void {
+function storeDraftsSoon(read: () => { drafts: Record<string, string> }): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     draftTimer = null;
-    const { drafts, incognito } = read();
     const sessions = useSessions.getState().summaries;
-    // Nothing typed for an incognito chat is written down: not in one, and not on Chat home while its switch is on.
-    saveDrafts(drafts, (key) => (key === 'home:chat' ? !incognito : sessions[key]?.incognito !== true));
+    saveDrafts(read().drafts, (key) => mayStore(key, privateDrafts, sessions, storedAtStart));
   }, 400);
 }
 
@@ -71,7 +75,7 @@ export const useUi = create<UiState>((set, get) => ({
   chatListExpanded: false,
   incognito: false,
   filter: DEFAULT_FILTER,
-  drafts: loadDrafts(),
+  drafts: storedDrafts,
   codeContext: null,
   dialog: null,
   hiddenStatusBars: {},
@@ -82,12 +86,15 @@ export const useUi = create<UiState>((set, get) => ({
   setMoreOpen: (moreOpen) => set({ moreOpen }),
   setChatListExpanded: (chatListExpanded) => set({ chatListExpanded }),
   setIncognito: (incognito) => {
+    // What is in the Chat home box when the switch goes on is for an incognito chat from now on.
+    if (incognito) trackPrivate(privateDrafts, 'home:chat', get().drafts['home:chat'] ?? '', true);
     set({ incognito });
     storeDraftsSoon(get);
   },
   setFilter: (filter) => set({ filter: { ...get().filter, ...filter } }),
   resetFilter: () => set({ filter: DEFAULT_FILTER }),
   setDraft: (key, text) => {
+    trackPrivate(privateDrafts, key, text, key === 'home:chat' ? get().incognito : useSessions.getState().summaries[key]?.incognito === true);
     const drafts = { ...get().drafts };
     if (text.length === 0) delete drafts[key];
     else {
@@ -113,3 +120,18 @@ export const useUi = create<UiState>((set, get) => ({
     return { images: inbox.images, files: inbox.files };
   }
 }));
+
+// A draft goes with its session: when a chat is deleted, or history is cleared, nothing typed for it is kept.
+useSessions.subscribe((state, previous) => {
+  if (state.summaries === previous.summaries) return;
+  const gone = Object.keys(previous.summaries).filter((id) => !(id in state.summaries));
+  if (gone.length === 0) return;
+  const drafts = { ...useUi.getState().drafts };
+  for (const id of gone) {
+    privateDrafts.delete(id);
+    storedAtStart.delete(id);
+    delete drafts[id];
+  }
+  useUi.setState({ drafts });
+  storeDraftsSoon(() => useUi.getState());
+});

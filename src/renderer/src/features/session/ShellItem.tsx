@@ -37,7 +37,6 @@ export function ShellItem({ shell }: { shell: UserShell }) {
   const [open, setOpen] = useState(false);
   const failed = shell.timedOut || (!shell.interrupted && shell.exitCode !== 0);
   const status = shell.timedOut ? 'Timed out' : shell.interrupted ? 'Stopped' : shell.exitCode === 0 ? 'Done' : `Exit ${shell.exitCode ?? '?'}`;
-  const shown = long && !open ? lines.slice(-FOLDED_LINES).join('\n') : shell.output;
   // A key typed into the command stays covered here; the output below has an eye for its own.
   const command = maskSecrets(shell.command);
 
@@ -57,8 +56,8 @@ export function ShellItem({ shell }: { shell: UserShell }) {
           Show all {lines.length.toLocaleString()} lines
         </button>
       ) : null}
-      {shown.length > 0 ? (
-        <Output text={shown} className={OUTPUT} />
+      {shell.output.length > 0 ? (
+        <Output text={shell.output} className={OUTPUT} {...(long && !open ? { lines: FOLDED_LINES } : {})} />
       ) : (
         <pre className={OUTPUT}>
           <span className="text-fg-faint">No output.</span>

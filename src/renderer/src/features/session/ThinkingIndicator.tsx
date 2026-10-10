@@ -43,6 +43,17 @@ function useRunningTasks(sessionId: string, enabled: boolean): number {
   return running;
 }
 
+/** The background commands of a session still running, as a link that opens their panel; nothing when there are none. */
+export function RunningTasksLink({ sessionId }: { sessionId: string }) {
+  const running = useRunningTasks(sessionId, true);
+  if (running === 0) return null;
+  return (
+    <button type="button" onClick={() => usePanels.getState().show(sessionId, 'tasks')} className="text-sm text-link hover:underline">
+      {running === 1 ? '1 running task' : `${String(running)} running tasks`}
+    </button>
+  );
+}
+
 /**
  * Under a running turn: Scion at work, the time so far, the size of the
  * context, background commands still running (opens their panel) and a

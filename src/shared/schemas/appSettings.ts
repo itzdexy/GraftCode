@@ -132,7 +132,7 @@ export const AppSettingsSchema = z.object({
     computerUse: z.boolean(),
     /** Pause a turn after this many model steps; null lets turns run until the work is done. */
     maxSteps: z.number().int().min(10).max(10_000).nullable(),
-    /** After an edit, ask the project's own language server for the errors in the edited file (trusted projects, outside a sandbox). */
+    /** After an edit, ask the built-in language server for the errors in the edited file (trusted projects whose packages are installed on this computer). */
     checkEdits: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
