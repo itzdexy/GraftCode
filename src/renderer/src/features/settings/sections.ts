@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AudioLines, Bell, BookText, Box, Cpu, Database, EyeOff, Globe, Image, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
+import { AudioLines, Bell, BookText, Box, ChartColumn, Cpu, Database, EyeOff, Globe, Image, Info, Keyboard, KeyRound, Palette, Plug, ShieldCheck, SlidersHorizontal, User, Webhook } from 'lucide-react';
 import type { AccentId, PaletteId } from '@shared/schemas/appSettings';
 import type { SettingsSection } from '../../stores/nav';
 
@@ -32,6 +32,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'appearance', label: 'Appearance', description: 'Theme, colors, text size and motion.', icon: Palette },
   { id: 'shortcuts', label: 'Shortcuts', description: 'Keyboard shortcuts.', icon: Keyboard },
   { id: 'notifications', label: 'Notifications', description: 'Desktop notifications and running in the background.', icon: Bell },
+  { id: 'usage', label: 'Usage', description: 'What Graft used and what it cost, by day and by model.', icon: ChartColumn },
   { id: 'data', label: 'Data', description: 'Export, clear and reset.', icon: Database },
   { id: 'about', label: 'About', description: 'Version and updates.', icon: Info }
 ];
