@@ -133,8 +133,9 @@ lock); the changed workflows were parsed and their new step run by hand.
 Branch `feat/claude-like-session-view`, local only: nothing of it was pushed, and no
 package was built. It sits on `origin/main` at `5f586fc` and contains
 `feat/reliability-security-upgrade` (0.6.16, `b51155e`), merged at `9e2e771`. The last
-commit that changes the app or its tests is `38605bb`. After it come Markdown, a merge
-of `origin/main` that changes no file (`613421d`), and the container script. Two
+commit that changes the app or its tests is `c38a213` (Settings search); before it
+come the symbol search (`38605bb`), a merge of `origin/main` that changes no file
+(`613421d`) and the container script (`5ce005f`). What follows it is Markdown only. Two
 systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm` container
 (Docker 29.8.0) packed from the working tree. Nothing here ran on macOS, on GitHub's
 runners, or against a paid provider.
@@ -153,11 +154,15 @@ runners, or against a paid provider.
 | `npx vitest run` | Linux container, `38605bb` | 88 files passed, 2 skipped; 1108 tests passed, 37 skipped, 0 failed |
 | `xvfb-run -a npx playwright test tests/e2e/semantic.spec.ts tests/e2e/editor.spec.ts` | Linux container, `38605bb` | 4 passed |
 | `npm run verify:docker` | Linux container, `613421d` with the script's own change | typecheck, lint and build exit 0; 88 files passed, 2 skipped; 1108 tests passed, 37 skipped, 0 failed; desktop suite 51 passed, 5 skipped, 0 failed (4.0 min) |
+| `npm run typecheck`, `npx eslint . --max-warnings 0`, `npm run build` | Windows, `c38a213` | exit 0, exit 0, exit 0 |
+| `npx vitest run` | Windows, `c38a213` | 90 files passed, 2 skipped; 1123 tests passed, 29 skipped, 0 failed |
+| `npx playwright test` | Windows, `c38a213` | 52 passed, 5 skipped, 0 failed (4.1 min) |
+| `npm run verify:docker` | Linux container, `c38a213` | typecheck, lint and build exit 0; 90 files passed, 2 skipped; 1115 tests passed, 37 skipped, 0 failed; desktop suite 52 passed, 5 skipped, 0 failed (4.1 min) |
 
 `npm run verify:docker` is new in this round (`scripts/e2e-docker.mjs --all`): one
 container runs every step whatever the one before it did and writes each step's log
-and a line of exit codes to `test-results/docker/`. Its first run is the last row
-above, so the final tree has a complete Linux pass.
+and a line of exit codes to `test-results/docker/`. The rows for `c38a213` are the
+final tree: complete on both systems.
 
 What failed on the way, and where it came from:
 
@@ -178,7 +183,9 @@ Checked by hand in the renderer preview (scripted sessions, not a real provider)
 diff with a made-up key covers it and the eye uncovers it; an approval for an edit
 shows the whole path and the change as it is; Verbose opens and folds rows already on
 screen; a session returns to where it was left, and to its latest message when that
-place is gone; the line of a block at work shows the turn's time and the context size.
+place is gone; the line of a block at work shows the turn's time and the context size;
+Settings lists its pages under headings, a search finds a setting with its page, and
+Enter opens the page with the setting in view and marked.
 Not checked by hand: the running-tasks link on that line (the preview has no background
 commands) and the Changes panel's eye.
 
