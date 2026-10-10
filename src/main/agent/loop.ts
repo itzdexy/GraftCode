@@ -99,6 +99,11 @@ export interface LoopHost {
    * output and after its retries; null when there is none. Asked at most once a turn.
    */
   fallback?(error: ProviderError, signal: AbortSignal): Promise<LoopModel | null>;
+  /**
+   * Why the turn has to pause before its next request (a limit on tokens, cost or time was
+   * passed), or null. The same answer goes to every loop of a turn: the limits are the turn's.
+   */
+  overBudget?(): string | null;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -371,6 +376,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         text: `Paused after ${config.maxIterations} steps, the limit set in Settings → Permissions.`,
         action: 'continue'
       });
+      return done('guard');
+    }
+    const over = host.overBudget?.() ?? null;
+    if (over !== null) {
+      // An agent the turn started just stops; the turn itself says why, once, and offers to continue.
+      if (config.agentLabel === null) host.emit({ type: 'notice', level: 'warning', text: over, action: 'continue' });
       return done('guard');
     }
 

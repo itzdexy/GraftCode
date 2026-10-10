@@ -46,6 +46,7 @@ import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
 import { SessionHost, type TurnScope } from './sessionHost';
+import type { TurnLimits } from './turnBudget';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import {
@@ -99,6 +100,8 @@ export interface SessionPreferences {
   personalization: Personalization;
   /** Settings → Permissions → Steps per turn; null means no limit. */
   maxSteps: number | null;
+  /** Settings → Permissions → limits for one turn: tokens, estimated cost, minutes of work. */
+  turnBudget: TurnLimits;
   /** Settings → Models → Agents: how groups of agents are routed and limited. */
   agents: AgentGroupSettings;
 }
@@ -1184,6 +1187,8 @@ export class AgentSession {
     const turnId = randomUUID();
     this.setStatus('running');
     this.emit({ type: 'turn-start', turnId });
+    // The limits count for this turn and everything it starts; "Continue" after a pause is a new turn.
+    this.host.beginTurn();
     let endReason: TurnEnd = 'completed';
     let failure: string | null = null;
     try {

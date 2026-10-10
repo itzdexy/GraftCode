@@ -34,6 +34,8 @@ export interface Harness {
 
 export interface HarnessOptions {
   script: FakeStep[];
+  /** The session's clock (default: one fixed moment). */
+  now?: () => Date;
   mode?: PermissionMode;
   kind?: 'code' | 'chat';
   effort?: EffortLevel | null;
@@ -74,6 +76,8 @@ export interface HarnessOptions {
   fallbackModel?: SessionPreferences['fallbackModel'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
   maxSteps?: number | null;
+  /** Settings → Permissions → limits for one turn (default: none). */
+  turnBudget?: Partial<SessionPreferences['turnBudget']>;
   /** The project's sandbox settings (default: no sandbox). */
   sandbox?: SessionDeps['sandbox'];
   /** A shell manager of the test's own (default: a plain one). */
@@ -177,6 +181,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
+      turnBudget: { tokens: null, costUsd: null, minutes: null, ...options.turnBudget },
       agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents }
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
@@ -188,7 +193,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     notify: (_summary, kind, text) => notifications.push({ kind, text }),
     generateTitle: (_summary, text) => titles.push(text),
     log: () => undefined,
-    now: () => new Date('2026-09-30T12:00:00Z')
+    now: options.now ?? (() => new Date('2026-09-30T12:00:00Z'))
   };
   const session = new AgentSession(summary, deps);
   return {

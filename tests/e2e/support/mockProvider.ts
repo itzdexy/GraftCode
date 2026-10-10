@@ -19,6 +19,8 @@ export interface ScriptedTurn {
   chunkDelayMs?: number;
   /** Keep the stream open after the text until the client disconnects (for interrupt tests). */
   hold?: boolean;
+  /** What the provider says this request used (default: 120 in, 30 out). */
+  usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
 export interface RecordedRequest {
@@ -174,7 +176,7 @@ export class MockProvider {
       );
     });
     res.write(chunk({}, (turn.toolCalls ?? []).length > 0 ? 'tool_calls' : 'stop'));
-    res.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 120, completion_tokens: 30 } })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', object: 'chat.completion.chunk', choices: [], usage: turn.usage ?? { prompt_tokens: 120, completion_tokens: 30 } })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
   }

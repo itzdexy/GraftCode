@@ -4,7 +4,7 @@ import { normalizeScope, scopeProblem } from '@shared/writeScopes';
 import { GraftError } from '@shared/errors';
 import type { AgentRun, AgentTimelineEntry, ModelRoleId } from '@shared/schemas/agentRuns';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
-import { addUsage, EMPTY_USAGE, type EffortLevel, type ModelRef, type Usage } from '@shared/schemas/common';
+import { addUsage, EMPTY_USAGE, type EffortLevel, type ModelRef } from '@shared/schemas/common';
 import { textOf, type StoredMessage, type ToolUseBlock } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
 import { sourcesOf, type Source } from '@shared/sources';
@@ -19,6 +19,7 @@ import { backupReason, runAgentLoop, runToolCall, type LoopConfig, type LoopHost
 import { routeModel, type Route } from './modelRouter';
 import { runGraph, type GraphControl, type NodeState } from './orchestrator';
 import { resolveRole, type ResolvedRole } from './roles';
+import { spentTokens } from './turnBudget';
 import { outsideScope } from './writeScope';
 import type { AgentWorkspaces } from './workspaces';
 import { workspaceHost } from './workspaceHost';
@@ -108,11 +109,6 @@ const TIMELINE_MAX = 200;
 
 function sameModel(a: ModelRef, b: ModelRef): boolean {
   return a.providerId === b.providerId && a.modelId === b.modelId;
-}
-
-/** Tokens that cost money: what was sent and written, with cache reads at the tenth they are billed at. */
-function spentTokens(usage: Usage): number {
-  return usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens + Math.round(usage.cacheReadTokens / 10);
 }
 
 function clip(text: string, max: number): string {
@@ -372,6 +368,7 @@ async function runAgent(
     maybeCompact: () => Promise.resolve(null),
     todos: () => [],
     takeSteering: () => Promise.resolve([]),
+    overBudget: () => parent.overBudget?.() ?? null,
     fallback: async (error, s) => {
       const next = (await parent.fallback?.(error, s)) ?? null;
       if (!next) return null;
@@ -440,6 +437,9 @@ async function runAgent(
       const result = await runAgentLoop(toLlmHistory(scratch), config, loopHost, stop.signal);
       if (overBudget) throw new GraftError('agent_budget', `Stopped: it used its budget of ${(host.settings.tokenBudget ?? 0).toLocaleString('en-US')} tokens.`);
       if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Stopped.');
+      // The turn's own limit, not this agent's doing: say which, instead of calling the agent stuck.
+      const turnOver = result.reason === 'guard' ? (parent.overBudget?.() ?? null) : null;
+      if (turnOver !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this agent finished. ${turnOver}`);
       if (result.reason === 'error') {
         const code = result.error?.code ?? 'unknown';
         const retryable = ['rate_limit', 'overloaded', 'server', 'network'].includes(code);
