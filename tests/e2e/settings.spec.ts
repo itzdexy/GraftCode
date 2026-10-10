@@ -231,3 +231,105 @@ test('data: export and clear history; with the tray on, closing the window keeps
   });
   await expect(w.getByRole('heading', { level: 2, name: 'Notifications' })).toBeVisible();
 });
+
+test('Settings → Usage counts a request on the day it was made, and a chat lists its commands', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+
+  await openSettings(w, 'Usage');
+  await expect(w.getByText('Nothing used in the last 30 days')).toBeVisible();
+
+  // One reply in a chat: one request, with the tokens the provider reported.
+  await w.getByRole('radio', { name: 'Chat' }).click();
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
+  provider.script({ text: 'Counted.' });
+  const home = w.getByRole('textbox', { name: 'How can I help you today?' });
+  await home.fill('Say something short');
+  await home.press('Enter');
+  await expect(w.getByText('Counted.')).toBeVisible();
+
+  // The chat's message box offers the commands a chat can use, and none that work on a project.
+  // While its menu is open the message box is a combobox.
+  const chatBox = 'Write a message, or type / for commands';
+  const composer = w.getByRole('combobox', { name: chatBox }).or(w.getByRole('textbox', { name: chatBox }));
+  await composer.fill('/');
+  const offered = w.getByRole('listbox');
+  await expect(offered.getByRole('option', { name: /^\/research/ })).toBeVisible();
+  await expect(offered.getByRole('option', { name: /^\/context/ })).toBeVisible();
+  await expect(offered.getByRole('option', { name: /^\/(plan|commit|init|mission)/ })).toHaveCount(0);
+  // Typed anyway, one of those says where it works instead of asking the model.
+  await composer.fill('/commit');
+  await composer.press('Escape');
+  await composer.press('Enter');
+  await expect(w.getByText('/commit works on a project, so it runs in code sessions. Here, just ask.')).toBeVisible();
+  // It never went to the provider: the one request is still the chat's first message.
+  expect(provider.chatRequests()).toHaveLength(1);
+  expect(JSON.stringify(provider.chatRequests()[0]!.body)).not.toContain('/commit');
+
+  await openSettings(w, 'Usage');
+  const totals = w.getByLabel('Totals');
+  await expect(totals).toContainText('Requests1');
+  await expect(totals).toContainText('Sent to models120');
+  await expect(totals).toContainText('Written by models30');
+  // The mock model has no published price: its request is counted and its cost is not made up.
+  await expect(totals).toContainText('SpentUnknown');
+  await expect(w.getByText('Nothing used in these days has a published price.')).toBeVisible();
+
+  await w.getByRole('radiogroup', { name: 'What the bars measure' }).getByRole('radio', { name: 'Tokens' }).click();
+  await expect(w.getByText(/^Most on .+: 150 tokens$/)).toBeVisible();
+  // The chart is one stop for the keyboard: End reads today out.
+  await w.getByRole('group', { name: /^Tokens for each of the last 30 days/ }).press('End');
+  await expect(w.getByText(/: No published price · 120 sent · 30 written · 1 request$/)).toBeVisible();
+
+  const byModel = w.getByRole('table', { name: 'What each model used in these days' });
+  const row = byModel.getByRole('row', { name: /Graft Test Large/ });
+  await expect(row.getByRole('cell')).toHaveText(['1', '120', '30', 'No published price']);
+
+  await w.getByRole('button', { name: 'Show the days as a table' }).click();
+  await expect(w.getByRole('table', { name: 'What was used on each day, newest first' }).getByRole('row')).toHaveCount(2);
+  await shot(w, 'settings-usage');
+
+  // It is stored, not held in memory: the same after Graft restarts.
+  const { userData, graftHome } = graft;
+  await graft.close();
+  graft = await launchGraft({ userData, graftHome });
+  await openSettings(graft.window, 'Usage');
+  await expect(graft.window.getByLabel('Totals')).toContainText('Requests1');
+});
+
+test('a turn pauses at the limit set in Settings → Permissions, and goes on when told to', async () => {
+  const project = makeGitProject({ 'notes.txt': 'hello\n' });
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider, { project });
+
+  // No limits until someone sets one, and the cost limit says what it is worked out from.
+  await openSettings(w, 'Permissions');
+  const tokens = w.getByRole('combobox', { name: 'Tokens per turn' });
+  await expect(tokens).toHaveValue('none');
+  await expect(w.getByRole('combobox', { name: 'Cost per turn' })).toHaveValue('none');
+  await expect(w.getByRole('combobox', { name: 'Time per turn' })).toHaveValue('none');
+  await expect(w.getByText(/worked out from published prices, so your bill can differ/)).toBeVisible();
+  await tokens.selectOption('250000');
+  await expect(tokens).toHaveValue('250000');
+  await shot(w, 'settings-turn-limits');
+
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
+  provider.script(
+    { toolCalls: [{ name: 'Glob', input: { pattern: '*.txt' } }], usage: { prompt_tokens: 300_000, completion_tokens: 30 } },
+    { text: 'Found notes.txt.' }
+  );
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('List the text files');
+  await composer.press('Enter');
+  await expect(w.getByText('Paused after about 300,030 tokens, past the limit of 250,000 for one turn set in Settings → Permissions.')).toBeVisible();
+  await expect(w.getByText('Found notes.txt.')).toHaveCount(0);
+  await shot(w, 'turn-paused-at-limit');
+
+  // Continue is a new turn with a fresh allowance.
+  await w.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(w.getByText('Found notes.txt.')).toBeVisible();
+});

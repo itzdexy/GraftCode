@@ -1,6 +1,6 @@
-# Try Graft 0.6.15
+# Try Graft 0.6.16
 
-1. Open **Settings → About** and confirm version **0.6.15**. In
+1. Open **Settings → About** and confirm version **0.6.16**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -18,6 +18,15 @@
 5. For a trusted TypeScript/JavaScript project, put the cursor on a symbol.
    Use **Check types**, **F12**, **Shift+F12**, and **Symbol info**. Queries use
    the current draft, and references navigate to their actual files/positions.
+
+6. In **Settings → Permissions**, set **Tokens per turn** to its smallest choice and
+   give a code session a task that reads several files. The turn should pause with
+   the number it reached and a **Continue** button, and go on when you press it. Set
+   it back to **No limit** afterwards.
+7. Open **Settings → Usage** after a few requests: today's bar, and a row for each
+   model with its requests, tokens and cost.
+8. In a chat, type `/`: the commands a chat can use are listed, and `/model` opens the
+   model menu.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

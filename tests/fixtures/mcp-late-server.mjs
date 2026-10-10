@@ -24,6 +24,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (token !== undefined) await extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: i, total: 4, message: 'Rendering' } });
     }
+    // Three of four reported: the last quarter is still to do. Answering in the same breath as the
+    // last note would also put both in one read on some systems, and the client's SDK drops a note
+    // it reads together with the result (it acts on the result first).
+    await new Promise((resolve) => setTimeout(resolve, 100));
     return { content: [{ type: 'text', text: 'rendered' }] };
   }
   if (mode === 'crash') setTimeout(() => process.exit(1), 50);

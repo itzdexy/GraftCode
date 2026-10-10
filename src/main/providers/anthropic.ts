@@ -379,6 +379,11 @@ export class AnthropicProvider implements LLMProvider {
     const blocks = new Map<number, OpenBlock>();
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     let stopReason: string | null = null;
+    let ended = false;
+    // A tool call is offered only once the model has said it is done. From the first call on, finished
+    // blocks wait here in the order they came, so a reply that breaks off hands over no call, and one
+    // that completes keeps the order the model wrote it in.
+    const held: ContentBlock[] = [];
 
     try {
       for await (const event of stream) {
@@ -434,7 +439,9 @@ export class AnthropicProvider implements LLMProvider {
             if (!open) break;
             blocks.delete(event.index);
             const block = finishBlock(open, displayMode);
-            if (block) yield { type: 'block', block };
+            if (!block) break;
+            if (held.length > 0 || block.type === 'tool_use') held.push(block);
+            else yield { type: 'block', block };
             break;
           }
           case 'message_delta': {
@@ -447,6 +454,7 @@ export class AnthropicProvider implements LLMProvider {
             break;
           }
           case 'message_stop':
+            ended = true;
             break;
           default:
             break;
@@ -455,6 +463,13 @@ export class AnthropicProvider implements LLMProvider {
     } catch (error) {
       throw mapSdkError(error, this.where);
     }
+    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+    // The stream closing is not the reply ending. The stop reason is the model's own word that it is
+    // done (every block is closed by then); message_stop is the event that follows it.
+    if (!ended && stopReason === null) {
+      throw new ProviderError('network', 'The reply stopped before it was complete. Anthropic did not send a stop reason.');
+    }
+    for (const block of held) yield { type: 'block', block };
     yield { type: 'usage', usage };
     yield { type: 'finish', reason: mapStop(stopReason) };
   }

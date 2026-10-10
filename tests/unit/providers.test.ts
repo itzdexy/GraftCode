@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseNdjson, parseSse } from '../../src/main/providers/sse';
 import { errorFromHttp, parseRetryAfter, ProviderError } from '../../src/main/providers/errors';
@@ -5,12 +7,14 @@ import { backoffDelay, DEFAULT_RETRY_POLICY, streamWithRetry } from '../../src/m
 import { AnthropicProvider, toAnthropicMessages } from '../../src/main/providers/anthropic';
 import { OpenAiChatProvider, toChatMessages } from '../../src/main/providers/openaiChat';
 import { GeminiProvider, toGeminiContents } from '../../src/main/providers/gemini';
+import { ProviderCatalog } from '../../src/main/providers/presets';
 import { OllamaProvider } from '../../src/main/providers/ollama';
 import { arrangeModels, familyOf, formatTokens } from '../../src/main/providers/catalog';
 import type { StreamEvent, StreamRequest } from '../../src/main/providers/types';
 import type { LlmMessage } from '../../src/shared/schemas/messages';
 import { FakeProvider, fakeModel } from '../support/fakeProvider';
 import { json, ndjson, sse, startFixtureServer, type FixtureServer } from '../support/httpFixture';
+import { makeTempDir, removeDir } from '../support/tmp';
 
 function streamOf(text: string, split = 3): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text);
@@ -260,6 +264,58 @@ describe('Anthropic adapter', () => {
     expect((body.tools as Array<Record<string, unknown>>)[0]).toMatchObject({ name: 'Read', eager_input_streaming: true });
     expect(body).not.toHaveProperty('temperature');
     expect(String(sent?.headers['anthropic-beta'])).toContain('thinking-display-updates');
+  });
+
+  it('rejects a stream that ends before the model said it was done: what arrived stays, its tool call is never offered, nothing is retried', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // Everything up to the closed tool call, then the connection ends: no message_delta with a stop reason, no message_stop.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 13)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const seen: StreamEvent[] = [];
+    const retries: number[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+    };
+    const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+    expect(seen.filter((e) => e.type === 'text-delta')).toEqual([
+      { type: 'text-delta', text: 'Reading ' },
+      { type: 'text-delta', text: 'it now.' }
+    ]);
+    expect(seen.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text']);
+    expect(seen.some((e) => e.type === 'finish')).toBe(false);
+    expect(retries).toEqual([]);
+    expect(server.requests.filter((r) => r.path.startsWith('/v1/messages'))).toHaveLength(1);
+  });
+
+  it('takes the stop reason as the end of the reply when the closing event is lost, and keeps the order of what the model wrote', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // message_delta arrived with stop_reason tool_use; only message_stop is missing.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 14)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    expect(events.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text', 'tool_use']);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+  });
+
+  it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 8)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const controller = new AbortController();
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), controller.signal, () => undefined)) {
+        if (event.type === 'text-delta') controller.abort();
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'aborted' });
   });
 
   it('falls back to summarized thinking when a model rejects progress-update display', async () => {
@@ -529,6 +585,165 @@ describe('Gemini adapter', () => {
     );
     expect(contents[0]?.parts[0]).toMatchObject({ functionCall: { name: 'Grep' }, thoughtSignature: 'ts-1' });
     expect(contents[1]?.parts[0]).toEqual({ functionResponse: { name: 'Grep', response: { output: '3 matches' } } });
+  });
+
+  describe('how hard a model thinks', () => {
+    let dirs: string[] = [];
+    afterEach(() => {
+      for (const dir of dirs) removeDir(dir);
+      dirs = [];
+    });
+
+    /** The catalog as Graft ships it, cut down to what these models need: the named levels each one takes, or a budget. */
+    function catalog(): ProviderCatalog {
+      const dir = makeTempDir();
+      dirs.push(dir);
+      const file = path.join(dir, 'catalog.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          providers: [
+            {
+              id: 'google',
+              name: 'Google',
+              kind: 'gemini',
+              api: null,
+              env: [],
+              doc: null,
+              key: 'required',
+              models: [
+                { id: 'gemini-3.6-flash', n: 'Gemini 3.6 Flash', t: 1, v: 1, r: 1, e: ['minimal', 'low', 'medium', 'high'] },
+                { id: 'gemini-3-pro-preview', n: 'Gemini 3 Pro', t: 1, v: 1, r: 1, e: ['low', 'high'] },
+                { id: 'gemini-2.5-pro', n: 'Gemini 2.5 Pro', t: 1, v: 1, r: 1, b: [128, 32768] }
+              ]
+            }
+          ]
+        })
+      );
+      return new ProviderCatalog(file);
+    }
+
+    const listed = (id: string, thinking = true) => ({ name: `models/${id}`, inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking });
+    beforeEach(() => {
+      server.route('GET', '/v1beta/models', (_req, res) =>
+        json(res, 200, { models: [listed('gemini-3.6-flash'), listed('gemini-3-pro-preview'), listed('gemini-2.5-pro'), listed('gemini-4-ultra'), listed('gemini-3.9-flash', false)] })
+      );
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] } }]));
+    });
+
+    const connect = (known: boolean): GeminiProvider =>
+      new GeminiProvider({ id: 'g', kind: 'gemini', preset: 'google', apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` }, known ? catalog() : null);
+
+    async function efforts(known = true): Promise<Record<string, StreamRequest['model']['effort']>> {
+      return Object.fromEntries((await connect(known).listModels()).map((m) => [m.ref.modelId, m.effort]));
+    }
+
+    /** What a request for `id` at `effort` carries as its thinking settings. */
+    async function thinkingSent(id: string, effort: StreamRequest['effort'], known = true): Promise<unknown> {
+      const provider = connect(known);
+      const model = (await provider.listModels()).find((m) => m.ref.modelId === id);
+      if (!model) throw new Error(`${id} is not listed`);
+      await collect(provider.streamText(request({ model, effort }), new AbortController().signal));
+      return (server.requests.at(-1)?.json() as { generationConfig: { thinkingConfig?: unknown } }).generationConfig.thinkingConfig;
+    }
+
+    it('offers a Gemini 3 model the levels it takes, and asks by level', async () => {
+      const models = await efforts();
+      expect(models['gemini-3.6-flash']).toMatchObject({ levels: ['minimal', 'low', 'medium', 'high', 'taproot'], default: 'medium' });
+      expect(models['gemini-3-pro-preview']).toMatchObject({ levels: ['low', 'high', 'taproot'], default: 'high' });
+
+      expect(await thinkingSent('gemini-3.6-flash', 'medium')).toEqual({ includeThoughts: true, thinkingLevel: 'MEDIUM' });
+      expect(await thinkingSent('gemini-3.6-flash', 'minimal')).toEqual({ includeThoughts: true, thinkingLevel: 'MINIMAL' });
+      // Taproot thinks at the model's strongest level; a budget is never sent beside a level (the API refuses the pair).
+      expect(await thinkingSent('gemini-3-pro-preview', 'taproot')).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+      // Asked at a level the model doesn't have (Graft asks for summaries at "low", titles at a model's lightest): the nearest one it does.
+      expect(await thinkingSent('gemini-3-pro-preview', 'medium')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      expect(await thinkingSent('gemini-3-pro-preview', 'minimal')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      expect(await thinkingSent('gemini-3.6-flash', 'max')).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+    });
+
+    it('keeps the token budget for a model from before Gemini 3, which refuses a level', async () => {
+      expect((await efforts())['gemini-2.5-pro']).toMatchObject({ levels: ['low', 'medium', 'high', 'extra', 'max', 'taproot'] });
+      expect(await thinkingSent('gemini-2.5-pro', 'high')).toEqual({ includeThoughts: true, thinkingBudget: 10_000 });
+      expect(await thinkingSent('gemini-2.5-pro', 'taproot')).toEqual({ includeThoughts: true, thinkingBudget: 24_576 });
+    });
+
+    it('gives a Gemini 3 model the catalog has not heard of the two levels every one of them takes', async () => {
+      const models = await efforts();
+      expect(models['gemini-4-ultra']).toMatchObject({ levels: ['low', 'high', 'taproot'] });
+      // The provider says this one does not think, and nothing says otherwise: no effort control.
+      expect(models['gemini-3.9-flash']).toBeNull();
+      expect(await thinkingSent('gemini-4-ultra', 'low')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      // Without a catalog at all, a Gemini 3 model is still asked by level.
+      expect((await efforts(false))['gemini-3.6-flash']).toMatchObject({ levels: ['low', 'high', 'taproot'] });
+      expect(await thinkingSent('gemini-3.6-flash', 'high', false)).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+    });
+  });
+
+  describe('a reply that is not finished', () => {
+    const listed = { name: 'models/gen-pro-3', displayName: 'Gen Pro 3', inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking: true };
+    const connect = async (): Promise<{ provider: GeminiProvider; model: StreamRequest['model'] }> => {
+      server.route('GET', '/v1beta/models', (_req, res) => json(res, 200, { models: [listed] }));
+      const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+      const [model] = await provider.listModels();
+      return { provider, model: model! };
+    };
+
+    it('rejects EOF without a finish reason: partial text stays, the function call is never offered, nothing is retried', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Looking for it.' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'Grep', args: { pattern: 'x' } } }] } }] } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const seen: StreamEvent[] = [];
+      const retries: number[] = [];
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+      };
+      const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+      expect(seen).toEqual([{ type: 'text-delta', text: 'Looking for it.' }]);
+      expect(retries).toEqual([]);
+      expect(server.requests.filter((r) => r.path.includes(':streamGenerateContent'))).toHaveLength(1);
+    });
+
+    it('accepts a reply whose last chunk carries the finish reason, whatever came in the chunks before', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Done ' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'here.' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 3 } } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events).toContainEqual({ type: 'block', block: { type: 'text', text: 'Done here.' } });
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+    });
+
+    it('takes a blocked prompt as an answer: a refusal, with no candidate and no finish reason', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { promptFeedback: { blockReason: 'SAFETY' } } }]));
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'refusal' });
+    });
+
+    it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Partial' }] } }] } }]));
+      const { provider, model } = await connect();
+      const controller = new AbortController();
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), controller.signal, () => undefined)) {
+          if (event.type === 'text-delta') controller.abort();
+        }
+      };
+      await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+    });
   });
 
   it('reports an invalid key as an auth error', async () => {

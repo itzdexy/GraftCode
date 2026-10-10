@@ -40,11 +40,14 @@ export class ToolRegistry {
     return filter ? all.filter(filter) : all;
   }
 
-  /** Tool specs in a stable (name-sorted) order so provider prompt caches stay warm. */
-  specs(names?: string[]): ToolSpec[] {
+  /**
+   * Tool specs in a stable (name-sorted) order so provider prompt caches stay warm.
+   * `descriptions` says what a tool is where it is offered, when that differs from its own words.
+   */
+  specs(names?: string[], descriptions: Partial<Record<string, string>> = {}): ToolSpec[] {
     const selected = names ? names.map((n) => this.tools.get(n)).filter((t): t is AnyTool => t !== undefined) : this.list();
     return selected
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((t) => ({ name: t.name, description: t.description, inputSchema: t.jsonSchema ?? jsonSchemaFor(t.input as z.ZodType) }));
+      .map((t) => ({ name: t.name, description: descriptions[t.name] ?? t.description, inputSchema: t.jsonSchema ?? jsonSchemaFor(t.input as z.ZodType) }));
   }
 }

@@ -19,6 +19,100 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.16 hardening, usage, limits and agents' backup (2026-10-10)
+
+Reliability and security, each fix with a test that failed before it:
+
+- **A stopped command leaves nothing running** (`killProcessTree`). The wrapper's PID marker
+  held a literal `$` since the first release, so on Windows the processes Git Bash started
+  were never looked up (fixed in #3). The test merged with that fix was skipped on Windows,
+  the one system that reads the marker; it now runs under Git Bash and compares the marker
+  with the PID the shell reports for itself. A second test runs a command whose child
+  outlives its own parent and checks that nothing is left after a timeout: against the old
+  wrapper the orphan kept writing. Two more gaps on the same path: when `ps.exe` could not be
+  started nothing was killed at all (the command's own tree is now always stopped, and the
+  failed lookup is reported afterwards), and on POSIX the second signal was sent only while
+  the shell itself was alive, so a child that ignores SIGTERM survived (SIGKILL now goes to
+  the whole group after the grace period).
+- **A cut-off stream is an error on every adapter.** 0.6.15 guarded chat completions and
+  Ollama; Gemini still reported a stream with no `finishReason` as a normal stop and ran its
+  function calls, and Anthropic mapped a missing stop reason to a finished reply and had
+  already handed over the tool calls whose blocks had closed. Both throw the same
+  retryable error now, and Anthropic tool calls wait, in order, until the model has said it
+  is done.
+- **A new browser session grants nothing.** Electron approves every permission request of a
+  session with no handler. The hidden window that takes pictures of sites had none, and a
+  probe in the running app showed a localhost page there was granted location and
+  notifications unasked. Every session created after startup now starts out refusing
+  (`session-created`, `denyAllPermissions`).
+- **Workflows:** read-only tokens by default, write only for the jobs that create, fill and
+  publish a release, no credentials left on disk for install scripts to read, actions pinned
+  to commits, time limits, and a version check and `SHA256SUMS-<OS>.txt` for release
+  artifacts. Not run on GitHub (billing lock); parsed and the new step run locally.
+- **A save right behind the typing is never dropped** (`draftSaves.ts`). The Files panel's
+  save decided from its last render whether a save was running, whether the draft was dirty
+  and what it contained; Monaco's Ctrl+S reaches it before React has drawn the latest
+  keystrokes or the end of the save before. On `origin/main` in a Linux container, with the
+  main process's handler recorded, 1 of 3 runs made no `files:save` request for the Ctrl+S
+  that follows the typing, and a second press seconds later did. The same route could write a
+  draft a few keystrokes old. The draft is now read from the store when a save starts, and a
+  save asked for while another is on its way waits for it instead of being dropped. This was
+  why `tests/e2e/editor.spec.ts:12` failed on Linux and passed on Windows.
+- **Every way a command is stopped has a test with a real process:** timeout, interruption,
+  a killed background job, and now a session being closed and the app shutting down. All
+  five end in `stop()` and `killProcessTree`.
+- **Two end-to-end tests that had only ever run on Windows** failed on Linux on
+  `origin/main`: the editor one above (a real fault), and
+  `tests/e2e/catalog.spec.ts:53`, which stored a key without the opt-in that a system with
+  no keyring requires (the refusal is by design; the test now gives the opt-in).
+
+Limits for one turn (`turnBudget.ts`, **Settings → Permissions**):
+
+- Three limits beside "Steps per turn": tokens, estimated cost, minutes of work. None is
+  set by default. Reaching one pauses the turn with the reason and Continue; Continue is a
+  new turn with a fresh allowance.
+- One `TurnBudget` per turn lives in `SessionHost`, and every loop the turn starts reports
+  to it through the same `loopHost`: the main agent, a `Task` sub-agent, each agent of a
+  group. The loop asks `LoopHost.overBudget` before every model request, beside the step
+  limit. The group's own per-agent token budget (Settings → Models → Agents) is unchanged
+  and sits below it.
+- Tokens are weighted as they are billed (cache reads at a tenth). Cost comes from the
+  prices Graft has, and the pause says it is an estimate. A request with no published price
+  can't be followed: the turn says so once, by the model's name, and the pause counts them.
+  What a tool pays for is added. Time is work on the session's clock: a permission prompt
+  or a question waiting for the user is not counted.
+- An agent the limit cuts short is reported as stopped, with the reason, and is not tried
+  again. A writer's unfinished checkout is kept aside, as for an interrupted one.
+
+Carried over from the round written on the 0.6.13 base and merged onto 0.6.15:
+
+- **`session.ts` is split** into `sessionHost.ts` (`SessionHost`: what the user is being
+  asked, the rules allowed for the session, tool context, usage, sub-agents, groups, the
+  backup model) and `missionController.ts`. 1,989 lines at 0.6.13, 1,482 now, with
+  upstream's context state and private writer checkouts carried into the moved code.
+- **Usage by day** (`usage_days`, migration 8; `src/shared/usage.ts`;
+  `SessionStore.recordUsage` and `usageSince`; channel `usage:days`). Every request is added
+  to its day under the model that answered it, the backup model included; what a tool pays
+  for is added without tokens; a request with no known price is counted and adds no cost.
+  **Settings → Usage** shows totals, a bar a day for 7, 30 or 90 days by cost or tokens,
+  the same numbers as a table, and a table by model.
+- **A backup model for every loop** (`SessionHost.loopHost(scope, answering, needs)`): the
+  main turn, a sub-agent and each agent of a group. Each loop has its own answering model;
+  a role that has to see is not handed a backup that can't; an agent's record names the
+  model that took over; the rounds after a failed check stay on it. Sub-agents get the
+  session's retry policy.
+- **Gemini thinks by level from Gemini 3 on** (`geminiEffort`, `takesThinkingLevel`), from
+  the catalog's levels, with `low` and `high` for a model the catalog doesn't know; earlier
+  models keep `thinkingBudget`. Checked against Google's API description (v1beta discovery
+  document, read 2026-10-10).
+- **Chats have the `/` menu** (`commandsFor`, `CODE_ONLY_COMMANDS`), `/model` opens the
+  chat's model menu, ten project-only commands say so in a chat, and with nothing typed the
+  menu lists every command and follows the arrow keys. `RunAgents` is described to a chat
+  as researchers on the web.
+- **A project keeps its header** in the sidebar while its only session is under Needs you.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
+
 ### 0.6.15 interface and recovery implementation (2026-10-09)
 
 - Require provider terminal confirmation before incomplete tool calls can execute;
@@ -344,26 +438,39 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 - The parts of the context are estimates by characters (about 3.5 a token): they say which
   part is large, not what a provider bills, and their sum differs from the provider's
   count, which is shown beside them. Tool schemas are counted as written out in JSON, which
-  is not how every provider encodes them. Spend by day is still not shown.
+  is not how every provider encodes them.
+- Usage by day starts with 0.6.16: earlier days have no rows and none are worked out from
+  old messages. The summaries and titles Graft asks for itself are not counted, in the day's
+  total or the session's. A day is the date on this computer when the request was made.
+  Costs are what the provider charged or its published price, so a bill can differ. The
+  record can't be exported or cleared from the app, and "Clear session history" leaves it.
+- The limits for one turn are checked before each model request, so a turn can pass one by
+  the requests already under way when it is reached: one for the turn itself, one for each
+  agent of a group working at that moment. The summaries and titles Graft asks for itself
+  are not counted. Cost follows only models with a published price. There is no limit on
+  the number of tool calls or of retries as such (steps per turn and the retry policy bound
+  those), none for a whole session, a day or a project, and a mission's turns each get the
+  allowance again. The choices are fixed lists; another value has to be put in the settings
+  by hand.
 - A rewind brings back only what was replaced from 0.6.13 on: messages summarized or
   cleared by an earlier version carry no `compactedBy` and stay out of the context.
 - Needs you lists by status only: a session whose turn finished with a question in plain
   text is not there, since nothing marks it as waiting. A session that stopped with an
-  error stays there until it is continued, retried or archived, also across restarts; a
-  project whose only session is listed there has no header, and so no "new session in this
-  project" button, for as long as it is.
+  error stays there until it is continued, retried or archived, also across restarts.
 
 - A session has one current plan: a second approved plan replaces the first in the bar and
   in summaries, and there is no history of plans beyond the transcript. A plan is not saved
   as a file in the project. The bar's progress counts the session's tasks, which the agent
-  writes itself and which need not match the plan's steps. `/plan` in a chat only explains;
-  the chat's command menu still lists it.
+  writes itself and which need not match the plan's steps.
+- The `/` menu of a chat is the list of built-in commands minus the ten that work on a
+  project; which of the rest are useful in a chat was not studied. The home screen's message
+  box has no menu in either mode.
 
 - Research reads HTML and text only: a PDF on the web can't be read. A mark on a citation
   says what this conversation opened, not whether the page says what is claimed. Search
   results that are redirect links (one provider's own search) are compared by the redirect,
-  so a link to the page itself reads "not opened". The `RunAgents` description a chat sees
-  is the code session's, with roles a chat has no use for.
+  so a link to the page itself reads "not opened". The input a chat sees for `RunAgents`
+  still lists `writes` and `verify`, which a chat refuses with a sentence.
 - The check against names that resolve to private addresses looks the name up before the
   request, and the request looks it up again: a name that changes its answer in between is
   not caught. A hosts-file name that points at this computer can't be read from a chat.
@@ -373,17 +480,21 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   slide runs off its edge. Sheets have no dates, number formats or charts. There is no
   table of contents, cover page or page-break control, and equations are plain text. The
   PDF uses the computer's own fonts.
-- `src/main/agent/session.ts` is 1,980 lines: turns, slash commands, compaction, the
-  loop host, and now the mission controller and agent-group wiring. Split the loop host
-  and the mission controller out before adding more.
-- The cutoff for removed tool output lives in memory: a restarted session sends old output
-  in full again until it next fills up. Removing output changes the start of the history
-  once, so a provider's prompt cache is rebuilt from that point. The estimate of what
+- `src/main/agent/session.ts` is 1,482 lines after the split: turns, the queue, slash
+  commands, the prompt, what a model is offered, compaction. `SessionHost` takes 22 things
+  from the session (`HostPorts`), which is wide. The next seam is what a model is offered
+  (tools, web access, the MCP tools that wait), about 140 lines with state of their own.
+- Removing old tool output changes the start of the history
+  once, so a provider's prompt cache is rebuilt from that point (the cutoff itself is
+  stored since 0.6.14). The estimate of what
   removing frees is by characters, not the provider's count. In the transcript a summary
   appears after the steps it kept, where it was made, though the model reads it first.
 - The backup model finishes one turn: the next turn asks the session's own model again and
-  waits through its retries before switching. Agents of a group and sub-agents have no
-  backup. A backup without vision gets a history with screenshots as it is.
+  waits through its retries before switching. The same holds for an agent of a group that
+  is tried again: its new attempt starts on its own model. In the main turn a backup without
+  vision gets a history with screenshots as it is (only an agent whose role has to see is
+  kept from such a backup). The switch is tested with recorded failures, not against a
+  provider that was really overloaded.
 - Agents that change files with no paths of their own share the session's working tree
   and run one at a time. Writers given `writes` paths run together in that same tree, kept
   apart only by their paths: the scope is enforced on the edit tools, not on Shell commands
@@ -394,8 +505,42 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   of the wire format (event names checked against OpenAI's documentation); nothing ran
   against a live OpenAI account. The 10K-token threshold for waiting MCP tools is a guess,
   not measured on real setups.
-- Gemini 3 models take a `thinkingLevel`; the adapter still sends `thinkingBudget`, which
-  works but doesn't match the levels the catalog lists for them.
+- Gemini's levels are checked against Google's API description and a recorded server, not
+  with a live key. Models are told apart by name (`gemini-3` and up take a level): a tuned or
+  renamed model is asked by budget. A Gemini 3 model the catalog doesn't know is offered
+  `low` and `high` only.
+- A stream is taken as complete on its provider's own terminal marker. A malformed event in
+  the middle of a stream is still skipped, on every adapter: a reply that lost a chunk and
+  then ended properly is accepted as it arrived. A reply that breaks off has no usage
+  recorded, though the provider may bill what it produced.
+- Stopping a command: a process a command started with `&` and left running after the
+  command itself finished is not tracked, so it lives on until it ends by itself, as in a
+  terminal. On Windows without Git Bash (PowerShell), only the launcher's process tree is
+  killed; a child detached with `Start-Process` is not found. The SIGKILL after the grace
+  period goes to the process group by its number two seconds later.
+- Permissions for pages: the default for new sessions is "refuse everything". The Browser
+  panel keeps its own rules. A window Graft opens for a page it did not write still runs
+  that page's scripts and lets it reach the network; only permissions are refused.
+- The remaining audit findings (8 moderate) are one advisory, GHSA-hp3w-g68c-fv3c in
+  `sprintf-js`, reached through electron-builder → @electron/get → global-agent → roarr.
+  Every published version is affected (latest 1.1.3, range `<=1.1.3`), so no upgrade or
+  override fixes it; it is used while building, not in the packaged app.
+- A stdio MCP server is a program started as you: it gets this computer's whole
+  environment (so `npx` and `uvx` behave as in a terminal), tokens that are set there
+  included, and can read what you can read. The MCP SDK's own default hands a server a short
+  list of variables instead. Graft neither sandboxes a server nor narrows its environment;
+  a server's own secrets can be kept in the key store. Commands run in a sandboxed session
+  see only the variables Graft names, not the host's.
+- Quitting waits for every session, terminal and server to stop and has no deadline of its
+  own: a stage that never finishes would keep the app from closing. If Graft itself is
+  killed or crashes, commands it started keep running and nothing ends them at the next
+  start.
+- The editor's save has unit tests for its order and an end-to-end test; the timing fault it
+  fixes showed on Linux only, and was not reproduced on Windows before or after.
+- A progress note an MCP server sends in the same breath as its result can be lost: the
+  SDK (1.31.0) acts on a result at once and hands a notification to its handler a moment
+  later, by which time the call's progress handler is gone. The result itself is not
+  affected.
 - MCP: no elicitation or sampling; resources can't be @-mentioned in the message box;
   prompts are only in the `/` menu; a server's notes are read when a session's prompt is
   built, so a server that connects later is not in it.
@@ -477,15 +622,16 @@ The five rounds designed and planned in October 2026 are done: chat documents (0
 research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention and context
 (0.6.13). What comes next:
 
-1. Split the loop host and the mission controller out of `session.ts` (1,980 lines): the
-   last three rounds each added to it.
+1. Done in 0.6.16: the loop host and the mission controller are out of `session.ts`. Next
+   seam: what a model is offered (tools, web access, waiting MCP tools).
 2. Expand recovery and cleanup controls for the writing-agent worktrees introduced
    in 0.6.14; then best-of-N.
 3. Expand the TypeScript LSP and tabbed editor foundation to indexing, splits,
    dockable layouts and semantic edits. Tabs and their preview/edit mode persistence
    are implemented in 0.6.15.
-4. A backup model for agents of a group; spend by day. Persisted context cutoffs
-   shipped in 0.6.14.
-5. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation
-   and @-mentioning resources.
+4. Done in 0.6.16: a backup model for agents of a group, spend by day, limits for one
+   turn. Next: a limit for a session or a day, and narrowing what a stdio MCP server
+   inherits (a choice that can break servers relying on an inherited token).
+5. Done in 0.6.16: Gemini `thinkingLevel`. Still open: measure the `ToolSearch` threshold on
+   real setups; MCP elicitation and @-mentioning resources.
 6. Diagrams and equations in replies; reading PDFs from the web.
