@@ -70,10 +70,12 @@ export function findCommand(name: string, platform: NodeJS.Platform, env: NodeJS
   const system = platformOf(platform);
   if (!system) return null;
   const extensions = system === 'win32' ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((e) => e.length > 0) : [''];
-  const dirs = [...(env.PATH ?? env.Path ?? '').split(path.delimiter), ...installDirs(system, env)].filter((d) => d.length > 0);
+  // The target platform's path rules here too, as in installDirs: the answer doesn't depend on where it is worked out.
+  const p = system === 'win32' ? path.win32 : path.posix;
+  const dirs = [...(env.PATH ?? env.Path ?? '').split(p.delimiter), ...installDirs(system, env)].filter((d) => d.length > 0);
   for (const dir of dirs) {
     for (const ext of extensions) {
-      const file = path.join(dir, `${name}${ext}`);
+      const file = p.join(dir, `${name}${ext}`);
       if (exists(file)) return file;
     }
   }
