@@ -28,6 +28,8 @@ export interface Harness {
   projectDir: string;
   home: string;
   waitFor(predicate: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>;
+  /** A new runtime over what is stored, as after Graft restarts. It becomes `session`; dispose the old one first. */
+  reopen(): AgentSession;
 }
 
 export interface HarnessOptions {
@@ -191,6 +193,10 @@ export function makeHarness(options: HarnessOptions): Harness {
   const session = new AgentSession(summary, deps);
   return {
     session,
+    reopen() {
+      this.session = new AgentSession(store.getSummary(summary.id), deps);
+      return this.session;
+    },
     store,
     provider,
     events,

@@ -18,6 +18,7 @@ import type {
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { agentRunActive, type AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
+import type { UsageDay, UsageEntry } from '@shared/usage';
 import { recoverMission } from '../agent/mission';
 import { parseJson, type Db } from './database';
 
@@ -93,6 +94,10 @@ export interface SessionStore {
   getMission(sessionId: string): Mission | null;
   /** Removes the missions started at or after a time (a rewind took their turn away). */
   deleteMissionsFrom(sessionId: string, fromTime: number): void;
+  /** Adds a request, or what a tool paid for, to its day's total for its model. */
+  recordUsage(entry: UsageEntry): void;
+  /** What was used on `fromDay` and after, by day and model, oldest day first. */
+  usageSince(fromDay: string): UsageDay[];
 }
 
 interface SessionRow {
@@ -434,6 +439,57 @@ export class SessionsRepo implements SessionStore {
 
   deleteMissionsFrom(sessionId: string, fromTime: number): void {
     this.db.prepare('DELETE FROM missions WHERE session_id = ? AND created_at >= ?').run(sessionId, fromTime);
+  }
+
+  recordUsage(entry: UsageEntry): void {
+    this.db
+      .prepare(
+        `INSERT INTO usage_days (day, provider_id, model_id, requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, unpriced)
+         VALUES (@day, @providerId, @modelId, 1, @input, @output, @cacheRead, @cacheWrite, @cost, @unpriced)
+         ON CONFLICT(day, provider_id, model_id) DO UPDATE SET
+           requests = requests + 1,
+           input_tokens = input_tokens + excluded.input_tokens,
+           output_tokens = output_tokens + excluded.output_tokens,
+           cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+           cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+           cost_usd = cost_usd + excluded.cost_usd,
+           unpriced = unpriced + excluded.unpriced`
+      )
+      .run({
+        day: entry.day,
+        providerId: entry.providerId,
+        modelId: entry.modelId,
+        input: entry.usage.inputTokens,
+        output: entry.usage.outputTokens,
+        cacheRead: entry.usage.cacheReadTokens,
+        cacheWrite: entry.usage.cacheWriteTokens,
+        cost: entry.costUsd ?? 0,
+        unpriced: entry.costUsd === null ? 1 : 0
+      });
+  }
+
+  usageSince(fromDay: string): UsageDay[] {
+    const rows = this.db.prepare('SELECT * FROM usage_days WHERE day >= ? ORDER BY day ASC, rowid ASC').all(fromDay) as Array<{
+      day: string;
+      provider_id: string;
+      model_id: string;
+      requests: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cost_usd: number;
+      unpriced: number;
+    }>;
+    return rows.map((row) => ({
+      day: row.day,
+      providerId: row.provider_id,
+      modelId: row.model_id,
+      requests: row.requests,
+      usage: { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cacheReadTokens: row.cache_read_tokens, cacheWriteTokens: row.cache_write_tokens },
+      costUsd: row.cost_usd,
+      unpriced: row.unpriced
+    }));
   }
 
   /** Missions left going when the app last quit: they wait, paused, for the user to resume them. Returns how many. */

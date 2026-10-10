@@ -9,7 +9,9 @@ import { ChatFiles } from '../../src/main/chat/chatFiles';
 import { DocumentMaker } from '../../src/main/chat/documents';
 import { compactionCut, renderTranscript, summaryMessageText } from '../../src/main/agent/compaction';
 import type { ContentBlock, LlmMessage, StoredMessage } from '../../src/shared/schemas/messages';
+import { CODE_ONLY_COMMANDS, commandsFor } from '../../src/shared/commands';
 import { currentPlan } from '../../src/shared/plans';
+import { usageDay } from '../../src/shared/usage';
 import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
@@ -49,6 +51,30 @@ describe('agent turns', () => {
     expect(h.titles).toEqual(['hi']);
     expect(lastRequest(h).system).toContain('You are Graft');
     expect(lastRequest(h).tools.map((t) => t.name)).toContain('Edit');
+  });
+
+  it('adds each request to the day it was made on, for the model that answered', async () => {
+    const day = usageDay(new Date('2026-09-30T12:00:00Z'));
+    const h = harness({
+      model: { pricing: { input: 2, output: 10 } },
+      script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*' } }], usage: { inputTokens: 1000, outputTokens: 50 } }, { text: 'Done.', usage: { inputTokens: 2000, outputTokens: 100 } }]
+    });
+    h.session.send('look');
+    await h.session.idle();
+    const rows = h.store.usageSince('2000-01-01');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ day, providerId: 'fake', modelId: 'fake-model', requests: 2, usage: { inputTokens: 3000, outputTokens: 150 }, unpriced: 0 });
+    expect(rows[0]!.costUsd).toBeCloseTo(0.0075, 10);
+    // The day's total and the session's are the same money.
+    expect(h.session.summary.usage.costUsd).toBeCloseTo(0.0075, 10);
+  });
+
+  it('counts a request of a model with no published price without a cost', async () => {
+    const h = harness({ script: [{ text: 'Hi.' }] });
+    h.session.send('hi');
+    await h.session.idle();
+    expect(h.store.usageSince('2000-01-01')).toMatchObject([{ requests: 1, costUsd: 0, unpriced: 1 }]);
+    expect(h.session.summary.usage.costUsd).toBeNull();
   });
 
   it('runs a read-only tool without asking and feeds the result back', async () => {
@@ -183,6 +209,31 @@ describe('cancellation, retries and errors', () => {
       await h.session.idle();
       expect(h.session.summary.lastError).toMatchObject({ code: 'overloaded' });
       expect(h.provider.requests).toHaveLength(3);
+    });
+
+    it('finishes a sub-agent’s task too, and the main agent goes on with its own model', async () => {
+      const h = harness({
+        models: [fakeModel(), backup],
+        fallbackModel: backup.ref,
+        script: [
+          { toolCalls: [{ name: 'Task', input: { description: 'Find config', prompt: 'Where is the config loaded?', subagent_type: 'explore' } }] },
+          busy,
+          busy,
+          busy,
+          { text: 'Report: the config is loaded in src/config.ts.', usage: { inputTokens: 400, outputTokens: 30 } },
+          { text: 'Done.' }
+        ]
+      });
+      h.session.send('find the config');
+      await h.session.idle();
+      expect(h.provider.requests[4]!.model.ref.modelId).toBe('backup-model');
+      expect(h.provider.requests[4]!.system).toContain('You are a sub-agent');
+      expect(switched(h)).toBe(true);
+      expect(h.provider.requests[5]!.model.ref.modelId).toBe('fake-model');
+      expect(JSON.stringify(h.provider.requests[5]!.messages)).toContain('Report: the config is loaded in src/config.ts.');
+      expect(texts(h).at(-1)).toBe('assistant:Done.');
+      // What the backup used is counted under the backup, not under the model that failed.
+      expect(h.store.usageSince('2000-01-01').find((r) => r.modelId === 'backup-model')).toMatchObject({ requests: 1, usage: { inputTokens: 400, outputTokens: 30 } });
     });
 
     it('measures the conversation against the backup model once it has taken over', async () => {
@@ -467,6 +518,43 @@ describe('compaction', () => {
     const stored = h.store.listMessages('session-1');
     expect(JSON.stringify(stored)).toContain('alpha 150');
     expect(stored.some((m) => m.meta.compacted)).toBe(false);
+  });
+
+  it('keeps old tool output removed when the session is opened again, until /clear', async () => {
+    const h = harness({
+      model: { contextWindow: 20_000 },
+      script: [
+        { toolCalls: [{ name: 'Read', input: { file_path: 'a.txt' } }], usage: { inputTokens: 2000, outputTokens: 20 } },
+        { toolCalls: [{ name: 'Read', input: { file_path: 'b.txt' } }], usage: { inputTokens: 17_000, outputTokens: 20 } },
+        { text: 'Both read.', usage: { inputTokens: 3000, outputTokens: 20 } },
+        { text: 'Still here.', usage: { inputTokens: 3000, outputTokens: 20 } }
+      ]
+    });
+    writeFile(h.projectDir, 'a.txt', lines('alpha', 300));
+    writeFile(h.projectDir, 'b.txt', 'beta marker\n');
+    h.session.send('read both');
+    await h.session.idle();
+    expect(removedNotice(h)).toBe(true);
+    const cutoff = h.store.getPruneBeforeSeq('session-1');
+    expect(cutoff).toBeGreaterThan(0);
+
+    // Graft restarts: a new runtime over what is stored. Without the cutoff it would send the old output whole again.
+    await h.session.dispose();
+    const again = h.reopen();
+    again.send('and now?');
+    await again.idle();
+    const sent = JSON.stringify(h.provider.requests.at(-1)!.messages);
+    expect(sent).toContain(REMOVED);
+    expect(sent).not.toContain('alpha 150');
+    expect(sent).toContain('beta marker');
+    expect(h.provider.requests).toHaveLength(4);
+
+    // A rewind pulls the stored cutoff back with the one in memory, and /clear drops it.
+    again.truncateFrom(cutoff - 1);
+    expect(h.store.getPruneBeforeSeq('session-1')).toBe(cutoff - 1);
+    again.send('/clear');
+    await again.idle();
+    expect(h.store.getPruneBeforeSeq('session-1')).toBe(0);
   });
 
   it('summarizes when removing old output would not make enough room', async () => {
@@ -1650,6 +1738,36 @@ describe('prompt commands', () => {
     expect(texts(chat).at(-1)).toBe('assistant:Plan mode works in code sessions. Here, just ask for a plan.');
     expect(chat.provider.requests).toHaveLength(0);
     expect(chat.session.summary.permissionMode).not.toBe('plan');
+
+    // The other commands that work on a project say the same in a chat, instead of sending a model a prompt about files it has none of.
+    for (const name of ['init', 'review', 'security-review', 'explain', 'test', 'decompile', 'commit', 'pr', 'mission']) {
+      chat.session.send(`/${name}`);
+      await chat.session.idle();
+      expect(texts(chat).at(-1)).toBe(`assistant:/${name} works on a project, so it runs in code sessions. Here, just ask.`);
+    }
+    expect(chat.provider.requests).toHaveLength(0);
+    // /help in a chat lists what a chat can use: /research stays, /commit is not there.
+    chat.session.send('/help');
+    await chat.session.idle();
+    expect(texts(chat).at(-1)).toContain('- /research [question]');
+    expect(texts(chat).at(-1)).not.toContain('- /commit');
+    expect(texts(chat).at(-1)).not.toContain('- /plan');
+    h.session.send('/help');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toContain('- /commit [hint]');
+
+    // The menu of a chat leaves them out too, except a command the user wrote under one of those names.
+    const offered = [
+      { name: 'plan', source: 'builtin' },
+      { name: 'research', source: 'builtin' },
+      { name: 'review', source: 'user' },
+      { name: 'commit', source: 'builtin' }
+    ];
+    expect(commandsFor('chat', offered).map((c) => c.name)).toEqual(['research', 'review']);
+    expect(commandsFor('code', offered)).toEqual(offered);
+    // Every name on that list is a command that exists: a renamed command can't stay hidden from chats by an old name.
+    const { BUILTIN_NAMES } = await import('../../src/main/agent/slashCommands');
+    expect([...CODE_ONLY_COMMANDS].filter((name) => !BUILTIN_NAMES.has(name))).toEqual([]);
 
     const { listCommands, loadCustomCommands } = await import('../../src/main/agent/slashCommands');
     const names = listCommands(h.home, null).map((c) => c.name);
