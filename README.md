@@ -114,6 +114,11 @@ a server that fails is left alone for a few minutes instead of holding edits up.
 file is checked: a change that breaks another file still surfaces through the
 project's checks.
 
+In the same projects `SemanticCode` finds a declaration by its name alone, and
+from there every use of it, the classes that implement an interface and the
+declaration of a value's type. The answers come from the language server, so an
+imported or renamed symbol is followed and two things with one name are told apart.
+
 Diffs mark the changed words inside a line and use syntax colours. API keys,
 tokens and passwords in command output, tool output and diffs are covered until
 the eye beside them is pressed. This changes what is shown, not what is stored

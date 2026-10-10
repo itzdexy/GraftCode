@@ -679,7 +679,7 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   }
   const questions = byName(['AskUserQuestion']);
   if (questions.length > 0) push('Asked you a question', questions.length);
-  const lookups = byName(['Symbols']);
+  const lookups = byName(['Symbols', 'SemanticCode']);
   if (lookups.length > 0) push(plural(lookups.length, 'Looked up the code’s structure', 'Looked up the code’s structure # times'), lookups.length);
   const finds = byName(['ToolSearch']);
   if (finds.length > 0) push(plural(finds.length, 'Looked for a tool', 'Looked for tools # times'), finds.length);
@@ -689,7 +689,7 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
     const status = noted.map((c) => inputOf<{ status: string }>(c.input).status).find((s) => s === 'done' || s === 'blocked');
     push(status === 'done' ? 'Reported the mission done' : status === 'blocked' ? 'Paused the mission' : plural(noted.length, 'Noted something for the mission', 'Noted # things for the mission'), noted.length);
   }
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'RunAgents', 'MissionUpdate', 'Symbols', 'ToolSearch', 'AskUserQuestion', 'CreateFile', 'RunCode', 'GenerateImage', 'ComfyUI']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'RunAgents', 'MissionUpdate', 'Symbols', 'SemanticCode', 'ToolSearch', 'AskUserQuestion', 'CreateFile', 'RunCode', 'GenerateImage', 'ComfyUI']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__') && !c.name.startsWith('mcp__resources__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -702,6 +702,15 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   if (denied > 0) push(plural(denied, 'one action was declined', '# actions were declined'), 0);
   return parts;
 }
+
+/** What the language server is asked at a place in a file, as a row says it. */
+const SEMANTIC_LOOKUPS: Record<string, string> = {
+  definition: 'the definition',
+  references: 'the uses',
+  implementation: 'the implementations',
+  typeDefinition: 'the type’s declaration',
+  hover: 'the type'
+};
 
 /** A row's wording: the action in muted text, then what it acted on in strong text (paths shortened to file names). */
 export function callParts(call: ToolCall): { verb: string; target: string; mono: boolean; title: string } {
@@ -754,6 +763,16 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       if (action === 'tests') return { verb: done ? 'Found the tests of' : 'Finding the tests of', target: file, mono: false, title: str('path') };
       const what = action === 'definition' ? 'the definition of' : 'uses of';
       return { verb: done ? `Found ${what}` : `Finding ${what}`, target: str('name'), mono: true, title: str('name') };
+    }
+    case 'SemanticCode': {
+      const action = str('action');
+      const file = fileName(str('file'));
+      if (action === 'symbol') return { verb: done ? 'Found the symbol' : 'Finding the symbol', target: str('name'), mono: true, title: str('name') };
+      if (action === 'outline') return { verb: done ? 'Outlined' : 'Outlining', target: file, mono: false, title: str('file') };
+      if (action === 'diagnostics') return { verb: done ? 'Checked the types of' : 'Checking the types of', target: file, mono: false, title: str('file') };
+      const what = SEMANTIC_LOOKUPS[action] ?? 'the code';
+      const line = typeof input.line === 'number' ? `:${String(input.line)}` : '';
+      return { verb: done ? `Looked up ${what} at` : `Looking up ${what} at`, target: `${file}${line}`, mono: false, title: str('file') };
     }
     case 'ToolSearch':
       return { verb: done ? 'Searched tools for' : 'Searching tools for', target: `“${str('query')}”`, mono: false, title: str('query') };
@@ -909,6 +928,8 @@ export function describeCall(call: ToolCall): string {
       return str('status') === 'done' ? 'Reported the mission done' : str('status') === 'blocked' ? 'Paused the mission' : 'Noted something for the mission';
     case 'Symbols':
       return `${call.result ? 'Looked up' : 'Looking up'} ${str('name') || str('path')} in the code`;
+    case 'SemanticCode':
+      return `${call.result ? 'Asked' : 'Asking'} the language server about ${str('name') || str('file')}`;
     case 'ToolSearch':
       return `${call.result ? 'Searched' : 'Searching'} tools for “${str('query')}”`;
     case 'mcp__resources__list':

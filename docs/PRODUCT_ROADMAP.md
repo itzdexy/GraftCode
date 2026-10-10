@@ -52,6 +52,13 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   Before a query the server is given again every document it holds that changed on disk
   (`refresh` in `languages/servers.ts`). The note says what to do in Graft's words and then
   quotes the checker's messages. No answer is never reported as a clean file.
+- **A declaration by its name** (`SemanticCode`, `languages/servers.ts`). Three more questions
+  for the language server: `symbol` finds declarations by name across the project and gives
+  each place on the name itself (the server gives the start of the declaration; `nameStart`
+  finds the name), so `references` or `definition` can be asked there next;
+  `implementation` and `typeDefinition` take a place like the others. Packages' own
+  declarations are left out, the name as asked comes first, and kinds are told to the model
+  in words. The transcript has a row for each question instead of the tool's name.
 - **Secrets covered in what is shown** (`shared/secrets.ts`, `Output.tsx`). Keys by shape
   (provider keys, GitHub, AWS, Google, Slack, Stripe, Hugging Face, npm, signed web tokens,
   private key blocks), bearer values, passwords in addresses, and values assigned to names
@@ -492,6 +499,10 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 - The transcript view is one setting for every code session, not a choice per session. In
   the Normal view a thought is left out entirely; only Thinking and Verbose show it.
+- `SemanticCode` answers for TypeScript and JavaScript only, in trusted projects, and a
+  search by name needs any file of the project to say which project is meant. It finds
+  what the server's own search finds: at most a few hundred names, matched by prefix,
+  substring or initials. There is no rename and no call hierarchy.
 - An edit is checked for the errors of the edited file only: a change that breaks another
   file is not reported until that file is edited or the project's checks run. Only TypeScript
   and JavaScript are checked. An edit waits five seconds for its check, so the first edit

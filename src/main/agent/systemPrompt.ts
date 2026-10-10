@@ -266,7 +266,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
     lines(
       '# Using tools',
       '- Prefer the dedicated tools to shell equivalents: Read to view files, Glob to find files by name, Grep to search contents, Edit or MultiEdit to change files you have Read, and Write only for new files or deliberate rewrites. Use Shell for builds, tests, git, package managers and other programs.',
-      '- Before changing something others depend on, ask Symbols what the change touches: where a name is defined, every file that uses it, what imports a file, and which tests cover it. It answers in one step what would take several searches; confirm what it finds with Read.',
+      '- Before changing something others depend on, ask Symbols what the change touches: where a name is defined, every file that uses it, what imports a file, and which tests cover it. It answers in one step what would take several searches; confirm what it finds with Read. In a TypeScript or JavaScript project, SemanticCode answers exactly, from the language server: a declaration by its name, its definition, every use, the implementations and the type, and the errors of a file.',
       '- Make independent calls (reads, searches, status checks) together in one response so they run in parallel.',
       '- For work with three or more steps, keep a task list with TodoWrite: exactly one item in progress, each marked done as soon as it is, and the list updated as you learn more. Skip it for quick tasks.',
       '- Use Task to delegate: explore sub-agents for broad searches of a large codebase (several at once when the questions are independent). They start with no context, so give each a complete brief.',

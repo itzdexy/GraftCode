@@ -224,6 +224,21 @@ describe('turn activity', () => {
     expect(callParts(call('Symbols', { action: 'importers', path: 'src/a.ts' }, found))).toMatchObject({ verb: 'Found what imports', target: 'a.ts' });
     expect(callParts(call('Symbols', { action: 'tests', path: 'src/a.ts' }, found))).toMatchObject({ verb: 'Found the tests of', target: 'a.ts' });
     expect(summarizeCalls([call('Symbols', { action: 'tests', path: 'src/a.ts' }, found), call('Symbols', { action: 'outline', path: 'src/a.ts' }, found)])).toBe('Looked up the code’s structure 2 times');
+
+    // What the language server is asked reads as a row too, not as the tool's name.
+    const semantic = (input: Record<string, unknown>, result?: typeof found) => callParts(call('SemanticCode', input, result));
+    expect(semantic({ action: 'symbol', file: 'src/a.ts', name: 'allow' })).toMatchObject({ verb: 'Finding the symbol', target: 'allow', mono: true });
+    expect(semantic({ action: 'symbol', file: 'src/a.ts', name: 'allow' }, found)).toMatchObject({ verb: 'Found the symbol', target: 'allow' });
+    expect(semantic({ action: 'outline', file: 'src/limits.ts' }, found)).toMatchObject({ verb: 'Outlined', target: 'limits.ts' });
+    expect(semantic({ action: 'diagnostics', file: 'src/limits.ts' }, found)).toMatchObject({ verb: 'Checked the types of', target: 'limits.ts' });
+    expect(semantic({ action: 'references', file: 'src/limits.ts', line: 12, column: 17 }, found)).toMatchObject({ verb: 'Looked up the uses at', target: 'limits.ts:12', title: 'src/limits.ts' });
+    expect(semantic({ action: 'definition', file: 'src/limits.ts', line: 3, column: 1 })).toMatchObject({ verb: 'Looking up the definition at', target: 'limits.ts:3' });
+    expect(semantic({ action: 'implementation', file: 'a.ts', line: 1, column: 1 }, found).verb).toBe('Looked up the implementations at');
+    expect(semantic({ action: 'typeDefinition', file: 'a.ts', line: 1, column: 1 }, found).verb).toBe('Looked up the type’s declaration at');
+    expect(semantic({ action: 'hover', file: 'a.ts', line: 1, column: 1 }, found).verb).toBe('Looked up the type at');
+    expect(describeCall(call('SemanticCode', { action: 'symbol', file: 'src/a.ts', name: 'allow' }, found))).toBe('Asked the language server about allow');
+    expect(describeCall(call('SemanticCode', { action: 'outline', file: 'src/a.ts' }))).toBe('Asking the language server about src/a.ts');
+    expect(summarizeCalls([call('SemanticCode', { action: 'symbol', file: 'a.ts', name: 'allow' }, found), call('Symbols', { action: 'outline', path: 'src/a.ts' }, found)])).toBe('Looked up the code’s structure 2 times');
   });
 
   it('words a search for tools, and what an agent reads from an MCP server’s resources', () => {
