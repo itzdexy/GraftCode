@@ -225,6 +225,42 @@ describe('Shell tool', () => {
     expect(ctx.shells.list(ctx.sessionId)[0]?.status).toBe('killed');
     expect((await shellOutputTool.execute({ shell_id: 'bg-nope' }, ctx)).isError).toBe(true);
   });
+
+  /** Waits until a heartbeat has been written at least once. */
+  const beating = async (...files: string[]): Promise<void> => {
+    for (let i = 0; i < 100 && !files.every((file) => fs.existsSync(file) && sizeOf(file) > 0); i++) await pause(100);
+    for (const file of files) expect(sizeOf(file)).toBeGreaterThan(0);
+  };
+  /** True when nothing writes to the files any more. */
+  const silent = async (...files: string[]): Promise<boolean> => {
+    await pause(1000);
+    const settled = files.map(sizeOf);
+    await pause(1500);
+    return files.every((file, index) => sizeOf(file) === settled[index]);
+  };
+
+  it.skipIf(isPowerShell)('stops what a session left running in the background when the session is closed', async () => {
+    const ctx = makeToolContext(dir);
+    const beat = path.join(dir, 'closed.log').split(path.sep).join('/');
+    await shellTool.execute({ command: heartbeat(beat), run_in_background: true }, ctx);
+    await beating(beat);
+    await ctx.shells.disposeSession(ctx.sessionId);
+    expect(ctx.shells.list(ctx.sessionId)[0]?.status).toBe('killed');
+    expect(await silent(beat)).toBe(true);
+  }, 30_000);
+
+  it.skipIf(isPowerShell)('stops the command that is running and the background jobs when the app shuts down', async () => {
+    const ctx = makeToolContext(dir);
+    const front = path.join(dir, 'front.log').split(path.sep).join('/');
+    const back = path.join(dir, 'back.log').split(path.sep).join('/');
+    await shellTool.execute({ command: heartbeat(back), run_in_background: true }, ctx);
+    // Forty seconds of work if nothing stops it: longer than this test may take.
+    const running = shellTool.execute({ command: heartbeat(front), timeout_ms: 120_000 }, ctx);
+    await beating(front, back);
+    await ctx.shells.disposeAll();
+    await running;
+    expect(await silent(front, back)).toBe(true);
+  }, 30_000);
 });
 
 describe('WebFetch', () => {
