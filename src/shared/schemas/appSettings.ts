@@ -54,6 +54,14 @@ export type AccentId = (typeof ACCENT_IDS)[number];
 export const MOTION_SETTINGS = ['system', 'on', 'reduced'] as const;
 export type MotionSetting = (typeof MOTION_SETTINGS)[number];
 
+/**
+ * How a code session's transcript shows a turn's work. "normal": what the agent says stays in view and
+ * the tool steps between fold into groups. "thinking" also shows its thoughts, "verbose" opens every
+ * step, and "summary" folds a whole turn into one line above its answer.
+ */
+export const TRANSCRIPT_VIEWS = ['normal', 'thinking', 'verbose', 'summary'] as const;
+export type TranscriptView = (typeof TRANSCRIPT_VIEWS)[number];
+
 /** Settings → Personalization: how answers are written, in chats and code sessions. */
 export const RESPONSE_STYLES = ['default', 'concise', 'explanatory', 'learning'] as const;
 export const ResponseStyleSchema = z.enum(RESPONSE_STYLES);
@@ -93,7 +101,8 @@ export const AppSettingsSchema = z.object({
     /** "system" follows the operating system's animation setting; "on" animates even when it asks for less. */
     motion: z.enum(MOTION_SETTINGS),
     /** Width of the transcript and composer column. */
-    transcriptWidth: z.enum(['narrow', 'medium', 'wide'])
+    transcriptWidth: z.enum(['narrow', 'medium', 'wide']),
+    transcriptView: z.enum(TRANSCRIPT_VIEWS)
   }),
   defaults: z.object({
     model: ModelRefSchema.nullable(),
@@ -122,7 +131,9 @@ export const AppSettingsSchema = z.object({
     /** Code sessions may see the screen and use the mouse and keyboard (asks before each action). */
     computerUse: z.boolean(),
     /** Pause a turn after this many model steps; null lets turns run until the work is done. */
-    maxSteps: z.number().int().min(10).max(10_000).nullable()
+    maxSteps: z.number().int().min(10).max(10_000).nullable(),
+    /** After an edit, ask the project's own language server for the errors in the edited file (trusted projects, outside a sandbox). */
+    checkEdits: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -204,10 +215,10 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow', transcriptView: 'normal' },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, checkEdits: true },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },

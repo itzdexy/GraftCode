@@ -1,8 +1,9 @@
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import { DEFAULT_APP_SETTINGS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
+import { DEFAULT_APP_SETTINGS, TRANSCRIPT_VIEWS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
 import { Button } from '../../components/Button';
 import { Slider } from '../../components/Slider';
 import { cn } from '../../lib/cn';
+import { TRANSCRIPT_VIEW_INFO } from '../../lib/format';
 import { useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { Group, saveSettings, SettingRow } from './common';
@@ -189,6 +190,29 @@ export function AppearanceSection() {
                   )}
                 >
                   {label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+        <SettingRow
+          label="Transcript view"
+          description={`${TRANSCRIPT_VIEW_INFO[appearance.transcriptView].description}. Code sessions only; the eye under the message box changes it too.`}
+          control={
+            <div role="radiogroup" aria-label="Transcript view" className="flex rounded-md border border-border p-2">
+              {TRANSCRIPT_VIEWS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={appearance.transcriptView === value}
+                  onClick={() => saveSettings({ appearance: { transcriptView: value } })}
+                  className={cn(
+                    'h-24 rounded-sm px-10 text-sm transition-ui',
+                    appearance.transcriptView === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary'
+                  )}
+                >
+                  {TRANSCRIPT_VIEW_INFO[value].label}
                 </button>
               ))}
             </div>

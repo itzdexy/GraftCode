@@ -364,6 +364,8 @@
 .graft-collapse {
   display: grid;
   grid-template-rows: 1fr;
+  /* One column as wide as the section and no wider, so a long line scrolls inside its own box instead of stretching the page. */
+  grid-template-columns: minmax(0, 1fr);
   transition:
     grid-template-rows var(--g-duration-base) var(--g-ease-out),
     opacity var(--g-duration-base) var(--g-ease-out);

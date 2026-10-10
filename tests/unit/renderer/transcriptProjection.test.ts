@@ -54,3 +54,18 @@ it('preserves mission and shell boundaries with notices, summaries and attached 
   const messages = [user(1), answer(2), message(3, 'assistant', [{ type: 'text', text: 'Continue' }], { kind: 'mission', mission: { turn: 2, of: 3, afterChecks: true } }), answer(4), message(5, 'user', [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }]), message(6, 'assistant', [{ type: 'text', text: 'Notice' }], { kind: 'notice' }), answer(7)];
   expect(project(messages, blank, false)).toEqual(groupActivity(buildTranscript(messages, blank), false));
 });
+
+it('groups a turn the way the chosen view asks, for the cached turns and the live one alike', () => {
+  vi.spyOn(Date, 'now').mockReturnValue(1000);
+  const project = createTranscriptProjection();
+  const worked = (seq: number, id: string) => message(seq, 'assistant', [{ type: 'text', text: 'Looking.' }, { type: 'thinking', text: 'Which file?' }, { type: 'tool_use', id, name: 'Read', input: { file_path: 'a.ts' } }]);
+  const messages = [user(1), worked(2, 'r1'), answer(3), user(4), worked(5, 'r2')];
+  for (const view of ['normal', 'thinking', 'verbose', 'summary'] as const) for (const active of [true, false]) {
+    expect(project(messages, blank, active, view), `${view}, ${String(active)}`).toEqual(groupActivity(buildTranscript(messages, blank), active, view));
+  }
+  // What was said stays outside the steps in the Normal view, and inside them in the Summary view.
+  expect(project(messages, blank, false, 'normal').filter((item) => item.kind === 'text')).toHaveLength(3);
+  expect(project(messages, blank, false, 'summary').filter((item) => item.kind === 'text')).toHaveLength(1);
+  // Changing the view rebuilds the turns already cached; changing it back gives the first answer again.
+  expect(project(messages, blank, false, 'normal')).toEqual(groupActivity(buildTranscript(messages, blank), false, 'normal'));
+});

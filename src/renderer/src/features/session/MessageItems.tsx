@@ -14,7 +14,7 @@ import { useCopy } from './CodeBlock';
 import { Markdown } from './Markdown';
 import { planShown } from './planModel';
 import { TodoList } from './ToolDetail';
-import type { TranscriptItem } from './transcriptModel';
+import { thoughtLabel, type TranscriptItem } from './transcriptModel';
 import { useSmoothText } from './useSmoothText';
 import { responseHasControlTokens } from './responseQuality';
 
@@ -69,7 +69,7 @@ function ActionButton({ label, onClick, children, active = false }: { label: str
   );
 }
 
-/** A typed user turn: raised block in code sessions, right-aligned bubble in chats. */
+/** A typed user turn, as a bubble on the right: Markdown that folds when long in code sessions, plain text in chats. */
 export function UserMessage({
   item,
   variant,
@@ -140,8 +140,8 @@ export function UserMessage({
   }
 
   return (
-    <div className="group/user flex flex-col gap-2" data-turn={item.turn}>
-      <div className="relative rounded-lg bg-raised px-12 py-8">
+    <div className="group/user flex flex-col items-end gap-2" data-turn={item.turn}>
+      <div className="relative max-w-[85%] min-w-0 rounded-lg bg-raised px-12 py-8">
         <div ref={bodyRef} className={cn('overflow-hidden', !expanded && tall && 'max-h-[280px]')}>
           {images}
           <Markdown text={item.text} variant="code" />
@@ -159,7 +159,7 @@ export function UserMessage({
           </div>
         ) : null}
       </div>
-      <div className="flex justify-end">{actions}</div>
+      {actions}
     </div>
   );
 }
@@ -213,8 +213,8 @@ export function AssistantText({ item, variant, actions }: { item: Item<'text'>; 
   );
 }
 
-export function ThinkingItem({ item }: { item: Item<'thinking'> }) {
-  const [open, setOpen] = useState(false);
+export function ThinkingItem({ item, defaultOpen = false }: { item: Item<'thinking'>; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (item.progress) return <p className="selectable text-md text-fg-muted italic">{item.text}</p>;
   return (
     <div className="flex flex-col">
@@ -224,7 +224,7 @@ export function ThinkingItem({ item }: { item: Item<'thinking'> }) {
         onClick={() => setOpen(!open)}
         className="flex min-h-24 items-center gap-6 self-start text-md text-fg-muted transition-ui hover:text-fg-secondary"
       >
-        {item.live ? 'Thinking' : 'Thought it through'}
+        {thoughtLabel(item.text, item.live)}
         <ChevronRight className={cn('size-14 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
       <Collapse open={open}>

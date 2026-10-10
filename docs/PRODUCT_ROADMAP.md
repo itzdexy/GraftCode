@@ -19,6 +19,44 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.17 session view and checked edits (2026-10-10)
+
+- **Transcript views** (`appearance.transcriptView`; `groupActivity(items, turnActive, view)`
+  in `transcriptModel.ts`). Normal, the new default for code sessions, keeps what the agent
+  says at the top level and folds the tool steps between two things it said into one block
+  (`stepTurn`, drawn by `StepGroup.tsx`): a line with the summary and the line counts that
+  opens into a bordered list, a single step as its own line, and for the newest block of a
+  running turn the mascot, the step in progress and the turn's time. Thinking also shows
+  thoughts, Verbose opens every step, Summary is the earlier one-line fold (`foldTurn`) and
+  what chats always use. The projection cache of finished turns is keyed by the view.
+- **Tenses** (`verbs.ts`). A command's description reads "Running the unit tests" until it
+  has a result and "Ran the unit tests" after; a description that opens with no known verb,
+  or with a word used as a noun ("Test results"), stays as written.
+- **Diffs** (`diffModel.ts`, `DiffView.tsx`). A removed line and the line that replaced it
+  are compared token by token (longest common subsequence, capped) and the changed words are
+  marked; unrelated lines are left unmarked. Both sides of a patch are highlighted as a whole
+  and the tokens handed back to their rows. An edit's diff names its file, shows one gutter
+  and draws a rule between hunks.
+- **Errors after each edit** (`languages/problems.ts`, `problemsAfter` in `tools/fs/write.ts`,
+  `ToolContext.checkFile`). Edit, MultiEdit and Write ask the bundled language server for
+  the edited file's diagnostics, within ten seconds, and add the errors to the tool result
+  and to its display. Asked only in a code session of a trusted project, and only while
+  `behavior.checkEdits` is on. No answer is never reported as a clean file.
+- **Secrets covered in what is shown** (`shared/secrets.ts`, `Output.tsx`). Keys by shape
+  (provider keys, GitHub, AWS, Google, Slack, Stripe, Hugging Face, npm, signed web tokens,
+  private key blocks), bearer values, and values assigned to names ending in key, secret,
+  token or password. Tool output, "!" commands, checks and background tasks cover them until
+  the eye is pressed; a command's row covers them always. Stored results are unchanged.
+- **Undo on the newest file card** (`EditsCard.tsx`, `RewindDialog.tsx`). The card carries
+  the message that started its turn; Undo opens the rewind dialog on Files only. Without a
+  snapshot the dialog does not fall back to removing messages.
+- **Smaller things.** Drafts are kept in the window's storage across restarts, never those
+  of incognito chats (`draftStore.ts`); a session returns to where it was left scrolled;
+  number keys pick a permission mode; your message is a bubble on the right in code sessions.
+- **Fixed:** a folding section could grow wider than the transcript (`.graft-collapse` had
+  no column limit), so a long diff line stretched the page sideways.
+- ESLint leaves `.claude/` alone: it can hold whole worktrees someone is still editing.
+
 ### 0.6.15 interface and recovery implementation (2026-10-09)
 
 - Require provider terminal confirmation before incomplete tool calls can execute;
@@ -341,6 +379,22 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Known weaknesses and technical debt
 
+- The transcript view is one setting for every code session, not a choice per session. In
+  the Normal view a thought is left out entirely; only Thinking and Verbose show it.
+- An edit is checked for the errors of the edited file only: a change that breaks another
+  file is not reported until that file is edited or the project's checks run. Only TypeScript
+  and JavaScript are checked. The check waits ten seconds at most, so the first edit after
+  a start in a large project may go unchecked while the server loads.
+- Secrets are recognized by common shapes and names: a key in an unusual format, or one
+  split across lines, is shown. Replies, diffs and approval cards are not covered (an
+  approval has to show the exact command). Copying a covered output copies the dots.
+- Undo is offered on the newest file card only, and it puts every file back as it was
+  before that turn: changes made since by commands or by hand go with it (the dialog lists
+  them, and a safety snapshot is taken first).
+- Drafts are kept per window in local storage: text only, the newest fifty, no attachments.
+- Words changed inside a line are marked for lines paired one to one within a change; a
+  line split in two, or lines longer than the comparison cap, are left unmarked.
+
 - The parts of the context are estimates by characters (about 3.5 a token): they say which
   part is large, not what a provider bills, and their sum differs from the provider's
   count, which is shown beside them. Tool schemas are counted as written out in JSON, which
@@ -450,7 +504,7 @@ praise and complain about (October 2026).
 | A side question that doesn't derail the turn | Claude Code `/btw` | Open |
 | Watch a pull request's CI and fix what fails | Claude Code desktop, Codex | Open |
 | Sandbox by default instead of prompts | Codex (workspace-write sandbox, asks only to leave it) | Graft's container sandbox is opt-in; default-on is open |
-| Diagnostics after each edit | OpenCode and Zed LSP integration | Open; large |
+| Diagnostics after each edit | OpenCode and Zed LSP integration | Shipped in 0.6.17 for TypeScript and JavaScript, for the edited file only; other languages and files broken by the edit are open |
 | Repository map from tree-sitter tags | Aider repo map | `Symbols` covers the questions without an index; a ranked map is open |
 
 ## The larger brief

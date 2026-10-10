@@ -27,15 +27,19 @@ function FileRow({ file }: { file: EditedFile }) {
       </button>
       <Collapse open={open} className="flex flex-col gap-6 px-12 pb-8">
         {file.patches.map((patch, i) => (
-          <EditDiff key={i} patch={patch} />
+          <EditDiff key={i} patch={patch} path={file.path} />
         ))}
       </Collapse>
     </li>
   );
 }
 
-/** The files a turn changed, with their line counts; each opens to its diff. */
-export function EditsCard({ files }: { files: EditedFile[] }) {
+/**
+ * The files a turn changed, with their line counts; each opens to its diff.
+ * `onUndo` puts the files back as they were before the turn (asked for on the
+ * newest card only, where that is exactly this turn's changes).
+ */
+export function EditsCard({ files, onUndo = null }: { files: EditedFile[]; onUndo?: (() => void) | null }) {
   const [all, setAll] = useState(false);
   const added = files.reduce((n, f) => n + f.added, 0);
   const removed = files.reduce((n, f) => n + f.removed, 0);
@@ -47,6 +51,11 @@ export function EditsCard({ files }: { files: EditedFile[] }) {
         <span className="flex-1 font-medium text-fg-strong">
           {files.length === 1 ? 'Edited 1 file' : `Edited ${String(files.length)} files`}
         </span>
+        {onUndo ? (
+          <button type="button" onClick={onUndo} className="rounded-sm px-6 text-sm text-fg-muted transition-ui hover:bg-hover hover:text-fg">
+            Undo
+          </button>
+        ) : null}
         <DiffCount added={added} removed={removed} pill />
       </header>
       <ul className="flex flex-col py-2">

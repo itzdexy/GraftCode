@@ -55,7 +55,15 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     created: z.boolean(),
     patch: z.string(),
     added: z.number().int(),
-    removed: z.number().int()
+    removed: z.number().int(),
+    /** Errors the language server found in the file right after this change; absent when none were found or nothing checked. */
+    problems: z
+      .object({
+        source: z.string(),
+        total: z.number().int(),
+        items: z.array(z.object({ line: z.number().int(), column: z.number().int(), code: z.union([z.string(), z.number()]).nullable(), text: z.string() }))
+      })
+      .optional()
   }),
   z.object({ kind: z.literal('glob'), pattern: z.string(), count: z.number().int(), files: z.array(z.string()) }),
   z.object({ kind: z.literal('grep'), pattern: z.string(), count: z.number().int(), preview: z.string() }),

@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import type { UserShell } from '@shared/schemas/messages';
+import { maskSecrets } from '@shared/secrets';
 import { Spinner } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/format';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { useNow } from '../../lib/time';
+import { Output } from './Output';
 
 /** A "!" command while it runs: its elapsed time and how to stop it. */
 export function RunningShell({ command, startedAt }: { command: string; startedAt: number | null }) {
@@ -16,7 +18,7 @@ export function RunningShell({ command, startedAt }: { command: string; startedA
     <div role="status" className="motion-rise flex items-center gap-8 rounded-md border border-border-card bg-sunken px-10 py-6">
       <Spinner size={12} label="Running" />
       <code className="min-w-0 flex-1 truncate font-mono text-[calc(var(--g-code-font-size)-1px)] text-fg">
-        <span className="text-accent">$</span> {command}
+        <span className="text-accent">$</span> {maskSecrets(command)}
       </code>
       <span className="shrink-0 text-xs text-fg-faint tabular-nums">
         {seconds}s · {stopKey} to stop
@@ -26,6 +28,7 @@ export function RunningShell({ command, startedAt }: { command: string; startedA
 }
 
 const FOLDED_LINES = 14;
+const OUTPUT = 'selectable max-h-[420px] overflow-auto px-10 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] break-words whitespace-pre-wrap text-fg-secondary';
 
 /** A command the user ran with "!" and its output, drawn like a terminal. */
 export function ShellItem({ shell }: { shell: UserShell }) {
@@ -35,13 +38,15 @@ export function ShellItem({ shell }: { shell: UserShell }) {
   const failed = shell.timedOut || (!shell.interrupted && shell.exitCode !== 0);
   const status = shell.timedOut ? 'Timed out' : shell.interrupted ? 'Stopped' : shell.exitCode === 0 ? 'Done' : `Exit ${shell.exitCode ?? '?'}`;
   const shown = long && !open ? lines.slice(-FOLDED_LINES).join('\n') : shell.output;
+  // A key typed into the command stays covered here; the output below has an eye for its own.
+  const command = maskSecrets(shell.command);
 
   return (
-    <div className="overflow-hidden rounded-md border border-border-card bg-sunken" aria-label={`You ran ${shell.command}`} role="group">
+    <div className="overflow-hidden rounded-md border border-border-card bg-sunken" aria-label={`You ran ${command}`} role="group">
       <div className="flex items-center gap-8 border-b border-border-subtle px-10 py-6">
         <SquareTerminal className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
-        <code className="selectable min-w-0 flex-1 truncate font-mono text-[calc(var(--g-code-font-size)-1px)] text-fg" title={`${shell.cwd}\n$ ${shell.command}`}>
-          <span className="text-accent">$</span> {shell.command}
+        <code className="selectable min-w-0 flex-1 truncate font-mono text-[calc(var(--g-code-font-size)-1px)] text-fg" title={`${shell.cwd}\n$ ${command}`}>
+          <span className="text-accent">$</span> {command}
         </code>
         <span className={cn('shrink-0 text-xs tabular-nums', failed ? 'text-danger' : 'text-fg-faint')}>
           {status} · {formatDuration(shell.durationMs)}
@@ -52,9 +57,13 @@ export function ShellItem({ shell }: { shell: UserShell }) {
           Show all {lines.length.toLocaleString()} lines
         </button>
       ) : null}
-      <pre className="selectable max-h-[420px] overflow-auto px-10 py-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] break-words whitespace-pre-wrap text-fg-secondary">
-        {shown.length > 0 ? shown : <span className="text-fg-faint">No output.</span>}
-      </pre>
+      {shown.length > 0 ? (
+        <Output text={shown} className={OUTPUT} />
+      ) : (
+        <pre className={OUTPUT}>
+          <span className="text-fg-faint">No output.</span>
+        </pre>
+      )}
       {shell.truncated ? <p className="px-10 pb-6 text-xs text-fg-faint">Only the end of the output is kept here.</p> : null}
     </div>
   );

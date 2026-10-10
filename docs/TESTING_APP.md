@@ -1,6 +1,6 @@
-# Try Graft 0.6.15
+# Try Graft 0.6.17
 
-1. Open **Settings → About** and confirm version **0.6.15**. In
+1. Open **Settings → About** and confirm version **0.6.17**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -18,6 +18,19 @@
 5. For a trusted TypeScript/JavaScript project, put the cursor on a symbol.
    Use **Check types**, **F12**, **Shift+F12**, and **Symbol info**. Queries use
    the current draft, and references navigate to their actual files/positions.
+6. In a code session of a trusted TypeScript project, ask Graft to make a small
+   change that would not compile (assign a string to a number). The edit's row
+   should read "1 problem", list it under the diff, and Graft should fix it in
+   its next step. Turn **Settings → Models → Check edits for errors** off and
+   repeat: the row has no problems and nothing is listed.
+7. In the same session, press the eye under the message box and try **Normal**,
+   **Thinking**, **Verbose** and **Summary**. Open a step group and an edit: the
+   diff names its file and marks the changed words. Press **Undo** on the newest
+   **Edited files** card and check the dialog opens on **Files only**.
+8. Run `!echo ghp_0123456789abcdefghijklmnopqrstuvwxyz0` (a made-up token): the
+   command line and its output show it covered; the eye on the output reveals it.
+   Type a few words without sending, restart Graft and reopen the session: the
+   words are still in the message box.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

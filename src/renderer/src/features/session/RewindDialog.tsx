@@ -15,6 +15,8 @@ interface Target {
   messageId: string;
   /** Chats only rewind the conversation (edit and resend). */
   chat: boolean;
+  /** What is chosen when the dialog opens ("files" for Undo on a turn's file card); the user can still change it. */
+  mode?: RewindMode;
 }
 
 export const useRewind = create<{ target: Target | null; open: (target: Target) => void; close: () => void }>((set) => ({
@@ -35,7 +37,7 @@ type Load = { state: 'loading' } | { state: 'error'; message: string } | { state
 
 function RewindBody({ target, onClose }: { target: Target; onClose: () => void }) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
-  const [mode, setMode] = useState<RewindMode | null>(null);
+  const [mode, setMode] = useState<RewindMode | null>(target.mode ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +58,8 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
   const preview = load.state === 'ready' ? load.preview : null;
   const filesAvailable = preview?.files !== null && preview !== null;
   const chosen: RewindMode = target.chat ? 'conversation' : (mode ?? (filesAvailable ? 'both' : 'conversation'));
+  // Undo asks for the files; without a snapshot that can't be done, and removing messages instead would be a surprise.
+  const impossible = preview !== null && chosen !== 'conversation' && !filesAvailable;
 
   const run = async (): Promise<void> => {
     setBusy(true);
@@ -100,7 +104,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => void run()} disabled={busy || preview === null}>
+          <Button variant="primary" onClick={() => void run()} disabled={busy || preview === null || impossible}>
             {target.chat ? 'Edit message' : 'Rewind'}
           </Button>
         </>
