@@ -155,8 +155,7 @@ describe('a language server that is slow or broken', () => {
 
     // The late answer arrives: the server is ready, and the next edit is checked again.
     waiting[0]?.answer([]);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const next = checks.problemsIn(root, path.join(root, 'c.ts'), signal);
     expect(waiting).toHaveLength(3);
     waiting[2]?.answer([diagnostic(1, 1, 1, 2304, "Cannot find name 'x'.")]);

@@ -58,6 +58,11 @@ const FALLBACK_REASONS: Partial<Record<ProviderErrorCode, string>> = {
   network: 'unreachable'
 };
 
+/** What a failure that another model may not have is called ("overloaded"); undefined for one that would follow the turn anywhere. */
+export function backupReason(error: ProviderError): string | undefined {
+  return FALLBACK_REASONS[error.code];
+}
+
 /** Everything the loop needs from its surroundings (session, UI, storage). */
 export interface LoopHost {
   append(role: 'user' | 'assistant', content: ContentBlock[], meta: MessageMeta, id?: string): StoredMessage;
@@ -93,7 +98,12 @@ export interface LoopHost {
    * Another model to finish the turn with, after `error` ended a request before any
    * output and after its retries; null when there is none. Asked at most once a turn.
    */
-  fallback?(error: ProviderError): Promise<LoopModel | null>;
+  fallback?(error: ProviderError, signal: AbortSignal): Promise<LoopModel | null>;
+  /**
+   * Why the turn has to pause before its next request (a limit on tokens, cost or time was
+   * passed), or null. The same answer goes to every loop of a turn: the limits are the turn's.
+   */
+  overBudget?(): string | null;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -102,6 +112,8 @@ export interface LoopConfig {
   model: ModelInfo;
   registry: ToolRegistry;
   toolNames: string[];
+  /** What a tool is in this session, where that differs from its own description (RunAgents in a chat). */
+  toolDescriptions?: Partial<Record<string, string>>;
   system: string;
   effort: EffortLevel | null;
   webSearch: boolean;
@@ -366,6 +378,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       });
       return done('guard');
     }
+    const over = host.overBudget?.() ?? null;
+    if (over !== null) {
+      // An agent the turn started just stops; the turn itself says why, once, and offers to continue.
+      if (config.agentLabel === null) host.emit({ type: 'notice', level: 'warning', text: over, action: 'continue' });
+      return done('guard');
+    }
 
     const estimate = lastContext > 0 ? lastContext : estimateMessagesTokens(history) + estimateTextTokens(config.system);
     try {
@@ -396,7 +414,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       system: config.system,
       // Thinking belongs to the model that did it: another model gets the history without.
       messages: config.stripThinking || switched ? withoutThinking(history) : history,
-      tools: config.registry.specs(config.toolNames),
+      tools: config.registry.specs(config.toolNames, config.toolDescriptions),
       effort: active.effort,
       webSearch: config.webSearch && active.model.supportsWebSearch,
       cacheKey: config.cacheKey,
@@ -475,11 +493,11 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
     // The model kept failing through its retries and nothing of a reply arrived, so nothing would be
     // said twice: another model may finish the turn. Once, so two failing models can't trade it forever.
-    const reason = failure ? FALLBACK_REASONS[failure.code] : undefined;
+    const reason = failure ? backupReason(failure) : undefined;
     if (failure && reason && content.length === 0 && !switched && host.fallback) {
       let next: LoopModel | null = null;
       try {
-        next = await host.fallback(failure);
+        next = await host.fallback(failure, signal);
       } catch (error) {
         host.log('warn', 'No backup model', { message: (error as Error).message });
       }

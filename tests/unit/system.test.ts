@@ -224,3 +224,35 @@ describe('loading the updater', () => {
     expect(releasesPage('provider: github\nowner: a/../b\nrepo: x\n')).toBeNull();
   });
 });
+
+describe('what pages may ask Electron for', () => {
+  it('refuses every permission for a session that shows pages Graft did not write', async () => {
+    const { denyAllPermissions } = await import('../../src/main/app/security');
+    type Ask = (contents: unknown, permission: string, callback: (granted: boolean) => void, details: unknown) => void;
+    type Check = (contents: unknown, permission: string, origin: string, details: unknown) => boolean;
+    const set: { ask: Ask | null; check: Check | null } = { ask: null, check: null };
+    denyAllPermissions({
+      setPermissionRequestHandler: (handler: unknown) => {
+        set.ask = handler as Ask;
+      },
+      setPermissionCheckHandler: (handler: unknown) => {
+        set.check = handler as Check;
+      }
+    });
+    // Without a handler Electron grants whatever a page asks for: camera, microphone, location, the clipboard.
+    for (const permission of ['media', 'geolocation', 'notifications', 'clipboard-read', 'clipboard-sanitized-write', 'display-capture', 'fullscreen', 'openExternal', 'usb', 'hid', 'serial']) {
+      const answers: boolean[] = [];
+      set.ask?.(null, permission, (granted) => answers.push(granted), {});
+      expect([permission, answers]).toEqual([permission, [false]]);
+      expect([permission, set.check?.(null, permission, 'https://site.example', {})]).toEqual([permission, false]);
+    }
+  });
+
+  it('opens only web addresses in the browser', async () => {
+    const { isSafeExternalUrl } = await import('../../src/main/app/security');
+    expect(['https://example.com/a?b=1', 'http://localhost:3000/'].map(isSafeExternalUrl)).toEqual([true, true]);
+    expect(['file:///C:/Windows/win.ini', 'javascript:alert(1)', 'ms-settings:privacy', 'smb://host/share', 'vscode://file/x', 'mailto:a@b.c', 'not a url', ''].map(isSafeExternalUrl)).toEqual(
+      Array.from({ length: 8 }, () => false)
+    );
+  });
+});

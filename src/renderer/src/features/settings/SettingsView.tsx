@@ -22,6 +22,7 @@ import { ProjectPicker } from './ProjectPicker';
 import { ProvidersSection } from './ProvidersSection';
 import { SETTINGS_SECTIONS } from './sections';
 import { ShortcutsSection } from './ShortcutsSection';
+import { UsageSection } from './UsageSection';
 
 /** MCP, hooks and memory exist per scope; these reuse the Customize editors with a project picker. */
 function ScopedSection({ render }: { render: (projectPath: string | null) => JSX.Element }) {
@@ -68,6 +69,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <ShortcutsSection />;
     case 'notifications':
       return <NotificationsSection />;
+    case 'usage':
+      return <UsageSection />;
     case 'data':
       return <DataSection />;
     case 'about':

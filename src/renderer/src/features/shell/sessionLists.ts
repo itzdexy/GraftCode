@@ -47,6 +47,8 @@ export interface ProjectGroup {
   /** Shown after the name when two groups share one ("name · path"). */
   detail: string | null;
   sessions: SessionSummary[];
+  /** How many of the project's sessions are listed under Needs you instead of here. */
+  elsewhere: number;
 }
 
 function folderName(path: string): string {
@@ -54,10 +56,14 @@ function folderName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-/** Groups code sessions by project folder, alphabetically by folder name. */
-export function groupByProject(sessions: SessionSummary[]): ProjectGroup[] {
+/**
+ * Groups code sessions by project folder, alphabetically by folder name. `elsewhere` are the
+ * sessions listed under Needs you: a project whose sessions all wait there keeps its header,
+ * and with it the way to start another session in that folder.
+ */
+export function groupByProject(sessions: SessionSummary[], elsewhere: SessionSummary[] = []): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
-  for (const s of sessions) {
+  const groupOf = (s: SessionSummary): ProjectGroup => {
     const key = s.projectPath ?? '';
     let group = groups.get(key);
     if (!group) {
@@ -66,12 +72,15 @@ export function groupByProject(sessions: SessionSummary[]): ProjectGroup[] {
         path: s.projectPath,
         name: s.projectName ?? (s.projectPath ? folderName(s.projectPath) : 'No folder'),
         detail: null,
-        sessions: []
+        sessions: [],
+        elsewhere: 0
       };
       groups.set(key, group);
     }
-    group.sessions.push(s);
-  }
+    return group;
+  };
+  for (const s of sessions) groupOf(s).sessions.push(s);
+  for (const s of elsewhere) if (s.projectPath) groupOf(s).elsewhere++;
   const list = [...groups.values()];
   const nameCounts = new Map<string, number>();
   for (const g of list) nameCounts.set(g.name.toLowerCase(), (nameCounts.get(g.name.toLowerCase()) ?? 0) + 1);

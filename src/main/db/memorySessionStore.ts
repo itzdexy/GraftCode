@@ -5,6 +5,8 @@ import type { SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
+import { addUsage, EMPTY_USAGE } from '@shared/schemas/common';
+import type { UsageDay, UsageEntry } from '@shared/usage';
 import type { SessionPatch, SessionStore } from './sessionsRepo';
 
 /**
@@ -18,6 +20,7 @@ export class MemorySessionStore implements SessionStore {
   private readonly agentRuns = new Map<string, AgentRun[]>();
   private readonly missions = new Map<string, Mission[]>();
   private readonly pruneCutoffs = new Map<string, number>();
+  private readonly usage: UsageDay[] = [];
 
   getPruneBeforeSeq(sessionId: string): number {
     this.getSummary(sessionId);
@@ -175,6 +178,24 @@ export class MemorySessionStore implements SessionStore {
 
   deleteMissionsFrom(sessionId: string, fromTime: number): void {
     this.missions.set(sessionId, (this.missions.get(sessionId) ?? []).filter((m) => m.createdAt < fromTime));
+  }
+
+  /** Kept while Graft runs and never written anywhere: an incognito chat leaves no record of what it used. */
+  recordUsage(entry: UsageEntry): void {
+    const found = this.usage.find((u) => u.day === entry.day && u.providerId === entry.providerId && u.modelId === entry.modelId);
+    const row: UsageDay = found ?? { day: entry.day, providerId: entry.providerId, modelId: entry.modelId, requests: 0, usage: EMPTY_USAGE, costUsd: 0, unpriced: 0 };
+    if (!found) this.usage.push(row);
+    row.requests += 1;
+    row.usage = addUsage(row.usage, entry.usage);
+    row.costUsd += entry.costUsd ?? 0;
+    if (entry.costUsd === null) row.unpriced += 1;
+  }
+
+  usageSince(fromDay: string): UsageDay[] {
+    return this.usage
+      .filter((u) => u.day >= fromDay)
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map((u) => ({ ...u }));
   }
 
   private list_(sessionId: string): StoredMessage[] {
