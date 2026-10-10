@@ -18,6 +18,9 @@
 5. For a trusted TypeScript/JavaScript project, put the cursor on a symbol.
    Use **Check types**, **F12**, **Shift+F12**, and **Symbol info**. Queries use
    the current draft, and references navigate to their actual files/positions.
+   In a code session of that project, ask Graft where a function you name is
+   defined and who calls it: its steps should read "Found the symbol …" and
+   "Looked up the uses at …", and the answer should name the right file and line.
 6. In a code session of a trusted TypeScript project with its packages installed,
    ask Graft to make a small change that would not compile (assign a string to a
    number). The edit's row should read "1 problem", list it under the diff, and
