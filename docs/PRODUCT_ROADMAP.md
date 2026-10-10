@@ -537,6 +537,10 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   start.
 - The editor's save has unit tests for its order and an end-to-end test; the timing fault it
   fixes showed on Linux only, and was not reproduced on Windows before or after.
+- A progress note an MCP server sends in the same breath as its result can be lost: the
+  SDK (1.31.0) acts on a result at once and hands a notification to its handler a moment
+  later, by which time the call's progress handler is gone. The result itself is not
+  affected.
 - MCP: no elicitation or sampling; resources can't be @-mentioned in the message box;
   prompts are only in the `/` menu; a server's notes are read when a session's prompt is
   built, so a server that connects later is not in it.
