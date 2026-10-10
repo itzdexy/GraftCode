@@ -117,6 +117,11 @@ export function Composer({
     if (autoFocus) focus();
   }, [autoFocus, focus]);
 
+  // The list of suggestions scrolls: the one the arrow keys are on stays in view.
+  useEffect(() => {
+    if (popupOpen) document.getElementById(`${listId}-${String(activeIndex)}`)?.scrollIntoView({ block: 'nearest' });
+  }, [popupOpen, listId, activeIndex]);
+
   // Attachments sent from elsewhere: the Browser panel's screenshots, picked elements and console logs.
   useEffect(() => {
     const take = (): void => {

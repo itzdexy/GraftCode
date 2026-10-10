@@ -1073,6 +1073,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const failure = await electronShell.openPath((await ctx.services()).paths.userData);
       if (failure) throw new GraftError('open_failed', `Couldn't open the data folder: ${failure}`);
     },
+    'usage:days': async ({ fromDay }) => (await ctx.services()).sessionsRepo.usageSince(fromDay),
     'updates:state': () => ctx.updates.get(),
     'updates:check': () => ctx.updates.check(),
     'updates:install': () => {

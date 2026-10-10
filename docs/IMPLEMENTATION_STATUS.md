@@ -227,6 +227,16 @@ an intentional addition bug, a Node test and a TypeScript error was prepared in
 the ignored `dist/manual-test-project/` directory; its README gives the agent,
 editor, type-check, draft-recovery and conflict test steps.
 
+### Local 0.6.16 round
+
+On `feat/reliability-security-upgrade` (not merged). Typecheck, lint, 1055 unit tests
+and 51 desktop tests pass on Windows; 1047 unit tests and 51 desktop tests pass in a
+Linux container, where two desktop tests and four unit tests failed before on `main`.
+The Windows package builds and its two smoke tests pass; it is unsigned and was not
+installed. The schema goes from 7 to 8 (`usage_days`); older databases are migrated,
+and a database written by 0.6.16 is refused by 0.6.15, as for every earlier step.
+Commands, commits and skips: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof

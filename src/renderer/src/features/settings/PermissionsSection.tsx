@@ -17,6 +17,34 @@ import { ProjectPicker } from './ProjectPicker';
 
 /** Choices for Steps per turn (besides no limit). */
 const STEP_LIMITS = [100, 250, 500, 1000, 2500] as const;
+/** Choices for the limits of one turn (besides no limit): tokens, US dollars, minutes. */
+const TOKEN_LIMITS = [250_000, 1_000_000, 5_000_000, 20_000_000] as const;
+const COST_LIMITS = [1, 5, 10, 25, 100] as const;
+const MINUTE_LIMITS = [10, 30, 60, 180] as const;
+
+const dollars = (n: number): string => `$${Number.isInteger(n) ? String(n) : n.toFixed(2)}`;
+const duration = (minutes: number): string =>
+  minutes % 60 !== 0 ? `${String(minutes)} minutes` : minutes === 60 ? '1 hour' : `${String(minutes / 60)} hours`;
+
+/** A limit picked from a few values, or none. A stored value that isn't one of them is listed too, so it is never shown as something else. */
+function LimitSelect({ label, value, choices, format, onChange }: { label: string; value: number | null; choices: readonly number[]; format: (n: number) => string; onChange: (value: number | null) => void }) {
+  const listed = value === null || choices.includes(value) ? choices : [...choices, value].sort((a, b) => a - b);
+  return (
+    <select
+      aria-label={label}
+      className="h-28 rounded-md border border-input-border bg-input px-8 text-base text-fg outline-none focus:border-border-strong"
+      value={value === null ? 'none' : String(value)}
+      onChange={(e) => onChange(e.target.value === 'none' ? null : Number(e.target.value))}
+    >
+      <option value="none">No limit</option>
+      {listed.map((n) => (
+        <option key={n} value={String(n)}>
+          {format(n)}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 const KINDS: Array<{ kind: keyof RuleLists; title: string; help: string }> = [
   { kind: 'allow', title: 'Allow', help: 'Runs without asking.' },
@@ -201,19 +229,28 @@ export function PermissionsSection() {
           label="Steps per turn"
           description="How many steps the agent may take before it pauses and offers to continue. With no limit it works until the task is done; it still stops if it repeats the same actions."
           control={
-            <select
-              aria-label="Steps per turn"
-              className="h-28 rounded-md border border-input-border bg-input px-8 text-base text-fg outline-none focus:border-border-strong"
-              value={settings.behavior.maxSteps === null ? 'none' : String(settings.behavior.maxSteps)}
-              onChange={(e) => saveSettings({ behavior: { maxSteps: e.target.value === 'none' ? null : Number(e.target.value) } })}
-            >
-              <option value="none">No limit</option>
-              {STEP_LIMITS.map((n) => (
-                <option key={n} value={String(n)}>
-                  {n.toLocaleString()} steps
-                </option>
-              ))}
-            </select>
+            <LimitSelect label="Steps per turn" value={settings.behavior.maxSteps} choices={STEP_LIMITS} format={(n) => `${n.toLocaleString()} steps`} onChange={(maxSteps) => saveSettings({ behavior: { maxSteps } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens per turn"
+          description="Pause a turn once it has used about this many tokens, with the agents it started. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens per turn" value={settings.behavior.turnTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(turnTokens) => saveSettings({ behavior: { turnTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost per turn"
+          description="Pause a turn at about this much. The amount is worked out from published prices, so your bill can differ, and a model with no published price can't be followed: Graft says so when one answers."
+          control={
+            <LimitSelect label="Cost per turn" value={settings.behavior.turnCostUsd} choices={COST_LIMITS} format={dollars} onChange={(turnCostUsd) => saveSettings({ behavior: { turnCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Time per turn"
+          description="Pause a turn after it has worked this long. The time it waits for your answer doesn't count."
+          control={
+            <LimitSelect label="Time per turn" value={settings.behavior.turnMinutes} choices={MINUTE_LIMITS} format={duration} onChange={(turnMinutes) => saveSettings({ behavior: { turnMinutes } })} />
           }
         />
       </Group>

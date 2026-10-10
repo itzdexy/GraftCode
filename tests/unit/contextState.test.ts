@@ -43,7 +43,7 @@ describe('durable context state', () => {
     const repo = new SessionsRepo(db);
     const s = session(repo);
     repo.appendMessage(s.id, 'user', [{ type: 'text', text: 'preserve this task' }], {});
-    expect(migrate(db)).toEqual([5, 6, 7]);
+    expect(migrate(db)).toEqual([5, 6, 7, 8]);
     expect(repo.getPruneBeforeSeq(s.id)).toBe(0);
     expect(repo.listMessages(s.id)[0]?.content).toEqual([{ type: 'text', text: 'preserve this task' }]);
   });

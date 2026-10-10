@@ -28,10 +28,14 @@ export interface Harness {
   projectDir: string;
   home: string;
   waitFor(predicate: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>;
+  /** A new runtime over what is stored, as after Graft restarts. It becomes `session`; dispose the old one first. */
+  reopen(): AgentSession;
 }
 
 export interface HarnessOptions {
   script: FakeStep[];
+  /** The session's clock (default: one fixed moment). */
+  now?: () => Date;
   mode?: PermissionMode;
   kind?: 'code' | 'chat';
   effort?: EffortLevel | null;
@@ -72,6 +76,8 @@ export interface HarnessOptions {
   fallbackModel?: SessionPreferences['fallbackModel'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
   maxSteps?: number | null;
+  /** Settings → Permissions → limits for one turn (default: none). */
+  turnBudget?: Partial<SessionPreferences['turnBudget']>;
   /** The project's sandbox settings (default: no sandbox). */
   sandbox?: SessionDeps['sandbox'];
   /** The language server's errors for an edited file (default: none, so edits are not checked). */
@@ -180,6 +186,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
+      turnBudget: { tokens: null, costUsd: null, minutes: null, ...options.turnBudget },
       agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents },
       checkEdits: options.checkEdits ?? true
     }),
@@ -192,11 +199,15 @@ export function makeHarness(options: HarnessOptions): Harness {
     notify: (_summary, kind, text) => notifications.push({ kind, text }),
     generateTitle: (_summary, text) => titles.push(text),
     log: () => undefined,
-    now: () => new Date('2026-09-30T12:00:00Z')
+    now: options.now ?? (() => new Date('2026-09-30T12:00:00Z'))
   };
   const session = new AgentSession(summary, deps);
   return {
     session,
+    reopen() {
+      this.session = new AgentSession(store.getSummary(summary.id), deps);
+      return this.session;
+    },
     store,
     provider,
     events,
