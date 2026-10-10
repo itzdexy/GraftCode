@@ -1,3 +1,4 @@
+import type { TranscriptView } from '@shared/schemas/appSettings';
 import type { EffortLevel, PermissionMode } from '@shared/schemas/common';
 
 const MINUTE = 60_000;
@@ -64,6 +65,13 @@ export const PERMISSION_MODE_INFO: Record<PermissionMode, { label: string; descr
   plan: { label: 'Plan', description: 'Read and plan only until you approve a plan' },
   auto: { label: 'Auto', description: 'Approve low-risk actions; ask about anything risky' },
   bypass: { label: 'Bypass', description: 'Run everything without asking; only deny rules still block' }
+};
+
+export const TRANSCRIPT_VIEW_INFO: Record<TranscriptView, { label: string; description: string }> = {
+  normal: { label: 'Normal', description: 'What Graft says, with its steps folded between' },
+  thinking: { label: 'Thinking', description: 'Also shows what it thought' },
+  verbose: { label: 'Verbose', description: 'Every step and thought opened' },
+  summary: { label: 'Summary', description: 'One line for a turn’s work, then its answer' }
 };
 
 /** Last path segment, for folder chips and group headers. */

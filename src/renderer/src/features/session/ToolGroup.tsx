@@ -31,9 +31,15 @@ export function DiffCount({ added, removed, pill = false }: { added: number; rem
   );
 }
 
+/** Where a call's row sits: inside an indented list, a row of a bordered list, or a line of the transcript itself. */
+type RowVariant = 'indented' | 'boxed' | 'flush';
+
+const ROW: Record<RowVariant, string> = { indented: 'min-h-24 rounded-sm px-4', boxed: 'min-h-30 w-full px-10', flush: 'min-h-26 max-w-full self-start rounded-sm' };
+const ROW_BODY: Record<RowVariant, string> = { indented: 'pt-2 pb-8 pl-4', boxed: 'px-10 pt-2 pb-10', flush: 'pt-2 pb-4' };
+
 /** One tool call as a step: what was done in muted text, what it was done to in strong text; opens to its details. */
-export function CallRow({ call }: { call: ToolCall }) {
-  const [open, setOpen] = useState(call.running !== null);
+export function CallRow({ call, variant = 'indented', defaultOpen = false }: { call: ToolCall; variant?: RowVariant; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen || call.running !== null);
   const failed = callFailed(call);
   const declined = call.result?.display?.kind === 'denied';
   const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
@@ -45,7 +51,7 @@ export function CallRow({ call }: { call: ToolCall }) {
         aria-expanded={open}
         title={parts.title}
         onClick={() => setOpen(!open)}
-        className="group/row flex min-h-24 items-center gap-6 rounded-sm px-4 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
+        className={cn('group/row flex items-center gap-6 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary', ROW[variant])}
       >
         {call.running ? <Ring value={0} size={10} spinning label="Running" /> : null}
         <span className="min-w-0 truncate">
@@ -56,10 +62,11 @@ export function CallRow({ call }: { call: ToolCall }) {
           ) : null}
         </span>
         {edit ? <DiffCount added={edit.added} removed={edit.removed} pill /> : null}
+        {edit?.problems ? <span className="shrink-0 text-amber-fg">{edit.problems.total === 1 ? '1 problem' : `${String(edit.problems.total)} problems`}</span> : null}
         {failed ? <span className="shrink-0 text-danger">Failed</span> : declined ? <span className="shrink-0 text-amber-fg">Declined</span> : null}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      <Collapse open={open} className="pt-2 pb-8 pl-4">
+      <Collapse open={open} className={ROW_BODY[variant]}>
         <ToolCallBody call={call} />
       </Collapse>
     </div>

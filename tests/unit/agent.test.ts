@@ -1217,6 +1217,73 @@ describe('agent tools that involve the user', () => {
     expect(h.provider.requests).toHaveLength(2);
   });
 
+  describe('an edit checked by the language server', () => {
+    const write = { toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on: number = "yes";\n' } }] };
+    const wrong = { source: 'TypeScript', total: 1, problems: [{ line: 1, column: 14, code: 2322, text: "Type 'string' is not assignable to type 'number'." }] };
+    /** A language server that gives this answer for every file, and remembers what it was asked. */
+    const server = (answer: () => Promise<typeof wrong> = () => Promise.resolve(wrong)) => {
+      const asked: Array<{ root: string; file: string }> = [];
+      return { asked, problems: (root: string, file: string) => (asked.push({ root, file }), answer()) };
+    };
+    const result = (h: Harness) => {
+      const block = h.store.listMessages('session-1').flatMap((m) => m.content).find((b) => b.type === 'tool_result');
+      return block?.type === 'tool_result' ? { text: block.content.map((c) => (c.type === 'text' ? c.text : '')).join(''), display: block.display } : null;
+    };
+
+    it('tells the model what is wrong with the file it just changed, and keeps it for the transcript', async () => {
+      const lsp = server();
+      const h = harness({ mode: 'auto-edit', problems: lsp.problems, script: [write, { text: 'Done.' }] });
+      h.session.send('build it');
+      await h.session.idle();
+
+      expect(lsp.asked).toEqual([{ root: h.projectDir, file: path.join(h.projectDir, 'feature.ts') }]);
+      const told = result(h);
+      expect(told?.text).toContain('Created feature.ts (2 lines).');
+      expect(told?.text).toContain('TypeScript reports 1 problem in feature.ts as it is now:');
+      expect(told?.text).toContain("  1:14  TS2322  Type 'string' is not assignable to type 'number'.");
+      expect(told?.display).toMatchObject({ kind: 'edit', problems: { source: 'TypeScript', total: 1, items: [{ line: 1, column: 14, code: 2322 }] } });
+      // The model's next request carries the note, so it can fix the error in its next step.
+      expect(JSON.stringify(lastRequest(h).messages)).toContain('TS2322');
+    });
+
+    it('says nothing when the file is clean, and never fails an edit because the server did', async () => {
+      const clean = harness({ mode: 'auto-edit', problems: server(() => Promise.resolve({ source: 'TypeScript', total: 0, problems: [] })).problems, script: [write, { text: 'Done.' }] });
+      clean.session.send('build it');
+      await clean.session.idle();
+      expect(result(clean)).toMatchObject({ text: 'Created feature.ts (2 lines).' });
+      expect(result(clean)?.display).not.toHaveProperty('problems');
+
+      const broken = harness({ mode: 'auto-edit', problems: server(() => Promise.reject(new Error('server crashed'))).problems, script: [write, { text: 'Done.' }] });
+      broken.session.send('build it');
+      await broken.session.idle();
+      expect(result(broken)).toMatchObject({ text: 'Created feature.ts (2 lines).' });
+      expect(fs.readFileSync(path.join(broken.projectDir, 'feature.ts'), 'utf8')).toContain('export const on');
+    });
+
+    it('is not asked in a project that is not trusted, nor with the setting off', async () => {
+      const untrusted = server();
+      const h = harness({ mode: 'auto-edit', trusted: () => false, problems: untrusted.problems, script: [write, { text: 'Done.' }] });
+      h.session.send('build it');
+      await h.session.idle();
+      expect(untrusted.asked).toEqual([]);
+      expect(result(h)?.text).toBe('Created feature.ts (2 lines).');
+
+      const off = server();
+      const switchedOff = harness({ mode: 'auto-edit', checkEdits: false, problems: off.problems, script: [write, { text: 'Done.' }] });
+      switchedOff.session.send('build it');
+      await switchedOff.session.idle();
+      expect(off.asked).toEqual([]);
+    });
+
+    it('is not asked in a chat', async () => {
+      const lsp = server();
+      const h = harness({ kind: 'chat', problems: lsp.problems, script: [{ text: 'Hello.' }] });
+      h.session.send('hi');
+      await h.session.idle();
+      expect(lsp.asked).toEqual([]);
+    });
+  });
+
   it('adds a verification pass in Taproot mode once the turn changed something', async () => {
     const h = harness({
       effort: 'taproot',

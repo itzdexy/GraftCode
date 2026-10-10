@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -6,6 +6,7 @@ import { sourceIndex, sourcesOf } from '@shared/sources';
 import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
+import { useApp } from '../../stores/app';
 import type { SessionView } from '../../stores/sessions';
 import {
   AssistantText,
@@ -23,14 +24,19 @@ import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
 import { SourcesContext } from './Markdown';
 import { MediaCard } from './MediaCard';
+import { useRewind } from './RewindDialog';
 import { RunningShell, ShellItem } from './ShellItem';
 import { SourcesCard } from './SourcesCard';
 import { StatusLine } from './ThinkingIndicator';
+import { StepGroup } from './StepGroup';
 import { ToolGroup } from './ToolGroup';
 import { type TranscriptItem } from './transcriptModel';
 import { createTranscriptProjection } from './transcriptProjection';
 
 const STICK_THRESHOLD = 80;
+
+/** Where each session's transcript was left when it wasn't at the bottom, for coming back to it (until the window closes). */
+const leftAt = new Map<string, number>();
 
 /**
  * One transcript item. Items that appear while a turn runs (the message just
@@ -84,10 +90,13 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
   // While a "!" command or the project's checks run no model is working, so the last turn stays as it finished.
   const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
+  // Chats fold a turn's work into one line; a code session shows it the way Settings → Appearance says.
+  const chosen = useApp((s) => s.settings?.appearance.transcriptView ?? 'normal');
+  const grouping = variant === 'chat' ? 'summary' : chosen;
   const projectTranscript = useMemo(() => createTranscriptProjection(), []);
   const items = useMemo(
-    () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking),
-    [projectTranscript, view.messages, view.streaming, view.running, modelWorking]
+    () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking, grouping),
+    [projectTranscript, view.messages, view.streaming, view.running, modelWorking, grouping]
   );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
   // What the conversation read and found, for the marks on citations; null when it never used the web.
@@ -98,6 +107,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  /** A scroll position waiting to be returned to. */
+  const restore = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [currentTurn, setCurrentTurn] = useState(0);
 
@@ -123,8 +134,22 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
+  // Opening a session returns to where it was left, or starts at the latest message. Declared before the
+  // effect below, so that one already knows which of the two applies when both run for a new session.
   useLayoutEffect(() => {
-    if (stick.current) scrollToBottom();
+    const saved = leftAt.get(summary.id);
+    restore.current = saved ?? null;
+    stick.current = saved === undefined;
+    if (saved === undefined) scrollToBottom();
+  }, [summary.id, scrollToBottom]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    // The place to return to can be reached only once the transcript is tall enough (its messages may still be loading).
+    if (el && restore.current !== null && el.scrollHeight - el.clientHeight >= restore.current) {
+      el.scrollTop = restore.current;
+      restore.current = null;
+    } else if (stick.current) scrollToBottom();
   }, [items, scrollToBottom]);
 
   const onScroll = (): void => {
@@ -133,6 +158,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
     stick.current = bottom;
     setAtBottom(bottom);
+    // While a place is still being returned to, scrolling is the transcript settling, not the user leaving it somewhere new.
+    if (bottom) leftAt.delete(summary.id);
+    else if (restore.current === null) leftAt.set(summary.id, el.scrollTop);
     const markers = el.querySelectorAll<HTMLElement>('[data-turn]');
     let current = 0;
     markers.forEach((marker, i) => {
@@ -149,15 +177,16 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     el.scrollTo({ top: marker.offsetTop - 16, behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    // Opening a session starts at the latest message.
-    stick.current = true;
-    scrollToBottom();
-  }, [summary.id, scrollToBottom]);
-
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
+  // Only the newest file card offers Undo: the snapshot from before its turn differs from now by exactly that turn.
+  const lastEdits = items.findLast((i) => i.kind === 'edits');
+  const undoTurn = (messageId: string | null): void => {
+    if (messageId !== null) useRewind.getState().open({ sessionId: summary.id, messageId, chat: false, mode: 'files' });
+  };
   const lastItem = items.at(-1);
-  const showStatus = modelWorking && view.permission === null && view.question === null;
+  // A live block of steps is the working line itself, so it stands in for the one below the transcript.
+  const liveSteps = grouping !== 'summary' && lastItem?.kind === 'activity' && lastItem.live;
+  const showStatus = modelWorking && view.permission === null && view.question === null && !liveSteps;
   const failed = summary.status === 'error' && summary.lastError && !view.turnActive;
 
   const render = (item: TranscriptItem): JSX.Element | null => {
@@ -179,13 +208,13 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <AssistantText item={item} variant={variant} actions={actions} />;
       }
       case 'thinking':
-        return <ThinkingItem item={item} />;
+        return <ThinkingItem item={item} defaultOpen={grouping === 'verbose'} />;
       case 'tools':
         return <ToolGroup calls={item.calls} />;
       case 'activity':
-        return <ActivityGroup item={item} />;
+        return grouping === 'summary' ? <ActivityGroup item={item} /> : <StepGroup item={item} verbose={grouping === 'verbose'} />;
       case 'edits':
-        return <EditsCard files={item.files} />;
+        return <EditsCard files={item.files} onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null} />;
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
       case 'sources':

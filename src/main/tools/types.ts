@@ -14,6 +14,7 @@ import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
 import type { MediaAccess } from '../media/mediaService';
 import type { AgentGroupInput } from '../agent/agentGroup';
 import type { MissionUpdateInput } from '../agent/mission';
+import type { FileProblems } from '../languages/problems';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 /** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
@@ -42,6 +43,8 @@ export interface DescribeContext {
 export interface ToolContext extends DescribeContext {
   /** Only trusted code projects may start a bundled local language server. */
   trustedProject?: boolean;
+  /** The errors that server finds in a file right after it changed; null when it cannot say. Absent where edits are not checked. */
+  checkFile?(file: string): Promise<FileProblems | null>;
   sessionId: string;
   toolUseId: string;
   signal: AbortSignal;

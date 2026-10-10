@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
-import { countChanges, parsePatch, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
+import { changedSpans, countChanges, inlineSpans, parsePatch, pieces, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
 import {
   activityTitle,
@@ -9,6 +9,7 @@ import {
   describeCall,
   diffTotals,
   groupActivity,
+  liveLabel,
   madeFiles,
   summarizeCalls,
   type ActivityItem,
@@ -123,7 +124,9 @@ describe('transcript model', () => {
         call('Edit', { file_path: 'x.ts' })
       ])
     ).toBe('Ran 2 commands (1 failed), edited x.ts');
-    expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' })])).toBe('Install dependencies');
+    // A command's description is told in the tense that fits: under way until it has a result, then done.
+    expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' })])).toBe('Installing dependencies');
+    expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' }, { display: { kind: 'text', text: '' } })])).toBe('Installed dependencies');
     expect(summarizeCalls([call('mcp__docs__search', {})])).toBe('Used search from docs');
   });
 
@@ -166,6 +169,9 @@ describe('turn activity', () => {
       ['src/new.ts', 10, 0, true],
       ['src/old.ts', 3, 2, false]
     ]);
+    // The card knows the message that started its turn: that message's snapshot is what Undo goes back to.
+    const asked = items[0];
+    expect(edits?.kind === 'edits' && edits.messageId).toBe(asked?.kind === 'user' ? asked.message.id : 'none');
     const block = items[1] as ActivityItem;
     expect(block.live).toBe(false);
     expect(block.steps.map((s) => s.kind)).toEqual(['text', 'tool', 'tool']);
@@ -248,7 +254,13 @@ describe('turn activity', () => {
       mono: false,
       title: 'src/main/agent/session.ts'
     });
-    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }))).toMatchObject({ verb: 'Run the unit tests', target: '' });
+    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }))).toMatchObject({ verb: 'Running the unit tests', target: '' });
+    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }, { display: { kind: 'text', text: '' } }))).toMatchObject({ verb: 'Ran the unit tests', target: '' });
+    expect(describeCall(call('Shell', { command: 'npm test', description: 'Final check.' }, { display: { kind: 'text', text: '' } }))).toBe('Final check');
+    // A key in a command is covered wherever the command is shown as a line.
+    const withKey = call('Shell', { command: 'curl -H "Authorization: Bearer abcDEF0123456789abcDEF0123456789" https://api.example.com' });
+    expect(callParts(withKey).target).toBe('curl -H "Authorization: Bearer abcDEF••••••••" https://api.example.com');
+    expect(describeCall(withKey)).not.toContain('0123456789');
     expect(callParts(call('Shell', { command: ['git status', 'git diff'].join('\n') }))).toMatchObject({ verb: '', target: 'git status', mono: true });
     expect(callParts(call('WebFetch', { url: 'https://www.anthropic.com/claude-opus-5-5' }))).toMatchObject({ verb: 'Reading', target: 'anthropic.com/claude-opus-5-5' });
   });
@@ -341,6 +353,80 @@ describe('turn activity', () => {
     );
     expect(split.map((i) => i.kind)).toEqual(['user', 'activity', 'todos', 'activity', 'text']);
   });
+
+  it('keeps what the agent says in view and folds only the tool steps between, in the Normal view', () => {
+    const items = groupActivity(buildTranscript(turn(), NO_LIVE), false, 'normal');
+    expect(items.map((i) => i.kind)).toEqual(['user', 'text', 'activity', 'text', 'edits']);
+    expect(items[1]).toMatchObject({ kind: 'text', text: 'Looking.' });
+    const block = items[2] as ActivityItem;
+    expect(block.live).toBe(false);
+    expect(block.steps.map((s) => s.kind)).toEqual(['tool', 'tool']);
+    expect(activityTitle(block)).toBe('Created new.ts, edited old.ts');
+    expect(diffTotals(block.steps.flatMap((s) => (s.kind === 'tool' ? [s.call] : [])))).toEqual({ added: 13, removed: 2 });
+  });
+
+  it('starts a new block of steps after each thing the agent says', () => {
+    seq = 0;
+    const items = groupActivity(
+      buildTranscript(
+        [
+          msg('user', [{ type: 'text', text: 'find it' }]),
+          msg('assistant', [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: 'a.ts' } }]),
+          msg('assistant', [{ type: 'tool_use', id: 'g', name: 'Grep', input: { pattern: 'x' } }]),
+          msg('assistant', [{ type: 'text', text: 'Found it.' }, { type: 'tool_use', id: 's', name: 'Shell', input: { command: 'ls' } }]),
+          msg('assistant', [{ type: 'text', text: 'ok' }])
+        ],
+        NO_LIVE
+      ),
+      false,
+      'normal'
+    );
+    expect(items.map((i) => i.kind)).toEqual(['user', 'activity', 'text', 'activity', 'text']);
+    expect((items[1] as ActivityItem).steps).toHaveLength(2);
+    expect((items[3] as ActivityItem).steps).toHaveLength(1);
+    // Every block keeps a key of its own, so one opening never opens another.
+    expect(new Set(items.map((i) => i.key)).size).toBe(items.length);
+  });
+
+  it('marks the newest steps as live only until the agent speaks again', () => {
+    const messages = turn().slice(0, 5);
+    const working = groupActivity(buildTranscript(messages, NO_LIVE), true, 'normal');
+    expect(working.map((i) => i.kind)).toEqual(['user', 'text', 'activity']);
+    expect((working[2] as ActivityItem).live).toBe(true);
+    const speaking = groupActivity(buildTranscript(messages, { streaming: { messageId: 'live', text: 'Writing the ans', thinking: '' }, running: {} }), true, 'normal');
+    expect(speaking.map((i) => i.kind)).toEqual(['user', 'text', 'activity', 'text']);
+    expect((speaking[2] as ActivityItem).live).toBe(false);
+    // A finished turn has no live block, whatever it ends with.
+    expect((groupActivity(buildTranscript(messages, NO_LIVE), false, 'normal')[2] as ActivityItem).live).toBe(false);
+  });
+
+  it('leaves thoughts out of the Normal view and shows them in the Thinking and Verbose views', () => {
+    seq = 0;
+    const messages = [
+      msg('user', [{ type: 'text', text: 'why?' }]),
+      msg('assistant', [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: 'a.ts' } }]),
+      msg('assistant', [{ type: 'thinking', text: 'hmm' }, { type: 'tool_use', id: 'g', name: 'Grep', input: { pattern: 'x' } }]),
+      msg('assistant', [{ type: 'text', text: 'Because.' }])
+    ];
+    const normal = groupActivity(buildTranscript(messages, NO_LIVE), false, 'normal');
+    // A thought that is not shown does not split the steps around it.
+    expect(normal.map((i) => i.kind)).toEqual(['user', 'activity', 'text']);
+    expect((normal[1] as ActivityItem).steps).toHaveLength(2);
+    for (const view of ['thinking', 'verbose'] as const) {
+      expect(groupActivity(buildTranscript(messages, NO_LIVE), false, view).map((i) => i.kind)).toEqual(['user', 'activity', 'thinking', 'activity', 'text']);
+    }
+    // The model narrating its progress is said, not thought: every view shows it.
+    const narrated = [msg('user', [{ type: 'text', text: 'go' }]), msg('assistant', [{ type: 'thinking', text: 'Checking the tests.', display: 'update' }, { type: 'text', text: 'Done.' }])];
+    expect(groupActivity(buildTranscript(narrated, NO_LIVE), false, 'normal').map((i) => i.kind)).toEqual(['user', 'thinking', 'text']);
+  });
+
+  it('names what a live block is doing: the running step, else the newest one', () => {
+    const messages = turn().slice(0, 4);
+    const idle = groupActivity(buildTranscript(messages, NO_LIVE), true, 'normal').at(-1) as ActivityItem;
+    expect(liveLabel(idle)).toBe('Edit src/old.ts');
+    const running = groupActivity(buildTranscript(messages, { streaming: null, running: { e: { name: 'Edit', summary: 'Editing old.ts', output: '' } } }), true, 'normal').at(-1) as ActivityItem;
+    expect(liveLabel(running)).toBe('Editing old.ts');
+  });
 });
 
 describe('diff model', () => {
@@ -373,6 +459,62 @@ describe('diff model', () => {
     ]);
     expect(rows.filter((r) => r.type === 'hunk').map((r) => r.hunk)).toEqual([0, 1]);
     expect(rows.find((r) => r.text === 'd')).toMatchObject({ hunk: 1, newNo: 10 });
+  });
+
+  it('marks the words that changed inside a line', () => {
+    const shown = (line: string, spans: Array<{ start: number; end: number }>): string[] => spans.map((s) => line.slice(s.start, s.end));
+    const renamed = changedSpans('return foo(bar);', 'return foo(baz);');
+    expect(renamed && [shown('return foo(bar);', renamed.before), shown('return foo(baz);', renamed.after)]).toEqual([['bar'], ['baz']]);
+
+    const before = "import { addUsage, type EffortLevel } from '@shared/schemas/common';";
+    const after = "import { addUsage, EMPTY_USAGE, type EffortLevel } from '@shared/schemas/common';";
+    const grown = changedSpans(before, after);
+    expect(grown?.before).toEqual([]);
+    expect(shown(after, grown?.after ?? []).join('')).toContain('EMPTY_USAGE');
+    // Only what was added is marked, not the rest of the line.
+    expect(shown(after, grown?.after ?? []).join('').length).toBeLessThan(16);
+
+    // Words that changed next to each other read as one mark, across the space between them.
+    const two = changedSpans('const total = first + second;', 'const total = alpha + beta;');
+    expect(two?.after.map((s) => 'const total = alpha + beta;'.slice(s.start, s.end))).toEqual(['alpha', 'beta']);
+    const run = changedSpans('say hello world now', 'say goodbye moon now');
+    expect(run?.after.map((s) => 'say goodbye moon now'.slice(s.start, s.end))).toEqual(['goodbye moon']);
+  });
+
+  it('marks nothing when two lines are the same or have little in common', () => {
+    expect(changedSpans('same', 'same')).toBeNull();
+    expect(changedSpans('', 'added')).toBeNull();
+    expect(changedSpans('return a + b;', 'export interface Thing {')).toBeNull();
+  });
+
+  it('pairs the removed and added lines of a change, one for one', () => {
+    const rows = parsePatch(['@@ -1,4 +1,3 @@', ' keep', '-const a = 1;', '-const gone = true;', '+const a = 2;', ' tail'].join('\n'));
+    const spans = inlineSpans(rows);
+    // Rows: hunk, keep, del, del, add, tail. The first removed line pairs with the added one; the second has no partner.
+    expect([...spans.keys()].sort()).toEqual([2, 4]);
+    expect(spans.get(2)).toEqual([{ start: 10, end: 11 }]);
+    expect(spans.get(4)).toEqual([{ start: 10, end: 11 }]);
+  });
+
+  it('cuts a line where its syntax tokens and its changed words begin and end', () => {
+    // "const a = 2;" as tokens [const][ a ][=][ 2][;] with the 2 changed.
+    const cut = pieces('const a = 2;', [5, 3, 1, 2, 1], [{ start: 10, end: 11 }]);
+    expect(cut.map((p) => [p.text, p.token, p.changed])).toEqual([
+      ['const', 0, false],
+      [' a ', 1, false],
+      ['=', 2, false],
+      [' ', 3, false],
+      ['2', 3, true],
+      [';', 4, false]
+    ]);
+    // Without tokens the line is cut at the changed words only; tokens that do not add up to the line are ignored.
+    expect(pieces('const a = 2;', null, [{ start: 10, end: 11 }]).map((p) => [p.text, p.token, p.changed])).toEqual([
+      ['const a = ', -1, false],
+      ['2', -1, true],
+      [';', -1, false]
+    ]);
+    expect(pieces('abc', [1, 1], []).map((p) => [p.text, p.token])).toEqual([['abc', -1]]);
+    expect(pieces('', null, [])).toEqual([]);
   });
 });
 

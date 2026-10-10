@@ -4,6 +4,7 @@ import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type Permissi
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import { MISSION_LIMITS, missionOpen, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
+import type { FileProblems } from '../languages/problems';
 import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
@@ -115,6 +116,8 @@ export interface SessionPreferences {
   maxSteps: number | null;
   /** Settings → Models → Agents: how groups of agents are routed and limited. */
   agents: AgentGroupSettings;
+  /** Settings → Models → Sessions: after an edit, the language server says what is wrong with the file. */
+  checkEdits: boolean;
 }
 
 export interface SessionDeps {
@@ -143,6 +146,8 @@ export interface SessionDeps {
   trust(projectRoot: string): void;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
   sandbox?(projectRoot: string): SandboxSettings | null;
+  /** The errors the local language server finds in a file of a project (see languages/problems.ts). Absent: edits are not checked. */
+  problems?(projectRoot: string, file: string, signal: AbortSignal): Promise<FileProblems | null>;
   /** The site from the Sites tab that this folder holds, with its live address; null for other folders. */
   site?(projectRoot: string): Promise<{ name: string; url: string } | null>;
   preferences(): SessionPreferences;
@@ -1745,6 +1750,11 @@ export class AgentSession {
       toolUseId,
       mcpRoot: this.summary.kind === 'code' ? this.settingsRoot() : null,
       trustedProject: trusted && this.summary.kind === 'code',
+      // The same gate as the SemanticCode tool: a code session in a project the user trusts. Settings can switch it off.
+      checkFile: (file) =>
+        root !== null && trusted && this.summary.kind === 'code' && this.deps.problems && this.deps.preferences().checkEdits
+          ? this.deps.problems(root, file, signal)
+          : Promise.resolve(null),
       cwd,
       projectRoot: root ?? cwd,
       platform: this.deps.platform,

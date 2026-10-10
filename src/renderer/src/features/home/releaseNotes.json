@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.6.17",
+    "date": "2026-10-10",
+    "items": [
+      "Code sessions keep what Graft says in view. The steps between fold into one line that opens into a list, such as “Read 2 files” or “Created a file, edited 5 files +185 −9”, and a running turn shows the step in progress with the time so far. Your messages sit on the right. Pick Normal, Thinking, Verbose or the earlier one-line Summary from the eye under the message box, or in Settings → Appearance.",
+      "Commands read in the tense that fits: “Running the unit tests” while they run, “Ran the unit tests” afterwards.",
+      "Diffs mark the words that changed inside a line and take syntax colours, in the transcript and in the Changes panel. An edit’s diff names its file.",
+      "After Graft edits a TypeScript or JavaScript file in a trusted project, the built-in language server checks that file and Graft sees its errors with the edit’s result, so it fixes them in its next step. The transcript lists them under the diff. Settings → Models → Check edits for errors turns this off.",
+      "API keys, tokens and passwords in command and tool output are covered until you press the eye on that output. What is stored, and what the model reads, is unchanged.",
+      "The newest “Edited files” card has Undo. It opens the rewind dialog on Files only, with the files that would change.",
+      "What you were typing survives a restart (never for incognito chats). A session opens where you left it scrolled. The permission-mode menu takes number keys.",
+      "Fixed: a long line in a diff or in command output could stretch the transcript sideways. It now scrolls inside its own box."
+    ]
+  },
+  {
     "version": "0.6.15",
     "date": "2026-10-09",
     "items": [

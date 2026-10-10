@@ -18,6 +18,7 @@ import { contextLimit, ContextUsage } from '../composer/ContextUsage';
 import { EffortPopover } from '../composer/EffortPopover';
 import { ModelQuickMenu } from '../composer/ModelQuickMenu';
 import { PermissionModeMenu } from '../composer/PermissionModeMenu';
+import { TranscriptViewMenu } from '../composer/TranscriptViewMenu';
 import { effortFor, resolveModel, sameModel } from '../models/modelChoice';
 import { PanelColumn } from '../panels/PanelColumn';
 import { ViewHeader } from '../shell/ViewHeader';
@@ -173,7 +174,12 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
               mentionRoot={folder}
               shell={folder !== null}
               autoFocus
-              leftControls={<PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />}
+              leftControls={
+                <>
+                  <PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />
+                  <TranscriptViewMenu />
+                </>
+              }
               rightControls={
                 <>
                   <ModelQuickMenu
