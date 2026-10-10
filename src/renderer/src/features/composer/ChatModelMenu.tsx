@@ -27,10 +27,13 @@ interface ChatModelMenuProps {
   onModel: (model: ModelInfo) => void;
   onEffort: (effort: EffortLevel) => void;
   disabled?: boolean;
+  /** Set both to open the menu from outside (the /model command); left out, it opens on its button only. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** Chat model menu: featured models with descriptions, an Effort submenu and More models. */
-export function ChatModelMenu({ model, effort, onModel, onEffort, disabled = false }: ChatModelMenuProps) {
+export function ChatModelMenu({ model, effort, onModel, onEffort, disabled = false, open, onOpenChange }: ChatModelMenuProps) {
   const groups = useApp((s) => s.models);
   const providers = useApp((s) => s.providers);
   const loading = useApp((s) => s.modelsLoading);
@@ -40,7 +43,7 @@ export function ChatModelMenu({ model, effort, onModel, onEffort, disabled = fal
   const providerLabel = (id: string): string => providers.find((p) => p.id === id)?.label ?? id;
 
   return (
-    <Menu>
+    <Menu {...(open !== undefined ? { open } : {})} {...(onOpenChange ? { onOpenChange } : {})}>
       <MenuTrigger asChild disabled={disabled}>
         <button
           type="button"

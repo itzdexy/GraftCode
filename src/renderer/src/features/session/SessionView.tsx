@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FileDiff, Globe, SquareTerminal, Workflow } from 'lucide-react';
+import { commandsFor } from '@shared/commands';
 import { currentPlan } from '@shared/plans';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { agentRunActive } from '@shared/schemas/agentRuns';
@@ -208,9 +209,13 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
   const levels = chatEffortLevels(model);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // The / menu of a chat: the built-in and the user's own commands, without those that work on a project.
+  const listed = useCommands(null, true);
+  const commands = useMemo(() => (listed ? commandsFor('chat', listed) : null), [listed]);
 
   const send = (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> =>
-    sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => undefined });
+    sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -236,12 +241,13 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           <Composer
             draftKey={summary.id}
             variant="code"
-            placeholder="Write a message…"
+            placeholder="Write a message, or type / for commands"
             supportsImages={model?.supportsVision ?? false}
             busy={busy}
             blockedReason={blockedReason}
             onSubmit={send}
             onInterrupt={() => interrupt(summary.id)}
+            commands={commands}
             history={!summary.incognito}
             autoFocus
             leftControls={<span className="min-w-0 truncate pl-4 text-sm text-fg-faint">{DISCLAIMER}</span>}
@@ -249,6 +255,8 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
               <ChatModelMenu
                 model={model}
                 effort={levels.length > 0 ? chatEffort(model, effort) : null}
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
                 onModel={(m) => setSessionModel(summary, m)}
                 onEffort={(level) => {
                   if (model) setSessionEffort(summary, model, level);
