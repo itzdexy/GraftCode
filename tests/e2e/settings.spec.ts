@@ -298,3 +298,38 @@ test('Settings → Usage counts a request on the day it was made, and a chat lis
   await openSettings(graft.window, 'Usage');
   await expect(graft.window.getByLabel('Totals')).toContainText('Requests1');
 });
+
+test('a turn pauses at the limit set in Settings → Permissions, and goes on when told to', async () => {
+  const project = makeGitProject({ 'notes.txt': 'hello\n' });
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider, { project });
+
+  // No limits until someone sets one, and the cost limit says what it is worked out from.
+  await openSettings(w, 'Permissions');
+  const tokens = w.getByRole('combobox', { name: 'Tokens per turn' });
+  await expect(tokens).toHaveValue('none');
+  await expect(w.getByRole('combobox', { name: 'Cost per turn' })).toHaveValue('none');
+  await expect(w.getByRole('combobox', { name: 'Time per turn' })).toHaveValue('none');
+  await expect(w.getByText(/worked out from published prices, so your bill can differ/)).toBeVisible();
+  await tokens.selectOption('250000');
+  await expect(tokens).toHaveValue('250000');
+  await shot(w, 'settings-turn-limits');
+
+  await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
+  provider.script(
+    { toolCalls: [{ name: 'Glob', input: { pattern: '*.txt' } }], usage: { prompt_tokens: 300_000, completion_tokens: 30 } },
+    { text: 'Found notes.txt.' }
+  );
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('List the text files');
+  await composer.press('Enter');
+  await expect(w.getByText('Paused after about 300,030 tokens, past the limit of 250,000 for one turn set in Settings → Permissions.')).toBeVisible();
+  await expect(w.getByText('Found notes.txt.')).toHaveCount(0);
+  await shot(w, 'turn-paused-at-limit');
+
+  // Continue is a new turn with a fresh allowance.
+  await w.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(w.getByText('Found notes.txt.')).toBeVisible();
+});

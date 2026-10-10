@@ -25,6 +25,7 @@ import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
 import { shouldCompact } from './tokens';
+import { TurnBudget } from './turnBudget';
 
 /** A sub-agent's steps when Settings sets no limit: it reports back on one delegated task, so it stays bounded. */
 const SUBAGENT_ITERATIONS = 200;
@@ -97,6 +98,8 @@ export class SessionHost {
   private readonly agentGroups = new Map<string, GraphControl>();
   /** The permission request on screen and those behind it (see prompt). */
   private promptChain: Promise<unknown> = Promise.resolve();
+  /** What the running turn has used against the limits from Settings; null when none is set. */
+  private turn: TurnBudget | null = null;
 
   constructor(private readonly ports: HostPorts) {}
 
@@ -116,6 +119,15 @@ export class SessionHost {
     this.ports.emit(event);
   }
 
+  /**
+   * Starts counting for a new turn. Every loop the turn starts reports its usage here, so the
+   * limits hold for the whole of the work: the main agent, its sub-agents and its groups.
+   */
+  beginTurn(): void {
+    const limits = this.deps.preferences().turnBudget;
+    this.turn = limits.tokens !== null || limits.costUsd !== null || limits.minutes !== null ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
+  }
+
   // ---- what the user is being asked ----------------------------------------
 
   /** The request and the question on screen, for a view that opens while they wait. */
@@ -129,6 +141,7 @@ export class SessionHost {
    * because the request it refers to is already gone.
    */
   cancelPending(): void {
+    this.turn?.waiting(false);
     if (this.pendingPermission) {
       const { request } = this.pendingPermission;
       this.pendingPermission.resolve({ decision: 'deny' });
@@ -162,6 +175,7 @@ export class SessionHost {
     }
     this.emit({ type: 'permission-resolved', requestId: response.requestId });
     this.ports.setStatus('running');
+    this.turn?.waiting(false);
     pending.resolve({
       decision: response.decision,
       ...(response.feedback ? { feedback: response.feedback } : {}),
@@ -177,6 +191,7 @@ export class SessionHost {
     this.pendingQuestion = null;
     this.emit({ type: 'question-resolved', requestId: response.requestId });
     this.ports.setStatus('running');
+    this.turn?.waiting(false);
     pending.resolve(response.dismissed ? null : response.answers);
   }
 
@@ -212,6 +227,8 @@ export class SessionHost {
       }
       this.pendingPermission = { request, resolve };
       this.ports.setStatus('needs-input');
+      // The time the user takes to answer is theirs, not the turn's.
+      this.turn?.waiting(true);
       this.emit({ type: 'permission', request });
       this.deps.notify(this.summary, 'needs-input', request.title);
     });
@@ -301,7 +318,10 @@ export class SessionHost {
         this.deps.store.updateSession(this.id, { usage: next });
         this.emit({ type: 'usage', usage: next });
         this.countForToday(answering.model.ref, usage, costUsd);
+        const unfollowed = this.turn?.add(usage, costUsd, answering.model.label) ?? null;
+        if (unfollowed) this.ports.notice('warning', unfollowed);
       },
+      overBudget: () => this.turn?.exceeded() ?? null,
       fallback: async (_error, signal) => {
         const backup = await this.backupFor(answering.model, needs, signal);
         // From here the loop is measured against the backup, its tools know that model, and what it uses is the backup's.
@@ -388,6 +408,7 @@ export class SessionHost {
           const request: QuestionRequest = { id: randomUUID(), sessionId: this.id, toolUseId, questions };
           this.pendingQuestion = { request, resolve };
           this.ports.setStatus('needs-input');
+          this.turn?.waiting(true);
           this.emit({ type: 'question', request });
           this.deps.notify(this.summary, 'needs-input', questions[0]?.question ?? 'The agent has a question');
         }),
@@ -444,6 +465,7 @@ export class SessionHost {
         this.deps.store.updateSession(this.id, { usage: next });
         this.emit({ type: 'usage', usage: next });
         this.countForToday(MEDIA_USAGE, EMPTY_USAGE, costUsd);
+        this.turn?.spend(costUsd);
       },
       deferredTools: this.ports.deferredTools(model)
     };
@@ -605,6 +627,10 @@ export class SessionHost {
       );
       if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
       if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
+      // Cut short by the turn's own limit: it did not finish, so its last words are not a report
+      // and what it changed stays in its checkout (kept below) instead of going in half done.
+      const over = result.reason === 'guard' ? (this.turn?.exceeded() ?? null) : null;
+      if (over !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this sub-agent finished. ${over}`);
       if (lease && this.deps.workspaces) {
         await privateHost?.close();
         const touched = scratch.flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && !b.isError && b.display?.kind === 'edit' ? [b.display.path] : [])));

@@ -1939,6 +1939,137 @@ describe('steps per turn', () => {
   });
 });
 
+describe('limits for one turn', () => {
+  const pauses = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Paused') ? [e.text] : []));
+
+  it('pauses when the turn has used its tokens, and continues with a fresh allowance', async () => {
+    const h = harness({
+      turnBudget: { tokens: 1500 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 1000, outputTokens: 50 } },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], usage: { inputTokens: 1000, outputTokens: 50 } },
+        { text: 'Finished after continuing.', usage: { inputTokens: 100, outputTokens: 10 } }
+      ]
+    });
+    h.session.send('work');
+    await h.session.idle();
+    expect(pauses(h)).toEqual(['Paused after about 2,100 tokens, past the limit of 1,500 for one turn set in Settings → Permissions.']);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Paused'))).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.provider.requests).toHaveLength(2);
+    expect(h.session.summary.status).toBe('idle');
+
+    h.session.retry();
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(3);
+    expect(texts(h).at(-1)).toBe('assistant:Finished after continuing.');
+    expect(pauses(h)).toHaveLength(1);
+  });
+
+  it('counts what a sub-agent used toward the turn that started it, and pauses once', async () => {
+    const h = harness({
+      turnBudget: { tokens: 5000 },
+      script: [
+        { toolCalls: [{ name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }], usage: { inputTokens: 500, outputTokens: 20 } },
+        { text: 'Report: nothing here', usage: { inputTokens: 6000, outputTokens: 10 } },
+        { text: 'never asked for' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual(['Paused after about 6,530 tokens, past the limit of 5,000 for one turn set in Settings → Permissions.']);
+    // The sub-agent's report still came back: the pause is the turn's, after the step that passed the limit.
+    expect(JSON.stringify(h.store.listMessages('session-1'))).toContain('Report: nothing here');
+  });
+
+  it('reports a sub-agent the limit cut short as stopped, not as finished', async () => {
+    const h = harness({
+      turnBudget: { tokens: 5000 },
+      script: [
+        { toolCalls: [{ id: 'task-1', name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }], usage: { inputTokens: 500, outputTokens: 20 } },
+        // The sub-agent is in the middle of its work when the turn's count goes over.
+        { text: 'Let me look.', toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 6000, outputTokens: 10 } },
+        { text: 'never asked for' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    const results = h.store.listMessages('session-1').flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && b.toolUseId === 'task-1' ? [b] : [])));
+    expect(results).toHaveLength(1);
+    expect(results[0]!.isError).toBe(true);
+    expect(results[0]!.content.map((b) => (b.type === 'text' ? b.text : '')).join('')).toContain(
+      'Stopped: the turn reached a limit before this sub-agent finished. Paused after about 6,530 tokens, past the limit of 5,000 for one turn set in Settings → Permissions.'
+    );
+    expect(pauses(h)).toHaveLength(1);
+  });
+
+  it('pauses after the minutes it worked, and the time an approval waited is not work', async () => {
+    let at = Date.parse('2026-09-30T12:00:00Z');
+    const h = harness({
+      now: () => new Date(at),
+      turnBudget: { minutes: 10 },
+      script: [
+        { toolCalls: [{ name: 'Edit', input: { file_path: 'a.ts', old_string: 'one', new_string: 'two' } }] },
+        // Eleven minutes pass while this step is being worked on.
+        () => {
+          at += 11 * 60_000;
+          return { toolCalls: [{ name: 'Glob', input: { pattern: '*.ts' } }] };
+        },
+        { text: 'never asked for' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.ts', 'const x = "one";\n');
+    h.session.send('change one to two');
+    const event = await h.waitFor((e) => e.type === 'permission');
+    if (event.type !== 'permission') throw new Error('unreachable');
+    // Half an hour before the user answers: three times the limit, and none of it the turn's.
+    at += 30 * 60_000;
+    h.session.respondPermission({ requestId: event.request.id, decision: 'allow-once' });
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual(['Paused after 10 minutes of work, the limit for one turn set in Settings → Permissions.']);
+  });
+
+  it('pauses on cost for a model with a price, and says the amount is an estimate', async () => {
+    const h = harness({
+      model: { pricing: { input: 1000, output: 1000 } },
+      turnBudget: { costUsd: 0.5 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 250, outputTokens: 50 } },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], usage: { inputTokens: 250, outputTokens: 50 } },
+        { text: 'never asked for' }
+      ]
+    });
+    h.session.send('work');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual(['Paused at about $0.60, past the limit of $0.50 for one turn set in Settings → Permissions. The amount comes from published prices and can differ from your bill.']);
+  });
+
+  it('says once that a model with no published price is outside the cost limit, and lets it work', async () => {
+    const h = harness({
+      turnBudget: { costUsd: 0.5 },
+      script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] }, { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] }, { text: 'Done.' }]
+    });
+    h.session.send('work');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+    const said = h.events.filter((e) => e.type === 'notice' && /cost limit for one turn can't follow/.test(e.text));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ text: "The cost limit for one turn can't follow Fake Model: it has no published price. Its requests are counted in tokens and time only." });
+  });
+
+  it('sets no limit unless Settings does', async () => {
+    const h = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 60_000, outputTokens: 50 } }, { text: 'Done.' }] });
+    h.session.send('work');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+  });
+});
+
 describe('sending a queued message now', () => {
   it('hands the message to the running turn after its next tool step, without stopping it', async () => {
     const h = harness({

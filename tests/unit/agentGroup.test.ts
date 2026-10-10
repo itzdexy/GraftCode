@@ -193,6 +193,27 @@ describe('a group of agents', () => {
     expect(h.runs.modest).toMatchObject({ status: 'done' });
   });
 
+  it('stops its agents at the limit of the turn that started them, without another attempt, and pauses the turn once', async () => {
+    const h = await run({
+      turnBudget: { tokens: 20_000 },
+      group: [explorer('one', 'Read everything'), explorer('two', 'Read the rest')],
+      agent: () => ({ toolCalls: [{ name: 'Glob', input: { pattern: '**/*' } }], usage: { inputTokens: 25_000, outputTokens: 100 } })
+    });
+    const stopped = /^Stopped: the turn reached a limit before this agent finished\. Paused after about [\d,]+ tokens, past the limit of 20,000 for one turn set in Settings → Permissions\.$/;
+    for (const id of ['one', 'two']) {
+      // The limit is the turn's, so trying the agent again would only spend more: one attempt, and the reason in its record.
+      expect(h.runs[id]).toMatchObject({ status: 'failed', attempt: 1, retries: [] });
+      expect(h.runs[id]!.error).toMatch(stopped);
+    }
+    // Each agent got one request in before the count was over; neither was asked again.
+    expect(h.provider.requests.filter((request) => taskOf(request) !== null)).toHaveLength(2);
+    // The turn says it once, with Continue, and does not go back to the model for a summary.
+    const pauses = h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Paused') ? [e] : []));
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0]).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.provider.requests.filter((request) => taskOf(request) === null)).toHaveLength(1);
+  });
+
   it('asks the user about one action at a time when agents working side by side both need approval', async () => {
     const h = start({
       mode: 'ask',

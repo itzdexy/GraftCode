@@ -122,7 +122,15 @@ export const AppSettingsSchema = z.object({
     /** Code sessions may see the screen and use the mouse and keyboard (asks before each action). */
     computerUse: z.boolean(),
     /** Pause a turn after this many model steps; null lets turns run until the work is done. */
-    maxSteps: z.number().int().min(10).max(10_000).nullable()
+    maxSteps: z.number().int().min(10).max(10_000).nullable(),
+    /**
+     * Limits for one turn, with every sub-agent and group it starts: the tokens that cost money, the
+     * estimated cost in US dollars, and the minutes it works (waiting for the user doesn't count).
+     * null sets none. Reaching one pauses the turn and offers to continue.
+     */
+    turnTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    turnCostUsd: z.number().min(0.01).max(100_000).nullable(),
+    turnMinutes: z.number().int().min(1).max(10_080).nullable()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -207,7 +215,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnCostUsd: null, turnMinutes: null },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },
