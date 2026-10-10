@@ -46,6 +46,9 @@
    model with its requests, tokens and cost.
 11. In a chat, type `/`: the commands a chat can use are listed, and `/model` opens the
    model menu.
+12. Open **Settings** and type `motion` in **Search settings**: "Motion" is listed with
+   its page, Appearance. Press Enter: that page opens with the setting in view and
+   marked for a moment. Type something that is nowhere: "No setting matches."
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

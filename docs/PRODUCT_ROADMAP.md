@@ -59,6 +59,14 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   `implementation` and `typeDefinition` take a place like the others. Packages' own
   declarations are left out, the name as asked comes first, and kinds are told to the model
   in words. The transcript has a row for each question instead of the tool's name.
+- **Settings search** (`settingsSearch.ts`, `SettingsView.tsx`). A box above the pages finds
+  pages and single settings, each with its page; Enter takes the first, the arrow keys
+  move through them, and the row or group that was taken brings itself into view and
+  stays marked for a moment (`FoundSetting` in `common.tsx`). What can be found is
+  `settingsIndex.json`: every row and group whose name is written out in a page's source,
+  read out by `tests/unit/settingsIndex.test.ts`, which fails when the file is behind (run
+  it with `-u` after adding a setting). The pages stand under five headings
+  (`SETTINGS_GROUPS`).
 - **Secrets covered in what is shown** (`shared/secrets.ts`, `Output.tsx`). Keys by shape
   (provider keys, GitHub, AWS, Google, Slack, Stripe, Hugging Face, npm, signed web tokens,
   private key blocks), bearer values, passwords in addresses, and values assigned to names
@@ -503,6 +511,11 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 - The transcript view is one setting for every code session, not a choice per session. In
   the Normal view a thought is left out entirely; only Thinking and Verbose show it.
+- Settings search finds the 90 rows and groups whose name is written out in a page's
+  source. A row whose name is worked out when it is drawn, a provider, a shortcut, and
+  what the Integrations, Hooks and Memory pages hold are found by their page only. It
+  matches words and the starts of words, not meanings: "dark" does not find Theme.
+  Settings is still a page, not a window over the session as in Claude.
 - `SemanticCode` answers for TypeScript and JavaScript only, in trusted projects, and a
   search by name needs any file of the project to say which project is meant. It finds
   what the server's own search finds: at most a few hundred names, matched by prefix,

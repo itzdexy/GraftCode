@@ -54,6 +54,51 @@ test('web search is free by default; picking an engine updates what Graft search
   await expect(w.getByText('Search is off.')).toBeVisible();
 });
 
+test('settings are found by searching: a setting opens its page and shows itself, a page opens by its name', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+  await openSettings(w, 'Profile');
+  const nav = w.getByRole('navigation', { name: 'Settings' });
+  // The pages stand under headings.
+  await expect(nav.getByRole('group', { name: 'Agent' }).getByRole('button', { name: 'Permissions', exact: true })).toBeVisible();
+
+  const search = nav.getByRole('searchbox', { name: 'Search settings' });
+  await search.fill('motion');
+  const hits = nav.getByRole('list', { name: 'Settings found' });
+  // The setting comes with the page it is on, before the page that only mentions it.
+  await expect(hits.getByRole('button').first()).toHaveText(/Motion\s*Appearance/);
+  await hits.getByRole('button', { name: /^Motion/ }).click();
+  await expect(w.getByRole('heading', { level: 2, name: 'Appearance' })).toBeVisible();
+  await expect(w.getByText('Motion', { exact: true })).toBeInViewport();
+  // The search is over once something is taken: the list of pages is back.
+  await expect(search).toHaveValue('');
+  await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'page');
+  await shot(w, 'settings-search-found');
+
+  // Enter takes the first thing found.
+  await search.fill('check edits');
+  await search.press('Enter');
+  await expect(w.getByRole('heading', { level: 2, name: 'Models' })).toBeVisible();
+  await expect(w.getByRole('switch', { name: 'Check edits for errors' })).toBeInViewport();
+
+  // A page by its name; the arrow keys reach what was found.
+  await search.fill('shortcuts');
+  await search.press('ArrowDown');
+  await expect(hits.getByRole('button').first()).toBeFocused();
+  await w.keyboard.press('Enter');
+  await expect(w.getByRole('heading', { level: 2, name: 'Shortcuts' })).toBeVisible();
+
+  await search.fill('zebra crossing');
+  await expect(nav.getByRole('status')).toHaveText('No setting matches.');
+  await shot(w, 'settings-search-none');
+  // Escape empties the box and leaves Settings open.
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(nav.getByRole('button', { name: 'Shortcuts', exact: true })).toBeVisible();
+});
+
 test('settings: appearance, rebinding a shortcut, a second provider and permission rules', async () => {
   provider = await MockProvider.start();
   graft = await launchGraft();
