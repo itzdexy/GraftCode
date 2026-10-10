@@ -177,6 +177,18 @@ export const RunAgentsInput = z.object({
 });
 export type RunAgentsInput = z.infer<typeof RunAgentsInput>;
 
+/**
+ * What RunAgents is in a chat, where a group can only research: the tool's own description
+ * is about a team that changes a project, which a chat has no use for.
+ */
+export const RUN_AGENTS_IN_CHAT = [
+  'Run several researchers as one group. Each has a fresh context of its own and one question; researchers that depend on nothing work side by side,',
+  'and one with depends_on starts once those have finished and receives their reports.',
+  'Use it for a question with several separate parts: role researcher, one agent for each part, each with a brief that stands on its own.',
+  'They can search and read the web and nothing else, so leave out writes and verify. The user sees the group as a graph and can open every agent.',
+  'It returns each researcher\'s findings and the pages it read; read them, and write the answer yourself.'
+].join(' ');
+
 export const runAgentsTool: ToolDefinition<RunAgentsInput> = {
   name: 'RunAgents',
   description: [

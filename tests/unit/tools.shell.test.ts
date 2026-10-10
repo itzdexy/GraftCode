@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { OutputBuffer, stripAnsi } from '../../src/main/tools/shell/outputBuffer';
-import { BASH_WRAPPER, msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
+import { BASH_WRAPPER, killProcessTree, msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
 import { killShellTool, shellOutputTool, shellTool } from '../../src/main/tools/shell/shellTools';
 import { fetchPage, pointsInside, redirectProblem, webFetchTool, WebFetchInput } from '../../src/main/tools/web/webFetch';
 import { htmlToText } from '../../src/main/tools/web/htmlToText';
@@ -48,26 +48,57 @@ describe('shell detection', () => {
     expect(msysTreeWinPids(ps, 94).sort()).toEqual([10176, 10968, 27876, 30000].sort());
   });
 
-  it.skipIf(process.platform === 'win32')('records the actual Bash PID for process-tree cleanup', async () => {
+  // The wrapper runs under bash, zsh or sh on every system; only PowerShell has no wrapper PID. On Windows the
+  // marker is the one thing the cleanup of Git Bash's descendants starts from, so this must run there too.
+  it.skipIf(isPowerShell)('records the PID the shell knows itself by, which the process-tree cleanup looks up', async () => {
+    const shell = detectShell(process.platform, process.env);
+    const flags = shell.kind === 'bash' ? ['--noprofile', '--norc'] : shell.kind === 'zsh' ? ['-f'] : [];
     const pidFile = path.join(dir, 'wrapper.pid');
-    const child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', BASH_WRAPPER], {
+    const ownPidFile = path.join(dir, 'own.pid');
+    const child = spawn(shell.path, [...flags, '-c', BASH_WRAPPER], {
       cwd: dir,
       env: {
         ...process.env,
         GRAFT_STATE_CWD: path.join(dir, 'wrapper.cwd'),
         GRAFT_STATE_ENV: path.join(dir, 'wrapper.env'),
         GRAFT_STATE_PID: pidFile,
-        GRAFT_CWD: dir,
-        GRAFT_CMD: 'true'
+        GRAFT_OWN_PID: ownPidFile,
+        GRAFT_CWD: dir.split(path.sep).join('/'),
+        GRAFT_CMD: 'printf %s "$$" > "$GRAFT_OWN_PID"'
       },
-      stdio: 'ignore'
+      stdio: 'ignore',
+      windowsHide: true
     });
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once('error', reject);
       child.once('close', resolve);
     });
     expect(exitCode).toBe(0);
-    expect(Number(fs.readFileSync(pidFile, 'utf8').trim())).toBe(child.pid);
+    const recorded = fs.readFileSync(pidFile, 'utf8').trim();
+    expect(recorded).toMatch(/^[1-9]\d*$/);
+    // What the shell calls itself. Under Git Bash that is its MSYS PID: the one `ps` lists and the cleanup follows.
+    expect(recorded).toBe(fs.readFileSync(ownPidFile, 'utf8').trim());
+    // Everywhere else it is also the process Node started.
+    if (process.platform !== 'win32') expect(Number(recorded)).toBe(child.pid);
+  });
+
+  it.runIf(process.platform === 'win32')('still stops the command when the list of MSYS processes cannot be read, and says so', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+    try {
+      const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+      const pidFile = path.join(dir, 'recorded.pid');
+      fs.writeFileSync(pidFile, '4242\n');
+      // A folder with no ps.exe in it: looking up the shell's descendants cannot even start.
+      const outcome = await killProcessTree(child, { platform: 'win32', msysTools: dir, pidFile }).then(
+        () => 'said nothing',
+        (error: Error) => error.message
+      );
+      await Promise.race([closed, new Promise<void>((_, reject) => setTimeout(() => reject(new Error('the command is still running')), 8000))]);
+      // The command itself is gone, and the hole in the cleanup is reported instead of passing for a full one.
+      expect(outcome).toMatch(/ps\.exe/);
+    } finally {
+      child.kill();
+    }
   });
 
   it('keeps head and tail of long output and strips ANSI codes', () => {
@@ -127,6 +158,39 @@ describe('Shell tool', () => {
     expect(result.display).toMatchObject({ interrupted: true });
   });
 
+  /** A loop that leaves a mark five times a second and ends by itself after 40 s, so a failed test cannot leave it running for good. */
+  const heartbeat = (file: string, before = ''): string => `${before}i=0; while [ $i -lt 200 ]; do echo beat >> "${file}"; i=$((i+1)); sleep 0.2; done`;
+  const sizeOf = (file: string): number => fs.statSync(file).size;
+  const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it.skipIf(isPowerShell)('leaves nothing running after a timeout, not even what outlived the process that started it', async () => {
+    const ctx = makeToolContext(dir);
+    const beat = path.join(dir, 'beat.log').split(path.sep).join('/');
+    // The inner shell starts the loop and exits at once, so the loop's parent is gone. Windows can no longer reach
+    // it from the command's process tree (taskkill /T stops at the missing link); only the shell's own record of
+    // its process group does, which is found from the PID the wrapper wrote down.
+    const result = await shellTool.execute({ command: `sh -c '( ${heartbeat(beat)} ) &'; sleep 30`, timeout_ms: 1500 }, ctx);
+    expect(result.display).toMatchObject({ timedOut: true });
+    expect(sizeOf(beat)).toBeGreaterThan(0);
+    await pause(1000);
+    const settled = sizeOf(beat);
+    await pause(1500);
+    expect(sizeOf(beat)).toBe(settled);
+  }, 30_000);
+
+  it.skipIf(process.platform === 'win32')('kills what ignores the polite signal once the grace period is over, though the shell itself is gone', async () => {
+    const ctx = makeToolContext(dir);
+    const beat = path.join(dir, 'beat.log');
+    // The loop ignores SIGTERM (and so does every sleep it starts); the shell that ran the command does not, and dies.
+    const result = await shellTool.execute({ command: `sh -c '${heartbeat(beat, 'trap "" TERM; ')}' & sleep 30`, timeout_ms: 1000 }, ctx);
+    expect(result.display).toMatchObject({ timedOut: true });
+    // Two seconds of grace, then SIGKILL for the whole group.
+    await pause(3500);
+    const settled = sizeOf(beat);
+    await pause(1500);
+    expect(sizeOf(beat)).toBe(settled);
+  }, 30_000);
+
   it('truncates huge output for the model but keeps the full log on disk', async () => {
     const ctx = makeToolContext(dir);
     const command = isPowerShell
@@ -161,6 +225,42 @@ describe('Shell tool', () => {
     expect(ctx.shells.list(ctx.sessionId)[0]?.status).toBe('killed');
     expect((await shellOutputTool.execute({ shell_id: 'bg-nope' }, ctx)).isError).toBe(true);
   });
+
+  /** Waits until a heartbeat has been written at least once. */
+  const beating = async (...files: string[]): Promise<void> => {
+    for (let i = 0; i < 100 && !files.every((file) => fs.existsSync(file) && sizeOf(file) > 0); i++) await pause(100);
+    for (const file of files) expect(sizeOf(file)).toBeGreaterThan(0);
+  };
+  /** True when nothing writes to the files any more. */
+  const silent = async (...files: string[]): Promise<boolean> => {
+    await pause(1000);
+    const settled = files.map(sizeOf);
+    await pause(1500);
+    return files.every((file, index) => sizeOf(file) === settled[index]);
+  };
+
+  it.skipIf(isPowerShell)('stops what a session left running in the background when the session is closed', async () => {
+    const ctx = makeToolContext(dir);
+    const beat = path.join(dir, 'closed.log').split(path.sep).join('/');
+    await shellTool.execute({ command: heartbeat(beat), run_in_background: true }, ctx);
+    await beating(beat);
+    await ctx.shells.disposeSession(ctx.sessionId);
+    expect(ctx.shells.list(ctx.sessionId)[0]?.status).toBe('killed');
+    expect(await silent(beat)).toBe(true);
+  }, 30_000);
+
+  it.skipIf(isPowerShell)('stops the command that is running and the background jobs when the app shuts down', async () => {
+    const ctx = makeToolContext(dir);
+    const front = path.join(dir, 'front.log').split(path.sep).join('/');
+    const back = path.join(dir, 'back.log').split(path.sep).join('/');
+    await shellTool.execute({ command: heartbeat(back), run_in_background: true }, ctx);
+    // Forty seconds of work if nothing stops it: longer than this test may take.
+    const running = shellTool.execute({ command: heartbeat(front), timeout_ms: 120_000 }, ctx);
+    await beating(front, back);
+    await ctx.shells.disposeAll();
+    await running;
+    expect(await silent(front, back)).toBe(true);
+  }, 30_000);
 });
 
 describe('WebFetch', () => {

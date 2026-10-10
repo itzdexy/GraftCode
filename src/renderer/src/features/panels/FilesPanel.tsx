@@ -12,6 +12,7 @@ import { useLoad } from '../../lib/useLoad';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
+import { draftSaves, type SaveTarget } from './draftSaves';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
 import { closeWorkspaceTab, loadWorkspaceLayout, openWorkspaceTab, saveWorkspaceLayout, setWorkspaceTabMode, type WorkspaceTab } from './workspaceLayout';
@@ -263,6 +264,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   const request = useRef(0);
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const saver = useRef<((target: SaveTarget) => void) | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [position, setPosition] = useState<CodeLocation | null>(null);
 
@@ -348,19 +350,19 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   const recoveryPaths = Object.entries(drafts).filter(([key, value]) => key.startsWith(`${sessionId}:`) && value.content !== value.original).map(([key]) => key.slice(sessionId.length + 1));
   const edit = editing === draftKey && !!draft && !!ready;
   const dirty = !!draft && draft.content !== draft.original;
-  const save = async (): Promise<void> => {
-    if (!draft || !selected || saving || !dirty) return;
-    const path = selected;
-    const key = draftKey;
-    const next = request.current;
-    setSaving(true); setSaveError(null);
-    try {
-      const result = await invoke('files:save', { sessionId, path, content: draft.content, revision: draft.revision });
-      if (result.revision) useEditorDrafts.getState().saved(key, draft.content, result.revision);
-      if (next === request.current) setPreview({ state: 'ready', preview: result });
-      setSaved((n) => n + 1);
-    } catch (error) { if (next === request.current) setSaveError(errorText(error)); }
-    finally { setSaving(false); }
+  // Ctrl+S reaches this before React has drawn the last keystrokes, or the end of the save before:
+  // the draft and whether a save is running are read where they live (draftSaves), not from this render.
+  // Made on the first save and kept: this view is mounted once for a session, so sessionId stays the same.
+  const save = (): void => {
+    if (!selected) return;
+    saver.current ??= draftSaves({
+      write: (target, content, revision) => invoke('files:save', { sessionId, path: target.path, content, revision }),
+      started: () => { setSaving(true); setSaveError(null); },
+      saved: (target, result) => { if (target.view === request.current) setPreview({ state: 'ready', preview: result }); setSaved((n) => n + 1); },
+      failed: (target, error) => { if (target.view === request.current) setSaveError(errorText(error)); },
+      settled: () => setSaving(false)
+    });
+    saver.current({ key: draftKey, path: selected, view: request.current });
   };
   const shown: ViewState = view && view.path === selected ? view : { path: selected ?? '', fit: true, source: false, pixels: null };
   const picture = ready?.media === 'image' && !ready.tooLarge;
@@ -405,7 +407,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
               if (edit) { setEditing(null); setLayout((current) => setWorkspaceTabMode(current, selected, 'preview')); }
               else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); setLayout((current) => setWorkspaceTabMode(current, selected, 'edit')); }
             }}><Pencil className="size-13" /></IconButton> : null}
-            {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={() => void save()}><Save className="size-13" /></IconButton> : null}
+            {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={save}><Save className="size-13" /></IconButton> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
@@ -435,7 +437,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
             {edit && draft ? <Suspense fallback={<LoadingState label="Loading editor…" />}><TextEditor key={`${sessionId}:${selected}:${opened}`} sessionId={sessionId} file={selected} value={draft.content} position={position} onNavigate={(location) => open(location.file, location)}
-              onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={() => void save()} /></Suspense> : ready ? (
+              onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={save} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}
           </div>

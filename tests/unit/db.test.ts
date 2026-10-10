@@ -186,6 +186,19 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
   });
 
+  it('gives an install from before the limits for one turn no limits, and keeps what it had set', () => {
+    const stored = { runInTray: true, bypassModeEnabled: false, bypassKeepsChecks: true, autoCompact: false, webSearch: true, computerUse: false, maxSteps: 250 };
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('behavior', JSON.stringify(stored));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnCostUsd: null, turnMinutes: null });
+    settings.update({ behavior: { turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 } });
+    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 });
+    // A limit too small to be meant is refused, and nothing changes.
+    expect(() => settings.update({ behavior: { turnTokens: 5 } })).toThrow(/turnTokens/);
+    expect(() => settings.update({ behavior: { turnCostUsd: 0 } })).toThrow(/turnCostUsd/);
+    expect(new AppSettingsService(db).get().behavior.turnTokens).toBe(1_000_000);
+  });
+
   it('gives an install from before the sound switch the sound, and keeps its notification choices', () => {
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('notifications', JSON.stringify({ enabled: true, needsInput: false, finished: true, errors: false }));
     const settings = new AppSettingsService(db);
