@@ -241,8 +241,8 @@ Commands, commits and skips: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 On `feat/claude-like-session-view` (local, not pushed), which contains the 0.6.16 branch.
 Typecheck, lint, 1116 unit tests and 51 desktop tests pass on Windows; 1108 unit tests
-pass in a Linux container, where the 51 desktop tests passed on the merge commit and the
-two specs the last commit concerns passed on it. No package was built and nothing was
+and the 51 desktop tests pass in a Linux container (`npm run verify:docker`, new in this
+round, runs all of it there). No package was built and nothing was
 installed. The schema is unchanged from 0.6.16 (8). Settings gain two fields with
 defaults (`appearance.transcriptView`, `behavior.checkEdits`), so older settings load
 as they are. Commands, commits and what failed on the way: `UPGRADE_TEST_REPORT.md`,

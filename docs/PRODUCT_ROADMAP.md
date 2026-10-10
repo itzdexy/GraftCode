@@ -80,6 +80,10 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 - **Fixed:** a folding section could grow wider than the transcript (`.graft-collapse` had
   no column limit), so a long diff line stretched the page sideways.
 - ESLint leaves `.claude/` alone: it can hold whole worktrees someone is still editing.
+- `npm run verify:docker` (`scripts/e2e-docker.mjs --all`): typecheck, lint, the unit
+  suite, the build and the desktop suite in one Linux container from the working tree.
+  Every step runs whatever the one before it did, each writes its log to
+  `test-results/docker/`, and `summary.txt` has the exit codes.
 
 ### 0.6.16 hardening, usage, limits and agents' backup (2026-10-10)
 

@@ -133,7 +133,8 @@ lock); the changed workflows were parsed and their new step run by hand.
 Branch `feat/claude-like-session-view`, local only: nothing of it was pushed, and no
 package was built. It sits on `origin/main` at `5f586fc` and contains
 `feat/reliability-security-upgrade` (0.6.16, `b51155e`), merged at `9e2e771`. The last
-commit that changes code or tests is `38605bb`; what follows it is Markdown only. Two
+commit that changes the app or its tests is `38605bb`. After it come Markdown, a merge
+of `origin/main` that changes no file (`613421d`), and the container script. Two
 systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm` container
 (Docker 29.8.0) packed from the working tree. Nothing here ran on macOS, on GitHub's
 runners, or against a paid provider.
@@ -151,10 +152,12 @@ runners, or against a paid provider.
 | `npm run build`, `xvfb-run -a npx playwright test` | Linux container, `9e2e771` | exit 0; 51 passed, 5 skipped, 0 failed (4.1 min) |
 | `npx vitest run` | Linux container, `38605bb` | 88 files passed, 2 skipped; 1108 tests passed, 37 skipped, 0 failed |
 | `xvfb-run -a npx playwright test tests/e2e/semantic.spec.ts tests/e2e/editor.spec.ts` | Linux container, `38605bb` | 4 passed |
+| `npm run verify:docker` | Linux container, `613421d` with the script's own change | typecheck, lint and build exit 0; 88 files passed, 2 skipped; 1108 tests passed, 37 skipped, 0 failed; desktop suite 51 passed, 5 skipped, 0 failed (4.0 min) |
 
-`38605bb` differs from `9e2e771` in the language server client, the `SemanticCode` tool,
-the transcript's labels, one line of the system prompt and their tests, so on Linux the
-whole desktop suite was not repeated for it; the two specs that touch those parts were.
+`npm run verify:docker` is new in this round (`scripts/e2e-docker.mjs --all`): one
+container runs every step whatever the one before it did and writes each step's log
+and a line of exit codes to `test-results/docker/`. Its first run is the last row
+above, so the final tree has a complete Linux pass.
 
 What failed on the way, and where it came from:
 
