@@ -263,6 +263,14 @@ export class GeminiProvider implements LLMProvider {
       }
     }
 
+    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+    // The end of the connection is not the end of the reply: only a finish reason is, or a prompt the
+    // provider refused. What was streamed stays visible; the function calls of a reply nobody confirmed
+    // are never offered to the loop.
+    if (finishReason === undefined && !blocked) {
+      throw new ProviderError('network', 'The reply stopped before it was complete. Gemini did not send a finish reason.');
+    }
+
     if (thought.length > 0) yield { type: 'block', block: { type: 'thinking', text: thought, display: 'summary', origin: 'gemini' } };
     if (text.length > 0) yield { type: 'block', block: { type: 'text', text } };
     for (const call of calls) {

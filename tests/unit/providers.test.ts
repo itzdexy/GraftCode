@@ -262,6 +262,58 @@ describe('Anthropic adapter', () => {
     expect(String(sent?.headers['anthropic-beta'])).toContain('thinking-display-updates');
   });
 
+  it('rejects a stream that ends before the model said it was done: what arrived stays, its tool call is never offered, nothing is retried', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // Everything up to the closed tool call, then the connection ends: no message_delta with a stop reason, no message_stop.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 13)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const seen: StreamEvent[] = [];
+    const retries: number[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+    };
+    const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+    expect(seen.filter((e) => e.type === 'text-delta')).toEqual([
+      { type: 'text-delta', text: 'Reading ' },
+      { type: 'text-delta', text: 'it now.' }
+    ]);
+    expect(seen.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text']);
+    expect(seen.some((e) => e.type === 'finish')).toBe(false);
+    expect(retries).toEqual([]);
+    expect(server.requests.filter((r) => r.path.startsWith('/v1/messages'))).toHaveLength(1);
+  });
+
+  it('takes the stop reason as the end of the reply when the closing event is lost, and keeps the order of what the model wrote', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // message_delta arrived with stop_reason tool_use; only message_stop is missing.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 14)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    expect(events.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text', 'tool_use']);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+  });
+
+  it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 8)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const controller = new AbortController();
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), controller.signal, () => undefined)) {
+        if (event.type === 'text-delta') controller.abort();
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+  });
+
   it('falls back to summarized thinking when a model rejects progress-update display', async () => {
     server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
     let calls = 0;
@@ -529,6 +581,72 @@ describe('Gemini adapter', () => {
     );
     expect(contents[0]?.parts[0]).toMatchObject({ functionCall: { name: 'Grep' }, thoughtSignature: 'ts-1' });
     expect(contents[1]?.parts[0]).toEqual({ functionResponse: { name: 'Grep', response: { output: '3 matches' } } });
+  });
+
+  describe('a reply that is not finished', () => {
+    const listed = { name: 'models/gen-pro-3', displayName: 'Gen Pro 3', inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking: true };
+    const connect = async (): Promise<{ provider: GeminiProvider; model: StreamRequest['model'] }> => {
+      server.route('GET', '/v1beta/models', (_req, res) => json(res, 200, { models: [listed] }));
+      const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+      const [model] = await provider.listModels();
+      return { provider, model: model! };
+    };
+
+    it('rejects EOF without a finish reason: partial text stays, the function call is never offered, nothing is retried', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Looking for it.' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'Grep', args: { pattern: 'x' } } }] } }] } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const seen: StreamEvent[] = [];
+      const retries: number[] = [];
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+      };
+      const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+      expect(seen).toEqual([{ type: 'text-delta', text: 'Looking for it.' }]);
+      expect(retries).toEqual([]);
+      expect(server.requests.filter((r) => r.path.includes(':streamGenerateContent'))).toHaveLength(1);
+    });
+
+    it('accepts a reply whose last chunk carries the finish reason, whatever came in the chunks before', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Done ' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'here.' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 3 } } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events).toContainEqual({ type: 'block', block: { type: 'text', text: 'Done here.' } });
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+    });
+
+    it('takes a blocked prompt as an answer: a refusal, with no candidate and no finish reason', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { promptFeedback: { blockReason: 'SAFETY' } } }]));
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'refusal' });
+    });
+
+    it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Partial' }] } }] } }]));
+      const { provider, model } = await connect();
+      const controller = new AbortController();
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), controller.signal, () => undefined)) {
+          if (event.type === 'text-delta') controller.abort();
+        }
+      };
+      await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+    });
   });
 
   it('reports an invalid key as an auth error', async () => {
