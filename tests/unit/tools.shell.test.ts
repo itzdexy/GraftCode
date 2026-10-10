@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { OutputBuffer, stripAnsi } from '../../src/main/tools/shell/outputBuffer';
-import { msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
+import { BASH_WRAPPER, msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
 import { killShellTool, shellOutputTool, shellTool } from '../../src/main/tools/shell/shellTools';
 import { fetchPage, pointsInside, redirectProblem, webFetchTool, WebFetchInput } from '../../src/main/tools/web/webFetch';
 import { htmlToText } from '../../src/main/tools/web/htmlToText';
@@ -45,6 +46,28 @@ describe('shell detection', () => {
       'I      97      94      94      10968  ?         197609 18:32:32 /usr/bin/ps'
     ].join('\n');
     expect(msysTreeWinPids(ps, 94).sort()).toEqual([10176, 10968, 27876, 30000].sort());
+  });
+
+  it.skipIf(process.platform === 'win32')('records the actual Bash PID for process-tree cleanup', async () => {
+    const pidFile = path.join(dir, 'wrapper.pid');
+    const child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', BASH_WRAPPER], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GRAFT_STATE_CWD: path.join(dir, 'wrapper.cwd'),
+        GRAFT_STATE_ENV: path.join(dir, 'wrapper.env'),
+        GRAFT_STATE_PID: pidFile,
+        GRAFT_CWD: dir,
+        GRAFT_CMD: 'true'
+      },
+      stdio: 'ignore'
+    });
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', resolve);
+    });
+    expect(exitCode).toBe(0);
+    expect(Number(fs.readFileSync(pidFile, 'utf8').trim())).toBe(child.pid);
   });
 
   it('keeps head and tail of long output and strips ANSI codes', () => {
