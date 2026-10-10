@@ -48,17 +48,21 @@ describe('shell detection', () => {
     expect(msysTreeWinPids(ps, 94).sort()).toEqual([10176, 10968, 27876, 30000].sort());
   });
 
-  it.skipIf(process.platform === 'win32')('records the actual Bash PID for process-tree cleanup', async () => {
+  it.skipIf(process.platform === 'win32' && detectShell('win32', process.env).kind !== 'bash')('records the actual Bash PID for process-tree cleanup', async () => {
     const pidFile = path.join(dir, 'wrapper.pid');
-    const child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', BASH_WRAPPER], {
+    const expectedPidFile = path.join(dir, 'wrapper.expected');
+    const bashPath = process.platform === 'win32' ? detectShell('win32', process.env).path : '/bin/bash';
+    const shellCwd = process.platform === 'win32' ? dir.split(path.sep).join('/') : dir;
+    const child = spawn(bashPath, ['--noprofile', '--norc', '-c', BASH_WRAPPER], {
       cwd: dir,
       env: {
         ...process.env,
         GRAFT_STATE_CWD: path.join(dir, 'wrapper.cwd'),
         GRAFT_STATE_ENV: path.join(dir, 'wrapper.env'),
         GRAFT_STATE_PID: pidFile,
-        GRAFT_CWD: dir,
-        GRAFT_CMD: 'true'
+        GRAFT_EXPECTED_PID: expectedPidFile,
+        GRAFT_CWD: shellCwd,
+        GRAFT_CMD: 'printf "%s" "$$" > "$GRAFT_EXPECTED_PID"'
       },
       stdio: 'ignore'
     });
@@ -67,7 +71,10 @@ describe('shell detection', () => {
       child.once('close', resolve);
     });
     expect(exitCode).toBe(0);
-    expect(Number(fs.readFileSync(pidFile, 'utf8').trim())).toBe(child.pid);
+    const recordedPid = fs.readFileSync(pidFile, 'utf8').trim();
+    const expectedPid = fs.readFileSync(expectedPidFile, 'utf8').trim();
+    expect(recordedPid).toMatch(/^\d+$/);
+    expect(recordedPid).toBe(expectedPid);
   });
 
   it('keeps head and tail of long output and strips ANSI codes', () => {
