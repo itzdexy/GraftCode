@@ -47,6 +47,7 @@ import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/per
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
 import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
+import { UsageDaySchema } from '../usage';
 
 /**
  * Every renderer → main request, with Zod schemas for input and output.
@@ -478,6 +479,8 @@ export const contracts = {
   'data:export': channel(Void, z.object({ path: z.string(), sessions: z.number().int() }).nullable()),
   'data:clearHistory': channel(Void, ClearHistoryResultSchema),
   'data:openFolder': channel(Void, Void),
+  // What was used on a day and after, by day and model (Settings → Usage).
+  'usage:days': channel(z.object({ fromDay: UsageDaySchema.shape.day }), z.array(UsageDaySchema)),
   'updates:state': channel(Void, UpdateStateSchema),
   'updates:check': channel(Void, UpdateStateSchema),
   'updates:install': channel(Void, Ok)

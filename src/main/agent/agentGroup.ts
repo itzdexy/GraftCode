@@ -15,7 +15,7 @@ import { FileStateTracker } from '../tools/fileState';
 import type { ToolRegistry } from '../tools/registry';
 import type { AgentDefinition } from './agents';
 import { toLlmHistory } from './history';
-import { runAgentLoop, runToolCall, type LoopConfig, type LoopHost } from './loop';
+import { backupReason, runAgentLoop, runToolCall, type LoopConfig, type LoopHost } from './loop';
 import { routeModel, type Route } from './modelRouter';
 import { runGraph, type GraphControl, type NodeState } from './orchestrator';
 import { resolveRole, type ResolvedRole } from './roles';
@@ -74,8 +74,11 @@ export interface GroupHost {
   /** Every model the user can use, for routing. */
   candidates(signal: AbortSignal): Promise<ModelInfo[]>;
   resolve(ref: ModelRef, signal: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo }>;
-  /** The loop host a sub-agent builds on: permission prompts, tool context, hooks, the session's usage. */
-  loopHost(model: ModelInfo, provider: LLMProvider): LoopHost;
+  /**
+   * The loop host an agent builds on: permission prompts, tool context, hooks, the session's usage,
+   * and the backup model, which has to see when the agent's work is looking at pictures.
+   */
+  loopHost(model: ModelInfo, provider: LLMProvider, needsVision: boolean): LoopHost;
   workspaces?: AgentWorkspaces;
   effort(model: ModelInfo): EffortLevel | null;
   /** Stores an agent's record and tells the interface. */
@@ -305,7 +308,7 @@ async function runAgent(
   let spent = 0;
   let overBudget = false;
   const scratch: StoredMessage[] = [];
-  const original = host.loopHost(model, provider);
+  const original = host.loopHost(model, provider, role.needsVision);
   const lease = host.workspaces && role.tools.some((tool) => WRITE_TOOLS.includes(tool))
     ? await host.workspaces.create(original.describeContext().cwd, signal) : null;
   if (lease) change({ workspace: lease.info }, { kind: 'start', text: 'Working in a private checkout; integration checks for destination conflicts.' });
@@ -369,6 +372,18 @@ async function runAgent(
     maybeCompact: () => Promise.resolve(null),
     todos: () => [],
     takeSteering: () => Promise.resolve([]),
+    fallback: async (error, s) => {
+      const next = (await parent.fallback?.(error, s)) ?? null;
+      if (!next) return null;
+      // The rounds after a failed check start on the model that works, not on the one that didn't answer.
+      Object.assign(config, { provider: next.provider, model: next.model, effort: next.effort });
+      const why = backupReason(error) ?? 'failing';
+      change(
+        { model: { ...next.model.ref, label: next.model.label }, routing: [...(current()?.routing ?? []), `${model.label} wasn't answering (${why}), so ${next.model.label} finished the work.`] },
+        { kind: 'retry', text: `${model.label} wasn't answering (${why}). Continued on ${next.model.label}.` }
+      );
+      return next;
+    },
     onUsage: (usage, _context, costUsd) => {
       // The session pays for its agents; the agent's own totals are kept beside it.
       parent.onUsage(usage, null, costUsd);

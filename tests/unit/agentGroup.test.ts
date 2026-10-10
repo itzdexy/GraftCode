@@ -398,6 +398,85 @@ describe('a group of agents', () => {
     expect(h.runs.rev!.routing.join(' ')).toMatch(/assigned/i);
   });
 
+  describe('with a backup model in Settings', () => {
+    const main = fakeModel();
+    const small = fakeModel({ ref: { providerId: 'fake', modelId: 'small-model' }, label: 'Small Model' });
+    const backup = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model' });
+    const busy = { error: new ProviderError('overloaded', 'The provider is overloaded (529).') };
+
+    it('finishes an agent on the backup when its own model keeps failing, and says so in its record', async () => {
+      const asked: string[] = [];
+      const h = await run({
+        models: [main, small, backup],
+        agents: { roles: { reviewer: small.ref }, retries: 0 },
+        fallbackModel: backup.ref,
+        group: [{ id: 'rev', role: 'reviewer', task: 'Review the diff', prompt: 'Review.' }, explorer('look', 'Look around')],
+        agent: (task, request) => {
+          asked.push(`${task}: ${request.model.ref.modelId}`);
+          return request.model.ref.modelId === 'small-model' ? busy : { text: `${task} done.`, usage: { inputTokens: 300, outputTokens: 40 } };
+        }
+      });
+      expect(h.runs.rev).toMatchObject({ status: 'done', result: 'Review the diff done.', attempt: 1 });
+      expect(h.runs.rev!.model).toMatchObject({ modelId: 'backup-model', label: 'Backup Model' });
+      expect(h.runs.rev!.routing.at(-1)).toBe("Small Model wasn't answering (overloaded), so Backup Model finished the work.");
+      expect(h.runs.rev!.timeline.map((e) => e.text)).toContain("Small Model wasn't answering (overloaded). Continued on Backup Model.");
+      expect(h.events.some((e) => e.type === 'notice' && e.text === "Small Model isn't answering (overloaded). Continuing with Backup Model.")).toBe(true);
+      // Its own model was tried through its retries first, and the other agent never left its model.
+      expect(asked.filter((a) => a === 'Review the diff: small-model')).toHaveLength(3);
+      expect(asked.filter((a) => a.startsWith('Look around'))).toEqual(['Look around: fake-model']);
+      expect(h.runs.look!.model).toMatchObject({ modelId: 'fake-model' });
+      // The agent's tokens are the backup's, in the agent's record and in the day's.
+      expect(h.runs.rev!.usage).toMatchObject({ inputTokens: 300, outputTokens: 40 });
+      expect(h.store.usageSince('2000-01-01').find((r) => r.modelId === 'backup-model')).toMatchObject({ requests: 1 });
+    });
+
+    it('stays on the backup for the rounds after a failed check', async () => {
+      const check = `node -e "process.exit(require('fs').existsSync('ok.txt') ? 0 : 1)"`;
+      const asked: string[] = [];
+      const h = await run({
+        models: [main, small, backup],
+        agents: { roles: { coder: small.ref }, retries: 0 },
+        fallbackModel: backup.ref,
+        group: [{ id: 'fix', role: 'implementer', task: 'Make the check pass', prompt: 'Do it.', verify: check }],
+        agent: (_task, request) => {
+          asked.push(request.model.ref.modelId);
+          if (request.model.ref.modelId === 'small-model') return busy;
+          if (!sentText(request).includes('failed (round')) return { text: 'Done, I think.' };
+          const last = request.messages.at(-1);
+          return last?.content.some((b) => b.type === 'tool_result') ? { text: 'Fixed for real.' } : { toolCalls: [{ name: 'Write', input: { file_path: 'ok.txt', content: 'ok\n' } }] };
+        }
+      });
+      expect(h.runs.fix).toMatchObject({ status: 'done', result: 'Fixed for real.' });
+      // Three tries of its own model, once; every request after that goes to the backup.
+      expect(asked.slice(0, 3)).toEqual(['small-model', 'small-model', 'small-model']);
+      expect(asked.slice(3).every((id) => id === 'backup-model')).toBe(true);
+      expect(asked.length).toBeGreaterThan(4);
+    });
+
+    it('is not given an agent that has to see when it cannot, or one whose model it already is', async () => {
+      const blind = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model', supportsVision: false });
+      const looks = await run({
+        models: [main, blind],
+        agents: { retries: 0 },
+        fallbackModel: blind.ref,
+        group: [{ id: 'ui', role: 'ui-reviewer', task: 'Check the page', prompt: 'Look.' }],
+        agent: () => busy
+      });
+      expect(looks.runs.ui).toMatchObject({ status: 'failed' });
+      expect(looks.runs.ui!.model).toMatchObject({ modelId: 'fake-model' });
+
+      const same = await run({
+        models: [main, small],
+        agents: { roles: { reviewer: small.ref }, retries: 0 },
+        fallbackModel: small.ref,
+        group: [{ id: 'rev', role: 'reviewer', task: 'Review the diff', prompt: 'Review.' }],
+        agent: () => busy
+      });
+      expect(same.runs.rev).toMatchObject({ status: 'failed' });
+      expect(same.runs.rev!.error).toMatch(/overloaded/);
+    });
+  });
+
   it('takes a group away with the turn that started it when the session is rewound', async () => {
     const h = await run({ group: [explorer('a', 'Look around')], agent: () => ({ text: 'Looked.' }) });
     expect(h.store.listAgentRuns('session-1')).toHaveLength(1);
@@ -422,6 +501,17 @@ describe('a group of researchers in a chat', () => {
     });
     expect(tools).toEqual({ 'Find the dates': ['WebFetch', 'WebSearch'], 'Write it up': ['WebFetch', 'WebSearch'] });
     expect([h.runs.r!.status, h.runs.w!.status]).toEqual(['done', 'done']);
+  });
+
+  it('is told what RunAgents does in a chat: researchers on the web, not implementers and testers', async () => {
+    const described = (h: Harness): string => h.provider.requests[0]!.tools.find((t) => t.name === 'RunAgents')?.description ?? '';
+    const chat = await run({ ...web, group: [{ id: 'r', role: 'researcher', task: 'Find the dates', prompt: 'Find them.' }], agent: () => ({ text: 'Done.' }) });
+    expect(described(chat)).toContain('Run several researchers as one group.');
+    expect(described(chat)).toContain('They can search and read the web and nothing else');
+    expect(described(chat)).not.toMatch(/implementer|tester|verify command/);
+    // A code session keeps the description of the whole team.
+    const code = await run({ group: [explorer('a', 'Look around')], agent: () => ({ text: 'Looked.' }) });
+    expect(described(code)).toContain('explorers side by side, then implementers');
   });
 
   it('refuses a group that asks for a command to be run or files to be changed: a chat has no project', async () => {
