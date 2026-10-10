@@ -142,6 +142,23 @@ describe('session lists', () => {
     expect(groups[0]?.detail).toBeNull();
   });
 
+  it('keeps the header of a project whose sessions all wait under Needs you, so another can be started there', () => {
+    const waiting = [
+      session({ id: 'w1', projectPath: 'C:/work/beta', projectName: 'beta', status: 'needs-input' }),
+      session({ id: 'w2', projectPath: 'C:/work/beta', projectName: 'beta', status: 'error' }),
+      session({ id: 'w3', projectPath: 'C:/work/Alpha', projectName: 'Alpha', status: 'needs-input' }),
+      session({ id: 'w4', projectPath: null, projectName: null, status: 'error' })
+    ];
+    const groups = groupByProject([session({ id: '1', projectPath: 'C:/work/Alpha', projectName: 'Alpha' })], waiting);
+    expect(groups.map((g) => [g.name, g.sessions.map((s) => s.id), g.elsewhere])).toEqual([
+      ['Alpha', ['1'], 1],
+      ['beta', [], 2]
+    ]);
+    // A session with no folder has no project to start another in: nothing is kept for it.
+    expect(groupByProject([], [waiting[3]!])).toEqual([]);
+    expect(groupByProject([session({ id: '1', projectPath: 'C:/work/Alpha', projectName: 'Alpha' })])[0]?.elsewhere).toBe(0);
+  });
+
   it('orders home sessions by attention, then recency', () => {
     const list = homeSessions(
       [

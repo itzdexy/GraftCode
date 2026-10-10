@@ -129,8 +129,8 @@ function ChatList({ sessions, activeId, controls }: { sessions: SessionSummary[]
   );
 }
 
-function CodeList({ sessions, activeId, controls }: { sessions: SessionSummary[]; activeId: string | null; controls: boolean }) {
-  const groups = useMemo(() => groupByProject(sessions), [sessions]);
+function CodeList({ sessions, elsewhere, activeId, controls }: { sessions: SessionSummary[]; elsewhere: SessionSummary[]; activeId: string | null; controls: boolean }) {
+  const groups = useMemo(() => groupByProject(sessions, elsewhere), [sessions, elsewhere]);
   if (groups.length === 0) {
     return (
       <section aria-label="Sessions">
@@ -157,11 +157,15 @@ function CodeList({ sessions, activeId, controls }: { sessions: SessionSummary[]
             ) : null}
             {i === 0 && controls ? <ListControls kind="code" /> : null}
           </ListHeader>
-          <ul className="flex flex-col">
-            {group.sessions.map((s) => (
-              <SessionRow key={s.id} session={s} active={s.id === activeId} />
-            ))}
-          </ul>
+          {group.sessions.length > 0 ? (
+            <ul className="flex flex-col">
+              {group.sessions.map((s) => (
+                <SessionRow key={s.id} session={s} active={s.id === activeId} />
+              ))}
+            </ul>
+          ) : (
+            <EmptyList text={group.elsewhere === 1 ? 'Its session is under Needs you.' : `Its ${String(group.elsewhere)} sessions are under Needs you.`} />
+          )}
         </section>
       ))}
     </div>
@@ -248,7 +252,7 @@ export function Sidebar() {
             {needing.length > 0 && rest.length === 0 ? null : mode === 'chat' ? (
               <ChatList sessions={rest} activeId={activeId} controls={needing.length === 0} />
             ) : (
-              <CodeList sessions={rest} activeId={activeId} controls={needing.length === 0} />
+              <CodeList sessions={rest} elsewhere={needing} activeId={activeId} controls={needing.length === 0} />
             )}
           </div>
         ) : null}
