@@ -12,16 +12,21 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# Read-only by default. Only the jobs that create, fill or publish the release get to write,
+# and none of them leaves its token on disk for the build's dependencies to find.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     name: Validate before packaging
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -35,8 +40,13 @@ jobs:
     name: Draft the release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Check the tag matches package.json
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - name: Create the draft with the notes from What's new
@@ -65,9 +75,14 @@ jobs:
             platform: --linux
             app: dist/linux-unpacked/graft
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -81,6 +96,26 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a npx playwright test packaged; else npx playwright test packaged; fi
         env:
           GRAFT_PACKAGED_EXE: ${{ matrix.app }}
+      # What is published can be checked by hand: every installer carries the version being released,
+      # and its SHA-256 goes into the release beside it.
+      - name: Check the installers' names and write their checksums
+        shell: bash
+        run: |
+          shopt -s nullglob
+          version="$(node -p "require('./package.json').version")"
+          files=(dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb)
+          if [ "${#files[@]}" -eq 0 ]; then echo "No installer was built." >&2; exit 1; fi
+          for file in "${files[@]}"; do
+            case "$file" in
+              *"$version"*) ;;
+              *) echo "$file does not carry version $version." >&2; exit 1 ;;
+            esac
+          done
+          sums="dist/SHA256SUMS-${RUNNER_OS}.txt"
+          for file in "${files[@]}"; do
+            if command -v sha256sum > /dev/null; then sha256sum "$file"; else shasum -a 256 "$file"; fi
+          done | sed -E 's#^([0-9a-f]{64}) [ *]dist/#\1  #' > "$sums"
+          cat "$sums"
       - name: Attach the installers to the draft
         if: github.event_name == 'push'
         shell: bash
@@ -88,11 +123,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=(dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb dist/*.blockmap dist/latest*.yml)
+          files=(dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb dist/*.blockmap dist/latest*.yml dist/SHA256SUMS-*.txt)
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
       - name: Keep the installers (dry run)
         if: github.event_name != 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: graft-${{ runner.os }}
           path: |
@@ -103,10 +138,11 @@ jobs:
             dist/*.deb
             dist/*.blockmap
             dist/latest*.yml
+            dist/SHA256SUMS-*.txt
           retention-days: 7
       - name: Keep traces and screenshots of failures
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: smoke-results-${{ runner.os }}
           path: test-results/
@@ -117,6 +153,9 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - name: Publish the draft
         env:
