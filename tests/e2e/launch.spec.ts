@@ -1,3 +1,5 @@
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { launchGraft } from './support/launch';
 
@@ -32,5 +34,40 @@ test('app launches with a sandboxed renderer and shows the Graft mark', async ()
     expect(unknown).toMatchObject({ ok: false, error: { code: 'unknown_channel' } });
   } finally {
     await graft.close();
+  }
+});
+
+test('a page Graft did not write is granted nothing: not in the session that pictures sites, not in one nobody set up', async () => {
+  // A page on this computer, as a site is: a secure context, where notifications and location can be asked for at all.
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<!doctype html><title>probe</title>');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/`;
+  const graft = await launchGraft();
+  try {
+    const states = await graft.app.evaluate(async ({ BrowserWindow }, page) => {
+      const probe = async (partition: string): Promise<{ notifications: string; location: string }> => {
+        const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition } });
+        try {
+          await win.loadURL(page);
+          return (await win.webContents.executeJavaScript(
+            "navigator.permissions.query({ name: 'geolocation' }).then((status) => ({ notifications: Notification.permission, location: status.state }))"
+          )) as { notifications: string; location: string };
+        } finally {
+          win.destroy();
+        }
+      };
+      return { thumbnails: await probe('graft-site-thumbnails'), unknown: await probe('graft-e2e-never-set-up') };
+    }, url);
+    // Electron grants everything to a session with no handler; every session Graft makes starts out refusing.
+    expect(states).toEqual({
+      thumbnails: { notifications: 'denied', location: 'denied' },
+      unknown: { notifications: 'denied', location: 'denied' }
+    });
+  } finally {
+    await graft.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
