@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { Usage } from '@shared/schemas/common';
 import type { LlmMessage } from '@shared/schemas/messages';
-import type { ModelInfo } from '@shared/schemas/models';
-import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier, labelFromId, THINKING_BUDGETS } from './catalog';
+import type { EffortSupport, ModelInfo } from '@shared/schemas/models';
+import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier, labelFromId, nearestAvailable, THINKING_BUDGETS } from './catalog';
 import { ProviderError } from './errors';
+import { catalogEffort, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { joinUrl, request, requestJson } from './http';
 import { parseSse } from './sse';
 import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, StreamRequest } from './types';
@@ -32,6 +33,25 @@ interface GeminiContent {
 const NON_TEXT_MODELS = /(embedding|aqa|imagen|tts|veo|learnlm|live|native-audio|image-generation|robotics)/i;
 /** Largest thinking budget accepted across current thinking models. */
 const MAX_BUDGET = 24_576;
+
+/**
+ * Gemini 3 and later are told how hard to think by a named level (`thinkingLevel`); the
+ * models before them take a token budget and refuse a level. The two are never sent together.
+ */
+export function takesThinkingLevel(modelId: string): boolean {
+  const major = /^gemini-(\d+)/.exec(modelId)?.[1];
+  return major !== undefined && Number(major) >= 3;
+}
+
+/**
+ * The effort control of a Gemini model. For one that takes a level, the catalog says which
+ * levels; a model the catalog doesn't know gets `low` and `high`, the two every Gemini 3 model
+ * accepts. Earlier thinking models get the levels Graft turns into budgets.
+ */
+export function geminiEffort(modelId: string, thinking: boolean, meta: CatalogModel | null): EffortSupport | null {
+  if (takesThinkingLevel(modelId)) return catalogEffort(meta, { reasoning: thinking, fallback: ['low', 'high'], allowOff: false, budgets: false });
+  return thinking ? effortSupport(['low', 'medium', 'high', 'extra', 'max', 'taproot']) : null;
+}
 
 export function toGeminiContents(messages: LlmMessage[], vision: boolean): GeminiContent[] {
   const names = new Map<string, string>();
@@ -108,7 +128,14 @@ export class GeminiProvider implements LLMProvider {
   private readonly base: string;
   private readonly apiKey: string;
 
-  constructor(connection: ProviderConnection) {
+  /** The catalog entry that describes this connection's models (Google's own, unless the connection names another). */
+  private readonly preset: string | null;
+
+  constructor(
+    connection: ProviderConnection,
+    private readonly catalog: ProviderCatalog | null = null
+  ) {
+    this.preset = connection.preset ?? NATIVE_PRESET.gemini ?? null;
     if (!connection.apiKey) throw new ProviderError('auth', 'An API key is required.', { retryable: false });
     this.id = connection.id;
     this.apiKey = connection.apiKey;
@@ -143,7 +170,7 @@ export class GeminiProvider implements LLMProvider {
       .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && !NON_TEXT_MODELS.test(m.name))
       .map((m): ModelInfo => {
         const id = m.name.replace(/^models\//, '');
-        const effort = m.thinking ? effortSupport(['low', 'medium', 'high', 'extra', 'max', 'taproot']) : null;
+        const effort = geminiEffort(id, m.thinking === true, this.catalog?.model(this.preset, id) ?? null);
         const contextWindow = m.inputTokenLimit ?? 1_048_576;
         return {
           ref: { providerId: this.id, modelId: id },
@@ -167,9 +194,15 @@ export class GeminiProvider implements LLMProvider {
 
   async *streamText(req: StreamRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
     const modelId = req.model.ref.modelId;
+    // A model listed with named levels carries each level's wire value; one without takes a budget.
+    // A level the model doesn't have (a summary is asked for at "low") becomes the nearest it does.
+    const named = req.model.effort?.values;
+    const level = req.effort && named ? nearestAvailable(req.effort, named) : undefined;
     const thinking =
       req.model.effort && req.effort
-        ? { includeThoughts: true, thinkingBudget: Math.min(MAX_BUDGET, Math.max(1024, THINKING_BUDGETS[req.effort])) }
+        ? typeof level === 'string'
+          ? { includeThoughts: true, thinkingLevel: level.toUpperCase() }
+          : { includeThoughts: true, thinkingBudget: Math.min(MAX_BUDGET, Math.max(1024, THINKING_BUDGETS[req.effort])) }
         : undefined;
     const body = {
       contents: toGeminiContents(req.messages, req.model.supportsVision),

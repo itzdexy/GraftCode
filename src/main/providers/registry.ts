@@ -26,7 +26,7 @@ export const createProvider: ProviderFactory = (connection, record, catalog) => 
     case 'anthropic':
       return new AnthropicProvider(connection);
     case 'gemini':
-      return new GeminiProvider(connection);
+      return new GeminiProvider(connection, catalog);
     case 'ollama':
       return new OllamaProvider(connection, record.customModels);
     case 'openai':
