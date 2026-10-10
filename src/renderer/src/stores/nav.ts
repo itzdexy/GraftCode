@@ -20,6 +20,7 @@ export type SettingsSection =
   | 'appearance'
   | 'shortcuts'
   | 'notifications'
+  | 'usage'
   | 'data'
   | 'about';
 
