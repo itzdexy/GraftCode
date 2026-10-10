@@ -343,6 +343,7 @@ npm run dev        # run Graft with hot reload
 | `GRAFT_LIVE_MCP=1 npx vitest run tests/unit/mcp.live.test.ts` | Starts real MCP servers through Graft's manager and checks the integrations catalogue against npm, PyPI and the remote endpoints (needs the network, Node.js and uv) |
 | `npm run test:e2e` | End-to-end tests that drive the built app (Playwright) |
 | `npm run test:e2e:docker` | Runs the end-to-end tests in a Linux container, from the working tree (needs Docker) |
+| `npm run verify:docker` | Typecheck, lint, unit tests, build and the end-to-end tests in one Linux container, from the working tree; every step runs and `test-results/docker/summary.txt` has each one's exit code (needs Docker) |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds installers with electron-builder |
 | `npm run dist:linux:docker` | Builds and smoke-tests the Linux installers in a Docker container, from any OS |
 | `npm run icons` | Regenerates the app and tray icons from the mascot sprite |

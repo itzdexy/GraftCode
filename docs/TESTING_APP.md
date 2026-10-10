@@ -57,6 +57,9 @@ npm test
 npm run test:e2e
 ```
 
+`npm run verify:docker` runs the same four and the build in a clean Linux container
+(needs Docker). Some faults show on one system only, so a change is checked on both.
+
 Windows packaging: `npm run dist:win`. The packaged smoke tests also check SQLite,
 bundled search, the editor, TypeScript language server and a real terminal:
 

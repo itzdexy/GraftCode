@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:e2e": "electron-vite build && playwright test",
     "test:e2e:docker": "node scripts/e2e-docker.mjs",
+    "verify:docker": "node scripts/e2e-docker.mjs --all",
     "measure": "node scripts/measure-reference.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "catalog": "node scripts/update-catalog.mjs",
