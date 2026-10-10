@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.6.14",
+    "date": "2026-10-10",
+    "items": [
+      "Usage: Settings → Usage shows what Graft used on each day and with each model: requests, tokens sent and written, and what it cost. Counting starts with this version. A model with no published price is counted without a cost, and incognito chats are not counted.",
+      "The backup model also finishes the work of a sub-agent, or of an agent in a group, when that agent's model keeps failing. The agent's record says which model took over and why.",
+      "Old tool output that Graft removed to make room stays removed after a restart. Before, a reopened session sent it all again until it next filled up.",
+      "Gemini 3 and later are told how hard to think by level, as Google's API asks, and the effort menu shows the levels each model has. Earlier Gemini models keep their thinking budget.",
+      "Chats have the / menu: /research, /context, /clear, /compact and the other commands a chat can use. /model opens the chat's model menu. Commands that work on a project, such as /plan, /commit and /review, say so in a chat instead of being sent to the model.",
+      "With only / typed, the menu lists every command instead of the twelve with the shortest names, and the list follows the arrow keys as you move through it.",
+      "In a chat, the model is told what a group of agents is there: researchers who search and read the web, one for each part of a question.",
+      "A project whose only session is listed under Needs you keeps its header in the sidebar, with the button to start another session there."
+    ]
+  },
+  {
     "version": "0.6.13",
     "date": "2026-10-06",
     "items": [

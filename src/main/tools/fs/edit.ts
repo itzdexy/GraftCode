@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { unifiedDiff } from '../diffUtil';
 import { displayPath, resolvePath } from '../paths';
 import { errorResult, textResult, type ToolDefinition } from '../types';
-import { freshnessError, writeFileAtomic } from './write';
+import { freshnessError, problemsAfter, writeFileAtomic } from './write';
 
 const EditSpec = z.object({
   old_string: z.string().describe('Exact text to replace, including indentation. Must be unique unless replace_all is set.'),
@@ -200,14 +200,16 @@ async function runEdits(filePath: string, edits: EditSpec[], ctx: Parameters<Too
   ctx.files.record(abs);
   const diff = unifiedDiff(shown, loaded, current);
   const message = `Edited ${shown}: ${replacements} replacement${replacements === 1 ? '' : 's'} (+${diff.added} −${diff.removed}).`;
-  const notes = [...looseNotes, ctx.notesForPaths([abs])].filter((n) => n).join('\n\n');
+  const checked = await problemsAfter(abs, shown, ctx);
+  const notes = [...looseNotes, checked.note, ctx.notesForPaths([abs])].filter((n) => n).join('\n\n');
   return textResult(notes ? `${message}\n\n${notes}` : message, {
     kind: 'edit',
     path: shown,
     created: false,
     patch: diff.patch,
     added: diff.added,
-    removed: diff.removed
+    removed: diff.removed,
+    ...checked.display
   });
 }
 

@@ -184,5 +184,26 @@ CREATE TABLE missions (
 ) STRICT;
 CREATE INDEX idx_missions_session ON missions (session_id, created_at);
 `
+  },
+  {
+    version: 5,
+    name: 'usage by day and the cutoff for removed tool output',
+    sql: `
+ALTER TABLE sessions ADD COLUMN prune_before INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE usage_days (
+  day TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  requests INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  unpriced INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, provider_id, model_id)
+) STRICT;
+`
   }
 ];

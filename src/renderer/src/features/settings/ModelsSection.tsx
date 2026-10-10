@@ -190,6 +190,12 @@ export function ModelsSection() {
           checked={settings.behavior.autoCompact}
           onChange={(autoCompact) => saveSettings({ behavior: { autoCompact } })}
         />
+        <SwitchRow
+          label="Check edits for errors"
+          description="After Graft changes a TypeScript or JavaScript file, the project's own TypeScript says what is wrong with it, and Graft fixes that in its next step instead of finding out from a build. Only in projects you trust, and not where commands run in a sandbox."
+          checked={settings.behavior.checkEdits}
+          onChange={(checkEdits) => saveSettings({ behavior: { checkEdits } })}
+        />
       </Group>
 
       <AgentsSettings models={models} />

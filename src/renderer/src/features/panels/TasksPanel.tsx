@@ -10,6 +10,7 @@ import { relativeTime } from '../../lib/format';
 import { errorText, invoke } from '../../lib/ipc';
 import { panelBus } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
+import { Output as CoveredOutput } from '../session/Output';
 import { PanelFrame } from './PanelFrame';
 
 const OUTPUT_POLL_MS = 1000;
@@ -63,9 +64,10 @@ function Output({ shell }: { shell: BackgroundShellView }) {
   if (error) return <p className="text-sm text-danger">{error}</p>;
   if (text === null) return <p className="text-sm text-fg-muted">Loading output…</p>;
   return (
-    <pre className="selectable max-h-[240px] overflow-auto rounded-sm bg-code-block px-8 py-6 font-mono text-2xs leading-[1.5] whitespace-pre-wrap text-fg-secondary">
-      {text || 'No output yet.'}
-    </pre>
+    <CoveredOutput
+      text={text || 'No output yet.'}
+      className="selectable max-h-[240px] overflow-auto rounded-sm bg-code-block px-8 py-6 font-mono text-2xs leading-[1.5] whitespace-pre-wrap text-fg-secondary"
+    />
   );
 }
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { PermissionMode } from '@shared/schemas/common';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../../components/Menu';
 import { cn } from '../../lib/cn';
@@ -26,8 +27,9 @@ export function PermissionModeMenu({ value, onChange, disabled = false }: Permis
   const bypassEnabled = useApp((s) => s.settings?.behavior.bypassModeEnabled ?? false);
   const cycle = useShortcutLabel('cyclePermissionMode');
   const modes: PermissionMode[] = bypassEnabled ? [...CYCLE_ORDER, 'bypass'] : CYCLE_ORDER;
+  const [open, setOpen] = useState(false);
   return (
-    <Menu>
+    <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger asChild disabled={disabled}>
         <button
           type="button"
@@ -40,12 +42,25 @@ export function PermissionModeMenu({ value, onChange, disabled = false }: Permis
           {PERMISSION_MODE_INFO[value].label}
         </button>
       </MenuTrigger>
-      <MenuContent side="top" align="start" className="w-[300px]">
+      <MenuContent
+        side="top"
+        align="start"
+        className="w-[300px]"
+        onKeyDown={(event) => {
+          // 1 to 5 pick a mode by its place in the list.
+          const mode = /^[1-9]$/.test(event.key) ? modes[Number(event.key) - 1] : undefined;
+          if (!mode) return;
+          event.preventDefault();
+          onChange(mode);
+          setOpen(false);
+        }}
+      >
         <MenuLabel>Permission mode · {cycle} to cycle</MenuLabel>
-        {modes.map((mode) => (
+        {modes.map((mode, i) => (
           <MenuItem
             key={mode}
             checked={mode === value}
+            shortcut={String(i + 1)}
             description={PERMISSION_MODE_INFO[mode].description}
             danger={mode === 'bypass'}
             onSelect={() => onChange(mode)}

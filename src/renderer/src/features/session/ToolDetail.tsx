@@ -7,6 +7,7 @@ import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/format';
+import { languageForPath } from '../../lib/highlight';
 import { invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
 import { useNav } from '../../stores/nav';
@@ -19,6 +20,7 @@ import { AGENT_STATUS_LABEL, AgentStatusGlyph, isAgentStatus } from '../panels/A
 import { FileMenu, useFileActions } from '../panels/FileMenu';
 import { fileSize } from './FilesCard';
 import { Markdown } from './Markdown';
+import { Output } from './Output';
 import type { ToolCall } from './transcriptModel';
 
 const OUTPUT = 'selectable max-h-[260px] overflow-auto rounded-sm bg-code-block px-10 py-6 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] whitespace-pre-wrap text-fg-secondary';
@@ -106,6 +108,29 @@ function ReadImage({ path, result }: { path: string; result: ToolResultBlock }) 
   );
 }
 
+/** What the project's language server found wrong with a file right after an edit: the same list the agent was given. */
+function Problems({ found }: { found: NonNullable<Extract<ToolDisplay, { kind: 'edit' }>['problems']> }) {
+  const more = found.total - found.items.length;
+  return (
+    <section aria-label="Problems after this change" className="flex flex-col gap-2">
+      <p className="text-sm text-amber-fg">
+        {found.source} found {found.total === 1 ? '1 problem' : `${String(found.total)} problems`} in the file after this change
+      </p>
+      <ul className="selectable flex flex-col gap-1 font-mono text-2xs text-fg-secondary">
+        {found.items.map((problem, i) => (
+          <li key={i} className="flex gap-8">
+            <span className="w-44 shrink-0 text-right text-fg-faint tabular-nums">
+              {problem.line}:{problem.column}
+            </span>
+            <span className="min-w-0 break-words">{problem.text}</span>
+          </li>
+        ))}
+      </ul>
+      {more > 0 ? <p className="text-2xs text-fg-faint">and {more} more</p> : null}
+    </section>
+  );
+}
+
 function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolResultBlock }) {
   switch (display.kind) {
     case 'shell':
@@ -121,7 +146,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
               in {display.cwd}
             </span>
           </div>
-          {display.output ? <pre className={OUTPUT}>{display.output}</pre> : <p className="text-sm text-fg-muted">No output.</p>}
+          {display.output ? <Output text={display.output} className={OUTPUT} /> : <p className="text-sm text-fg-muted">No output.</p>}
           {display.truncated && display.logPath ? (
             <button type="button" className="self-start text-sm text-link hover:underline" onClick={() => revealLog(display.logPath ?? '')}>
               Output was shortened. Show the full log
@@ -136,7 +161,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
             Background command {display.shellId}: {display.status}
             {display.exitCode !== null ? ` (exit ${display.exitCode})` : ''}
           </p>
-          {display.output ? <pre className={OUTPUT}>{display.output}</pre> : null}
+          {display.output ? <Output text={display.output} className={OUTPUT} /> : null}
         </div>
       );
     case 'kill-shell':
@@ -150,14 +175,19 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
         </p>
       );
     case 'edit':
-      return <EditDiff patch={display.patch} />;
+      return (
+        <div className="flex flex-col gap-6">
+          <EditDiff patch={display.patch} path={display.path} />
+          {display.problems ? <Problems found={display.problems} /> : null}
+        </div>
+      );
     case 'glob':
       return (
         <div className="flex flex-col gap-4">
           <p className="text-sm text-fg-muted">
             {display.count} {display.count === 1 ? 'match' : 'matches'} for {display.pattern}
           </p>
-          {display.files.length > 0 ? <pre className={OUTPUT}>{display.files.join('\n')}</pre> : null}
+          {display.files.length > 0 ? <Output text={display.files.join('\n')} className={OUTPUT} /> : null}
         </div>
       );
     case 'grep':
@@ -166,7 +196,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
           <p className="text-sm text-fg-muted">
             {display.count} {display.count === 1 ? 'result' : 'results'} for {display.pattern}
           </p>
-          {display.preview ? <pre className={OUTPUT}>{display.preview}</pre> : null}
+          {display.preview ? <Output text={display.preview} className={OUTPUT} /> : null}
         </div>
       );
     case 'fetch':
@@ -282,7 +312,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
     case 'plan':
       return <Markdown text={display.plan} variant="code" />;
     case 'mcp':
-      return <pre className={OUTPUT}>{display.text}</pre>;
+      return <Output text={display.text} className={OUTPUT} />;
     case 'web-search':
       return <SearchResultList results={display.results} />;
     case 'file':
@@ -291,7 +321,7 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
           <p className="text-sm text-fg-muted">
             {display.name} · {fileSize(display.size)}
           </p>
-          {display.preview ? <pre className={OUTPUT}>{display.preview}</pre> : null}
+          {display.preview ? <Output text={display.preview} className={OUTPUT} /> : null}
         </div>
       );
     case 'code':
@@ -303,8 +333,8 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
             <span>{formatDuration(display.durationMs)} in the sandbox</span>
             {display.files.length > 0 ? <span>· made {display.files.map((f) => f.name).join(', ')}</span> : null}
           </div>
-          {display.output ? <pre className={OUTPUT}>{display.output}</pre> : !display.error ? <p className="text-sm text-fg-muted">No output.</p> : null}
-          {display.error ? <pre className={cn(OUTPUT, 'text-danger')}>{display.error}</pre> : null}
+          {display.output ? <Output text={display.output} className={OUTPUT} /> : !display.error ? <p className="text-sm text-fg-muted">No output.</p> : null}
+          {display.error ? <Output text={display.error} className={cn(OUTPUT, 'text-danger')} /> : null}
         </div>
       );
     case 'denied':
@@ -312,21 +342,28 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
     case 'error':
       return <p className="selectable text-sm text-danger">{display.message}</p>;
     case 'text':
-      return <pre className={OUTPUT}>{display.text}</pre>;
+      return <Output text={display.text} className={OUTPUT} />;
   }
-  return <pre className={OUTPUT}>{resultText(result)}</pre>;
+  return <Output text={resultText(result)} className={OUTPUT} />;
 }
 
-export function EditDiff({ patch }: { patch: string }) {
+/** One edit as a diff: the file it changed (when known) and its line counts above, the lines below with their changed words marked. */
+export function EditDiff({ patch, path }: { patch: string; path?: string }) {
   const rows = useMemo(() => parsePatch(patch), [patch]);
   const { added, removed } = countChanges(rows);
   return (
     <div className="overflow-hidden rounded-sm border border-border-card">
-      <div className="flex gap-8 border-b border-border-card bg-sunken px-8 py-2 font-mono text-2xs">
-        <span className="text-diff-add">+{added}</span>
-        <span className="text-diff-del">-{removed}</span>
+      <div className="flex items-center gap-8 border-b border-border-card bg-sunken px-8 py-2 font-mono text-2xs">
+        {path ? (
+          // Cut at the start, so a long path still ends in its file name.
+          <span className="selectable min-w-0 flex-1 truncate text-left text-fg-muted [direction:rtl]" title={path}>
+            <bdi>{path}</bdi>
+          </span>
+        ) : null}
+        <span className="shrink-0 text-diff-add">+{added}</span>
+        <span className="shrink-0 text-diff-del">-{removed}</span>
       </div>
-      <DiffView rows={rows} mode="unified" className="max-h-[320px] overflow-y-auto" />
+      <DiffView rows={rows} mode="unified" language={path ? languageForPath(path) : null} gutter="one" hunkHeaders={false} className="max-h-[320px] overflow-y-auto" />
     </div>
   );
 }
@@ -334,10 +371,10 @@ export function EditDiff({ patch }: { patch: string }) {
 /** Body of one tool call in an expanded group: exact command, output, diff, or result text. */
 export function ToolCallBody({ call }: { call: ToolCall }) {
   if (call.running) {
-    return call.running.output ? <pre className={OUTPUT}>{call.running.output}</pre> : <p className="text-sm text-fg-muted">Running…</p>;
+    return call.running.output ? <Output text={call.running.output} className={OUTPUT} /> : <p className="text-sm text-fg-muted">Running…</p>;
   }
   if (!call.result) return <p className="text-sm text-fg-muted">Waiting to run.</p>;
   if (call.result.display) return <DisplayBody display={call.result.display} result={call.result} />;
   const text = resultText(call.result);
-  return text ? <pre className={cn(OUTPUT, call.result.isError && 'text-danger')}>{text}</pre> : <p className="text-sm text-fg-muted">No output.</p>;
+  return text ? <Output text={text} className={cn(OUTPUT, call.result.isError && 'text-danger')} /> : <p className="text-sm text-fg-muted">No output.</p>;
 }

@@ -6,6 +6,7 @@ import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/format';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { useNow } from '../../lib/time';
+import { Output } from './Output';
 
 /** The project's checks while they run, after the turn changed files. */
 export function RunningChecks({ commands, round, startedAt }: { commands: string[]; round: number; startedAt: number }) {
@@ -80,9 +81,13 @@ export function CheckItem({ check }: { check: CheckReport }) {
                 </span>
               </button>
               {showing ? (
-                <pre className="selectable max-h-[320px] overflow-auto px-10 pt-2 pb-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] break-words whitespace-pre-wrap text-fg-secondary">
-                  {run.output.length > 0 ? run.output : <span className="text-fg-faint">No output.</span>}
-                </pre>
+                <Output
+                  text={run.output.length > 0 ? run.output : 'No output.'}
+                  className={cn(
+                    'selectable max-h-[320px] overflow-auto px-10 pt-2 pb-8 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] break-words whitespace-pre-wrap',
+                    run.output.length > 0 ? 'text-fg-secondary' : 'text-fg-faint'
+                  )}
+                />
               ) : null}
             </li>
           );

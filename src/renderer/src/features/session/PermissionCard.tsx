@@ -57,11 +57,8 @@ function Detail({ request }: { request: PermissionRequest }) {
     case 'edit':
       return (
         <div className="flex flex-col gap-4">
-          <p className="font-mono text-sm text-fg-secondary">
-            {d.created ? 'Create ' : 'Edit '}
-            {d.path}
-          </p>
-          <EditDiff patch={d.patch} />
+          <p className="text-sm text-fg-secondary">{d.created ? 'Create this file' : 'Edit this file'}</p>
+          <EditDiff patch={d.patch} path={d.path} />
         </div>
       );
     case 'path':

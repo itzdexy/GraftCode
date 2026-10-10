@@ -62,6 +62,8 @@ export interface SessionManagerDeps {
   media: SessionDeps['media'];
   /** The Browser panel for the agent's Browser tool; absent where there is none. */
   browser?: SessionDeps['browser'];
+  /** The project's language server, for checking edits; absent where there is none. */
+  problems?: SessionDeps['problems'];
   /** Sites from the Sites tab, for the prompt of a session that builds one. */
   site?: SessionDeps['site'];
   revealBrowser?: SessionDeps['revealBrowser'];
@@ -149,6 +151,7 @@ export class SessionManager {
       ...(d.browser ? { browser: d.browser } : {}),
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
+      ...(d.problems ? { problems: d.problems } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -188,7 +191,8 @@ export class SessionManager {
           computerUse: s.behavior.computerUse,
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
-          agents: s.agents
+          agents: s.agents,
+          checkEdits: s.behavior.checkEdits
         };
       },
       gitInfo: async (cwd) => {

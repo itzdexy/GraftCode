@@ -1,7 +1,10 @@
+import type { TranscriptView } from '@shared/schemas/appSettings';
 import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
+import { maskSecrets } from '@shared/secrets';
 import type { Source } from '@shared/sources';
 import { turnSources } from './sourcesModel';
+import { inTense } from './verbs';
 
 /**
  * Turns stored messages into display items: consecutive tool calls collapse
@@ -36,7 +39,8 @@ export type TranscriptItem =
   | { kind: 'notice'; key: string; text: string }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
-  | { kind: 'edits'; key: string; files: EditedFile[] }
+  /** `messageId`: the message the user sent to start this turn, whose snapshot holds the files as they were before it; null for a turn the user did not type. */
+  | { kind: 'edits'; key: string; files: EditedFile[]; messageId: string | null }
   | { kind: 'files'; key: string; files: MadeFile[] }
   /** The pages a finished turn read. */
   | { kind: 'sources'; key: string; sources: Source[] }
@@ -294,12 +298,93 @@ function addSteps(steps: ActivityStep[], next: ActivityStep[]): void {
 }
 
 /**
- * Folds each turn's work (narration, thinking, tool calls) into activity
- * blocks, leaving the turn's answer visible: the last text that nothing but
- * bookkeeping follows. While a turn runs, its streaming text stays outside
- * and the newest block is live. Todos, plans, errors and notices end a block.
+ * The Summary view, and every chat: folds a turn's work (narration, thinking,
+ * tool calls) into activity blocks, leaving the turn's answer visible: the
+ * last text that nothing but bookkeeping follows. While the turn runs, its
+ * streaming text stays outside and the newest block is live.
  */
-export function groupActivity(items: TranscriptItem[], turnActive: boolean): TranscriptItem[] {
+function foldTurn(out: TranscriptItem[], segment: TranscriptItem[], startedAt: number | null, running: boolean): void {
+  const turnStart = out.length;
+  // The answer: the last text with no work after it. While the turn runs, that is the text
+  // streaming now, or a stored one the model ended its step with (it stays the answer while
+  // hooks and checks run, and becomes narration if the turn goes on working).
+  let answer = -1;
+  for (let i = segment.length - 1; i >= 0; i--) {
+    const item = segment[i];
+    if (!item || !isWork(item)) continue;
+    if (item.kind === 'text' && (item.live || item.closing || !running)) answer = i;
+    break;
+  }
+  let steps: ActivityStep[] = [];
+  let endedAt = startedAt ?? 0;
+  let firstKey = '';
+  const flush = (): void => {
+    if (steps.length > 0) out.push({ kind: 'activity', key: `activity:${firstKey}`, steps, live: false, startedAt, endedAt });
+    steps = [];
+  };
+  segment.forEach((item, i) => {
+    if (item.kind === 'user') {
+      out.push(item);
+      return;
+    }
+    if (isWork(item) && i !== answer) {
+      if (steps.length === 0) firstKey = item.key;
+      addSteps(steps, stepsOf(item));
+      endedAt = Math.max(endedAt, item.at);
+      return;
+    }
+    flush();
+    if (isWork(item)) endedAt = Math.max(endedAt, item.at);
+    out.push(item);
+  });
+  flush();
+  const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
+  if (!block) return;
+  // The newest block of a turn in progress is still working, even while the answer streams after it.
+  if (running) block.live = true;
+  // The answer arrived after the work: it closes the turn's last block.
+  const closing = answer >= 0 ? segment[answer] : undefined;
+  if (closing && isWork(closing)) block.endedAt = Math.max(block.endedAt, closing.at);
+}
+
+/**
+ * The Normal, Thinking and Verbose views: everything the agent says stays in
+ * view, and the tool steps between two things it said fold into one block.
+ * The Normal view leaves thoughts out; the other two show each on its own
+ * line. The newest block is live until the agent speaks again.
+ */
+function stepTurn(out: TranscriptItem[], segment: TranscriptItem[], startedAt: number | null, running: boolean, view: TranscriptView): void {
+  const turnStart = out.length;
+  let steps: ActivityStep[] = [];
+  let endedAt = startedAt ?? 0;
+  let firstKey = '';
+  const flush = (): void => {
+    if (steps.length > 0) out.push({ kind: 'activity', key: `activity:${firstKey}`, steps, live: false, startedAt, endedAt });
+    steps = [];
+  };
+  for (const item of segment) {
+    if (item.kind === 'tools' || item.kind === 'provider') {
+      if (steps.length === 0) firstKey = item.key;
+      addSteps(steps, stepsOf(item));
+      endedAt = Math.max(endedAt, item.at);
+      continue;
+    }
+    // A thought that is not shown does not split the steps around it. Progress notes are said, not thought.
+    if (item.kind === 'thinking' && !item.progress && view === 'normal') continue;
+    flush();
+    out.push(item);
+  }
+  flush();
+  const last = out.length > turnStart ? out.at(-1) : undefined;
+  if (running && last?.kind === 'activity') last.live = true;
+}
+
+/**
+ * Groups each turn's work for display. Todos, plans, errors and notices end
+ * a block in every view, and a finished turn ends with the files it changed.
+ * Chats always use the Summary view.
+ */
+export function groupActivity(items: TranscriptItem[], turnActive: boolean, view: TranscriptView = 'summary'): TranscriptItem[] {
   const out: TranscriptItem[] = [];
   const turns: TranscriptItem[][] = [[]];
   for (const item of items) {
@@ -309,49 +394,16 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
     else turns.at(-1)?.push(item);
   }
   turns.forEach((segment, index) => {
-    const lastTurn = index === turns.length - 1;
-    const turnStart = out.length;
     const first = segment[0];
     const startedAt = first?.kind === 'user' ? first.message.createdAt : first?.kind === 'mission' ? first.at : null;
-    // The answer: the last text with no work after it. While the turn runs, that is the text
-    // streaming now, or a stored one the model ended its step with (it stays the answer while
-    // hooks and checks run, and becomes narration if the turn goes on working).
-    let answer = -1;
-    for (let i = segment.length - 1; i >= 0; i--) {
-      const item = segment[i];
-      if (!item || !isWork(item)) continue;
-      if (item.kind === 'text' && (item.live || item.closing || !(lastTurn && turnActive))) answer = i;
-      break;
-    }
-    let steps: ActivityStep[] = [];
-    let endedAt = startedAt ?? 0;
-    let firstKey = '';
-    const flush = (): void => {
-      if (steps.length > 0) out.push({ kind: 'activity', key: `activity:${firstKey}`, steps, live: false, startedAt, endedAt });
-      steps = [];
-    };
-    segment.forEach((item, i) => {
-      if (item.kind === 'user') {
-        out.push(item);
-        return;
-      }
-      if (isWork(item) && i !== answer) {
-        if (steps.length === 0) firstKey = item.key;
-        addSteps(steps, stepsOf(item));
-        endedAt = Math.max(endedAt, item.at);
-        return;
-      }
-      flush();
-      if (isWork(item)) endedAt = Math.max(endedAt, item.at);
-      out.push(item);
-    });
-    flush();
+    const running = index === turns.length - 1 && turnActive;
+    if (view === 'summary') foldTurn(out, segment, startedAt, running);
+    else stepTurn(out, segment, startedAt, running, view);
     // A finished turn ends with the files it changed.
-    const running = lastTurn && turnActive;
     if (!running) {
       const calls = segment.flatMap((item) => (item.kind === 'tools' ? item.calls : []));
       const files = editedFiles(calls);
-      if (files.length > 0) out.push({ kind: 'edits', key: `edits:${segment[0]?.key ?? String(index)}`, files });
+      if (files.length > 0) out.push({ kind: 'edits', key: `edits:${segment[0]?.key ?? String(index)}`, files, messageId: first?.kind === 'user' ? first.message.id : null });
       // …and, in chats, the files it made for the user to download.
       const made = madeFiles(calls);
       if (made.length > 0) out.push({ kind: 'files', key: `files:${segment[0]?.key ?? String(index)}`, files: made });
@@ -361,19 +413,41 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean): Tra
       const media = madeMedia(calls);
       if (media) out.push({ kind: 'media', key: `media:${segment[0]?.key ?? String(index)}`, media });
     }
-    // The newest block of a turn in progress is still working, even while the answer streams after it.
-    if (lastTurn && turnActive) {
-      const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
-      if (block) block.live = true;
-    }
-    // The answer arrived after the work: it closes the turn's last block.
-    if (answer >= 0) {
-      const item = segment[answer];
-      const block = out.slice(turnStart).findLast((o): o is ActivityItem => o.kind === 'activity');
-      if (item && isWork(item) && block) block.endedAt = Math.max(block.endedAt, item.at);
-    }
   });
   return out;
+}
+
+export function firstLine(text: string): string {
+  return text.trim().split('\n')[0]?.replace(/^#+\s*/, '').replace(/\*\*/g, '') ?? '';
+}
+
+/** A summarized thought usually opens with a short heading; that names the step. */
+export function thoughtLabel(text: string, live: boolean): string {
+  const line = firstLine(text).replace(/[.:]$/, '');
+  if (line.length > 0 && line.length <= 90) return line;
+  return live ? 'Thinking' : 'Thought it through';
+}
+
+/** A running call as what is happening: "Editing session.ts", "Running the unit tests", "Running npm test". */
+function runningLabel(call: ToolCall): string {
+  const parts = callParts(call);
+  if (call.name === 'Shell' && parts.verb === '') return `Running ${parts.target}`;
+  return [parts.verb, parts.target].filter((part) => part.length > 0).join(' ');
+}
+
+/** What a live block is doing now: the running tool, else its newest step. */
+export function liveLabel(item: ActivityItem): string {
+  for (let i = item.steps.length - 1; i >= 0; i--) {
+    const step = item.steps[i];
+    if (step?.kind === 'tool' && step.call.running) return runningLabel(step.call) || step.call.running.summary;
+  }
+  const last = item.steps.at(-1);
+  if (!last) return 'Working';
+  if (last.kind === 'text') return firstLine(last.text);
+  if (last.kind === 'tool') return describeCall(last.call);
+  if (last.kind === 'provider') return last.summary;
+  if (last.kind === 'search') return `Searched the web for “${last.search.query}”`;
+  return thoughtLabel(last.text, last.live);
 }
 
 /** Query and results of a WebSearch tool call (results empty until it finishes). */
@@ -497,7 +571,10 @@ export function summarizeCalls(calls: ToolCall[], limit = Number.POSITIVE_INFINI
   if (calls.length === 1) {
     const only = calls[0]!;
     const description = shellDescription(only);
-    if (description && !commandFailed(only)) return description.charAt(0).toUpperCase() + description.slice(1);
+    if (description && !commandFailed(only)) {
+      const told = inTense(description, only.result !== null);
+      return told.charAt(0).toUpperCase() + told.slice(1);
+    }
   }
   const all = summaryParts(calls);
   const kept = all.slice(0, limit);
@@ -650,8 +727,9 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       return { verb: done ? 'Listed' : 'Listing', target: str('pattern'), mono: false, title: str('pattern') };
     case 'Shell': {
       const description = shellDescription(call);
-      const command = str('command').split('\n')[0] ?? '';
-      return description ? { verb: description, target: '', mono: false, title: command } : { verb: '', target: command, mono: true, title: command };
+      // A key typed into a command stays covered in its row; the call's details show what it printed.
+      const command = maskSecrets(str('command').split('\n')[0] ?? '');
+      return description ? { verb: inTense(description, done), target: '', mono: false, title: command } : { verb: '', target: command, mono: true, title: command };
     }
     case 'WebFetch': {
       const url = str('url');
@@ -799,8 +877,10 @@ export function describeCall(call: ToolCall): string {
       return `Find files ${str('pattern')}`;
     case 'Grep':
       return `${call.result ? 'Searched for' : 'Search'} “${str('pattern')}”${str('path') ? ` in ${str('path')}` : ''}`;
-    case 'Shell':
-      return shellDescription(call) ?? str('command').split('\n')[0] ?? '';
+    case 'Shell': {
+      const description = shellDescription(call);
+      return description ? inTense(description, call.result !== null) : maskSecrets(str('command').split('\n')[0] ?? '');
+    }
     case 'ShellOutput':
       return `Check background command ${str('shell_id')}`;
     case 'KillShell':

@@ -14,6 +14,7 @@ import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
 import type { MediaAccess } from '../media/mediaService';
 import type { AgentGroupInput } from '../agent/agentGroup';
 import type { MissionUpdateInput } from '../agent/mission';
+import type { FileProblems } from '../intel/problems';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 /** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
@@ -62,6 +63,8 @@ export interface ToolContext extends DescribeContext {
   runAgents(input: AgentGroupInput): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }>;
   /** Project notes (GRAFT.md) for directories first touched by these paths, or null. */
   notesForPaths(paths: string[]): string | null;
+  /** The errors the project's language server finds in a file right after it changed; null when nothing can say (see intel/codeIntel.ts). */
+  checkFile(file: string): Promise<FileProblems | null>;
   /** Screen, mouse and keyboard when computer use is on (Settings → Permissions); null otherwise. */
   computer: ComputerControl | null;
   /** Searches the web with the engine chosen in Settings → Web search. */

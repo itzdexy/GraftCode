@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { makeDir, refusedChange } from '../../files/makeDir';
+import { problemsNote, type Problem } from '../../intel/problems';
 import { unifiedDiff } from '../diffUtil';
 import type { FileStateTracker } from '../fileState';
 import { displayPath, resolvePath } from '../paths';
-import { errorResult, textResult, type ToolDefinition } from '../types';
+import { errorResult, textResult, type ToolContext, type ToolDefinition } from '../types';
 
 export const WriteInput = z.object({
   file_path: z.string().min(1).describe('Path of the file to create or replace.'),
@@ -38,6 +39,21 @@ export function freshnessError(files: FileStateTracker, abs: string, shown: stri
   if (check.reason === 'not-read') return `Read ${shown} before ${verb} it.`;
   if (check.reason === 'modified') return `${shown} changed since you last read it. Read it again before ${verb} it.`;
   return `${shown} no longer exists.`;
+}
+
+/**
+ * What a change's result says and shows about the file's problems: the note
+ * for the model and the list for the transcript, when the project's language
+ * server finds any. A server that fails or says nothing never fails the edit.
+ */
+export async function problemsAfter(
+  abs: string,
+  shown: string,
+  ctx: Pick<ToolContext, 'checkFile'>
+): Promise<{ note: string | null; display: { problems?: { source: string; total: number; items: Problem[] } } }> {
+  const found = await ctx.checkFile(abs).catch(() => null);
+  if (!found || found.total === 0) return { note: null, display: {} };
+  return { note: problemsNote(shown, found), display: { problems: { source: found.source, total: found.total, items: found.problems } } };
 }
 
 export const writeTool: ToolDefinition<WriteInput> = {
@@ -80,14 +96,16 @@ export const writeTool: ToolDefinition<WriteInput> = {
     const diff = unifiedDiff(shown, before ?? '', input.content);
     const lines = input.content.length === 0 ? 0 : input.content.split(/\r?\n/).length;
     const message = before === null ? `Created ${shown} (${lines} lines).` : `Wrote ${shown} (${lines} lines).`;
-    const notes = ctx.notesForPaths([abs]);
+    const checked = await problemsAfter(abs, shown, ctx);
+    const notes = [checked.note, ctx.notesForPaths([abs])].filter((n) => n).join('\n\n');
     return textResult(notes ? `${message}\n\n${notes}` : message, {
       kind: 'edit',
       path: shown,
       created: before === null,
       patch: diff.patch,
       added: diff.added,
-      removed: diff.removed
+      removed: diff.removed,
+      ...checked.display
     });
   }
 };

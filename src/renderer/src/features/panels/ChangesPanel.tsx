@@ -6,6 +6,7 @@ import { Spinner } from '../../components/ContextRing';
 import { Dialog, DialogContent } from '../../components/Dialog';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
+import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { panelsOf, usePanels } from '../../stores/panels';
 import { reportError, useToasts } from '../../stores/toasts';
@@ -284,6 +285,7 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
             <DiffView
               rows={rows}
               mode={mode}
+              language={languageForPath(current.path)}
               hunkActions={(hunk) => (
                 <span className="flex shrink-0 gap-4 font-sans text-2xs">
                   {current.staged ? (

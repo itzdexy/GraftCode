@@ -6,6 +6,7 @@ import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
+import { CodeIntel } from './intel/codeIntel';
 import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
@@ -49,6 +50,8 @@ let ptyManager: PtyManager | null = null;
 let mcpManager: McpManager | null = null;
 let scheduler: Scheduler | null = null;
 const artifactServer = new ArtifactServer();
+// Language servers of trusted projects, for checking edits. Electron runs them as Node, so nothing depends on a Node of the user's.
+const codeIntel = new CodeIntel({ execPath: process.execPath, runAsNode: true, log: (message) => log.info('intel', message) });
 let browserPanel: BrowserPanel | null = null;
 let quitting = false;
 let settingsSnapshot: AppSettings | null = null;
@@ -329,6 +332,7 @@ async function sessions(): Promise<SessionManager> {
       return { name: site.name, url: s.siteServer.url(site.slug) };
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
+    problems: (file, root) => codeIntel.problems(file, root),
     chatFiles: s.chatFiles,
     documents: new DocumentMaker({ printPdf: printHtmlToPdf }),
     runCode: runInSandbox,
@@ -395,6 +399,7 @@ async function shutdown(): Promise<void> {
     tray.destroy();
     scheduler?.stop();
     browserPanel?.close();
+    codeIntel.dispose();
     await ptyManager?.disposeAll();
     await mcpManager?.disposeAll();
     await sessionManager?.disposeAll();

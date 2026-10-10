@@ -19,6 +19,59 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.14 (2026-10-10)
+
+- **`session.ts` is split.** The loop host is `sessionHost.ts` (`SessionHost`: what the user
+  is being asked, the rules allowed for the session, the context each tool runs in, usage,
+  sub-agents, groups and the backup model) and the mission controller is
+  `missionController.ts` (`MissionController`: the stored mission kept in step with the rules
+  of `mission.ts`, and its checks). The session keeps turns, the queue, slash commands, the
+  prompt and compaction, and hands each of the two what it needs (`HostPorts`,
+  `MissionPorts`). 1,989 lines became 1,489. The suite passed unchanged after the split and
+  before anything else was added.
+- **The cutoff for removed tool output is stored** (`sessions.prune_before`, migration 5;
+  `SessionStore.pruneCutoff` and `setPruneCutoff`). A reopened session sends old output as
+  removed, as it did before the restart; a rewind pulls the stored cutoff back and `/clear`
+  drops it.
+- **A backup model for every loop** (`SessionHost.loopHost(scope, answering, needs)`). The
+  host's `fallback` serves the main turn, a sub-agent and each agent of a group. Each loop
+  has its own `answering` model, so a switch inside a sub-agent is not the main agent's. An
+  agent whose role has to see is not given a backup that can't (`needs.vision`), and no agent
+  works in Taproot on the backup. In a group the record names the model that took over
+  (`model`, `routing`, a line in the timeline), and the rounds after a failed check stay on
+  it. Sub-agents now get the session's retry policy: they ran on the default while the main
+  turn and groups used the configured one (found by the new test).
+- **Usage by day** (`usage_days`, migration 5; `src/shared/usage.ts`;
+  `SessionStore.recordUsage` and `usageSince`; channel `usage:days`). Every request is added
+  to its day, the date on this computer, under the model that answered it, the backup model
+  included. What a tool pays for (a generated picture) is added without tokens. A request
+  with no known price is counted in `unpriced` and adds no cost. Incognito chats record into
+  the store in memory only. **Settings → Usage** (`UsageSection.tsx`, `usageModel.ts`) shows
+  totals, a bar a day for 7, 30 or 90 days by cost or by tokens, read out by the pointer or
+  the arrow keys, the same numbers as a table, and a table by model.
+- **Gemini thinks by level from Gemini 3 on** (`geminiEffort`, `takesThinkingLevel`). The
+  adapter gets the catalog: the named levels a model takes become its effort levels and are
+  sent as `thinkingConfig.thinkingLevel` (`MINIMAL`, `LOW`, `MEDIUM`, `HIGH`). A Gemini 3
+  model the catalog doesn't know gets `low` and `high`. Earlier models keep
+  `thinkingBudget`. Checked against Google's API description (the v1beta discovery document,
+  read 2026-10-10), which says of `thinkingLevel`: "Recommended for Gemini 3 or later models.
+  Use with earlier models results in an error."
+- **Chats have the `/` menu** (`commandsFor` and `CODE_ONLY_COMMANDS` in
+  `src/shared/commands.ts`). A chat's message box had no menu at all; it now lists the
+  commands a chat can use, and `/model` opens the chat's model menu. Ten commands that work on
+  a project say so in a chat instead of sending a model a prompt about files it doesn't have
+  (`/init` did exactly that), and `/help` in a chat leaves them out. With nothing typed
+  after the `/`, the menu lists every command in the catalogue's order instead of the twelve
+  with the shortest names (`commandSuggestions`), and the list follows the arrow keys
+  (`Composer.tsx`); both hold for code sessions too. Found by the end-to-end test, where a
+  chat's menu showed twelve commands and `/research` was not among them.
+- **`RunAgents` is described to a chat as what it is there:** researchers on the web
+  (`RUN_AGENTS_IN_CHAT`, `LoopConfig.toolDescriptions`). The context report counts that text.
+- **A project keeps its header** in the sidebar while its only session is under Needs you,
+  and with it the button that starts another session there (`groupByProject(sessions,
+  elsewhere)`).
+- **Catalog** regenerated: 213 providers, 7,586 models.
+
 ### 0.6.13 (2026-10-06)
 
 - **What fills the context** (`src/main/agent/contextBreakdown.ts`). The next request is
@@ -301,26 +354,34 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 - The parts of the context are estimates by characters (about 3.5 a token): they say which
   part is large, not what a provider bills, and their sum differs from the provider's
   count, which is shown beside them. Tool schemas are counted as written out in JSON, which
-  is not how every provider encodes them. Spend by day is still not shown.
+  is not how every provider encodes them.
+- Usage by day starts with 0.6.14: earlier days have no rows and none are worked out from
+  old messages. The summaries and titles Graft asks for itself are not counted, in the day's
+  total or the session's. A day is the date on this computer when the request was made.
+  Costs are what the provider charged or its published price, so a bill can differ. The
+  record can't be exported or cleared from the app, and "Clear session history" leaves it.
+  The page was looked at in the preview with made-up rows and driven end to end with one
+  real request; it was not looked at with months of real use.
 - A rewind brings back only what was replaced from 0.6.13 on: messages summarized or
   cleared by an earlier version carry no `compactedBy` and stay out of the context.
 - Needs you lists by status only: a session whose turn finished with a question in plain
   text is not there, since nothing marks it as waiting. A session that stopped with an
-  error stays there until it is continued, retried or archived, also across restarts; a
-  project whose only session is listed there has no header, and so no "new session in this
-  project" button, for as long as it is.
+  error stays there until it is continued, retried or archived, also across restarts.
 
 - A session has one current plan: a second approved plan replaces the first in the bar and
   in summaries, and there is no history of plans beyond the transcript. A plan is not saved
   as a file in the project. The bar's progress counts the session's tasks, which the agent
-  writes itself and which need not match the plan's steps. `/plan` in a chat only explains;
-  the chat's command menu still lists it.
+  writes itself and which need not match the plan's steps.
+- The `/` menu of a chat is the list of built-in commands minus the ten that work on a
+  project; which of the rest are useful in a chat was not studied (`/permissions` opens
+  Settings, where little applies to a chat). The home screen's message box has no menu in
+  either mode.
 
 - Research reads HTML and text only: a PDF on the web can't be read. A mark on a citation
   says what this conversation opened, not whether the page says what is claimed. Search
   results that are redirect links (one provider's own search) are compared by the redirect,
-  so a link to the page itself reads "not opened". The `RunAgents` description a chat sees
-  is the code session's, with roles a chat has no use for.
+  so a link to the page itself reads "not opened". The input a chat sees for `RunAgents`
+  still lists `writes` and `verify`, which a chat refuses with a sentence.
 - The check against names that resolve to private addresses looks the name up before the
   request, and the request looks it up again: a name that changes its answer in between is
   not caught. A hosts-file name that points at this computer can't be read from a chat.
@@ -330,17 +391,19 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   slide runs off its edge. Sheets have no dates, number formats or charts. There is no
   table of contents, cover page or page-break control, and equations are plain text. The
   PDF uses the computer's own fonts.
-- `src/main/agent/session.ts` is 1,980 lines: turns, slash commands, compaction, the
-  loop host, and now the mission controller and agent-group wiring. Split the loop host
-  and the mission controller out before adding more.
-- The cutoff for removed tool output lives in memory: a restarted session sends old output
-  in full again until it next fills up. Removing output changes the start of the history
+- `src/main/agent/session.ts` is 1,489 lines after the split: turns, the queue, slash
+  commands, the prompt, what a model is offered, compaction. `SessionHost` takes 22 things
+  from the session (`HostPorts`), which is wide. The next seam is what a model is offered
+  (tools, web access, the MCP tools that wait), about 140 lines with state of their own.
+- Removing old tool output changes the start of the history
   once, so a provider's prompt cache is rebuilt from that point. The estimate of what
   removing frees is by characters, not the provider's count. In the transcript a summary
   appears after the steps it kept, where it was made, though the model reads it first.
 - The backup model finishes one turn: the next turn asks the session's own model again and
-  waits through its retries before switching. Agents of a group and sub-agents have no
-  backup. A backup without vision gets a history with screenshots as it is.
+  waits through its retries before switching. The same holds for an agent of a group that
+  is tried again: its new attempt starts on its own model. In the main turn a backup without
+  vision gets a history with screenshots as it is (only an agent whose role has to see is
+  kept from such a backup).
 - Agents that change files with no paths of their own share the session's working tree
   and run one at a time. Writers given `writes` paths run together in that same tree, kept
   apart only by their paths: the scope is enforced on the edit tools, not on Shell commands
@@ -351,8 +414,10 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   of the wire format (event names checked against OpenAI's documentation); nothing ran
   against a live OpenAI account. The 10K-token threshold for waiting MCP tools is a guess,
   not measured on real setups.
-- Gemini 3 models take a `thinkingLevel`; the adapter still sends `thinkingBudget`, which
-  works but doesn't match the levels the catalog lists for them.
+- Gemini's levels are checked against Google's API description and a recorded server, not
+  with a live key. Models are told apart by name (`gemini-3` and up take a level): a tuned or
+  renamed model is asked by budget. A Gemini 3 model the catalog doesn't know is offered
+  `low` and `high` only.
 - MCP: no elicitation or sampling; resources can't be @-mentioned in the message box;
   prompts are only in the `/` menu; a server's notes are read when a session's prompt is
   built, so a server that connects later is not in it.
@@ -397,13 +462,13 @@ praise and complain about (October 2026).
 | A loop that goes on until a condition holds | Claude Code and Codex goals | Shipped in 0.6.6 as missions, with the user's commands as the condition |
 | One function per fresh agent with a machine check | Decompilation projects driven by agents (compile, diff, feed the failure back, cap the attempts) | Shipped in 0.6.6 as `/decompile` on top of `verify` |
 | Prune old tool output before summarizing | OpenCode session compaction, Claude Code | Shipped in 0.6.12, as a view of the history: nothing stored changes |
-| Fallback model per session | Roo Code and Goose provider settings | Shipped in 0.6.12 as one backup model in Settings, used once a turn |
+| Fallback model per session | Roo Code and Goose provider settings | Shipped in 0.6.12 as one backup model in Settings, used once a turn; for sub-agents and agents of a group since 0.6.14 |
 | Worktree per agent that writes | Claude Code, Cursor | Open; unlocks parallel implementers and best-of-N |
 | Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
 | A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | Open; small. Graft notifies but has no sound |
 | Comments on a diff that go back to the agent | Cursor and Codex review | Open |
-| Where the context and the money went, by category | Claude Code `/context` and `/cost` | The context half shipped in 0.6.13 as `/context` and the popover; spend by day is open |
+| Where the context and the money went, by category | Claude Code `/context` and `/cost` | The context half shipped in 0.6.13 as `/context` and the popover; spend by day shipped in 0.6.14 as Settings → Usage |
 | A side question that doesn't derail the turn | Claude Code `/btw` | Open |
 | Watch a pull request's CI and fix what fails | Claude Code desktop, Codex | Open |
 | Sandbox by default instead of prompts | Codex (workspace-write sandbox, asks only to leave it) | Graft's container sandbox is opt-in; default-on is open |
@@ -428,17 +493,18 @@ round. What exists now and what does not:
 
 ## Next, in order
 
-The five rounds designed and planned in October 2026 are done: chat documents (0.6.9),
-research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention and context
-(0.6.13). What comes next:
+The five rounds designed and planned in October 2026 are done (0.6.9 to 0.6.13), and 0.6.14
+took the first, fourth and part of the fifth item of the list that followed them. What
+comes next:
 
-1. Split the loop host and the mission controller out of `session.ts` (1,980 lines): the
-   last three rounds each added to it.
-2. A worktree per agent that writes, merged back by the main agent: parallel
+1. A worktree per agent that writes, merged back by the main agent: parallel
    implementers, then best-of-N.
-3. Diagnostics after edits (LSP), starting with TypeScript.
-4. Keep the cutoff for removed tool output across restarts; a backup model for agents of a
-   group; spend by day.
-5. Gemini `thinkingLevel`; measure the `ToolSearch` threshold on real setups; MCP elicitation
-   and @-mentioning resources.
-6. Diagrams and equations in replies; reading PDFs from the web.
+2. Diagnostics after edits (LSP), starting with TypeScript.
+3. MCP elicitation and @-mentioning resources; measure the `ToolSearch` threshold on real
+   setups.
+4. Diagrams and equations in replies; reading PDFs from the web.
+5. Usage: count the summaries and titles Graft asks for itself, export the record, clear
+   it. Remember that a model is failing, so the turn after a switch doesn't wait through
+   its retries again.
+6. Split what a model is offered out of `session.ts`; a `RunAgents` input for chats
+   without `writes` and `verify`.

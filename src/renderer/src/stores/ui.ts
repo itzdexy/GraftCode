@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import { DEFAULT_FILTER, type SessionFilter } from '../features/shell/sessionLists';
+import { loadDrafts, saveDrafts } from '../lib/draftStore';
+import { useSessions } from './sessions';
 
 export interface CodeContext {
   projectPath: string | null;
@@ -21,7 +23,7 @@ interface UiState {
   /** The next chat started from Chat home is incognito (not saved). */
   incognito: boolean;
   filter: SessionFilter;
-  /** Composer drafts keyed by "home:code", "home:chat" or a session id. */
+  /** Composer drafts keyed by "home:code", "home:chat" or a session id. They outlast a restart, except those of incognito chats. */
   drafts: Record<string, string>;
   codeContext: CodeContext | null;
   dialog: InfoDialog;
@@ -48,6 +50,19 @@ interface UiState {
   takeInbox: (key: string) => { images: ImageBlock[]; files: FileAttachment[] } | null;
 }
 
+/** Writes the drafts to storage a moment after the last keystroke. */
+let draftTimer: ReturnType<typeof setTimeout> | null = null;
+function storeDraftsSoon(read: () => { drafts: Record<string, string>; incognito: boolean }): void {
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    draftTimer = null;
+    const { drafts, incognito } = read();
+    const sessions = useSessions.getState().summaries;
+    // Nothing typed for an incognito chat is written down: not in one, and not on Chat home while its switch is on.
+    saveDrafts(drafts, (key) => (key === 'home:chat' ? !incognito : sessions[key]?.incognito !== true));
+  }, 400);
+}
+
 export const useUi = create<UiState>((set, get) => ({
   searchOpen: false,
   paletteOpen: false,
@@ -56,7 +71,7 @@ export const useUi = create<UiState>((set, get) => ({
   chatListExpanded: false,
   incognito: false,
   filter: DEFAULT_FILTER,
-  drafts: {},
+  drafts: loadDrafts(),
   codeContext: null,
   dialog: null,
   hiddenStatusBars: {},
@@ -66,14 +81,22 @@ export const useUi = create<UiState>((set, get) => ({
   setPaletteOpen: (paletteOpen, paletteQuery = '') => set(paletteOpen ? { paletteOpen, paletteQuery, searchOpen: false } : { paletteOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
   setChatListExpanded: (chatListExpanded) => set({ chatListExpanded }),
-  setIncognito: (incognito) => set({ incognito }),
+  setIncognito: (incognito) => {
+    set({ incognito });
+    storeDraftsSoon(get);
+  },
   setFilter: (filter) => set({ filter: { ...get().filter, ...filter } }),
   resetFilter: () => set({ filter: DEFAULT_FILTER }),
   setDraft: (key, text) => {
     const drafts = { ...get().drafts };
     if (text.length === 0) delete drafts[key];
-    else drafts[key] = text;
+    else {
+      // Set last, so the draft being typed counts as the newest when old ones are dropped.
+      delete drafts[key];
+      drafts[key] = text;
+    }
     set({ drafts });
+    storeDraftsSoon(get);
   },
   setCodeContext: (codeContext) => set({ codeContext }),
   setDialog: (dialog) => set({ dialog }),

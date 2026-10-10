@@ -28,6 +28,8 @@ export interface Harness {
   projectDir: string;
   home: string;
   waitFor(predicate: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>;
+  /** A new runtime over what is stored, as after Graft restarts. It becomes `session`; dispose the old one first. */
+  reopen(): AgentSession;
 }
 
 export interface HarnessOptions {
@@ -74,6 +76,10 @@ export interface HarnessOptions {
   maxSteps?: number | null;
   /** The project's sandbox settings (default: no sandbox). */
   sandbox?: SessionDeps['sandbox'];
+  /** The project's language server (default: none, so edits are not checked). */
+  problems?: SessionDeps['problems'];
+  /** Settings → Models → Sessions: check edits with it (default on). */
+  checkEdits?: boolean;
   /** A shell manager of the test's own (default: a plain one). */
   shells?: SessionDeps['shells'];
   /** MCP tools connected for the session (default: none). */
@@ -153,6 +159,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     mcpPrompt: (server, name, args) => (options.mcp?.getPrompt ? options.mcp.getPrompt(server, name, args) : Promise.reject(new Error('No MCP prompts in this test.'))),
     shells: options.shells ?? makeShellManager(path.join(home, 'shell-logs')),
     ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+    ...(options.problems ? { problems: options.problems } : {}),
     shellLabel: shell.label,
     settings,
     hooks: () => (options.hooks ? new HookRunner(() => options.hooks ?? {}, shell, () => projectDir) : null),
@@ -175,7 +182,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
-      agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents }
+      agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents },
+      checkEdits: options.checkEdits ?? true
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
     checkpoint: () => Promise.resolve(null),
@@ -191,6 +199,10 @@ export function makeHarness(options: HarnessOptions): Harness {
   const session = new AgentSession(summary, deps);
   return {
     session,
+    reopen() {
+      this.session = new AgentSession(store.getSummary(summary.id), deps);
+      return this.session;
+    },
     store,
     provider,
     events,
