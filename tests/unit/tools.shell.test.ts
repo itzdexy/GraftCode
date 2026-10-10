@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { OutputBuffer, stripAnsi } from '../../src/main/tools/shell/outputBuffer';
-import { msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
+import { BASH_WRAPPER, msysTreeWinPids } from '../../src/main/tools/shell/shellManager';
 import { killShellTool, shellOutputTool, shellTool } from '../../src/main/tools/shell/shellTools';
 import { fetchPage, pointsInside, redirectProblem, webFetchTool, WebFetchInput } from '../../src/main/tools/web/webFetch';
 import { htmlToText } from '../../src/main/tools/web/htmlToText';
@@ -45,6 +46,35 @@ describe('shell detection', () => {
       'I      97      94      94      10968  ?         197609 18:32:32 /usr/bin/ps'
     ].join('\n');
     expect(msysTreeWinPids(ps, 94).sort()).toEqual([10176, 10968, 27876, 30000].sort());
+  });
+
+  it.skipIf(process.platform === 'win32' && detectShell('win32', process.env).kind !== 'bash')('records the actual Bash PID for process-tree cleanup', async () => {
+    const pidFile = path.join(dir, 'wrapper.pid');
+    const expectedPidFile = path.join(dir, 'wrapper.expected');
+    const bashPath = process.platform === 'win32' ? detectShell('win32', process.env).path : '/bin/bash';
+    const shellCwd = process.platform === 'win32' ? dir.split(path.sep).join('/') : dir;
+    const child = spawn(bashPath, ['--noprofile', '--norc', '-c', BASH_WRAPPER], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GRAFT_STATE_CWD: path.join(dir, 'wrapper.cwd'),
+        GRAFT_STATE_ENV: path.join(dir, 'wrapper.env'),
+        GRAFT_STATE_PID: pidFile,
+        GRAFT_EXPECTED_PID: expectedPidFile,
+        GRAFT_CWD: shellCwd,
+        GRAFT_CMD: 'printf "%s" "$$" > "$GRAFT_EXPECTED_PID"'
+      },
+      stdio: 'ignore'
+    });
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', resolve);
+    });
+    expect(exitCode).toBe(0);
+    const recordedPid = fs.readFileSync(pidFile, 'utf8').trim();
+    const expectedPid = fs.readFileSync(expectedPidFile, 'utf8').trim();
+    expect(recordedPid).toMatch(/^\d+$/);
+    expect(recordedPid).toBe(expectedPid);
   });
 
   it('keeps head and tail of long output and strips ANSI codes', () => {
