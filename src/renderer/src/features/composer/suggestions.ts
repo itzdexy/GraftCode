@@ -36,20 +36,30 @@ export interface Suggestion {
   sendOnEnter: boolean;
 }
 
+/**
+ * The commands to offer for what was typed after the "/". With nothing typed there is nothing
+ * to rank by: every command is listed in the order it was given (the built-in ones as the
+ * catalogue orders them, then the user's), and the list scrolls. Once something is typed, the
+ * twelve best matches, names that start with it first.
+ */
 export function commandSuggestions(commands: SlashCommand[], query: string): Suggestion[] {
   const q = query.toLowerCase();
-  return commands
-    .map((c) => ({ c, score: c.name.startsWith(q) ? 1000 - c.name.length : (fuzzyScore(q, c.name) ?? null) }))
-    .filter((x): x is { c: SlashCommand; score: number } => x.score !== null)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 12)
-    .map(({ c }) => ({
-      key: `${c.source}:${c.name}`,
-      label: `/${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''}`,
-      detail: c.description,
-      insert: c.argumentHint ? `/${c.name} ` : `/${c.name}`,
-      sendOnEnter: c.argumentHint === null
-    }));
+  const matched =
+    q === ''
+      ? commands
+      : commands
+          .map((c) => ({ c, score: c.name.startsWith(q) ? 1000 - c.name.length : (fuzzyScore(q, c.name) ?? null) }))
+          .filter((x): x is { c: SlashCommand; score: number } => x.score !== null)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 12)
+          .map(({ c }) => c);
+  return matched.map((c) => ({
+    key: `${c.source}:${c.name}`,
+    label: `/${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''}`,
+    detail: c.description,
+    insert: c.argumentHint ? `/${c.name} ` : `/${c.name}`,
+    sendOnEnter: c.argumentHint === null
+  }));
 }
 
 function quotePath(p: string): string {
