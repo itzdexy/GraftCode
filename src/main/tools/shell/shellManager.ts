@@ -78,7 +78,7 @@ const MAX_BACKGROUND_TEXT = 1_000_000;
 const VOLATILE = new Set(['PWD', 'OLDPWD', 'SHLVL', '_', 'PS1', 'PS2', 'PROMPT', 'COLUMNS', 'LINES']);
 
 export const BASH_WRAPPER = [
-  'echo $ > "$GRAFT_STATE_PID" 2>/dev/null',
+  'echo $$ > "$GRAFT_STATE_PID" 2>/dev/null',
   'cd -- "$GRAFT_CWD" 2>/dev/null || echo "graft: working directory is missing: $GRAFT_CWD" >&2',
   '__graft_cmd=$GRAFT_CMD',
   'unset GRAFT_CMD GRAFT_CWD',
