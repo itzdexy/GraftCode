@@ -225,6 +225,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 - **Real documents:** ask for a PDF, a text document (.docx), slides (.pptx) or a spreadsheet (.xlsx) and Graft builds it from the Markdown or rows the model writes: headings, lists, tables, links, the chat's own pictures, speaker's notes on slides, numbers and formulas in sheets. It is built inside Graft, in a window that runs no script and loads nothing from the web.
 - **Code in a sandbox:** chats run JavaScript in a hidden page with no network or file access to calculate, process data and make files.
 - **They know the time:** each message carries when it was sent.
+- **Commands:** type `/` for the commands a chat can use, such as `/research`, `/context`, `/clear` and `/compact`; `/model` opens the model menu. Commands that work on a project, such as `/plan` and `/commit`, say so here instead of being sent to the model.
 - **Read aloud** with pause, resume and stop, in a natural voice from OpenRouter's speech models or your computer's own voice (Settings → Voice).
 - **Incognito chats** that are never saved. See [Privacy and security](#privacy-and-security).
 
@@ -233,9 +234,10 @@ Graft uses what a server offers beyond tools. What a server says about using its
 - A catalog generated from [models.dev](https://models.dev) with 200+ providers, plus Ollama and custom endpoints. Each model's context window, tool use, vision, effort levels and prices come from the catalog and the provider's own model list.
 - **Context sizes you can trust:** a provider added by typing its address is matched to its catalog entry, a server's own figure for a model wins, and a model on an unknown gateway gets the size most providers give for it. A size nothing vouches for says "(assumed)", and you can set a model's size yourself in Settings → Models. A model on Ollama is measured against the context Graft asks Ollama to hold (32K unless you set a size, shown as "32K of 128K context"), since that is all Ollama keeps; a model Ollama passes on to a hosted service gets its whole window.
 - **OpenAI's Responses API** for the models only it serves (the `-pro` and Codex models and deep research): the summary of their reasoning is shown as they think, and the reasoning is kept across tool calls. Tested against recordings of the API, not a live account.
-- **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions.
-- **A backup model:** choose one in Settings → Models. When a session's model is overloaded, rate limited or unreachable after its retries, and nothing of a reply has arrived, the turn continues on the backup and says so. The next turn asks the session's own model first again. Never used in incognito chats.
+- **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions. Each model shows the levels it has: Gemini 3 and later think by named level, as Google's API asks, and earlier Gemini models by a budget.
+- **A backup model:** choose one in Settings → Models. When a session's model is overloaded, rate limited or unreachable after its retries, and nothing of a reply has arrived, the turn continues on the backup and says so. A sub-agent, or an agent of a group, whose model fails is finished the same way, and its record names the model that took over. The next turn asks the session's own model first again. Never used in incognito chats.
 - Reasoning carried across tool calls for models that need it. Prompt caching for Claude models, both on Anthropic and through OpenRouter. Cost tracking that counts cached tokens at their own rates and uses the charged amount when the provider reports it.
+- **Usage by day:** **Settings → Usage** adds up what Graft used on each day and with each model: requests, tokens sent (and how much of that the provider read from its cache), tokens written, and the cost, as bars and as a table. A model with no published price is counted without a cost. Counted from 0.6.16 on; incognito chats are left out.
 
 ### Personal and good-looking
 

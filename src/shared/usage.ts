@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { UsageSchema, type Usage } from './schemas/common';
 
 /**
- * What Graft used on one day with one model. Counted as requests are made, from 0.6.14
+ * What Graft used on one day with one model. Counted as requests are made, from 0.6.16
  * on: a day before that has no row, and nothing is worked out for it afterwards.
  */
 export const UsageDaySchema = z.object({

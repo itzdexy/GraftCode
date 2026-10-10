@@ -243,7 +243,7 @@ export function UsageSection() {
           <EmptyState
             icon={<ChartColumn className="size-20" aria-hidden="true" />}
             title={`Nothing used in the last ${String(range)} days`}
-            description="Graft counts each request as it is made. Sessions from before version 0.6.14 kept one total for the whole session, so their days are not here."
+            description="Graft counts each request as it is made. Sessions from before version 0.6.16 kept one total for the whole session, so their days are not here."
           />
         </div>
       ) : (
@@ -282,7 +282,7 @@ export function UsageSection() {
         </>
       )}
       <p className="text-sm text-fg-muted">
-        Counted from version 0.6.14 on, as requests are made. Costs come from each provider’s published prices, so a bill can differ. Incognito chats are not counted.
+        Counted from version 0.6.16 on, as requests are made. Costs come from each provider’s published prices, so a bill can differ. Incognito chats are not counted.
       </p>
     </div>
   );
