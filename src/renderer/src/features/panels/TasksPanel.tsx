@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Maximize2, Minimize2, Square, Trash } from 'lucide-react';
 import type { BackgroundShellView } from '@shared/schemas/panels';
+import { maskSecrets } from '@shared/secrets';
 import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
 import { Ring } from '../../components/ContextRing';
@@ -74,6 +75,8 @@ function Output({ shell }: { shell: BackgroundShellView }) {
 function TaskRow({ shell }: { shell: BackgroundShellView }) {
   const [open, setOpen] = useState(false);
   const running = shell.status === 'running';
+  // Covered like the same command's row in the transcript; that row's details show it in full on request.
+  const command = maskSecrets(shell.command);
   const stop = (): void => {
     invoke('shells:kill', { id: shell.id }).catch((e: unknown) => reportError("Couldn't stop the command", e));
   };
@@ -82,8 +85,8 @@ function TaskRow({ shell }: { shell: BackgroundShellView }) {
       <div className="flex min-h-26 items-center gap-6">
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-6 text-left">
           {running ? <Ring value={0} size={10} spinning label="Running" /> : <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" />}
-          <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg-secondary" title={shell.command}>
-            {shell.command}
+          <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg-secondary" title={command}>
+            {command}
           </span>
         </button>
         {running ? (

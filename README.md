@@ -105,18 +105,21 @@ the step in progress and the time so far. The eye under the message box, or
 **Settings → Appearance → Transcript view**, switches between **Normal**,
 **Thinking**, **Verbose** and the earlier one-line **Summary**. Chats are unchanged.
 
-After an edit to a TypeScript or JavaScript file in a trusted project, the
-bundled language server checks that file and its errors come back with the
-edit's result, so the next step can fix them. The transcript lists them under
-the diff. **Settings → Models → Check edits for errors** turns this off. Only
-the edited file is checked: a change that breaks another file still surfaces
-through the project's checks.
+After an edit to a TypeScript or JavaScript file in a trusted project with its
+packages installed, the bundled language server checks that file and its errors
+come back with the edit's result, so the next step can fix them. The transcript
+lists them under the diff. An edit waits at most five seconds for its check, and
+a server that fails is left alone for a few minutes instead of holding edits up.
+**Settings → Models → Check edits for errors** turns this off. Only the edited
+file is checked: a change that breaks another file still surfaces through the
+project's checks.
 
 Diffs mark the changed words inside a line and use syntax colours. API keys,
-tokens and passwords in command and tool output are covered until the eye on
-that output is pressed. This changes what is shown, not what is stored or sent
-to the model, and it recognizes common formats only. The newest **Edited files**
-card has **Undo**, which opens the rewind dialog on **Files only**.
+tokens and passwords in command output, tool output and diffs are covered until
+the eye beside them is pressed. This changes what is shown, not what is stored
+or sent to the model, and it recognizes common formats only; a change waiting for
+your approval is shown as it is. The **Edited files** card of the last turn has
+**Undo**, which opens the rewind dialog on **Files only**.
 
 The [implementation record](docs/IMPLEMENTATION_STATUS.md) tracks verified changes,
 security boundaries and the remaining development milestones.

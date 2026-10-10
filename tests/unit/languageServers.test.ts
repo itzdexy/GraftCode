@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type * as ChildProcessModule from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { problemsIn, problemsNote } from '../../src/main/languages/problems';
+import { EditChecks, problemsNote } from '../../src/main/languages/problems';
 import { LanguageServers } from '../../src/main/languages/servers';
 import { semanticCodeTool } from '../../src/main/tools/search/semantic';
 import { makeTempDir, removeDir } from '../support/tmp';
@@ -177,31 +177,56 @@ describe('real TypeScript language-server queries', () => {
 });
 
 describe('an edited file checked by the real server', () => {
+  const signal = new AbortController().signal;
+  // Generous waits: the first query starts the server and loads the project.
+  const check = (name: string) => new EditChecks(servers, { budgetMs: 60_000, pauseMs: 0 }).problemsIn(dir, path.join(dir, name), signal);
+  const TWO_ARGUMENTS = 'export function twice(value: number, times: number): number { return value * times; }\n';
+
   it('reports the type error an edit introduced, in the form the edit tools pass on, and nothing once it is fixed', async () => {
     const file = path.join(dir, 'main.ts');
-    const signal = new AbortController().signal;
-    // Generous waits: this is the first query, so the server starts and loads the project.
-    expect(await problemsIn(servers, dir, file, signal, 60_000)).toEqual({ source: 'TypeScript', problems: [], total: 0 });
+    expect(await check('main.ts')).toEqual({ source: 'TypeScript', problems: [], total: 0 });
 
     fs.writeFileSync(file, 'import { twice } from "./library";\nexport const answer: string = twice(21);\n');
-    const broken = await problemsIn(servers, dir, file, signal, 60_000);
+    const broken = await check('main.ts');
     expect(broken?.total).toBe(1);
     expect(broken?.problems[0]).toMatchObject({ line: 2, column: 14, code: 2322 });
     expect(broken?.problems[0]?.text).toContain("Type 'number' is not assignable to type 'string'");
-    expect(problemsNote('main.ts', broken!)).toContain('  2:14  TS2322  ');
+    expect(problemsNote('main.ts', broken!)).toContain('> 2:14  TS2322  ');
 
     fs.writeFileSync(file, 'import { twice } from "./library";\nexport const answer: number = twice(21);\n');
-    expect((await problemsIn(servers, dir, file, signal, 60_000))?.total).toBe(0);
-  });
+    expect((await check('main.ts'))?.total).toBe(0);
+  }, 60_000);
 
   it('sees that a change to one file broke another, when that other file is checked', async () => {
-    const signal = new AbortController().signal;
-    expect((await problemsIn(servers, dir, path.join(dir, 'main.ts'), signal, 60_000))?.total).toBe(0);
+    expect((await check('main.ts'))?.total).toBe(0);
     // The function now wants a second argument; the file that calls it did not change.
-    fs.writeFileSync(path.join(dir, 'library.ts'), 'export function twice(value: number, times: number): number { return value * times; }\n');
-    expect((await problemsIn(servers, dir, path.join(dir, 'library.ts'), signal, 60_000))?.total).toBe(0);
-    const caller = await problemsIn(servers, dir, path.join(dir, 'main.ts'), signal, 60_000);
+    fs.writeFileSync(path.join(dir, 'library.ts'), TWO_ARGUMENTS);
+    expect((await check('library.ts'))?.total).toBe(0);
+    const caller = await check('main.ts');
     expect(caller?.total).toBe(1);
     expect(caller?.problems[0]?.code).toBe(2554);
-  });
+  }, 60_000);
+
+  it('checks a file against what its imports hold on disk now, not the copy the server was given earlier', async () => {
+    const library = path.join(dir, 'library.ts');
+    const original = fs.readFileSync(library, 'utf8');
+    // Both files are now documents the server holds open, and it answers from those.
+    expect((await check('library.ts'))?.total).toBe(0);
+    expect((await check('main.ts'))?.total).toBe(0);
+
+    // A command, the user's editor or a rewind changes the library. Nobody asks about that file.
+    fs.writeFileSync(library, TWO_ARGUMENTS);
+    const caller = await check('main.ts');
+    expect(caller?.total).toBe(1);
+    expect(caller?.problems[0]?.code).toBe(2554);
+
+    // Changed back the same way: the error goes with its cause instead of being reported for good.
+    fs.writeFileSync(library, original);
+    expect((await check('main.ts'))?.total).toBe(0);
+
+    // Deleted: the file that imports it no longer finds it.
+    fs.rmSync(library);
+    const orphan = await check('main.ts');
+    expect(orphan?.problems.map((p) => p.code)).toContain(2307);
+  }, 60_000);
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentBlock, StoredMessage } from '../../../src/shared/schemas/messages';
-import { changedSpans, countChanges, inlineSpans, parsePatch, pieces, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
+import { changedSpans, countChanges, coveredRows, hunkTexts, inlineSpans, parsePatch, pieces, rowsFromHunks, toSplitRows } from '../../../src/renderer/src/features/diff/diffModel';
 import { commandSuggestions, detectToken } from '../../../src/renderer/src/features/composer/suggestions';
 import {
   activityTitle,
@@ -34,6 +34,9 @@ function call(name: string, input: unknown, result: Partial<NonNullable<ToolCall
 }
 
 const NO_LIVE = { streaming: null, running: {} };
+
+/** What a command that ran leaves behind. */
+const ran = (command: string) => ({ kind: 'shell' as const, command, cwd: '/', exitCode: 0, output: '', truncated: false, logPath: null, durationMs: 1, timedOut: false, interrupted: false, backgroundId: null });
 
 describe('transcript model', () => {
   it('folds consecutive tool calls across messages into one group with their results', () => {
@@ -124,9 +127,11 @@ describe('transcript model', () => {
         call('Edit', { file_path: 'x.ts' })
       ])
     ).toBe('Ran 2 commands (1 failed), edited x.ts');
-    // A command's description is told in the tense that fits: under way until it has a result, then done.
-    expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' })])).toBe('Installing dependencies');
-    expect(summarizeCalls([call('Shell', { command: 'npm ci', description: 'install dependencies.' }, { display: { kind: 'text', text: '' } })])).toBe('Installed dependencies');
+    // A command's description is told as things stand: as written until it runs, under way while it does, done once it has.
+    const install = { command: 'npm ci', description: 'install dependencies.' };
+    expect(summarizeCalls([call('Shell', install)])).toBe('Install dependencies');
+    expect(summarizeCalls([{ ...call('Shell', install), running: { summary: '', output: '' } }])).toBe('Installing dependencies');
+    expect(summarizeCalls([call('Shell', install, { display: ran('npm ci') })])).toBe('Installed dependencies');
     expect(summarizeCalls([call('mcp__docs__search', {})])).toBe('Used search from docs');
   });
 
@@ -254,13 +259,23 @@ describe('turn activity', () => {
       mono: false,
       title: 'src/main/agent/session.ts'
     });
-    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }))).toMatchObject({ verb: 'Running the unit tests', target: '' });
-    expect(callParts(call('Shell', { command: 'npm test', description: 'Run the unit tests.' }, { display: { kind: 'text', text: '' } }))).toMatchObject({ verb: 'Ran the unit tests', target: '' });
-    expect(describeCall(call('Shell', { command: 'npm test', description: 'Final check.' }, { display: { kind: 'text', text: '' } }))).toBe('Final check');
+    const tests = { command: 'npm test', description: 'Run the unit tests.' };
+    // Waiting to be allowed, nothing runs: the description stays as the model wrote it.
+    expect(callParts(call('Shell', tests))).toMatchObject({ verb: 'Run the unit tests', target: '' });
+    expect(callParts({ ...call('Shell', tests), running: { summary: '', output: '' } })).toMatchObject({ verb: 'Running the unit tests', target: '' });
+    expect(callParts(call('Shell', tests, { display: ran('npm test') }))).toMatchObject({ verb: 'Ran the unit tests', target: '' });
+    // Declined, it never ran: "Ran the unit tests" beside "Declined" would be untrue.
+    expect(callParts(call('Shell', tests, { display: { kind: 'denied', reason: 'You declined it.' } })).verb).toBe('Run the unit tests');
+    expect(describeCall(call('Shell', tests, { display: { kind: 'denied', reason: 'You declined it.' } }))).toBe('Run the unit tests');
+    expect(describeCall(call('Shell', { command: 'npm test', description: 'Final check.' }, { display: ran('npm test') }))).toBe('Final check');
     // A key in a command is covered wherever the command is shown as a line.
     const withKey = call('Shell', { command: 'curl -H "Authorization: Bearer abcDEF0123456789abcDEF0123456789" https://api.example.com' });
-    expect(callParts(withKey).target).toBe('curl -H "Authorization: Bearer abcDEF••••••••" https://api.example.com');
+    expect(callParts(withKey).target).toBe('curl -H "Authorization: Bearer ••••••••" https://api.example.com');
     expect(describeCall(withKey)).not.toContain('0123456789');
+    // So is one in the address of a page that was read or opened.
+    const fetched = call('WebFetch', { url: 'https://api.example.com/v1/data?api_key=abcd1234efgh5678ijkl' });
+    expect(callParts(fetched).title).toBe('https://api.example.com/v1/data?api_key=••••••••');
+    expect(describeCall(fetched)).toBe('Reading https://api.example.com/v1/data?api_key=••••••••');
     expect(callParts(call('Shell', { command: ['git status', 'git diff'].join('\n') }))).toMatchObject({ verb: '', target: 'git status', mono: true });
     expect(callParts(call('WebFetch', { url: 'https://www.anthropic.com/claude-opus-5-5' }))).toMatchObject({ verb: 'Reading', target: 'anthropic.com/claude-opus-5-5' });
   });
@@ -485,6 +500,68 @@ describe('diff model', () => {
     expect(changedSpans('same', 'same')).toBeNull();
     expect(changedSpans('', 'added')).toBeNull();
     expect(changedSpans('return a + b;', 'export interface Thing {')).toBeNull();
+  });
+
+  it('marks a whole emoji, never half of one', () => {
+    // Both are two code units that start with the same one; a mark over the second alone would draw two broken glyphs.
+    const before = "  status: '\u{1F534}',";
+    const after = "  status: '\u{1F7E2}',";
+    const spans = changedSpans(before, after);
+    expect(spans?.before.map((s) => before.slice(s.start, s.end))).toEqual(['\u{1F534}']);
+    expect(spans?.after.map((s) => after.slice(s.start, s.end))).toEqual(['\u{1F7E2}']);
+  });
+
+  it('stops marking words once a diff has spent its share of work, and still pairs what fits', () => {
+    const pair = (n: number): string[] => [`-const value${String(n)} = 1;`, `+const value${String(n)} = 2;`];
+    const rows = parsePatch(['@@ -1,6 +1,6 @@', ...pair(1), ' keep', ...pair(2), ' keep', ...pair(3)].join('\n'));
+    // Each pair is 8 tokens against 8: 64 cells. All three fit by default; a budget of 130 pays for two.
+    expect(inlineSpans(rows).size).toBe(6);
+    expect([...inlineSpans(rows, 130).keys()].sort((a, b) => a - b)).toEqual([1, 2, 4, 5]);
+    expect(inlineSpans(rows, 0).size).toBe(0);
+    // A pair too large for what is left is passed over; a smaller one after it is still marked.
+    const wide = `const total = ${Array.from({ length: 30 }, (_, i) => `part${String(i)}`).join(' + ')};`;
+    const mixed = parsePatch(['@@ -1,4 +1,4 @@', `-${wide}`, `+${wide.replace('part7', 'other')}`, ' keep', ...pair(4)].join('\n'));
+    expect([...inlineSpans(mixed, 100).keys()].sort((a, b) => a - b)).toEqual([4, 5]);
+  });
+
+  it('puts each hunk’s lines together as the text before and the text after, hunk by hunk', () => {
+    const rows = rowsFromHunks([
+      { header: '@@ -1,3 +1,3 @@', lines: [' /**', '- * old', '+ * new'] },
+      { header: '@@ -40,2 +40,3 @@', lines: [' const a = 1;', '+const b = 2;', ' done();'] }
+    ]);
+    const { texts, placeOf } = hunkTexts(rows);
+    // The comment left open at the end of the first hunk is not carried into the second.
+    expect(texts).toEqual([
+      { before: '/**\n * old', after: '/**\n * new' },
+      { before: 'const a = 1;\ndone();', after: 'const a = 1;\nconst b = 2;\ndone();' }
+    ]);
+    expect(placeOf).toEqual([
+      null,
+      { hunk: 0, side: 'after', line: 0 },
+      { hunk: 0, side: 'before', line: 1 },
+      { hunk: 0, side: 'after', line: 1 },
+      null,
+      { hunk: 1, side: 'after', line: 0 },
+      { hunk: 1, side: 'after', line: 1 },
+      { hunk: 1, side: 'after', line: 2 }
+    ]);
+    expect(hunkTexts([])).toEqual({ texts: [], placeOf: [] });
+  });
+
+  it('covers the lines of a diff that hold a key, and only those', () => {
+    const key = `sk-ant-api03-${'a1B2c3D4'.repeat(6)}`;
+    const env = parsePatch(['@@ -1,2 +1,3 @@', ' PORT=3000', '-ANTHROPIC_API_KEY=', `+ANTHROPIC_API_KEY=${key}`, ' DEBUG=1'].join('\n'));
+    expect([...coveredRows(env)]).toEqual([[3, 'ANTHROPIC_API_KEY=sk-ant••••••••']]);
+    expect(coveredRows(parsePatch(['@@ -1 +1 @@', '-const a = 1;', '+const a = 2;'].join('\n'))).size).toBe(0);
+
+    // A private key is known by its first line; every line of it is covered, in the text it belongs to.
+    const pem = ['-----BEGIN OPENSSH PRIVATE KEY-----', 'b3BlbnNzaC1rZXktdjEAAAAA', 'AAAAB3NzaC1yc2EAAAADAQAB', '-----END OPENSSH PRIVATE KEY-----'];
+    const added = parsePatch(['@@ -0,0 +1,5 @@', ...pem.map((line) => `+${line}`), '+# deploy key'].join('\n'));
+    expect([...coveredRows(added).keys()]).toEqual([1, 2, 3, 4]);
+    expect([...new Set(coveredRows(added).values())]).toEqual(['••••••••']);
+    // Removed, it is covered on the removed side; the line kept after it is not.
+    const removed = parsePatch(['@@ -1,5 +1,1 @@', ...pem.map((line) => `-${line}`), ' # deploy key'].join('\n'));
+    expect([...coveredRows(removed).keys()]).toEqual([1, 2, 3, 4]);
   });
 
   it('pairs the removed and added lines of a change, one for one', () => {

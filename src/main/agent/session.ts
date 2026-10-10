@@ -1751,9 +1751,9 @@ export class AgentSession {
       mcpRoot: this.summary.kind === 'code' ? this.settingsRoot() : null,
       trustedProject: trusted && this.summary.kind === 'code',
       // The same gate as the SemanticCode tool: a code session in a project the user trusts. Settings can switch it off.
-      checkFile: (file) =>
+      checkFile: (checkRoot, file) =>
         root !== null && trusted && this.summary.kind === 'code' && this.deps.problems && this.deps.preferences().checkEdits
-          ? this.deps.problems(root, file, signal)
+          ? this.deps.problems(checkRoot, file, signal)
           : Promise.resolve(null),
       cwd,
       projectRoot: root ?? cwd,

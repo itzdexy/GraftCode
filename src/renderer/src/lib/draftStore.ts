@@ -35,3 +35,33 @@ export function saveDrafts(drafts: Record<string, string>, keep: (key: string) =
     // rocky: drafts are a convenience; when storage is full or unavailable they last only until the window closes.
   }
 }
+
+/**
+ * Remembers which drafts hold text typed in private. A draft is flagged the
+ * moment text is set for it in private (an incognito chat, or Chat home while
+ * its incognito switch is on) and stays flagged until it is emptied, so it
+ * cannot reach storage after the switch goes off or the chat is deleted.
+ */
+export function trackPrivate(flagged: Set<string>, key: string, text: string, privateNow: boolean): void {
+  if (text.length === 0) flagged.delete(key);
+  else if (privateNow) flagged.add(key);
+}
+
+/**
+ * Whether a draft may be stored: never one typed in private; a home draft
+ * always; a session's only while that session is known and not incognito.
+ * A session nobody knows is refused (its chat may have been incognito and is
+ * gone), unless its draft came from storage at start, before the sessions
+ * were loaded.
+ */
+export function mayStore(
+  key: string,
+  flagged: ReadonlySet<string>,
+  sessions: Readonly<Record<string, { incognito: boolean } | undefined>>,
+  storedAtStart: ReadonlySet<string>
+): boolean {
+  if (flagged.has(key)) return false;
+  if (key.startsWith('home:')) return true;
+  const session = sessions[key];
+  return session ? !session.incognito : storedAtStart.has(key);
+}

@@ -1239,8 +1239,8 @@ describe('agent tools that involve the user', () => {
       expect(lsp.asked).toEqual([{ root: h.projectDir, file: path.join(h.projectDir, 'feature.ts') }]);
       const told = result(h);
       expect(told?.text).toContain('Created feature.ts (2 lines).');
-      expect(told?.text).toContain('TypeScript reports 1 problem in feature.ts as it is now:');
-      expect(told?.text).toContain("  1:14  TS2322  Type 'string' is not assignable to type 'number'.");
+      expect(told?.text).toContain('TypeScript reports 1 problem in feature.ts as it is now. Fix what this change caused');
+      expect(told?.text).toContain("> 1:14  TS2322  Type 'string' is not assignable to type 'number'.");
       expect(told?.display).toMatchObject({ kind: 'edit', problems: { source: 'TypeScript', total: 1, items: [{ line: 1, column: 14, code: 2322 }] } });
       // The model's next request carries the note, so it can fix the error in its next step.
       expect(JSON.stringify(lastRequest(h).messages)).toContain('TS2322');

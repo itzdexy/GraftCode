@@ -30,6 +30,12 @@ function validatedFile(root: string, name: string): string {
   return file;
 }
 
+/** A file's state on disk, to tell whether it changed since the server was given its text; null when it is not there. */
+function diskStamp(file: string): string | null {
+  try { const stat = fs.statSync(file); return `${String(stat.mtimeMs)}:${String(stat.size)}`; }
+  catch { return null; }
+}
+
 async function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   let abort: (() => void) | undefined;
@@ -61,7 +67,8 @@ class TypeScriptClient {
   private readonly connection: MessageConnection;
   private readonly ready: Promise<void>;
   private readonly exited: Promise<void>;
-  private readonly documents = new Map<string, number>();
+  /** The documents the server holds open, by URI: the version it was last given, and the file's state on disk then (null for an unsaved buffer). */
+  private readonly documents = new Map<string, { version: number; file: string; stamp: string | null }>();
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
   private disposing: Promise<void> | undefined;
@@ -141,18 +148,44 @@ class TypeScriptClient {
     } catch { return null; }
   }
 
+  /**
+   * The server answers from the documents it holds, not from the disk. One whose file changed since it was given
+   * (a command, the user's editor, a rewind) is given again, and one whose file is gone or no longer fit to hold
+   * is closed, so no file is checked against an old copy of what it imports.
+   */
+  private async refresh(queried: string): Promise<void> {
+    for (const [uri, held] of this.documents) {
+      if (uri === queried) continue;
+      const stamp = diskStamp(held.file);
+      if (stamp === held.stamp) continue;
+      let text: string | null = null;
+      try { if (validatedFile(this.root, held.file) === held.file) text = fs.readFileSync(held.file, 'utf8'); }
+      catch { /* closed below: the server then reads whatever is on disk itself */ }
+      if (text === null) {
+        this.documents.delete(uri);
+        await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri } });
+      } else {
+        this.documents.set(uri, { version: held.version + 1, file: held.file, stamp });
+        await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version: held.version + 1 }, contentChanges: [{ text }] });
+      }
+    }
+  }
+
   private async query(input: SemanticQuery, signal: AbortSignal, buffer?: string): Promise<SemanticResult> {
     const file = validatedFile(this.root, input.file);
+    // Taken before the text is read: a write in between shows as a change at the next query instead of being missed.
+    const stamp = buffer === undefined ? diskStamp(file) : null;
     const text = buffer ?? fs.readFileSync(file, 'utf8');
     const uri = pathToFileURL(file).href;
     if (!this.documents.has(uri) && this.documents.size >= 64) {
       const oldest = this.documents.keys().next().value;
       if (oldest) { await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri: oldest } }); this.documents.delete(oldest); }
     }
-    const version = (this.documents.get(uri) ?? 0) + 1;
-    this.documents.set(uri, version);
+    const version = (this.documents.get(uri)?.version ?? 0) + 1;
+    this.documents.set(uri, { version, file, stamp });
     if (version === 1) await this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri, languageId: /\.tsx$/i.test(file) ? 'typescriptreact' : /\.[cm]?ts$/i.test(file) ? 'typescript' : /\.jsx$/i.test(file) ? 'javascriptreact' : 'javascript', version, text } });
     else await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+    await this.refresh(uri);
     const base: SemanticResult = { engine: 'typescript-language-server', action: input.action, file: path.relative(this.root, file).replaceAll(path.sep, '/'), truncated: false };
     if (input.action === 'diagnostics') {
       // This pinned server does not version publishDiagnostics. Its documented LSP

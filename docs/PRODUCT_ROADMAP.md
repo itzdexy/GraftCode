@@ -29,30 +29,47 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   running turn the mascot, the step in progress and the turn's time. Thinking also shows
   thoughts, Verbose opens every step, Summary is the earlier one-line fold (`foldTurn`) and
   what chats always use. The projection cache of finished turns is keyed by the view.
-- **Tenses** (`verbs.ts`). A command's description reads "Running the unit tests" until it
-  has a result and "Ran the unit tests" after; a description that opens with no known verb,
-  or with a word used as a noun ("Test results"), stays as written.
+- **Tenses** (`verbs.ts`, `asItStands` in `transcriptModel.ts`). A command's description
+  reads "Running the unit tests" while it runs and "Ran the unit tests" once it has run;
+  waiting to be allowed, or declined, it stays as written. So does a description that opens
+  with no known verb, with a word used as a noun ("Test results"), or with two verbs joined
+  ("Build and test the app").
 - **Diffs** (`diffModel.ts`, `DiffView.tsx`). A removed line and the line that replaced it
-  are compared token by token (longest common subsequence, capped) and the changed words are
-  marked; unrelated lines are left unmarked. Both sides of a patch are highlighted as a whole
-  and the tokens handed back to their rows. An edit's diff names its file, shows one gutter
-  and draws a rule between hunks.
+  are compared token by token (longest common subsequence, capped for a pair of lines and
+  for a whole diff) and the changed words are marked; unrelated lines are left unmarked.
+  Each hunk's two texts are highlighted whole (`hunkTexts`) and the tokens handed back to
+  their rows, so a comment left open at the end of one hunk does not colour the next. An
+  edit's diff names its file, shows one gutter and draws a rule between hunks.
 - **Errors after each edit** (`languages/problems.ts`, `problemsAfter` in `tools/fs/write.ts`,
   `ToolContext.checkFile`). Edit, MultiEdit and Write ask the bundled language server for
-  the edited file's diagnostics, within ten seconds, and add the errors to the tool result
-  and to its display. Asked only in a code session of a trusted project, and only while
-  `behavior.checkEdits` is on. No answer is never reported as a clean file.
+  the edited file's diagnostics and add the errors to the tool result and to its display.
+  Asked only in a code session of a trusted project, only while `behavior.checkEdits` is on,
+  and only where the project's packages are installed (`packagesMissing`: in a fresh clone
+  or an agent's private checkout every import would be an error). `EditChecks` keeps a
+  server from holding edits up: an edit waits five seconds, a query that takes longer
+  finishes without it, and a failure pauses that project's checks for three minutes. The
+  root is the caller's `projectRoot`, so a writer in a private checkout is checked there.
+  Before a query the server is given again every document it holds that changed on disk
+  (`refresh` in `languages/servers.ts`). The note says what to do in Graft's words and then
+  quotes the checker's messages. No answer is never reported as a clean file.
 - **Secrets covered in what is shown** (`shared/secrets.ts`, `Output.tsx`). Keys by shape
   (provider keys, GitHub, AWS, Google, Slack, Stripe, Hugging Face, npm, signed web tokens,
-  private key blocks), bearer values, and values assigned to names ending in key, secret,
-  token or password. Tool output, "!" commands, checks and background tasks cover them until
-  the eye is pressed; a command's row covers them always. Stored results are unchanged.
-- **Undo on the newest file card** (`EditsCard.tsx`, `RewindDialog.tsx`). The card carries
-  the message that started its turn; Undo opens the rewind dialog on Files only. Without a
-  snapshot the dialog does not fall back to removing messages.
+  private key blocks), bearer values, passwords in addresses, and values assigned to names
+  ending in key, secret, token or password. Tool output, "!" commands, checks, background
+  tasks and diffs (`coveredRows`; in the transcript and the Changes panel) cover them until
+  the eye is pressed. A command's row and an address in a row cover them always; the step's
+  details show the command in full behind the same eye. An approval card shows a change as
+  it is. Every pattern is bounded, so a long line costs time in proportion to its length.
+  Stored results are unchanged.
+- **Undo on the last turn's file card** (`EditsCard.tsx`, `RewindDialog.tsx`). The card
+  carries the message that started its turn; Undo opens the rewind dialog on Files only.
+  It is offered only while nothing came after that turn: a later message or "!" command
+  may have changed files that have no card. Without a snapshot the dialog does not fall
+  back to removing messages, and with Files only chosen it says the conversation stays.
 - **Smaller things.** Drafts are kept in the window's storage across restarts, never those
-  of incognito chats (`draftStore.ts`); a session returns to where it was left scrolled;
-  number keys pick a permission mode; your message is a bubble on the right in code sessions.
+  of incognito chats, also once such a chat is removed (`draftStore.ts`); a session returns
+  to where it was left scrolled, or to its latest message when that place is gone; number
+  keys pick a permission mode; your message is a bubble on the right in code sessions.
 - **Fixed:** a folding section could grow wider than the transcript (`.graft-collapse` had
   no column limit), so a long diff line stretched the page sideways.
 - ESLint leaves `.claude/` alone: it can hold whole worktrees someone is still editing.
@@ -383,17 +400,25 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
   the Normal view a thought is left out entirely; only Thinking and Verbose show it.
 - An edit is checked for the errors of the edited file only: a change that breaks another
   file is not reported until that file is edited or the project's checks run. Only TypeScript
-  and JavaScript are checked. The check waits ten seconds at most, so the first edit after
-  a start in a large project may go unchecked while the server loads.
+  and JavaScript are checked. An edit waits five seconds for its check, so the first edit
+  after a server starts in a large project goes unchecked while it loads, and after a
+  failure a project's edits go unchecked for three minutes. A project whose packages are
+  not installed is not checked at all, which includes every agent writing in a private
+  checkout of a project with dependencies; "installed" means a `node_modules` folder above
+  the file. Documents the server holds are compared with the disk by time and size before
+  each query; files it never opened are refreshed by its own file watching.
 - Secrets are recognized by common shapes and names: a key in an unusual format, or one
-  split across lines, is shown. Replies, diffs and approval cards are not covered (an
-  approval has to show the exact command). Copying a covered output copies the dots.
-- Undo is offered on the newest file card only, and it puts every file back as it was
-  before that turn: changes made since by commands or by hand go with it (the dialog lists
-  them, and a safety snapshot is taken first).
+  split across lines, is shown. What Graft writes itself (replies, thoughts, plans, error
+  messages) is not covered, and neither is an approval card, which has to show exactly what
+  is being approved. A covered diff line has no colours or word marks until it is shown.
+  Copying a covered output copies the dots.
+- Undo is offered on the file card of the last turn only, and it puts every file back as
+  it was before that turn: changes made in that turn by commands, or since by hand, go
+  with it (the dialog lists them, and a safety snapshot is taken first).
 - Drafts are kept per window in local storage: text only, the newest fifty, no attachments.
 - Words changed inside a line are marked for lines paired one to one within a change; a
-  line split in two, or lines longer than the comparison cap, are left unmarked.
+  line split in two, lines longer than the comparison cap, and the rest of a diff that has
+  spent its share of comparisons are left unmarked.
 
 - The parts of the context are estimates by characters (about 3.5 a token): they say which
   part is large, not what a provider bills, and their sum differs from the provider's

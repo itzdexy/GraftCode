@@ -64,9 +64,9 @@ export function freshnessError(files: FileStateTracker, abs: string, shown: stri
 export async function problemsAfter(
   abs: string,
   shown: string,
-  ctx: Pick<ToolContext, 'checkFile'>
+  ctx: Pick<ToolContext, 'checkFile' | 'projectRoot'>
 ): Promise<{ note: string | null; display: { problems?: { source: string; total: number; items: Problem[] } } }> {
-  const found = (await ctx.checkFile?.(abs).catch(() => null)) ?? null;
+  const found = (await ctx.checkFile?.(ctx.projectRoot, abs).catch(() => null)) ?? null;
   if (!found || found.total === 0) return { note: null, display: {} };
   return { note: problemsNote(shown, found), display: { problems: { source: found.source, total: found.total, items: found.problems } } };
 }

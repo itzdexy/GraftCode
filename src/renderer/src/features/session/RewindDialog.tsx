@@ -141,9 +141,11 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
           )}
           <div className="flex flex-col gap-4 text-base">
             <p className="text-fg-secondary">
-              {preview.messagesRemoved > 0
-                ? `${preview.messagesRemoved} ${preview.messagesRemoved === 1 ? 'message' : 'messages'} from this point on will be removed.`
-                : 'No messages come after this one.'}
+              {chosen === 'files'
+                ? 'The conversation stays as it is.'
+                : preview.messagesRemoved > 0
+                  ? `${preview.messagesRemoved} ${preview.messagesRemoved === 1 ? 'message' : 'messages'} from this point on will be removed.`
+                  : 'No messages come after this one.'}
             </p>
             {target.chat ? null : preview.files === null ? (
               <p className="text-fg-muted">There is no file snapshot for this message, so only the conversation can be rewound.</p>

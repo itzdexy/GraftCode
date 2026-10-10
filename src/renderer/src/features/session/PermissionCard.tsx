@@ -57,8 +57,12 @@ function Detail({ request }: { request: PermissionRequest }) {
     case 'edit':
       return (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-fg-secondary">{d.created ? 'Create this file' : 'Edit this file'}</p>
-          <EditDiff patch={d.patch} path={d.path} />
+          {/* The whole path, wrapping: what is being approved has to be readable without a tooltip. */}
+          <p className="selectable font-mono text-sm break-all text-fg-secondary">
+            {d.created ? 'Create ' : 'Edit '}
+            {d.path}
+          </p>
+          <EditDiff patch={d.patch} path={d.path} named={false} covered={false} />
         </div>
       );
     case 'path':
