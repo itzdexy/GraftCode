@@ -39,7 +39,7 @@ if (process.env.GRAFT_USER_DATA_DIR) {
 // Artifact previews are served from their own privileged, sandboxed scheme.
 protocol.registerSchemesAsPrivileged([{ scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
-const paths = buildPaths(app.getPath('userData'), undefined, app.getPath('documents'));
+const paths = buildPaths(app.getPath('userData'), undefined, app.getPath('documents'), resourcePath());
 configureLogFile(paths.logs);
 const isFirstLaunch = !fs.existsSync(paths.database);
 

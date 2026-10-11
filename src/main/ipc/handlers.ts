@@ -787,7 +787,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
       return s.tools.names().filter((n) => !n.startsWith('mcp__') && !parentOnly.has(n) && !chatOnly.has(n));
     },
-    'customize:skills': async ({ projectPath }) => listSkills((await ctx.services()).paths.graftHome, projectPath),
+    'customize:skills': async ({ projectPath }) => {
+      const { paths } = await ctx.services();
+      return listSkills(paths.graftHome, projectPath, paths.builtinSkills);
+    },
     'customize:saveSkill': async ({ scope, projectPath, name, description, body, previousPath }) => ({
       path: await saveSkill((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, body, previousPath })
     }),

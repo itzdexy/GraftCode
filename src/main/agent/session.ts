@@ -130,6 +130,8 @@ export interface SessionDeps {
   hooks(projectRoot: string | null, trusted: boolean): HookRunner | null;
   rgPath: string;
   graftHome: string;
+  /** The skills that ship with Graft; null when there are none. */
+  builtinSkills: string | null;
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   trust(projectRoot: string): void;
@@ -1071,7 +1073,7 @@ export class AgentSession {
         date: this.deps.now().toISOString().slice(0, 10),
         mode: summary.permissionMode,
         memory: memory.initial(this.workingDir()),
-        skills: loadSkills(this.deps.graftHome, root),
+        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills),
         webSearch: web.native || web.clientSearch,
         computer: this.computerFor(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),

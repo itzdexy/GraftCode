@@ -79,12 +79,13 @@ function notesSection(memory: MemoryFile[]): string {
   ].join('\n\n');
 }
 
-function skillsSection(skills: SkillInfo[]): string {
+/** The skills a session may use. A skill Graft ships can carry a note of Graft's own, on the line after it. */
+export function skillsSection(skills: SkillInfo[]): string {
   if (skills.length === 0) return '';
   return [
     '# Skills',
     'Skills are instruction files for specialized tasks. When a task matches a skill, Read its SKILL.md first and follow it.',
-    ...skills.map((s) => `- ${s.name}: ${s.description} (${s.path})`)
+    ...skills.flatMap((s) => [`- ${s.name}: ${s.description} (${s.path})`, ...(s.note ? [`  ${s.note}`] : [])])
   ].join('\n');
 }
 

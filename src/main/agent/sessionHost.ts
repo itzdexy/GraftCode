@@ -24,6 +24,7 @@ import type { MissionController } from './missionController';
 import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
+import { skillReadRoots } from './skills';
 import { shouldCompact } from './tokens';
 import { TurnBudget } from './turnBudget';
 
@@ -205,7 +206,8 @@ export class SessionHost {
       rules,
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
       allowNetwork: this.summary.kind === 'chat',
-      sandboxed: this.deps.shells.sandboxFor(this.id) !== null
+      sandboxed: this.deps.shells.sandboxFor(this.id) !== null,
+      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills)
     };
   }
 
