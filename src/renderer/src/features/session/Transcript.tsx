@@ -20,6 +20,7 @@ import {
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
+import { DiagramCard } from './DiagramCard';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
 import { SourcesContext } from './Markdown';
@@ -237,6 +238,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <EditsCard files={item.files} onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null} />;
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
+      case 'diagrams':
+        return <DiagramCard sessionId={summary.id} diagrams={item.diagrams} />;
       case 'sources':
         return <SourcesCard sources={item.sources} />;
       case 'media':
