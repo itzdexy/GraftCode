@@ -79,6 +79,8 @@ export interface ToolContext extends DescribeContext {
   publicWebOnly: boolean;
   /** Saves files the user can download from the chat; null outside chats and in incognito chats. */
   chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
+  /** The folder of the skills Graft ships, for the Skill tool; null when the build has none. */
+  builtinSkills: string | null;
   /** Builds a PDF, a text document, slides or a spreadsheet from what was written, for CreateFile; null where files can't be made. */
   makeDocument: ((kind: DocumentKind, name: string, source: string, signal: AbortSignal) => Promise<Buffer>) | null;
   /** Runs JavaScript in an isolated page with no network or file access; null outside chats. */

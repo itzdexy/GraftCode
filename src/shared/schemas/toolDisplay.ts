@@ -138,7 +138,8 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     /** `site` names the site when the URL is a redirect. */
     results: z.array(z.object({ title: z.string(), url: z.string(), site: z.string().optional() }))
   }),
-  MadeFileSchema.extend({ kind: z.literal('file'), preview: z.string().nullable() }),
+  /** `diagram` is present when the file a chat saved is a diagram: the transcript then shows it at the end of the turn. */
+  MadeFileSchema.extend({ kind: z.literal('file'), preview: z.string().nullable(), diagram: DiagramInfoSchema.optional() }),
   z.object({
     kind: z.literal('code'),
     code: z.string(),

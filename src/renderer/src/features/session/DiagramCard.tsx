@@ -4,6 +4,8 @@ import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../components/Menu';
 import { cn } from '../../lib/cn';
+import { invoke } from '../../lib/ipc';
+import { reportError } from '../../stores/toasts';
 import { useFileActions } from '../panels/FileMenu';
 import { ScaledFrame, useDiagramAddress, useDiagramCopies, usePageSize } from './DiagramFrame';
 import { DiagramViewer } from './DiagramViewer';
@@ -40,8 +42,15 @@ function DiagramRow({ sessionId, diagram, onOpen }: { sessionId: string; diagram
   const scale = fitScale({ width, height }, { width: available, maxHeight: CARD_MAX_HEIGHT });
   // The place held before that: the diagram's own shape, as wide as the card allows.
   const held = Math.min(CARD_MAX_HEIGHT, Math.round((available * diagram.height) / diagram.width));
-  const path = diagram.source.kind === 'project' ? diagram.source.path : diagram.source.name;
-  const target = { path, type: 'file' as const };
+  const { source } = diagram;
+  const path = source.kind === 'project' ? source.path : source.name;
+  // A project's diagram is a file of the session's folder; a chat's is one of the files the chat keeps.
+  const act = (action: 'open' | 'reveal'): void => {
+    if (source.kind === 'project') return run(action, { path: source.path, type: 'file' });
+    invoke(action === 'open' ? 'chatFiles:open' : 'chatFiles:reveal', { sessionId, name: source.name }).catch((error: unknown) =>
+      reportError(action === 'open' ? `Couldn't open ${source.name}` : `Couldn't show ${source.name}`, error)
+    );
+  };
 
   return (
     <li aria-label={diagram.title} className="flex flex-col border-t border-border-subtle first:border-t-0">
@@ -93,23 +102,21 @@ function DiagramRow({ sessionId, diagram, onOpen }: { sessionId: string; diagram
             <MenuItem onSelect={() => save('svg')}>SVG image</MenuItem>
           </MenuContent>
         </Menu>
-        {diagram.source.kind === 'project' ? (
-          <Menu>
-            <MenuTrigger asChild>
-              <IconButton label={`More for ${diagram.name}`} size="sm">
-                <MoreHorizontal className="size-14" />
-              </IconButton>
-            </MenuTrigger>
-            <MenuContent align="end" aria-label={`More for ${diagram.name}`}>
-              <MenuItem icon={<ExternalLink className="size-14" />} onSelect={() => run('open', target)}>
-                Open in browser
-              </MenuItem>
-              <MenuItem icon={<FolderOpen className="size-14" />} onSelect={() => run('reveal', target)}>
-                Show in folder
-              </MenuItem>
-            </MenuContent>
-          </Menu>
-        ) : null}
+        <Menu>
+          <MenuTrigger asChild>
+            <IconButton label={`More for ${diagram.name}`} size="sm">
+              <MoreHorizontal className="size-14" />
+            </IconButton>
+          </MenuTrigger>
+          <MenuContent align="end" aria-label={`More for ${diagram.name}`}>
+            <MenuItem icon={<ExternalLink className="size-14" />} onSelect={() => act('open')}>
+              Open in browser
+            </MenuItem>
+            <MenuItem icon={<FolderOpen className="size-14" />} onSelect={() => act('reveal')}>
+              Show in folder
+            </MenuItem>
+          </MenuContent>
+        </Menu>
       </div>
     </li>
   );

@@ -67,6 +67,8 @@ export interface HarnessOptions {
   chatFiles?: SessionDeps['chatFiles'];
   documents?: SessionDeps['documents'];
   runCode?: SessionDeps['runCode'];
+  /** The folder of the skills Graft ships (default: none). */
+  builtinSkills?: string | null;
   media?: SessionDeps['media'];
   /** Settings → Models → Agents (default: session model, four at once, one retry, no budget). */
   agents?: Partial<SessionPreferences['agents']>;
@@ -169,7 +171,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     hooks: () => (options.hooks ? new HookRunner(() => options.hooks ?? {}, shell, () => projectDir) : null),
     rgPath: RG_PATH,
     graftHome: home,
-    builtinSkills: null,
+    builtinSkills: options.builtinSkills ?? null,
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,

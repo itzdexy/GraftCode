@@ -226,9 +226,15 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   /** Draws pictures of diagrams; its hidden window and session are made the first time one is asked for. */
   let diagramPictures: DiagramRenderer | null = null;
   const pictures = (): DiagramRenderer => (diagramPictures ??= createDiagramRenderer(ctx.artifacts));
-  /** The diagram a card names, checked, with the folder a copy of it is offered in. A code session's own files only. */
+  /**
+   * The diagram a card names, checked, with the folder a copy of it is offered in: beside the
+   * file in a code session, Downloads for a chat (its own files live in Graft's data folder).
+   */
   const diagramOf = async (sessionId: string, source: DiagramSource): Promise<Awaited<ReturnType<typeof diagramFile>> & { folder: string }> => {
-    if (source.kind === 'chat') throw new GraftError('not_a_diagram', `Couldn't find the diagram in ${source.name}.`);
+    if (source.kind === 'chat') {
+      const file = chatFile(await ctx.services(), sessionId, source.name);
+      return { ...(await diagramFile(path.dirname(file), path.basename(file))), folder: app.getPath('downloads') };
+    }
     const found = await diagramFile(await workDirFor(sessionId), source.path);
     return { ...found, folder: path.dirname(found.file) };
   };

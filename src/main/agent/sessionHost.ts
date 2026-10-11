@@ -68,8 +68,8 @@ export interface HostPorts {
   projectRoot(): string | null;
   settingsRoot(): string | null;
   workingDir(): string;
-  /** CreateFile and RunCode, for chats with a model that uses tools. */
-  chatWork(model: ModelInfo): { files: boolean; code: boolean };
+  /** CreateFile, RunCode and Skill, for chats with a model that uses tools. */
+  chatWork(model: ModelInfo): { files: boolean; code: boolean; skills: boolean };
   effortFor(model: ModelInfo): EffortLevel | null;
   privacy(): RequestPrivacy;
   /** The prompt and the tools of the running turn; null before the session's first. */
@@ -486,6 +486,7 @@ export class SessionHost {
       computer: this.deps.computer,
       publicWebOnly: this.summary.kind === 'chat',
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
+      builtinSkills: work.skills ? this.deps.builtinSkills : null,
       makeDocument:
         work.files && this.deps.documents
           ? (kind, name, source, s) =>

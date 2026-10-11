@@ -29,6 +29,29 @@ describe('the diagrams of a turn', () => {
     expect(madeDiagrams([edit('1', 'a.html', { title: 'A', width: 960, height: 600 }), edit('2', 'a.html')])).toEqual([]);
   });
 
+  it('include the diagrams a chat made as files', () => {
+    const made = (id: string, name: string, diagram?: { title: string; width: number; height: number }, isError = false): ToolCall => ({
+      id,
+      name: 'CreateFile',
+      input: {},
+      running: null,
+      result: { type: 'tool_result', toolUseId: id, isError, content: [], display: { kind: 'file', name, size: 10, mime: 'text/html', preview: null, ...(diagram ? { diagram } : {}) } }
+    });
+    const calls = [
+      made('1', 'orders.html', { title: 'Orders', width: 960, height: 600 }),
+      made('2', 'notes.md'),
+      made('3', 'orders (2).html', { title: 'Orders, wider', width: 1200, height: 600 }),
+      made('4', 'failed.html', { title: 'Failed', width: 960, height: 600 }, true)
+    ];
+    expect(madeDiagrams(calls)).toEqual([
+      { source: { kind: 'chat', name: 'orders.html' }, name: 'orders.html', title: 'Orders', width: 960, height: 600 },
+      { source: { kind: 'chat', name: 'orders (2).html' }, name: 'orders (2).html', title: 'Orders, wider', width: 1200, height: 600 }
+    ]);
+    // The files are still listed; the diagrams are drawn after them.
+    const items: TranscriptItem[] = [{ kind: 'tools', key: 't1', calls, at: 1 }];
+    expect(groupActivity(items, false, 'normal').map((i) => i.kind)).toEqual(['activity', 'files', 'diagrams']);
+  });
+
   it('end a finished turn as a card after its files, and not a running one', () => {
     const items: TranscriptItem[] = [{ kind: 'tools', key: 't1', calls: [edit('1', 'a.html', { title: 'A', width: 960, height: 600 })], at: 1 }];
     expect(groupActivity(items, false, 'normal').map((i) => i.kind)).toEqual(['activity', 'edits', 'diagrams']);

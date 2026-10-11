@@ -676,6 +676,12 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
   }
   const runs = byName(['RunCode']);
   if (runs.length > 0) push(plural(runs.length, 'Ran code', 'Ran code # times'), runs.length);
+  // A skill is read in several calls (the skill, then the files it points to): one skill, said once.
+  const skills = byName(['Skill']);
+  if (skills.length > 0) {
+    const names = [...new Set(skills.map((c) => String(inputOf<{ name: string }>(c.input).name ?? '')))];
+    push(names.length === 1 ? `Read the ${names[0] ?? ''} skill` : `Read ${String(names.length)} skills`, skills.length);
+  }
   const images = byName(['GenerateImage']);
   if (images.length > 0) push(plural(images.length, 'Generated an image', 'Generated # images'), images.length);
   const comfy = byName(['ComfyUI']);
@@ -695,7 +701,7 @@ function summaryParts(calls: ToolCall[]): Array<{ text: string; calls: number }>
     const status = noted.map((c) => inputOf<{ status: string }>(c.input).status).find((s) => s === 'done' || s === 'blocked');
     push(status === 'done' ? 'Reported the mission done' : status === 'blocked' ? 'Paused the mission' : plural(noted.length, 'Noted something for the mission', 'Noted # things for the mission'), noted.length);
   }
-  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'RunAgents', 'MissionUpdate', 'Symbols', 'SemanticCode', 'ToolSearch', 'AskUserQuestion', 'CreateFile', 'RunCode', 'GenerateImage', 'ComfyUI']);
+  const known = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Shell', 'ShellOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Computer', 'Browser', 'Task', 'RunAgents', 'MissionUpdate', 'Symbols', 'SemanticCode', 'ToolSearch', 'AskUserQuestion', 'CreateFile', 'RunCode', 'Skill', 'GenerateImage', 'ComfyUI']);
   const mcp = calls.filter((c) => c.name.startsWith('mcp__') && !c.name.startsWith('mcp__resources__'));
   if (mcp.length > 0) {
     const [, server = '', tool = ''] = mcp[0]!.name.split('__');
@@ -804,6 +810,10 @@ export function callParts(call: ToolCall): { verb: string; target: string; mono:
       const d = call.result?.display;
       const verb = !done ? 'Running code' : d?.kind === 'code' && d.error === null ? 'Ran code' : 'Ran code (failed)';
       return { verb, target: '', mono: false, title: 'JavaScript in the sandbox' };
+    }
+    case 'Skill': {
+      const skill = `the ${str('name')} skill`;
+      return { verb: done ? 'Read' : 'Reading', target: str('file') || skill, mono: false, title: str('file') ? `${str('file')} of ${skill}` : skill };
     }
     case 'GenerateImage':
       return { verb: !done ? 'Generating' : call.result?.isError ? "Couldn't generate" : 'Generated', target: fileName(str('path')), mono: false, title: str('prompt') };
@@ -938,6 +948,8 @@ export function describeCall(call: ToolCall): string {
       return `${call.result ? 'Asked' : 'Asking'} the language server about ${str('name') || str('file')}`;
     case 'ToolSearch':
       return `${call.result ? 'Searched' : 'Searching'} tools for “${str('query')}”`;
+    case 'Skill':
+      return `${call.result ? 'Read' : 'Reading'} ${str('file') ? `${str('file')} of ` : ''}the ${str('name')} skill`;
     case 'mcp__resources__list':
       return `${call.result ? 'Listed' : 'Listing'} MCP resources${str('server') ? ` of ${str('server')}` : ''}`;
     case 'mcp__resources__read':

@@ -1144,6 +1144,35 @@ describe('agent tools that involve the user', () => {
     expect(JSON.stringify(code.provider.requests[0]!.messages[0])).not.toContain('[Sent ');
   });
 
+  it('lets a chat read the skills Graft ships, with the files it saves and never without them', async () => {
+    const builtinSkills = path.resolve(__dirname, '../../resources/skills');
+    const chatFiles = { save: (_id: string, name: string, data: Buffer) => ({ name, path: `/files/${name}`, size: data.length, mime: 'text/html' }) };
+    const chat = harness({
+      kind: 'chat',
+      chatFiles,
+      builtinSkills,
+      script: [{ toolCalls: [{ name: 'Skill', input: { name: 'diagram-design' } }] }, { text: 'Read it.' }]
+    });
+    chat.session.send('draw how an order is paid');
+    await chat.session.idle();
+    const first = chat.provider.requests[0]!;
+    expect(first.tools.map((t) => t.name).sort()).toEqual(['CreateFile', 'Skill']);
+    expect(first.system).toContain('For a diagram, read the diagram-design skill with Skill (name "diagram-design") and follow it, then save the result with CreateFile as one .html file');
+    // The skill came back as its own text, and nobody was asked.
+    expect(JSON.stringify(chat.provider.requests[1]!.messages.at(-1))).toContain('name: diagram-design');
+    expect(chat.events.some((e) => e.type === 'permission')).toBe(false);
+
+    // No files to save a diagram in, an incognito chat, a code session: none of them has the tool or is told about it.
+    for (const options of [{ kind: 'chat' as const, builtinSkills }, { kind: 'chat' as const, incognito: true, chatFiles, builtinSkills }, { chatFiles, builtinSkills }]) {
+      const other = harness({ ...options, script: [{ text: 'ok' }] });
+      other.session.send('hi');
+      await other.session.idle();
+      const request = other.provider.requests[0]!;
+      expect(request.tools.map((t) => t.name)).not.toContain('Skill');
+      expect(request.system).not.toContain('with Skill');
+    }
+  });
+
   it('runs a model’s built-in search only when its provider is the chosen engine; free search goes through WebSearch', async () => {
     const run = async (active: 'exa' | 'anthropic' | null): Promise<{ native: boolean; tools: string[] }> => {
       const h = harness({

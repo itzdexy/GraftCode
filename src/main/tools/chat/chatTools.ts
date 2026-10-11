@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { MadeFile } from '@shared/schemas/toolDisplay';
 import { MAX_CHAT_FILE_BYTES, safeFileName } from '../../chat/chatFiles';
 import { documentKind, MAX_DOCUMENT_SOURCE } from '../../chat/documents';
+import { diagramMark } from '../fs/write';
 import { errorResult, textResult, type ToolDefinition } from '../types';
 
 /**
@@ -93,13 +94,17 @@ export const createFileTool: ToolDefinition<CreateFileInput> = {
       return errorResult(`Couldn't create ${input.name}: ${(error as Error).message}`);
     }
     const from = built ? `, built from the ${kind === 'xlsx' ? 'rows' : 'Markdown'} you wrote` : '';
-    return textResult(`Created ${file.name} (${size(file.size)})${from}. The user sees it in the chat with buttons to save or open it.`, {
+    // A page that is a diagram is drawn in the chat as well as listed with its files.
+    const drawn = built ? {} : diagramMark(file.name, data.toString('utf8'));
+    const seen = drawn.diagram ? 'The user sees the diagram in the chat, with buttons to copy or save it.' : 'The user sees it in the chat with buttons to save or open it.';
+    return textResult(`Created ${file.name} (${size(file.size)})${from}. ${seen}`, {
       kind: 'file',
       name: file.name,
       size: file.size,
       mime: file.mime,
       // A built document shows what it was built from; a text file its own start.
-      preview: built ? clipped(input.content) : textPreview(data, file.mime)
+      preview: built ? clipped(input.content) : textPreview(data, file.mime),
+      ...drawn
     });
   }
 };
