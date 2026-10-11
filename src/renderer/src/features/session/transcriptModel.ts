@@ -3,6 +3,7 @@ import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell
 import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import { maskSecrets } from '@shared/secrets';
 import type { Source } from '@shared/sources';
+import { madeDiagrams, type MadeDiagram } from './diagramModel';
 import { turnSources } from './sourcesModel';
 import { inTense } from './verbs';
 
@@ -42,6 +43,8 @@ export type TranscriptItem =
   /** `messageId`: the message the user sent to start this turn, whose snapshot holds the files as they were before it; null for a turn the user did not type. */
   | { kind: 'edits'; key: string; files: EditedFile[]; messageId: string | null }
   | { kind: 'files'; key: string; files: MadeFile[] }
+  /** The diagrams a finished turn drew, shown as they are. */
+  | { kind: 'diagrams'; key: string; diagrams: MadeDiagram[] }
   /** The pages a finished turn read. */
   | { kind: 'sources'; key: string; sources: Source[] }
   | { kind: 'media'; key: string; media: MadeMedia }
@@ -407,6 +410,9 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean, view
       // …and, in chats, the files it made for the user to download.
       const made = madeFiles(calls);
       if (made.length > 0) out.push({ kind: 'files', key: `files:${segment[0]?.key ?? String(index)}`, files: made });
+      // …and the diagrams it drew.
+      const drawn = madeDiagrams(calls);
+      if (drawn.length > 0) out.push({ kind: 'diagrams', key: `diagrams:${segment[0]?.key ?? String(index)}`, diagrams: drawn });
       // …and the pages it read on the web.
       const read = turnSources(calls);
       if (read.length > 0) out.push({ kind: 'sources', key: `sources:${segment[0]?.key ?? String(index)}`, sources: read });
