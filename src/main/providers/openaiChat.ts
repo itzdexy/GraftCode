@@ -8,7 +8,7 @@ import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
-import { parseSse } from './sse';
+import { isDamagedEvent, parseSse } from './sse';
 import { isOfficialOpenAiModels, openAiShutdownDate, withModelLifecycle } from './modelLifecycle';
 import type { FinishReason, LLMProvider, ProviderConnection, RequestPrivacy, StreamEvent, StreamRequest } from './types';
 
@@ -543,6 +543,7 @@ export class OpenAiChatProvider implements LLMProvider {
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     let costUsd: number | undefined;
 
+    let damaged = 0;
     for await (const msg of parseSse(response.body)) {
       if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
       if (msg.data === '[DONE]') break;
@@ -550,6 +551,7 @@ export class OpenAiChatProvider implements LLMProvider {
       try {
         chunk = JSON.parse(msg.data) as Record<string, unknown>;
       } catch {
+        if (isDamagedEvent(msg.data)) damaged++;
         continue;
       }
       const err = chunk.error as { message?: string; code?: number | string } | undefined;
@@ -631,7 +633,7 @@ export class OpenAiChatProvider implements LLMProvider {
       }
     }
     yield { type: 'usage', usage, ...(costUsd !== undefined ? { costUsd } : {}) };
-    yield { type: 'finish', reason: calls.length > 0 && finish !== 'length' ? 'tool_use' : mapFinish(finish) };
+    yield { type: 'finish', reason: calls.length > 0 && finish !== 'length' ? 'tool_use' : mapFinish(finish), ...(damaged > 0 ? { damaged } : {}) };
   }
 
   /** One reply from the Responses API, for the models that chat completions does not serve. */

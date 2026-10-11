@@ -1,5 +1,8 @@
 import type { ContentBlock, LlmMessage, StoredMessage } from '@shared/schemas/messages';
 
+/** The answer for a tool call that was asked for and never started. */
+export const NOT_RUN = 'Not run: the turn was interrupted.';
+
 /** Whether a stored message is part of what the model reads: notices, command output and check records are for the user only. */
 export function isSent(message: StoredMessage): boolean {
   return !message.meta.compacted && message.meta.kind !== 'notice' && message.meta.kind !== 'command-output' && message.meta.kind !== 'check';
@@ -53,7 +56,7 @@ export function toLlmHistory(messages: StoredMessage[]): LlmMessage[] {
       type: 'tool_result',
       toolUseId: id,
       isError: true,
-      content: [{ type: 'text', text: 'Not run: the turn was interrupted.' }]
+      content: [{ type: 'text', text: NOT_RUN }]
     }));
     if (next?.role === 'user') {
       // Results must lead the next user message; prepend the repairs to it.

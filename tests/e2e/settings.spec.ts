@@ -312,6 +312,14 @@ test('a turn pauses at the limit set in Settings → Permissions, and goes on wh
   await expect(tokens).toHaveValue('none');
   await expect(w.getByRole('combobox', { name: 'Cost per turn' })).toHaveValue('none');
   await expect(w.getByRole('combobox', { name: 'Time per turn' })).toHaveValue('none');
+  // The limits have a group of their own, six of them, each a choice that starts at "No limit".
+  const limits = w.getByRole('region', { name: 'Limits for one turn' });
+  await expect(limits.getByRole('combobox')).toHaveCount(6);
+  await expect(limits.getByRole('combobox', { name: 'Tool calls per turn' })).toHaveValue('none');
+  await expect(limits.getByRole('combobox', { name: 'Retries per turn' })).toHaveValue('none');
+  await limits.getByRole('combobox', { name: 'Retries per turn' }).selectOption('0');
+  await expect(limits.getByRole('combobox', { name: 'Retries per turn' })).toHaveValue('0');
+  await limits.getByRole('combobox', { name: 'Retries per turn' }).selectOption('none');
   await expect(w.getByText(/worked out from published prices, so your bill can differ/)).toBeVisible();
   await tokens.selectOption('250000');
   await expect(tokens).toHaveValue('250000');

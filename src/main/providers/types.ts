@@ -45,7 +45,12 @@ export type StreamEvent =
   | { type: 'block'; block: ContentBlock }
   /** `costUsd` is what the provider says it charged, when it reports that. */
   | { type: 'usage'; usage: Usage; costUsd?: number }
-  | { type: 'finish'; reason: FinishReason; detail?: string };
+  /**
+   * `damaged`: events of the stream that could not be read and were left out. The reply ended
+   * properly but is not whole: its text may have gaps, and a tool call put together from what
+   * was left can parse and still not be what the model wrote, so none of them may be run.
+   */
+  | { type: 'finish'; reason: FinishReason; detail?: string; damaged?: number };
 
 export interface LLMProvider {
   readonly id: string;

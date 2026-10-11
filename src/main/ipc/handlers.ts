@@ -929,7 +929,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
             state,
             error: matches ? st.error : null,
             hint: matches ? st.hint : null,
-            tools: matches ? st.tools.map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly })) : [],
+            tools: matches ? st.tools.map((t) => ({ name: t.name, registeredAs: t.registeredAs, description: t.description, readOnly: t.readOnly })) : [],
             prompts: matches ? st.prompts.map((p) => ({ command: mcpPromptCommand(p.server, p.name), description: p.description, argumentHint: promptHint(p) || null })) : [],
             resources: matches ? st.resources : false
           });

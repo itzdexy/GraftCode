@@ -7,6 +7,8 @@ import { mcpNotesSection } from '../../src/main/agent/systemPrompt';
 import { maskConfig, mergeMcpConfig } from '../../src/main/mcp/mcpConfig';
 import { mcpPromptCommand, promptArguments } from '../../src/main/mcp/names';
 import { clientCapabilities, convertContent, McpManager, mcpToolName, progressLine, stdioEnv, troubleshootFor } from '../../src/main/mcp/mcpManager';
+import { McpServerConfigSchema } from '../../src/shared/schemas/config';
+import { McpServerInputSchema } from '../../src/shared/schemas/customize';
 import { SettingsStore } from '../../src/main/permissions/settingsStore';
 import { KeyStore } from '../../src/main/secrets/keyStore';
 import { ToolRegistry } from '../../src/main/tools/registry';
@@ -14,6 +16,7 @@ import { makeToolContext } from '../support/toolContext';
 import { makeTempDir, removeDir } from '../support/tmp';
 
 const FIXTURE = path.resolve(__dirname, '..', 'fixtures', 'mcp-test-server.mjs');
+const ENV_SERVER = path.resolve(__dirname, '..', 'fixtures', 'mcp-env-server.mjs');
 const LATE = path.resolve(__dirname, '..', 'fixtures', 'mcp-late-server.mjs');
 const RICH = path.resolve(__dirname, '..', 'fixtures', 'mcp-rich-server.mjs');
 
@@ -91,6 +94,32 @@ describe('MCP manager', () => {
     expect(manager.status()[0]?.state).toBe('disabled');
     expect(registry.get('mcp__test__shout')).toBeUndefined();
     expect(manager.toolNames(null)).toEqual([]);
+  });
+
+  it('starts a server without this computer’s keys and tokens when it is set up that way', async () => {
+    process.env.GRAFT_TEST_API_KEY = 'not for servers';
+    process.env.GRAFT_TEST_PLAIN = 'fine';
+    cleanup.push(() => {
+      delete process.env.GRAFT_TEST_API_KEY;
+      delete process.env.GRAFT_TEST_PLAIN;
+      return Promise.resolve();
+    });
+    const { manager, registry } = setup({
+      open: { type: 'stdio', command: process.execPath, args: [ENV_SERVER] },
+      closed: { type: 'stdio', command: process.execPath, args: [ENV_SERVER], inherit: 'no-secrets', env: { GIVEN_TOKEN: 'handed over' } },
+      bare: { type: 'stdio', command: process.execPath, args: [ENV_SERVER], inherit: 'minimal' }
+    });
+    await manager.sync();
+    const ctx = makeToolContext(makeTempDir());
+    const names = ['GRAFT_TEST_API_KEY', 'GRAFT_TEST_PLAIN', 'GIVEN_TOKEN', 'PATH'];
+    const has = async (server: string): Promise<string> => {
+      const result = await (registry.get(`mcp__${server}__has`) as unknown as Executable).execute({ names }, ctx);
+      return (result.content as Array<{ type: string; text?: string }>).map((c) => c.text ?? '').join('');
+    };
+    // A server from before this setting inherits everything, as it always did.
+    expect(await has('open')).toBe('GRAFT_TEST_API_KEY, GRAFT_TEST_PLAIN, PATH');
+    expect(await has('closed')).toBe('GRAFT_TEST_PLAIN, GIVEN_TOKEN, PATH');
+    expect(await has('bare')).toBe('PATH');
   });
 
   it('reports servers that fail to start', async () => {
@@ -260,6 +289,40 @@ describe('MCP helpers', () => {
     expect(win.PATHEXT).toBe('.EXE;.CMD');
   });
 
+  it('can leave keys and tokens out of what a server inherits, and still hands over the ones it was given', () => {
+    const base = {
+      PATH: '/usr/bin', HOME: '/home/me', PWD: '/work', OLDPWD: '/', SSH_AUTH_SOCK: '/tmp/agent.sock', TOKENIZERS_PARALLELISM: 'false', PUBLIC_KEY: 'ssh-ed25519 AAAA',
+      HTTPS_PROXY: 'http://me:pw@proxy:8080', NODE_EXTRA_CA_CERTS: '/etc/ca.pem', PLAIN_URL: 'https://example.com/a?b=c', KEYBOARD: 'us',
+      GITHUB_TOKEN: 'ghp_x', OPENAI_API_KEY: 'sk-x', AWS_SECRET_ACCESS_KEY: 'x', AWS_ACCESS_KEY_ID: 'AKIA', AWS_SESSION_TOKEN: 'x', NPM_CONFIG__AUTH: 'x', DB_PASSWORD: 'x',
+      STRIPE_KEY: 'x', CLIENT_SECRET: 'x', MY_CREDENTIALS: 'x', GOOGLE_APPLICATION_CREDENTIALS: '/keys/sa.json', DATABASE_URL: 'postgres://app:hunter2@db/prod', Api_Key: 'x', PGPASSWORD: 'x',
+      SHELL_FUNC: '() { echo hi; }'
+    };
+    const env = stdioEnv(base, { GITHUB_TOKEN: 'from-settings' }, 'linux', 'no-secrets');
+    expect(Object.keys(env).sort()).toEqual(
+      ['GITHUB_TOKEN', 'HOME', 'HTTPS_PROXY', 'KEYBOARD', 'NODE_EXTRA_CA_CERTS', 'OLDPWD', 'PATH', 'PLAIN_URL', 'PUBLIC_KEY', 'PWD', 'SSH_AUTH_SOCK', 'TOKENIZERS_PARALLELISM'].sort()
+    );
+    // What the server's own settings give it always arrives, whatever it is called.
+    expect(env.GITHUB_TOKEN).toBe('from-settings');
+    expect(env.PATH).toContain('/home/me/.local/bin');
+    // A server from before this setting, and one set to inherit everything, get what they always got.
+    expect(stdioEnv(base, {}, 'linux').GITHUB_TOKEN).toBe('ghp_x');
+    expect(stdioEnv(base, {}, 'linux', 'all').DATABASE_URL).toBe('postgres://app:hunter2@db/prod');
+  });
+
+  it('can hand a server only what a program needs to start', () => {
+    const posix = stdioEnv({ PATH: '/usr/bin', HOME: '/home/me', USER: 'me', SHELL: '/bin/zsh', LANG: 'en_US.UTF-8', TMPDIR: '/tmp', EDITOR: 'vim', GITHUB_TOKEN: 'x', NODE_OPTIONS: '--inspect' }, { GODOT_PATH: '/opt/godot' }, 'linux', 'minimal');
+    expect(Object.keys(posix).sort()).toEqual(['GODOT_PATH', 'HOME', 'LANG', 'PATH', 'SHELL', 'TMPDIR', 'USER']);
+    expect(posix.PATH).toContain('/home/me/.local/bin');
+    // Windows names are matched whatever their case, and commands still resolve (PATHEXT, ComSpec).
+    const win = stdioEnv(
+      { Path: 'C:\\Windows', PATHEXT: '.EXE;.CMD', USERPROFILE: 'C:\\Users\\me', APPDATA: 'C:\\Users\\me\\AppData\\Roaming', SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\system32\\cmd.exe', TEMP: 'C:\\Temp', GITHUB_TOKEN: 'x', OneDrive: 'C:\\Users\\me\\OneDrive' },
+      {},
+      'win32',
+      'minimal'
+    );
+    expect(Object.keys(win).sort()).toEqual(['APPDATA', 'ComSpec', 'PATHEXT', 'Path', 'SystemRoot', 'TEMP', 'USERPROFILE'].sort());
+  });
+
   it('knows what to check for the apps it integrates with', () => {
     expect(troubleshootFor('roblox_studio')).toMatch(/Enable Studio as MCP server/);
     expect(troubleshootFor('blender')).toMatch(/Blender is open/);
@@ -332,8 +395,18 @@ describe('MCP helpers', () => {
 
   it('masks secrets for the UI and keeps unchanged ones on save', () => {
     const stored = { type: 'stdio' as const, command: 'node', args: ['s.js'], env: { TOKEN: 'secret', OTHER: 'x' }, enabled: true };
-    expect(maskConfig(stored)).toEqual({ type: 'stdio', command: 'node', args: ['s.js'], envKeys: ['TOKEN', 'OTHER'], cwd: null, enabled: true });
-    const merged = mergeMcpConfig({ type: 'stdio', command: 'node', args: ['s.js'], env: { NEW: 'n' }, keepEnv: ['TOKEN'], cwd: null, enabled: true }, stored);
-    expect(merged).toEqual({ type: 'stdio', command: 'node', args: ['s.js'], env: { TOKEN: 'secret', NEW: 'n' }, enabled: true });
+    // A server saved before the setting existed inherits everything, and the form shows that.
+    expect(maskConfig(stored)).toEqual({ type: 'stdio', command: 'node', args: ['s.js'], envKeys: ['TOKEN', 'OTHER'], cwd: null, inherit: 'all', enabled: true });
+    const merged = mergeMcpConfig({ type: 'stdio', command: 'node', args: ['s.js'], env: { NEW: 'n' }, keepEnv: ['TOKEN'], cwd: null, inherit: 'minimal', enabled: true }, stored);
+    expect(merged).toEqual({ type: 'stdio', command: 'node', args: ['s.js'], env: { TOKEN: 'secret', NEW: 'n' }, inherit: 'minimal', enabled: true });
+    expect(maskConfig(merged)).toMatchObject({ inherit: 'minimal' });
+  });
+
+  it('gives a server saved without a choice everything but keys and tokens, and reads an old settings file as it always did', () => {
+    const input = McpServerInputSchema.parse({ type: 'stdio', command: 'npx', args: [], env: {}, keepEnv: [], cwd: null, enabled: true });
+    expect(input).toMatchObject({ inherit: 'no-secrets' });
+    const old = McpServerConfigSchema.parse({ type: 'stdio', command: 'npx' });
+    expect(old).toEqual({ type: 'stdio', command: 'npx', args: [], env: {}, enabled: true });
+    expect(() => McpServerConfigSchema.parse({ type: 'stdio', command: 'npx', inherit: 'some' })).toThrow();
   });
 });

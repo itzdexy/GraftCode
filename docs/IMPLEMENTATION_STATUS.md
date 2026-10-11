@@ -237,6 +237,17 @@ installed. The schema goes from 7 to 8 (`usage_days`); older databases are migra
 and a database written by 0.6.16 is refused by 0.6.15, as for every earlier step.
 Commands, commits and skips: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
+### Local 0.6.22 round
+
+On `feat/durable-agent-and-isolation` (not merged). Typecheck, lint, 1125 unit tests
+and 53 desktop tests pass on Windows; 1117 unit tests and 53 desktop tests pass in a
+Linux container. The Windows package builds and its two smoke tests pass; it is
+unsigned and was not installed. The schema goes from 8 to 9 (`tool_journal`). Of the
+milestone "strong shell/MCP permission enforcement, durable execution replay and
+recovery/cleanup controls" this round has the MCP permissions and the journal with its
+answers after a crash; a command that outlives the app is still not found again.
+Commands, commits and skips: `UPGRADE_TEST_REPORT.md`, section 0.6.22.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof

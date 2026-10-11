@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import { textOf, type ContentBlock, type LlmMessage, type StoredMessage } from '../../src/shared/schemas/messages';
 import type { ModelInfo } from '../../src/shared/schemas/models';
+import type { LoopJournal } from '../../src/main/agent/journal';
 import { runAgentLoop, type LoopConfig, type LoopHost, type LoopModel, type LoopResult } from '../../src/main/agent/loop';
 import type { Decision } from '../../src/main/permissions/engine';
 import type { RetryPolicy } from '../../src/main/providers/retry';
@@ -45,6 +46,10 @@ export interface LoopHarnessOptions {
   backup?: FakeStep[];
   /** The host's answer when the loop asks for another model, given the backup model (null without `backup`). Default: that model. */
   fallback?: (offer: LoopModel | null) => Promise<LoopModel | null>;
+  /** Where the loop writes down its tool calls (default: nowhere). */
+  journal?: LoopJournal;
+  /** How long a tool is waited for after the turn was stopped (default: the loop's own). */
+  stopGraceMs?: number;
 }
 
 export interface LoopHarness {
@@ -86,6 +91,7 @@ export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
     onUsage: () => undefined,
     todos: () => [],
     log: () => undefined,
+    ...(options.journal ? { journal: options.journal } : {}),
     ...(offer || options.fallback ? { fallback: () => (options.fallback ? options.fallback(offer) : Promise.resolve(offer)) } : {})
   };
   const config: LoopConfig = {
@@ -105,7 +111,8 @@ export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
     taproot: false,
     checksFix: false,
     stripThinking: false,
-    sessionId: 'session-test'
+    sessionId: 'session-test',
+    ...(options.stopGraceMs !== undefined ? { stopGraceMs: options.stopGraceMs } : {})
   };
   return {
     provider,

@@ -6,6 +6,7 @@ import {
   type ContentBlock,
   type MessageMeta,
   type StoredMessage,
+  type ToolResultBlock,
   textOf
 } from '@shared/schemas/messages';
 import type {
@@ -19,6 +20,7 @@ import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { agentRunActive, type AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
 import type { UsageDay, UsageEntry } from '@shared/usage';
+import { keepable, type JournalEntry, type JournalStart } from '../agent/journal';
 import { recoverMission } from '../agent/mission';
 import { parseJson, type Db } from './database';
 
@@ -98,6 +100,14 @@ export interface SessionStore {
   recordUsage(entry: UsageEntry): void;
   /** What was used on `fromDay` and after, by day and model, oldest day first. */
   usageSince(fromDay: string): UsageDay[];
+  /** Writes down that a tool call is about to run. Called before it starts, so it is on record if the app stops while it runs. */
+  journalStart(entry: JournalStart): void;
+  /** Writes down what a started call returned. */
+  journalEnd(sessionId: string, toolUseId: string, result: ToolResultBlock, at: number): void;
+  /** Forgets calls whose results are in the conversation, with everything an agent they started did. */
+  journalSettle(sessionId: string, rootIds: string[]): void;
+  /** The calls written down and not yet forgotten, in the order they started. */
+  journalOpen(sessionId: string): JournalEntry[];
 }
 
 interface SessionRow {
@@ -493,6 +503,50 @@ export class SessionsRepo implements SessionStore {
   }
 
   /** Missions left going when the app last quit: they wait, paused, for the user to resume them. Returns how many. */
+  journalStart(entry: JournalStart): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO tool_journal (session_id, tool_use_id, root_id, agent, name, summary, effect, started_at, ended_at, result)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
+      )
+      .run(entry.sessionId, entry.toolUseId, entry.rootId, entry.agent, entry.name, entry.summary, entry.effect, entry.startedAt);
+  }
+
+  journalEnd(sessionId: string, toolUseId: string, result: ToolResultBlock, at: number): void {
+    this.db.prepare('UPDATE tool_journal SET ended_at = ?, result = ? WHERE session_id = ? AND tool_use_id = ?').run(at, JSON.stringify(keepable(result)), sessionId, toolUseId);
+  }
+
+  journalSettle(sessionId: string, rootIds: string[]): void {
+    if (rootIds.length === 0) return;
+    const forget = this.db.prepare('DELETE FROM tool_journal WHERE session_id = ? AND root_id = ?');
+    this.db.transaction(() => {
+      for (const rootId of rootIds) forget.run(sessionId, rootId);
+    })();
+  }
+
+  journalOpen(sessionId: string): JournalEntry[] {
+    const rows = this.db
+      .prepare('SELECT tool_use_id, root_id, agent, name, summary, effect, started_at, ended_at, result FROM tool_journal WHERE session_id = ? ORDER BY rowid')
+      .all(sessionId) as Array<{ tool_use_id: string; root_id: string; agent: string | null; name: string; summary: string; effect: string; started_at: number; ended_at: number | null; result: string | null }>;
+    return rows.map((row) => ({
+      sessionId,
+      toolUseId: row.tool_use_id,
+      rootId: row.root_id,
+      agent: row.agent,
+      name: row.name,
+      summary: row.summary,
+      effect: row.effect === 'read' ? 'read' : 'change',
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      result: row.result === null ? null : (JSON.parse(row.result) as ToolResultBlock)
+    }));
+  }
+
+  /** Sessions with calls still written down: after a start, the ones the app stopped in the middle of. */
+  journalSessions(): string[] {
+    return (this.db.prepare('SELECT DISTINCT session_id FROM tool_journal').all() as Array<{ session_id: string }>).map((row) => row.session_id);
+  }
+
   recoverMissions(now: number = Date.now()): number {
     const rows = this.db.prepare('SELECT id, data FROM missions').all() as Array<{ id: string; data: string }>;
     let recovered = 0;

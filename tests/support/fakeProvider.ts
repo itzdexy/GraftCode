@@ -13,6 +13,8 @@ export interface FakeReply {
   toolCalls?: Array<{ id?: string; name: string; input: unknown }>;
   usage?: Partial<Usage>;
   finish?: FinishReason;
+  /** Events of this reply that arrived unreadable and were left out (as an adapter reports them). */
+  damaged?: number;
   /** Delay between streamed chunks, to test interrupts mid-stream. */
   chunkDelayMs?: number;
 }
@@ -115,6 +117,6 @@ export class FakeProvider implements LLMProvider {
       type: 'usage',
       usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, ...step.usage }
     };
-    yield { type: 'finish', reason: step.finish ?? ((step.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'stop') };
+    yield { type: 'finish', reason: step.finish ?? ((step.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'stop'), ...(step.damaged ? { damaged: step.damaged } : {}) };
   }
 }
