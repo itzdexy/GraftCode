@@ -47,7 +47,7 @@ Built in Graft's own look, on what was already there (web search, sources, the m
   (`pagePicture` in `app/favicons.ts`): public https hosts, no cookies, at most 6 MB,
   decoded and re-encoded as a 360 px JPEG. Only PNG and JPEG decode, so a page whose
   picture is WebP or AVIF keeps its site icon.
-- **Reports.** In a chat a blockquote is a card with a leaf-green edge.
+- **Reports.** In a chat a blockquote is a card of its own.
 
 Not built: pictures inside the text of a reply (a model-written image address is a way to
 leak a conversation, so remote images in Markdown stay links), editing a generated picture
