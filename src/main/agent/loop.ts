@@ -235,6 +235,9 @@ async function prepareCall(call: ToolUseBlock, config: LoopConfig, host: LoopHos
   if (call.meta?.invalidJson === 'true') {
     return { ...base, tool, error: 'The tool input was not valid JSON (the response may have been cut off). Call the tool again with complete arguments.' };
   }
+  if (call.meta?.damaged === 'true') {
+    return { ...base, tool, error: 'Not run: part of the reply that asked for this was damaged on the way and left out, so what it asks for may not be what was meant. Ask for it again.' };
+  }
   const parsed = (tool.input as z.ZodType).safeParse(call.input);
   if (!parsed.success) return { ...base, tool, error: `Invalid input for ${tool.name}: ${zodMessage(parsed.error)}` };
   let descriptor: ToolCallDescriptor;
@@ -457,6 +460,8 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let pendingText = '';
     let pendingThinking = '';
     let finish: FinishReason = 'other';
+    /** Events of this reply that arrived unreadable (see StreamEvent 'finish'). */
+    let damaged = 0;
     let responseUsage: Usage | null = null;
     let responseCost: number | null = null;
     const request: StreamRequest = {
@@ -506,6 +511,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             break;
           case 'finish':
             finish = event.reason;
+            damaged = event.damaged ?? 0;
             break;
         }
       }
@@ -527,7 +533,18 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
 
     const aborted = signal.aborted || failure?.code === 'aborted';
-    const content = blocks.filter((b) => !(b.type === 'text' && b.text.length === 0));
+    // A reply that lost a piece on the way: a tool call put together from what was left can parse and
+    // still not be what the model wrote, so none of its calls is run (see prepareCall).
+    const kept = damaged > 0 ? blocks.map((b): ContentBlock => (b.type === 'tool_use' ? { ...b, meta: { ...b.meta, damaged: 'true' } } : b)) : blocks;
+    const content = kept.filter((b) => !(b.type === 'text' && b.text.length === 0));
+    if (damaged > 0 && !failure && !aborted) {
+      const asked = content.some((b) => b.type === 'tool_use');
+      host.emit({
+        type: 'notice',
+        level: 'warning',
+        text: `Part of this reply arrived damaged and was left out (${String(damaged)} ${damaged === 1 ? 'piece' : 'pieces'} of the stream could not be read). Its text may have gaps${asked ? ', and nothing it asked for was run' : ''}.`
+      });
+    }
     if (content.length > 0) {
       const meta: MessageMeta = { turnId: config.turnId, model: active.model.ref, ...(responseUsage ? { usage: responseUsage } : {}) };
       if (aborted) meta.interrupted = true;
