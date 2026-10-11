@@ -6,7 +6,7 @@ import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTie
 import { ProviderError } from './errors';
 import { catalogEffort, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { joinUrl, request, requestJson } from './http';
-import { parseSse } from './sse';
+import { isDamagedEvent, parseSse } from './sse';
 import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, StreamRequest } from './types';
 
 interface GeminiModel {
@@ -246,6 +246,7 @@ export class GeminiProvider implements LLMProvider {
     let finishReason: string | undefined;
     let blocked = false;
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    let damaged = 0;
 
     for await (const msg of parseSse(response.body)) {
       if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
@@ -253,6 +254,7 @@ export class GeminiProvider implements LLMProvider {
       try {
         chunk = JSON.parse(msg.data) as Record<string, unknown>;
       } catch {
+        if (isDamagedEvent(msg.data)) damaged++;
         continue;
       }
       const err = chunk.error as { message?: string; code?: number } | undefined;
@@ -322,6 +324,6 @@ export class GeminiProvider implements LLMProvider {
       };
     }
     yield { type: 'usage', usage };
-    yield { type: 'finish', reason: blocked ? 'refusal' : mapFinish(finishReason, calls.length > 0) };
+    yield { type: 'finish', reason: blocked ? 'refusal' : mapFinish(finishReason, calls.length > 0), ...(damaged > 0 ? { damaged } : {}) };
   }
 }

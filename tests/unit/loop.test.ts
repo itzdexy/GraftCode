@@ -325,3 +325,32 @@ describe('what a loop writes down about its tool calls', () => {
   });
 });
 
+describe('a reply that lost a piece on the way', () => {
+  it('does not run what it asked for: the input may not be what the model wrote', async () => {
+    const ran: string[] = [];
+    const h = makeLoopHarness({
+      script: [
+        // The arguments came in pieces and one was unreadable: what is left parses, and means something else.
+        { text: 'Cleaning up.', toolCalls: [{ id: 'rm-1', name: 'Change', input: { command: 'rm -rf ./build' } }, { id: 'look-1', name: 'Look', input: {} }], damaged: 1 },
+        { toolCalls: [{ id: 'rm-2', name: 'Change', input: { command: 'rm -rf ./build/cache' } }] },
+        { text: 'Done.' }
+      ],
+      tools: [testTool('Change', { run: (input) => (ran.push(String(input.command)), 'removed') }), testTool('Look', { safe: true, run: () => (ran.push('looked'), 'seen') })]
+    });
+    const result = await h.run('clean the cache');
+    expect(result.reason).toBe('completed');
+    // Neither call of the damaged reply ran, not even the one that only looks: the model is asked again.
+    expect(ran).toEqual(['rm -rf ./build/cache']);
+    const refused = 'Not run: part of the reply that asked for this was damaged on the way and left out, so what it asks for may not be what was meant. Ask for it again.';
+    expect(resultTexts(h.stored[1])).toEqual([refused, refused]);
+    expect(h.notices()).toEqual(['Part of this reply arrived damaged and was left out (1 piece of the stream could not be read). Its text may have gaps, and nothing it asked for was run.']);
+  });
+
+  it('keeps the text of a damaged reply and says that it may have gaps', async () => {
+    const h = makeLoopHarness({ script: [{ text: 'The answer is 4', damaged: 2 }], tools: [] });
+    const result = await h.run('what is 2 + 2?');
+    expect(result).toMatchObject({ reason: 'completed', finalText: 'The answer is 4' });
+    expect(h.notices()).toEqual(['Part of this reply arrived damaged and was left out (2 pieces of the stream could not be read). Its text may have gaps.']);
+  });
+});
+

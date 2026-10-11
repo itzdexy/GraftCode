@@ -52,6 +52,15 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
   if (data.length > 0) yield { event, data: data.join('\n') };
 }
 
+/**
+ * Whether stream data that failed to parse was an event that arrived damaged. An event is a
+ * JSON object, so data that starts like one and does not parse was cut or corrupted on the
+ * way. Anything else ("ping", an empty line) is a server's keep-alive and was never an event.
+ */
+export function isDamagedEvent(data: string): boolean {
+  return data.trimStart().startsWith('{');
+}
+
 /** Parses newline-delimited JSON (Ollama's streaming format). */
 export async function* parseNdjson(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   for await (const line of lines(body)) {
