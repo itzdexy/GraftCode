@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.6.23",
+    "date": "2026-10-11",
+    "items": [
+      "Ask for a diagram, or type /diagram and what to draw, and Graft draws it with the built-in diagram-design skill: architecture, flows, sequences, data models and forty more kinds, laid out by hand rather than by a layout engine. The diagram appears in the conversation when the turn ends.",
+      "A diagram opens large with zoom, copies to the clipboard as a picture, and saves as PNG or SVG. The file itself is an ordinary .html page in your project that any browser opens.",
+      "Chats draw diagrams too, and keep them with the chat’s files.",
+      "Customize → Skills shows the skills that come with Graft. A skill of your own with the same name replaces one.",
+      "Reading a skill’s own files no longer asks for permission.",
+      "Previews of pages have Geist, Geist Mono and Instrument Serif without a network.",
+      "This build holds three rounds of work in one: the session view and checked edits of 0.6.17, the tool journal and MCP permissions of 0.6.22, and diagrams. Their notes are below."
+    ]
+  },
+  {
     "version": "0.6.22",
     "date": "2026-10-11",
     "items": [

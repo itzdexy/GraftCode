@@ -130,6 +130,27 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Diagrams (0.6.23)
+
+Ask for a diagram, or type `/diagram` and what to draw. Graft draws it with the
+bundled **diagram-design** skill: architecture, flows, sequences, data models and
+forty more kinds, each laid out by hand as one `.html` page with an inline SVG, saved
+in `docs/diagrams/` unless you name a place. When the turn ends the diagram is shown
+in the conversation, live in a sandboxed frame and scaled to fit. **Open** shows it
+large with zoom, **Copy image** puts a picture of it on the clipboard, and **Save as…**
+writes a PNG at twice its size or an SVG that stands by itself. The page is an
+ordinary file: any browser opens it.
+
+Chats draw diagrams too. A chat reads the skill with its `Skill` tool, saves the page
+with its other files, and shows it the same way. **Customize → Skills** lists the
+skills that come with Graft; a skill of your own with the same name replaces one.
+Reading a skill's own files does not ask for permission.
+
+A diagram needs a model that can take in the skill's instructions (its `SKILL.md`
+alone is 30 KB, before the references it names) and write a page of a few thousand
+tokens by hand; a small or local model may not manage. The skill's own script checks
+need Python 3 and are skipped without it.
+
 The [implementation record](docs/IMPLEMENTATION_STATUS.md) tracks verified changes,
 security boundaries and the remaining development milestones.
 
@@ -410,6 +431,7 @@ Maintainers: see the [launch playbook](docs/LAUNCH_PLAYBOOK.md) for demo ideas, 
 ## Acknowledgements
 
 - Model and provider metadata comes from [models.dev](https://models.dev) (MIT License).
+- Diagrams are drawn with [diagram-design](https://github.com/cathrynlavery/diagram-design) by Cathryn Lavery (MIT), bundled unchanged.
 - Graft is built with [Electron](https://www.electronjs.org/), [React](https://react.dev/), [Vite](https://vitejs.dev/), [Zod](https://zod.dev/), [Radix UI](https://www.radix-ui.com/) and [ripgrep](https://github.com/BurntSushi/ripgrep).
 
 Graft is an independent project. It is not affiliated with or endorsed by any model provider.

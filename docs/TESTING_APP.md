@@ -49,14 +49,24 @@
 12. Open **Settings** and type `motion` in **Search settings**: "Motion" is listed with
    its page, Appearance. Press Enter: that page opens with the setting in view and
    marked for a moment. Type something that is nowhere: "No setting matches."
-
-9. In a code session, have the agent run a command that takes a while (`sleep 30`),
-   allow it, and end Graft from the task manager while it runs. Start Graft again and
-   open the session: a note says what was cut off, and when you write again the agent
-   is told the outcome is unknown instead of "not run".
-10. In **Customize → Integrations**, open a connected MCP server and set one of its
+13. In a code session, have the agent run a command that takes a while (`sleep 30`),
+    allow it, and end Graft from the task manager while it runs. Start Graft again and
+    open the session: a note says what was cut off, and when you write again the agent
+    is told the outcome is unknown instead of "not run".
+14. In **Customize → Integrations**, open a connected MCP server and set one of its
     tools to **Never**: a call to it is refused without a prompt, in any mode. Add a
     server and look at what it gets from this computer's environment.
+15. In a code session, type `/diagram how a request reaches the database` (or anything
+    your project has). Graft reads the diagram-design skill without asking, asks before
+    it writes the page, and when the turn ends the diagram is shown under its reply.
+    Press **Open**: the diagram opens large; try **Zoom in** and **Fit**. **Copy image**
+    then paste into another app; **Save as…** once as PNG and once as SVG. This needs a
+    capable model: a small one may not follow the skill.
+16. In a chat (not incognito), ask for a diagram of something. Its steps read "Read the
+    diagram-design skill" and "Created …html", the file is listed under **Files from this
+    reply**, and the diagram is drawn below it. **Save as…** offers Downloads.
+17. Open **Customize → Skills**: diagram-design is listed as **Built in**, with **Show
+    folder** and no Edit or Delete.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

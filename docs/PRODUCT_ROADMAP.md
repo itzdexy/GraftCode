@@ -19,6 +19,49 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.23 diagrams (2026-10-11)
+
+One build holds 0.6.17, 0.6.22 and this round, so it is numbered above all three; the
+branch is `feat/richer-graft`, local only. 0.6.18 to 0.6.21 were set aside for four rounds
+of which this is the first. The other three (code in the conversation, review and
+navigation, windows and motion) are planned and not built, and no build carries those
+numbers.
+
+- **The diagram-design skill ships with Graft** (`resources/skills/diagram-design`, version
+  2.6.74, by Cathryn Lavery, MIT). The folder is upstream's, byte for byte, with its
+  licences: `UPSTREAM.json` records the commit and a hash of the tree, a unit test compares
+  the folder with that hash, and `npm run skill:diagram` takes a new version. What is
+  different in Graft is said beside the skill, not in it (`BUILTIN_SKILL_NOTES`).
+- **Built-in skills** (`agent/skills.ts`, `app/paths.ts`, Customize → Skills). They are
+  listed with a "Built in" mark and no Edit or Delete; a skill of the user's or the project's
+  with the same name replaces one. A skill's own files are read without asking
+  (`permissions/engine.ts`): a skill is instructions the agent was told to read.
+- **The edit tools mark a diagram** (`shared/diagrams.ts`, `tools/fs/write.ts`,
+  `tools/fs/edit.ts`). A diagram is told from any other page by the skill's contract: an
+  inline `<svg role="img">` labelled by two ids ending in `-title` and `-desc`. The result
+  of the edit carries its title and the size of its viewBox.
+- **Previews have fonts and report their size** (`artifacts/previewExtras.ts`,
+  `scripts/copy-fonts.mjs`, `resources/fonts`). A previewed page that names Geist, Geist
+  Mono or Instrument Serif gets the bundled files, so a diagram looks the same without a
+  network; a page asked with `?report=size` tells the card how tall it is.
+- **Copies** (`diagrams/render.ts`, `files/fileTree.ts`, channels `diagrams:previewUrl`,
+  `diagrams:copyImage`, `diagrams:save`). The file is found and checked again each time,
+  inside the session's folder. A PNG is drawn in a hidden window with scripts off, at twice
+  the diagram's size; an SVG is the diagram alone with the page's own styles carried in.
+- **The card and the viewer** (`session/DiagramCard.tsx`, `DiagramFrame.tsx`,
+  `DiagramViewer.tsx`, `diagramModel.ts`). A turn's diagrams end it, after its files: the
+  page itself in a frame with `sandbox="allow-scripts"`, scaled to the card and at most
+  520 px high, six to a card. Open shows it large with Fit and five zoom steps.
+- **`/diagram`** (`agent/slashCommands.ts`) sends the brief: read the skill, read what the
+  diagram is about, save one `.html` file.
+- **Chats** (`tools/skillTool.ts`, `tools/chat/chatTools.ts`). A chat has no file tools, so
+  it reads the skill with `Skill`: a skill Graft ships, its `SKILL.md` or a file inside its
+  folder, text only, 256 KB a call. The tool comes with `CreateFile` and never without it,
+  so an incognito chat has neither. `CreateFile` marks a saved `.html` diagram, and the
+  card offers its copies in Downloads.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.23.
+
 ### 0.6.22 a journal of tool calls, MCP permissions, stricter stops (2026-10-11)
 
 Numbered after 0.6.17 to 0.6.21, which other branches hold; none of them is on `main` yet.
@@ -566,6 +609,19 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- Diagrams are only as good as the model that draws them. The skill is long (its
+  `SKILL.md` is 30 KB and the references it sends an agent to run from 1 KB to 106 KB), and
+  the result is a hand-placed page of a few thousand tokens: a small or local model may
+  not follow it. No live model drew a diagram in testing; the tests script the page.
+  The skill's own script checks need Python 3 and are skipped without it.
+- A diagram's card needs the edit that wrote the file: a diagram written by a command,
+  written outside the session's folder, or made before 0.6.23 gets no card. A preview has
+  the three bundled fonts in Latin script only. An SVG copy names its fonts instead of
+  carrying them, so it falls back where they are not installed. The built-in skill is
+  updated only by a new Graft version.
+- In a chat, `Skill` reads the skills Graft ships and none of the user's own, 256 KB of a
+  file at most for each call. A diagram a chat saves is listed twice, with the chat's
+  files and as a diagram.
 - The transcript view is one setting for every code session, not a choice per session. In
   the Normal view a thought is left out entirely; only Thinking and Verbose show it.
 - Settings search finds the 90 rows and groups whose name is written out in a page's
@@ -810,4 +866,7 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    and a choice of what a local server inherits. Next: a limit for a session or a day.
 5. Done in 0.6.16: Gemini `thinkingLevel`. Still open: measure the `ToolSearch` threshold on
    real setups; MCP elicitation and @-mentioning resources.
-6. Diagrams and equations in replies; reading PDFs from the web.
+6. Done in 0.6.23: diagrams, drawn with the bundled skill and shown when the turn ends.
+   Still open: equations in replies; reading PDFs from the web.
+7. Planned in October 2026 and not built: code in the conversation, review and navigation,
+   windows and motion (Settings as a window among them).
