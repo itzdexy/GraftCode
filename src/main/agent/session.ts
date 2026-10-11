@@ -31,7 +31,7 @@ import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
-import { runChecks } from './checks';
+import { runChecks, suggestChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { modelOrder, toLlmHistory, withSentTimes } from './history';
 import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
@@ -45,6 +45,7 @@ import { loadAgents } from './agents';
 import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
+import { reconcileInterrupted, type Cut } from './journal';
 import { SessionHost, type TurnScope } from './sessionHost';
 import type { TurnLimits } from './turnBudget';
 import { MemoryLoader } from './memory';
@@ -223,6 +224,10 @@ export class AgentSession {
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
   private deltaTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  /** Whether this runtime has started a turn since it was made. */
+  private ranTurn = false;
+  /** Whether this runtime has said that nothing checks the project's changes (see sayUnchecked). */
+  private saidUnchecked = false;
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
 
@@ -724,6 +729,27 @@ export class AgentSession {
     return root ? this.deps.settings.checks(root, this.deps.isTrusted(root)) : null;
   }
 
+  /**
+   * Said once for the session when a turn changed files and none of the project's checks ran:
+   * a finished turn is not a checked one, and nothing else on the screen says which it was.
+   */
+  private sayUnchecked(): void {
+    if (this.saidUnchecked || this.summary.kind !== 'code' || this.checksConfig()) return;
+    const root = this.settingsRoot();
+    if (!root) return;
+    this.saidUnchecked = true;
+    // The project has checks; it is trust that is missing.
+    if (this.deps.settings.checks(root, true)) {
+      this.notice('info', 'Nothing checked these changes: this project has checks, and they run only once you trust the project (Settings → Permissions).');
+      return;
+    }
+    const found = suggestChecks(root);
+    this.notice(
+      'info',
+      `Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files.${found.length > 0 ? ` Found here: ${found.join(', ')}.` : ''}`
+    );
+  }
+
   /** Runs the checks; null when the turn was stopped or they couldn't run. */
   private async runChecks(root: string | null, round: number, signal: AbortSignal): Promise<CheckReport | null> {
     const config = this.checksConfig();
@@ -1189,6 +1215,10 @@ export class AgentSession {
     this.emit({ type: 'turn-start', turnId });
     // The limits count for this turn and everything it starts; "Continue" after a pause is a new turn.
     this.host.beginTurn();
+    // Calls an earlier turn left without an answer are answered before anything is added behind them. On this
+    // session's first turn they are from before the app last stopped; later, from a turn that failed.
+    this.reconcile(this.ranTurn ? 'failed' : 'stopped');
+    this.ranTurn = true;
     let endReason: TurnEnd = 'completed';
     let failure: string | null = null;
     try {
@@ -1301,6 +1331,7 @@ export class AgentSession {
         this.deps.notify(this.summary, 'error', result.error.message);
         return;
       }
+      if (result.reason === 'completed' && result.changed) this.sayUnchecked();
       if (result.reason === 'completed' && userText !== null) this.maybeTitle(starting ? starting.objective : userText);
       // A turn of a mission that is still going isn't the end of anything: the mission says when it is done or needs the user.
       const onMission = this.missions.current()?.status === 'active';
@@ -1320,9 +1351,20 @@ export class AgentSession {
       this.setStatus('error', info);
       this.deps.notify(this.summary, 'error', info.message);
     } finally {
+      // A turn that failed between a tool and its answer: what the tool returned is put into the conversation now.
+      this.reconcile('failed');
       this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
+    }
+  }
+
+  /** Answers tool calls that were left open, from the journal (agent/journal.ts), and shows what was added. */
+  private reconcile(cut: Cut): void {
+    try {
+      for (const message of reconcileInterrupted(this.deps.store, this.id, cut)?.messages ?? []) this.emit({ type: 'message', message });
+    } catch (error) {
+      this.deps.log('error', 'Could not reconcile the tool journal', { session: this.id, message: (error as Error).message });
     }
   }
 

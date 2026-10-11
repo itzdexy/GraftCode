@@ -5,6 +5,10 @@ export interface TurnLimits {
   tokens: number | null;
   costUsd: number | null;
   minutes: number | null;
+  /** Tool calls started, by the turn and by the agents it started. */
+  toolCalls: number | null;
+  /** Times a failed request was sent again. */
+  retries: number | null;
 }
 
 /** Tokens that cost money: what was sent and written, with cache reads at the tenth they are billed at. */
@@ -25,6 +29,8 @@ export class TurnBudget {
   private tokens = 0;
   private costUsd = 0;
   private unpriced = 0;
+  private toolCalls = 0;
+  private retries = 0;
   private readonly startedAt: number;
   private waitedMs = 0;
   private waitingSince: number | null = null;
@@ -56,6 +62,16 @@ export class TurnBudget {
     this.costUsd += costUsd;
   }
 
+  /** A tool call started, in the turn's own loop or an agent's. */
+  toolCall(): void {
+    this.toolCalls++;
+  }
+
+  /** A failed request is about to be sent again. The one that goes past the limit is refused (see exceeded). */
+  retry(): void {
+    this.retries++;
+  }
+
   /** The turn is waiting for the user (an approval, a question): that time is theirs, not the turn's. */
   waiting(on: boolean): void {
     if (on) {
@@ -74,7 +90,7 @@ export class TurnBudget {
 
   /** Why the turn has to pause now, or null while it is within its limits. */
   exceeded(): string | null {
-    const { tokens, costUsd, minutes } = this.limits;
+    const { tokens, costUsd, minutes, toolCalls, retries } = this.limits;
     if (tokens !== null && this.tokens > tokens) {
       return `Paused after about ${this.tokens.toLocaleString('en-US')} tokens, past the limit of ${tokens.toLocaleString('en-US')} ${WHERE}.`;
     }
@@ -84,6 +100,14 @@ export class TurnBudget {
     }
     if (minutes !== null && this.workedMs() >= minutes * 60_000) {
       return `Paused after ${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'} of work, the limit ${WHERE}.`;
+    }
+    if (toolCalls !== null && this.toolCalls >= toolCalls) {
+      // A reply can ask for several calls at once, and they all run before the turn can be paused.
+      const made = `${this.toolCalls.toLocaleString('en-US')} tool ${this.toolCalls === 1 ? 'call' : 'calls'}`;
+      return this.toolCalls === toolCalls ? `Paused after ${made}, the limit ${WHERE}.` : `Paused after ${made}, past the limit of ${toolCalls.toLocaleString('en-US')} ${WHERE}.`;
+    }
+    if (retries !== null && this.retries > retries) {
+      return `Paused after ${String(retries)} ${retries === 1 ? 'retry of a failed request' : 'retries of failed requests'}, the limit ${WHERE}.`;
     }
     return null;
   }

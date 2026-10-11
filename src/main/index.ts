@@ -9,6 +9,7 @@ import { SessionManager } from './agent/sessionManager';
 import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
+import { runStages } from './app/shutdown';
 import { disposeSandbox, runInSandbox } from './chat/codeSandbox';
 import { DocumentMaker } from './chat/documents';
 import { disposePrinter, printHtmlToPdf } from './chat/pdfPrinter';
@@ -396,32 +397,45 @@ function openMainWindow(): void {
   });
 }
 
+/** How long each part of quitting may take. Their sum is the longest a quit can last. */
+const QUIT_LIMITS = { services: 3_000, terminals: 2_000, mcp: 4_000, sessions: 6_000, languageServers: 4_000, sites: 2_000, shells: 6_000 } as const;
+
 async function shutdown(): Promise<void> {
-  const drain = async (stage: string, action: () => Promise<void> | undefined): Promise<void> => {
-    log.debug('app', 'Shutdown stage started', { stage });
-    await action();
-    log.debug('app', 'Shutdown stage finished', { stage });
-  };
-  try {
-    updates.dispose();
-    desktop?.dispose();
-    keepAwake.dispose();
-    tray.destroy();
-    scheduler?.stop();
-    browserPanel?.close();
-    await drain('terminals', () => ptyManager?.disposeAll());
-    await drain('mcp', () => mcpManager?.disposeAll());
-    await drain('sessions', () => sessionManager?.disposeAll());
-    if (servicesPromise) {
-      const s = await servicesPromise;
-      s.catalogSync.dispose();
-      await drain('language-servers', () => s.languages.dispose());
-      await drain('sites', () => s.siteServer.close());
-      await drain('shells', () => s.shells.disposeAll());
-      s.db.close();
+  // Each of these is on its own: one that fails must not keep the rest from being tidied up.
+  const quick: Array<[string, () => void]> = [
+    ['updates', () => updates.dispose()],
+    ['desktop', () => desktop?.dispose()],
+    ['keep-awake', () => keepAwake.dispose()],
+    ['tray', () => tray.destroy()],
+    ['scheduler', () => scheduler?.stop()],
+    ['browser', () => browserPanel?.close()]
+  ];
+  for (const [part, dispose] of quick) {
+    try {
+      dispose();
+    } catch (error) {
+      log.error('app', 'Error during shutdown', { stage: part, message: (error as Error).message });
     }
-  } catch (error) {
-    log.error('app', 'Error during shutdown', { message: (error as Error).message });
+  }
+  // Services that are still starting are waited for briefly, so what they started can be stopped.
+  const services = servicesPromise
+    ? await Promise.race([servicesPromise.catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), QUIT_LIMITS.services))])
+    : null;
+  const reports = await runStages([
+    { name: 'terminals', limitMs: QUIT_LIMITS.terminals, run: () => ptyManager?.disposeAll() },
+    { name: 'mcp', limitMs: QUIT_LIMITS.mcp, run: () => mcpManager?.disposeAll() },
+    // Sessions stop their turns here; a turn that is cut short is on record in the tool journal and answered at the next start.
+    { name: 'sessions', limitMs: QUIT_LIMITS.sessions, run: () => sessionManager?.disposeAll() },
+    { name: 'catalog', limitMs: 1_000, run: () => services?.catalogSync.dispose() },
+    { name: 'language-servers', limitMs: QUIT_LIMITS.languageServers, run: () => services?.languages.dispose() },
+    { name: 'sites', limitMs: QUIT_LIMITS.sites, run: () => services?.siteServer.close() },
+    { name: 'shells', limitMs: QUIT_LIMITS.shells, run: () => services?.shells.disposeAll() },
+    { name: 'database', limitMs: 2_000, run: () => services?.db.close() }
+  ]);
+  for (const report of reports) {
+    const fields = { stage: report.stage, ms: report.ms, ...(report.error ? { message: report.error } : {}) };
+    if (report.outcome === 'done') log.debug('app', 'Shutdown stage finished', fields);
+    else log.error('app', report.outcome === 'timed out' ? 'Shutdown stage did not finish in time and was left' : 'Shutdown stage failed', fields);
   }
 }
 

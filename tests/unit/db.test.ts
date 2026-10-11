@@ -190,9 +190,11 @@ describe('app settings', () => {
     const stored = { runInTray: true, bypassModeEnabled: false, bypassKeepsChecks: true, autoCompact: false, webSearch: true, computerUse: false, maxSteps: 250 };
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('behavior', JSON.stringify(stored));
     const settings = new AppSettingsService(db);
-    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnCostUsd: null, turnMinutes: null });
+    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null });
     settings.update({ behavior: { turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 } });
-    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 });
+    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30 });
+    settings.update({ behavior: { turnToolCalls: 500, turnRetries: 0 } });
+    expect(new AppSettingsService(db).get().behavior).toMatchObject({ turnToolCalls: 500, turnRetries: 0 });
     // A limit too small to be meant is refused, and nothing changes.
     expect(() => settings.update({ behavior: { turnTokens: 5 } })).toThrow(/turnTokens/);
     expect(() => settings.update({ behavior: { turnCostUsd: 0 } })).toThrow(/turnCostUsd/);

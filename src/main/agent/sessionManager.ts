@@ -26,6 +26,7 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { GraftPaths } from '../app/paths';
 import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
+import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
 import { generateTitle, titleModel } from './title';
@@ -99,6 +100,14 @@ export class SessionManager {
     }
     this.deps.repo.recoverAgentRuns();
     this.deps.repo.recoverMissions();
+    // Tool calls that were running when the app stopped get a truthful answer now, so the note is there when the session is opened.
+    for (const id of this.deps.repo.journalSessions()) {
+      try {
+        reconcileInterrupted(this.deps.repo, id);
+      } catch (error) {
+        this.deps.log('error', 'Could not reconcile the tool journal', { session: id, message: (error as Error).message });
+      }
+    }
   }
 
   setActive(id: string | null): void {
@@ -194,7 +203,7 @@ export class SessionManager {
           computerUse: s.behavior.computerUse,
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
-          turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes },
+          turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes, toolCalls: s.behavior.turnToolCalls, retries: s.behavior.turnRetries },
           agents: s.agents
         };
       },

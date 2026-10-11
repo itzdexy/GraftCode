@@ -369,6 +369,8 @@ async function runAgent(
     todos: () => [],
     takeSteering: () => Promise.resolve([]),
     overBudget: () => parent.overBudget?.() ?? null,
+    onRetry: () => parent.onRetry?.(),
+    ...(parent.journal ? { journal: parent.journal } : {}),
     fallback: async (error, s) => {
       const next = (await parent.fallback?.(error, s)) ?? null;
       if (!next) return null;

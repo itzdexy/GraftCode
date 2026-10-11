@@ -51,7 +51,7 @@ describe('integrations', () => {
     const blender = integrationSetup('blender', {}, 'win32', winEnv, files([uvx]));
     expect(blender).toEqual({
       name: 'blender',
-      config: { type: 'stdio', command: uvx, args: ['mcp-for-blender'], env: {}, keepEnv: [], cwd: null, enabled: true },
+      config: { type: 'stdio', command: uvx, args: ['mcp-for-blender'], env: {}, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true },
       secrets: {}
     });
     const roblox = integrationSetup('roblox-studio', {}, 'win32', winEnv, files([]));
@@ -69,7 +69,7 @@ describe('integrations', () => {
     const uvx = win.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
     const setup = integrationSetup('ghidra', { GHIDRA_INSTALL_DIR: ' C:\\ghidra ' }, 'win32', winEnv, files([uvx]));
     // The launch its own documentation gives: uvx pyghidra-mcp --transport stdio, with GHIDRA_INSTALL_DIR set.
-    expect(setup.config).toEqual({ type: 'stdio', command: uvx, args: ['pyghidra-mcp', '--transport', 'stdio'], env: { GHIDRA_INSTALL_DIR: 'C:\\ghidra' }, keepEnv: [], cwd: null, enabled: true });
+    expect(setup.config).toEqual({ type: 'stdio', command: uvx, args: ['pyghidra-mcp', '--transport', 'stdio'], env: { GHIDRA_INSTALL_DIR: 'C:\\ghidra' }, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true });
     expect(setup.secrets).toEqual({});
     expect(() => integrationSetup('ghidra', {}, 'linux', { PATH: '' }, files([]))).toThrow(/Enter the ghidra folder first/);
   });

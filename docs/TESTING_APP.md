@@ -1,6 +1,6 @@
-# Try Graft 0.6.16
+# Try Graft 0.6.22
 
-1. Open **Settings → About** and confirm version **0.6.16**. In
+1. Open **Settings → About** and confirm version **0.6.22**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -27,6 +27,14 @@
    model with its requests, tokens and cost.
 8. In a chat, type `/`: the commands a chat can use are listed, and `/model` opens the
    model menu.
+
+9. In a code session, have the agent run a command that takes a while (`sleep 30`),
+   allow it, and end Graft from the task manager while it runs. Start Graft again and
+   open the session: a note says what was cut off, and when you write again the agent
+   is told the outcome is unknown instead of "not run".
+10. In **Customize → Integrations**, open a connected MCP server and set one of its
+    tools to **Never**: a call to it is refused without a prompt, in any mode. Add a
+    server and look at what it gets from this computer's environment.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

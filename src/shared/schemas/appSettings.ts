@@ -129,6 +129,9 @@ export const AppSettingsSchema = z.object({
      * null sets none. Reaching one pauses the turn and offers to continue.
      */
     turnTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    /** Also for one turn and what it starts: tool calls started, and failed requests sent again. */
+    turnToolCalls: z.number().int().min(1).max(1_000_000).nullable(),
+    turnRetries: z.number().int().min(0).max(10_000).nullable(),
     turnCostUsd: z.number().min(0.01).max(100_000).nullable(),
     turnMinutes: z.number().int().min(1).max(10_080).nullable()
   }),
@@ -215,7 +218,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnCostUsd: null, turnMinutes: null },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },

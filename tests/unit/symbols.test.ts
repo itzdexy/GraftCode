@@ -285,6 +285,115 @@ describe('the Symbols tool', () => {
     expect(routes).toContain('tests/routes.test.ts');
   });
 
+  describe('what a change to a file can reach', () => {
+    const write = (file: string, text: string): void => {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+    };
+    beforeEach(() => {
+      // limits <- routes <- app <- app.test, beside what the project already has (admin, limits.test, routes.test).
+      write('src/app.ts', "import { handle } from './api/routes';\nexport const app = handle;\n");
+      write('tests/app.test.ts', "import { app } from '../src/app';\ntest('app', () => expect(app(1)).toBe(200));\n");
+    });
+
+    it('follows imports as far as they go, step by step, and says through which file each one is reached', async () => {
+      const text = await run({ action: 'impact', path: 'src/shared/limits.ts' });
+      expect(text.split('\n')).toEqual([
+        'A change to src/shared/limits.ts can reach 6 files through imports, 3 steps at the most.',
+        'Import it (3):',
+        '  src/api/admin.ts',
+        '  src/api/routes.ts',
+        '  tests/limits.test.ts (test)',
+        '2 steps away (2):',
+        '  src/app.ts  through src/api/routes.ts',
+        '  tests/routes.test.ts (test)  through src/api/routes.ts',
+        '3 steps away (1):',
+        '  tests/app.test.ts (test)  through src/app.ts',
+        'Tests among them, the nearest first (3):',
+        '  tests/limits.test.ts  imports it',
+        '  tests/routes.test.ts  2 steps',
+        '  tests/app.test.ts  3 steps',
+        'Imports only: code loaded by name at run time, or reached through a dependency, is not found this way.'
+      ]);
+      // The one-step question still answers as it did: it does not count a test two steps away.
+      expect(await run({ action: 'tests', path: 'src/shared/limits.ts' })).not.toContain('routes.test.ts');
+    });
+
+    it('lists a file that takes only types from another, and follows nothing behind it', async () => {
+      // shape.ts takes a type from routes.ts; draws.ts takes a value from shape.ts. A change to how routes.ts
+      // works cannot change what draws.ts does: only the type check, which reads the whole project, is concerned.
+      write('src/shape.ts', "import type { handle } from './api/routes';\nexport type Handler = typeof handle;\nexport const SIDES = 4;\n");
+      write('src/draws.ts', "import { SIDES } from './shape';\nexport const draws = SIDES;\n");
+      // Both a type and a value from the same file, on two lines: the value decides.
+      write('src/both.ts', "import type { handle as Handle } from './api/routes';\nimport { handle } from './api/routes';\nexport const both: typeof Handle = handle;\n");
+      write('src/behind-both.ts', "import { both } from './both';\nexport const behind = both;\n");
+      const text = await run({ action: 'impact', path: 'src/api/routes.ts' });
+      expect(text).toContain('  src/shape.ts (types only)');
+      expect(text).not.toContain('src/draws.ts');
+      expect(text).toContain('  src/both.ts\n');
+      expect(text).toContain('  src/behind-both.ts  through src/both.ts');
+      expect(text).toContain('A file marked (types only) takes nothing but types from the file before it, so nothing behind it is followed; the type check covers those.');
+      // The one-step answer says it too.
+      expect(await run({ action: 'importers', path: 'src/api/routes.ts' })).toMatch(/src\/shape\.ts:1 \(types only\)/);
+    });
+
+    it('goes through a helper that tests share to the tests that use it, and counts only the tests as tests', async () => {
+      write('tests/support/server.ts', "import { handle } from '../../src/api/routes';\nexport const serve = (): number => handle(1);\n");
+      write('tests/served.test.ts', "import { serve } from './support/server';\ntest('serves', () => expect(serve()).toBe(200));\n");
+      // A test in a test folder whose name does not say so (as Mocha's are).
+      write('test/basic.js', "const { handle } = require('../src/api/routes');\nit('basic', () => handle(1));\n");
+      const text = await run({ action: 'impact', path: 'src/api/routes.ts' });
+      expect(text).toContain('  tests/support/server.ts (test helper)');
+      expect(text).toContain('  tests/served.test.ts (test)  through tests/support/server.ts');
+      expect(text).toContain('  test/basic.js (test)');
+      const tests = text.slice(text.indexOf('Tests among them'), text.indexOf('Imports only'));
+      expect(tests).toContain('  tests/served.test.ts  2 steps');
+      expect(tests).toContain('  test/basic.js  imports it');
+      expect(tests).not.toContain('support/server.ts');
+    });
+
+    it('ends where the imports end: a file nothing imports reaches nothing', async () => {
+      expect(await run({ action: 'impact', path: 'tests/app.test.ts' })).toBe(
+        'Nothing imports tests/app.test.ts, so a change to it reaches no other file through imports. It may be an entry point, be loaded by name at run time, or be unused.'
+      );
+    });
+
+    it('is not caught by files that import each other', async () => {
+      write('src/ring/a.ts', "import { b } from './b';\nexport const a = (): number => b() + 1;\n");
+      write('src/ring/b.ts', "import { a } from './a';\nexport const b = (): number => (Math.random() > 2 ? a() : 0);\n");
+      const text = await run({ action: 'impact', path: 'src/ring/a.ts' });
+      expect(text).toContain('A change to src/ring/a.ts can reach 1 file through imports, 1 step at the most.');
+      expect(text).toContain('  src/ring/b.ts');
+      expect(text).not.toContain('2 steps away');
+    });
+
+    it('names a test that is called after the file though nothing was found to import it', async () => {
+      write('src/lonely.ts', 'export const lonely = 1;\n');
+      write('tests/lonely.test.ts', "test('lonely', () => undefined);\n");
+      expect(await run({ action: 'impact', path: 'src/lonely.ts' })).toBe(
+        [
+          'Nothing imports src/lonely.ts, so a change to it reaches no other file through imports. It may be an entry point, be loaded by name at run time, or be unused.',
+          'Named after it, though no import was found: tests/lonely.test.ts'
+        ].join('\n')
+      );
+    });
+
+    it('stops at a number of files and says so, when a file is imported from everywhere', async () => {
+      write('src/base.ts', 'export const base = 1;\n');
+      for (let i = 0; i < 230; i++) write(`src/many/user${String(i)}.ts`, `import { base } from '../base';\nexport const user${String(i)} = base;\n`);
+      const text = await run({ action: 'impact', path: 'src/base.ts' });
+      expect(text).toMatch(/^A change to src\/base\.ts can reach at least 200 files through imports\./);
+      expect(text).toContain('Stopped at 200 files: it is imported so widely that the rest would say little.');
+      expect(text).toContain('… 170 more.');
+    });
+
+    it('needs a file inside the project', async () => {
+      const result = await symbolsTool.execute({ action: 'impact' }, makeToolContext(dir));
+      expect(result.isError).toBe(true);
+      expect((await symbolsTool.describe({ action: 'impact', path: 'src/app.ts' }, { cwd: dir, projectRoot: dir, platform: process.platform })).summary).toBe('Find what a change to src/app.ts can reach');
+    });
+  });
+
   it('says so plainly when there is nothing to find, or the request is incomplete', async () => {
     expect(await run({ action: 'definition', name: 'nothingCalledThis' })).toMatch(/No definition of nothingCalledThis/);
     expect(await run({ action: 'tests', path: 'src/api/other.ts' })).toMatch(/No tests found/);

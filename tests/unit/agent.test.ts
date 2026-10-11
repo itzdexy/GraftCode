@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/main/providers/errors';
 import { modelOrder, toLlmHistory } from '../../src/main/agent/history';
+import { NOT_FINISHED, NOT_RUN, RECORDED_NOTE, type JournalStart } from '../../src/main/agent/journal';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
 import { MemoryLoader } from '../../src/main/agent/memory';
 import { ChatFiles } from '../../src/main/chat/chatFiles';
@@ -1939,6 +1940,173 @@ describe('steps per turn', () => {
   });
 });
 
+describe('changes that nothing checked', () => {
+  const notes = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Nothing checked') ? [e.text] : []));
+  const write = (file: string) => ({ toolCalls: [{ name: 'Write', input: { file_path: file, content: 'export {};\n' } }] });
+
+  it('says so once, and names the checks the project could have', async () => {
+    const h = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }, write('b.ts'), { text: 'Added b.' }] });
+    writeFile(h.projectDir, 'package.json', JSON.stringify({ scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' } }));
+    h.session.send('add a');
+    await h.session.idle();
+    expect(notes(h)).toEqual([
+      'Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files. Found here: npm run typecheck, npm test.'
+    ]);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Nothing checked'))).toMatchObject({ level: 'info' });
+    // Once for the session, not after every turn.
+    h.session.send('add b');
+    await h.session.idle();
+    expect(notes(h)).toHaveLength(1);
+  });
+
+  it('says it without a list when the project shows nothing to run', async () => {
+    const h = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }] });
+    h.session.send('add a');
+    await h.session.idle();
+    expect(notes(h)).toEqual(['Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files.']);
+  });
+
+  it('says nothing after a turn that changed nothing, in a chat, or when the project has checks', async () => {
+    const asked = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.ts' } }] }, { text: 'Two files.' }] });
+    asked.session.send('what is here?');
+    await asked.session.idle();
+    expect(notes(asked)).toEqual([]);
+
+    const chat = harness({ kind: 'chat', script: [{ text: 'Hello.' }] });
+    chat.session.send('hi');
+    await chat.session.idle();
+    expect(notes(chat)).toEqual([]);
+
+    const checked = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }] });
+    writeFile(checked.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['node -e 0'], fix: true, timeoutSec: 60 } }));
+    checked.session.send('add a');
+    await checked.session.idle();
+    expect(notes(checked)).toEqual([]);
+    expect(checked.store.listMessages('session-1').filter((m) => m.meta.kind === 'check')).toHaveLength(1);
+  });
+
+  it('says that the project is not trusted when that is why its checks did not run', async () => {
+    const h = harness({ mode: 'auto-edit', trusted: () => false, script: [write('a.ts'), { text: 'Added a.' }] });
+    writeFile(h.projectDir, '.graft/settings.json', JSON.stringify({ checks: { commands: ['node -e 0'], fix: true, timeoutSec: 60 } }));
+    h.session.send('add a');
+    await h.session.idle();
+    expect(h.events.flatMap((e) => (e.type === 'notice' && e.text.includes('checks') ? [e.text] : []))).toEqual([
+      'Nothing checked these changes: this project has checks, and they run only once you trust the project (Settings → Permissions).'
+    ]);
+  });
+});
+
+describe('a turn that is cut off', () => {
+  const question = { questions: [{ question: 'Which DB?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] }] };
+  const resultsSent = (h: Harness): Array<[string, string]> =>
+    h.provider.requests
+      .at(-1)!
+      .messages.flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' ? [[b.toolUseId, b.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')] as [string, string]] : [])));
+
+  it('has its running call on record while it runs, and nothing once the turn is over', async () => {
+    const h = harness({ script: [{ toolCalls: [{ id: 'ask-1', name: 'AskUserQuestion', input: question }] }, { text: 'Going with it.' }] });
+    h.session.send('set up storage');
+    const q = await h.waitFor((e) => e.type === 'question');
+    if (q.type !== 'question') throw new Error('unreachable');
+    expect(h.store.journalOpen('session-1')).toMatchObject([{ toolUseId: 'ask-1', rootId: 'ask-1', agent: null, name: 'AskUserQuestion', effect: 'read', endedAt: null, result: null }]);
+    h.session.answerQuestion({ requestId: q.request.id, answers: [{ selected: ['Postgres'] }] });
+    await h.session.idle();
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+  });
+
+  it('has no record of a call that is still waiting for approval', async () => {
+    const h = harness({ script: [{ toolCalls: [{ name: 'Edit', input: { file_path: 'a.ts', old_string: 'one', new_string: 'two' } }] }, { text: 'Changed it.' }] });
+    writeFile(h.projectDir, 'a.ts', 'const x = "one";\n');
+    h.session.send('change one to two');
+    const event = await h.waitFor((e) => e.type === 'permission');
+    if (event.type !== 'permission') throw new Error('unreachable');
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+    h.session.respondPermission({ requestId: event.request.id, decision: 'allow-once' });
+    await h.session.idle();
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+  });
+
+  it('writes what a sub-agent does under the call that started it', async () => {
+    const h = harness({
+      script: [
+        { toolCalls: [{ id: 'task-1', name: 'Task', input: { description: 'Look around', prompt: 'Look', subagent_type: 'explore' } }] },
+        { toolCalls: [{ id: 'glob-1', name: 'Glob', input: { pattern: '*.md' } }] },
+        { text: 'Report: nothing here' },
+        { text: 'Done.' }
+      ]
+    });
+    const seen: Array<Pick<JournalStart, 'toolUseId' | 'rootId' | 'agent' | 'effect'>> = [];
+    const start = h.store.journalStart.bind(h.store);
+    h.store.journalStart = (entry) => {
+      seen.push({ toolUseId: entry.toolUseId, rootId: entry.rootId, agent: entry.agent, effect: entry.effect });
+      start(entry);
+    };
+    h.session.send('look around');
+    await h.session.idle();
+    expect(seen).toEqual([
+      { toolUseId: 'task-1', rootId: 'task-1', agent: null, effect: 'read' },
+      { toolUseId: 'glob-1', rootId: 'task-1', agent: 'Look around', effect: 'read' }
+    ]);
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+  });
+
+  it('tells the model what is known when the session is used again after the app stopped: not finished, and never started', async () => {
+    const h = harness({
+      script: [
+        { text: 'Two things.', toolCalls: [{ id: 'ask-1', name: 'AskUserQuestion', input: question }, { id: 'edit-1', name: 'Edit', input: { file_path: 'a.ts', old_string: 'one', new_string: 'two' } }] },
+        { text: 'Picking up where it stopped.' }
+      ]
+    });
+    writeFile(h.projectDir, 'a.ts', 'const x = "one";\n');
+    h.session.send('set up storage');
+    await h.waitFor((e) => e.type === 'question');
+    // The app stops here, with the question on screen and the edit not reached. The old session is never told;
+    // a new one starts over what is stored, idle, as after a restart.
+    h.store.updateSession('session-1', { status: 'idle' });
+    const again = h.reopen();
+    again.send('continue');
+    await again.idle();
+    expect(resultsSent(h)).toEqual([['ask-1', NOT_FINISHED], ['edit-1', NOT_RUN]]);
+    const notes = h.store.listMessages('session-1').filter((m) => m.meta.kind === 'notice');
+    expect(notes).toHaveLength(1);
+    expect(JSON.stringify(notes[0]!.content)).toContain('Graft stopped while this session was working.');
+    // The note reached the window too.
+    expect(h.events.some((e) => e.type === 'message' && e.message.id === notes[0]!.id)).toBe(true);
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+    expect(fs.readFileSync(path.join(h.projectDir, 'a.ts'), 'utf8')).toBe('const x = "one";\n');
+  });
+
+  it('keeps what a tool returned when the turn fails before the result is stored', async () => {
+    const h = harness({
+      script: [{ toolCalls: [{ id: 'glob-1', name: 'Glob', input: { pattern: '*.ts' } }] }, { text: 'Found it.' }]
+    });
+    writeFile(h.projectDir, 'kept.ts', 'export {};\n');
+    // The store refuses once, exactly when the tool's result is to be written.
+    const append = h.store.appendMessage.bind(h.store);
+    let refused = false;
+    h.store.appendMessage = (sessionId, role, content, meta, id) => {
+      if (!refused && role === 'user' && content.some((b) => b.type === 'tool_result')) {
+        refused = true;
+        throw new Error('database is locked');
+      }
+      return append(sessionId, role, content, meta, id);
+    };
+    h.session.send('find the file');
+    await h.session.idle();
+    expect(h.session.summary.status).toBe('error');
+    expect(h.store.journalOpen('session-1')).toEqual([]);
+
+    h.session.retry();
+    await h.session.idle();
+    // Before, the model was told the search had not run, and searched again or guessed.
+    const [id, text] = resultsSent(h)[0]!;
+    expect(id).toBe('glob-1');
+    expect(text).toContain('kept.ts');
+    expect(text).toContain(RECORDED_NOTE.replace('Graft stopped', 'The turn ended'));
+    expect(texts(h).at(-1)).toBe('assistant:Found it.');
+  });
+});
+
 describe('limits for one turn', () => {
   const pauses = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Paused') ? [e.text] : []));
 
@@ -2029,6 +2197,40 @@ describe('limits for one turn', () => {
     await h.session.idle();
     expect(h.provider.requests).toHaveLength(2);
     expect(pauses(h)).toEqual(['Paused after 10 minutes of work, the limit for one turn set in Settings → Permissions.']);
+  });
+
+  it('pauses after the tool calls of the turn and of the agent it started, and continues when told to', async () => {
+    const h = harness({
+      turnBudget: { toolCalls: 3 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }, { id: 'task-1', name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }] },
+        // The sub-agent's own call is the third of the turn, so it is stopped before it can report.
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Finished after continuing.' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    expect(pauses(h)).toEqual(['Paused after 3 tool calls, the limit for one turn set in Settings → Permissions.']);
+    expect(h.provider.requests).toHaveLength(2);
+    h.session.retry();
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Finished after continuing.');
+  });
+
+  it('stops trying a failing request again at the limit, says what failed, and does not call that an error', async () => {
+    const overloaded = (): { error: ProviderError } => ({ error: new ProviderError('overloaded', 'The model is overloaded.', { retryable: true }) });
+    const h = harness({
+      turnBudget: { retries: 1 },
+      // The harness would try three times; the turn allows one retry.
+      script: [overloaded(), overloaded(), overloaded(), { text: 'never asked for' }]
+    });
+    h.session.send('hello');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual(['Paused after 1 retry of a failed request, the limit for one turn set in Settings → Permissions. The request that failed: The model is overloaded.']);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Paused'))).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.session.summary.status).toBe('idle');
   });
 
   it('pauses on cost for a model with a price, and says the amount is an estimate', async () => {
