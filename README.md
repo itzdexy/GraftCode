@@ -130,6 +130,16 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Pictures, drawings and research (0.6.24)
+
+While a picture is being made, a grid of dots stands in for it and a line of dots walks
+across it. The finished picture comes into focus, and a click opens it in a viewer with
+zoom. An SVG the model writes shows as the drawing once its code is complete; the button
+beside **Copy** shows the code again. While Graft searches the web, the line above its
+steps counts the websites found so far, and the **Sources** card shows the picture each
+page offers for itself. Those pictures are fetched like site icons: public https
+addresses only, no cookies, re-encoded before they are shown.
+
 ### Diagrams (0.6.23)
 
 Ask for a diagram, or type `/diagram` and what to draw. Graft draws it with the

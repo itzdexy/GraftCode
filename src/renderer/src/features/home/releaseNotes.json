@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.24",
+    "date": "2026-10-11",
+    "items": [
+      "While a picture is being made, a grid of dots stands in for it: a line of bright dots walks the grid from one green dot to the next, and the corner shows the time so far or what the engine last said. The line above reads \u201cCreating image\u201d.",
+      "A picture that has just been made comes into focus instead of popping in. One picture shows large, at its own shape. Click any generated picture to see it in a viewer with zoom (+, \u2212, 0 to fit).",
+      "An SVG the model writes shows as the drawing once its code is complete. The button beside Copy switches between the drawing and its code.",
+      "While Graft searches the web, the line above the steps counts what it has found: \u201cSearching 12 websites\u201d.",
+      "Sources show the picture a page offers for itself, when a page that was read has one. Graft fetches it the way it fetches site icons: from public https addresses, without cookies, and re-encoded before it is shown. Pages read before this version have none.",
+      "In a chat, a quoted block in a reply is a card of its own, so a key fact or a caveat in a report stands out."
+    ]
+  },
+  {
     "version": "0.6.23",
     "date": "2026-10-11",
     "items": [

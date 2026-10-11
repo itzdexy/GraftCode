@@ -779,6 +779,16 @@
     padding-left: 0.8em;
     color: var(--g-text-secondary);
   }
+  /* In a chat a quoted block is an aside in a report (a key fact, a caveat): a card of its own, marked in leaf green. */
+  .graft-prose--chat blockquote {
+    margin: 0.8em 0;
+    border: 1px solid var(--g-border-card);
+    border-left: 2px solid var(--g-accent);
+    border-radius: var(--g-radius-md);
+    background: var(--g-surface-sunken);
+    padding: 0.55em 0.9em;
+    font-size: 0.95em;
+  }
   .graft-prose hr {
     margin: 1em 0;
     border: 0;

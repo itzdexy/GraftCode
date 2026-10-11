@@ -105,6 +105,10 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     const seen = sourcesOf(view.messages);
     return seen.length > 0 ? sourceIndex(seen) : null;
   }, [view.messages]);
+  // What was already there when the session opened. A card that comes later was made while it was open, and shows that it is new.
+  const [opened, setOpened] = useState<{ id: string; keys: Set<string> } | null>(null);
+  if (items.length > 0 && opened?.id !== summary.id) setOpened({ id: summary.id, keys: new Set(items.map((i) => i.key)) });
+  const fresh = (key: string): boolean => opened?.id === summary.id && !opened.keys.has(key);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -241,9 +245,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       case 'diagrams':
         return <DiagramCard sessionId={summary.id} diagrams={item.diagrams} />;
       case 'sources':
-        return <SourcesCard sources={item.sources} />;
+        return <SourcesCard sources={item.sources} fresh={fresh(item.key)} />;
       case 'media':
-        return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} />;
+        return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} fresh={fresh(item.key)} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':

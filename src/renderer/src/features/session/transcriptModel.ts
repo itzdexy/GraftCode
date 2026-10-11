@@ -441,14 +441,44 @@ function runningLabel(call: ToolCall): string {
   return [parts.verb, parts.target].filter((part) => part.length > 0).join(' ');
 }
 
+/** "Searching 12 websites": the pages a block's searches have found so far, each once; "Searching the web" before the first answer. */
+export function searchingLabel(item: ActivityItem): string {
+  const pages = new Set<string>();
+  for (const step of item.steps) {
+    const results = step.kind === 'search' ? step.search.results : step.kind === 'tool' && step.call.name === 'WebSearch' ? searchOfCall(step.call).results : [];
+    for (const result of results) pages.add(result.url);
+  }
+  return pages.size === 0 ? 'Searching the web' : `Searching ${String(pages.size)} ${pages.size === 1 ? 'website' : 'websites'}`;
+}
+
+/**
+ * A picture being made right now, for the grid that stands in for it: what
+ * to call it and the engine's latest word. Null for every other call, and
+ * once the call has a result.
+ */
+export function generatingImage(call: ToolCall): { label: string; note: string | null } | null {
+  if (call.result !== null || call.running === null) return null;
+  const comfy = call.name === 'ComfyUI' && inputOf<{ action: string }>(call.input).action === 'run';
+  if (call.name !== 'GenerateImage' && !comfy) return null;
+  const note = call.running.output.trim().split('\n').at(-1)?.trim() ?? '';
+  return { label: comfy ? 'Running the workflow' : 'Creating image', note: note.length > 0 ? note.slice(0, 40) : null };
+}
+
 /** What a live block is doing now: the running tool, else its newest step. */
 export function liveLabel(item: ActivityItem): string {
   for (let i = item.steps.length - 1; i >= 0; i--) {
     const step = item.steps[i];
-    if (step?.kind === 'tool' && step.call.running) return runningLabel(step.call) || step.call.running.summary;
+    if (step?.kind === 'tool' && step.call.running) {
+      // The step below names the query; the line above counts what the searches have turned up.
+      if (step.call.name === 'WebSearch') return searchingLabel(item);
+      const making = generatingImage(step.call);
+      if (making) return making.label;
+      return runningLabel(step.call) || step.call.running.summary;
+    }
   }
   const last = item.steps.at(-1);
   if (!last) return 'Working';
+  if (last.kind === 'search' && last.search.results.length === 0) return searchingLabel(item);
   if (last.kind === 'text') return firstLine(last.text);
   if (last.kind === 'tool') return describeCall(last.call);
   if (last.kind === 'provider') return last.summary;

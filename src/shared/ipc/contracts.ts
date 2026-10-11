@@ -171,6 +171,8 @@ export const contracts = {
     z.object({ audio: z.string(), mime: z.string() })
   ),
   'web:favicon': channel(z.object({ host: z.string().min(3).max(253) }), z.string().nullable()),
+  /** The picture of a page a reply read, as a small data: URL; null when there is none to show. */
+  'web:pagePicture': channel(z.object({ url: z.string().min(12).max(2000) }), z.string().nullable()),
   'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
   'power:keepAwakeList': channel(Void, z.array(z.string())),
   /** Colours are the palette's --g-bg and --g-icon; without them the theme's default colours apply. */

@@ -66,7 +66,7 @@ import { isInside } from '../tools/paths';
 import { openExternalSafely } from '../app/security';
 import type { Services } from '../app/services';
 import type { SiteView } from '@shared/schemas/sites';
-import { favicon } from '../app/favicons';
+import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
@@ -348,6 +348,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { engine: found.engine, count: found.results.length, first: first ? { title: first.title, url: first.url } : null };
     },
     'web:favicon': ({ host }) => favicon(host),
+    'web:pagePicture': ({ url }) => pagePicture(url),
     'voice:models': async () => {
       const available = openRouterAccess(await ctx.services()) !== null;
       try {
