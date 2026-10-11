@@ -57,7 +57,8 @@ module.exports = {
   extraResources: [
     { from: 'resources/icons', to: 'icons' },
     { from: 'resources/catalog', to: 'catalog' },
-    { from: 'resources/skills', to: 'skills' }
+    { from: 'resources/skills', to: 'skills' },
+    { from: 'resources/fonts', to: 'fonts' }
   ],
   asar: true,
   asarUnpack: ['**/node_modules/node-pty/**', '**/node_modules/better-sqlite3/**', '**/node_modules/@vscode/ripgrep-*/bin/**',

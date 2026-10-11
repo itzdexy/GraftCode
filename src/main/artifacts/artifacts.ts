@@ -7,6 +7,7 @@ import type { ContentBlock } from '@shared/schemas/messages';
 import type { Db } from '../db/database';
 import { looksBinary } from '../tools/fs/read';
 import { isInsideReal } from '../tools/paths';
+import { fontReader, withPreviewExtras, type FontReader } from './previewExtras';
 
 /**
  * Artifacts are files the agent created or edited in a session. They are
@@ -177,11 +178,22 @@ const MIME: Record<string, string> = {
  * graft-artifact://<token>/<file>; relative assets resolve inside that
  * folder only. A token made for one file (a picture in the Files panel)
  * serves that file and nothing beside it.
+ *
+ * A page is sent with what previewExtras adds: the bundled fonts it names
+ * and, for an address ending in ?report=size, a report of its size.
  */
 const MAX_PREVIEW_TOKENS = 64;
 
+const HTML_PAGE = /\.html?$/i;
+
 export class ArtifactServer {
   private readonly roots = new Map<string, { root: string; only: string | null }>();
+  private readonly fonts: FontReader;
+
+  /** `fontsDir`: the fonts previews are given (resources/fonts); without it pages keep the computer's own. */
+  constructor(options: { fontsDir?: string | null } = {}) {
+    this.fonts = fontReader(options.fontsDir ?? null);
+  }
 
   /** An address for a page and whatever it links to in its own folder. */
   urlFor(file: string): string {
@@ -225,6 +237,12 @@ export class ArtifactServer {
       data = await fs.promises.readFile(file);
     } catch {
       return new Response('Not found', { status: 404 });
+    }
+    if (HTML_PAGE.test(file)) {
+      const written = data.toString('utf8');
+      const page = withPreviewExtras(written, { fonts: this.fonts, reportSize: url.search === '?report=size' });
+      // A page with nothing added goes out as the bytes it is.
+      if (page !== written) data = Buffer.from(page, 'utf8');
     }
     return new Response(new Uint8Array(data), {
       status: 200,
