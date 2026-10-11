@@ -5,7 +5,8 @@ import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
 import { CallRow, DiffCount } from './ToolGroup';
 import { SearchStep } from '../web/SearchResults';
-import { activityTitle, diffTotals, durationText, firstLine, liveLabel, searchOfCall, thoughtLabel, type ActivityItem, type ActivityStep } from './transcriptModel';
+import { GeneratingImage } from './GeneratingImage';
+import { activityTitle, diffTotals, durationText, firstLine, generatingImage, liveLabel, searchOfCall, thoughtLabel, type ActivityItem, type ActivityStep } from './transcriptModel';
 
 /** One line of narration with its `code` spans set like Markdown's inline code. */
 function InlineCode({ text }: { text: string }) {
@@ -83,6 +84,8 @@ function Step({ step, live }: { step: ActivityStep; live: boolean }) {
       return <ThoughtStep text={step.text} live={step.live} />;
     case 'tool': {
       const call = step.call;
+      const making = generatingImage(call);
+      if (making) return <GeneratingImage label={making.label} note={making.note} />;
       if (call.name !== 'WebSearch') return <CallRow call={call} />;
       const failed = call.result?.isError ? call.result.content.map((c) => (c.type === 'text' ? c.text : '')).join(' ') : null;
       return <SearchStep search={searchOfCall(call)} live={call.running !== null || (call.result === null && live)} error={failed} />;

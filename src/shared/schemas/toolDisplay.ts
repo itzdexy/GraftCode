@@ -102,7 +102,16 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('kill-shell'), shellId: z.string(), killed: z.boolean() }),
   /** `url` is where the page answered from; `requested` is the address that was asked for, when the page had moved. */
-  z.object({ kind: z.literal('fetch'), url: z.string(), requested: z.string().optional(), status: z.number().int(), bytes: z.number().int(), title: z.string().nullable() }),
+  z.object({
+    kind: z.literal('fetch'),
+    url: z.string(),
+    requested: z.string().optional(),
+    status: z.number().int(),
+    bytes: z.number().int(),
+    title: z.string().nullable(),
+    /** The picture the page offers for links to it (see extractImage); absent when it names none, and in results stored before 0.6.24. */
+    image: z.string().max(2000).optional()
+  }),
   /** A computer-use step; the screenshot rides along in the result's content, the point is where it acted (screenshot pixels). */
   z.object({
     kind: z.literal('computer'),

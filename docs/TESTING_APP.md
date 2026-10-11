@@ -1,6 +1,6 @@
-# Try Graft 0.6.23
+# Try Graft 0.6.24
 
-1. Open **Settings → About** and confirm version **0.6.23**. In
+1. Open **Settings → About** and confirm version **0.6.24**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -67,6 +67,18 @@
     reply**, and the diagram is drawn below it. **Save as…** offers Downloads.
 17. Open **Customize → Skills**: diagram-design is listed as **Built in**, with **Show
     folder** and no Edit or Delete.
+18. In a chat, ask for an SVG ("code an SVG of a game controller"). The code streams in a
+    block; when the reply ends the block shows the drawing. The button beside **Copy**
+    shows the code, and again the drawing.
+19. In a chat with web search on, ask Graft to research something. While it searches,
+    the line above the steps counts: "Searching 12 websites". When it has read pages,
+    the **Sources** card shows a small picture beside each page that offers one (a tile
+    shimmers until it loads; a page without one keeps its site icon).
+20. With an image model set up (**Settings → Images**), ask for a picture. While it is
+    made, a grid of dots stands in for it and a line of dots walks across the grid. The
+    finished picture comes into focus; click it for the viewer, and try **+**, **−** and
+    **0**. With **Appearance → Motion** set to Reduced the grid holds still and the
+    picture just appears.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

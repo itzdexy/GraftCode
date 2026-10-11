@@ -8,7 +8,8 @@ import { subscribeVisibleClock } from '../../lib/motion';
 import { SearchStep } from '../web/SearchResults';
 import { RunningTasksLink } from './ThinkingIndicator';
 import { CallRow, DiffCount } from './ToolGroup';
-import { activityTitle, diffTotals, durationText, liveLabel, searchOfCall, type ActivityItem, type ActivityStep } from './transcriptModel';
+import { GeneratingImage } from './GeneratingImage';
+import { activityTitle, diffTotals, durationText, generatingImage, liveLabel, searchOfCall, type ActivityItem, type ActivityStep } from './transcriptModel';
 
 /** How long the turn has run, counting up (paused while the window is hidden). Mounted only while a block is live, so finished blocks don't tick. */
 function Elapsed({ since }: { since: number }) {
@@ -25,6 +26,13 @@ function Step({ step, live, verbose, boxed }: { step: ActivityStep; live: boolea
   switch (step.kind) {
     case 'tool': {
       const call = step.call;
+      const making = generatingImage(call);
+      if (making)
+        return (
+          <div className={boxed ? 'px-6 py-4' : '-mx-4'}>
+            <GeneratingImage label={making.label} note={making.note} />
+          </div>
+        );
       if (call.name !== 'WebSearch') return <CallRow call={call} variant={boxed ? 'boxed' : 'flush'} defaultOpen={verbose} />;
       const failed = call.result?.isError ? call.result.content.map((c) => (c.type === 'text' ? c.text : '')).join(' ') : null;
       return (

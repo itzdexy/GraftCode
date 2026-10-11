@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isPrivateAddress, isPrivateIp } from '@shared/privacy';
 import { normalizeUrl } from '@shared/sources';
 import { errorResult, textResult, type ToolDefinition } from '../types';
-import { extractTitle, htmlToText } from './htmlToText';
+import { extractImage, extractTitle, htmlToText } from './htmlToText';
 
 const MAX_DOWNLOAD = 5 * 1024 * 1024;
 const MAX_TEXT = 60_000;
@@ -157,8 +157,10 @@ export const webFetchTool: ToolDefinition<WebFetchInput> = {
       const raw = buffer.toString('utf8');
       let text: string;
       let title: string | null = null;
+      let image: string | null = null;
       if (/html/i.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
         title = extractTitle(raw);
+        image = extractImage(raw, finalUrl);
         text = htmlToText(raw, finalUrl);
       } else if (/^(text\/|application\/(json|xml|javascript|x-yaml|yaml|toml))/i.test(type) || type === '') {
         text = raw;
@@ -174,7 +176,7 @@ export const webFetchTool: ToolDefinition<WebFetchInput> = {
       return textResult(
         body,
         // The address that was asked for is kept when the page answered from another: a link to either is a link to this page.
-        { kind: 'fetch', url: finalUrl, ...(normalizeUrl(finalUrl) !== normalizeUrl(input.url) ? { requested: input.url } : {}), status: response.status, bytes: buffer.byteLength, title },
+        { kind: 'fetch', url: finalUrl, ...(normalizeUrl(finalUrl) !== normalizeUrl(input.url) ? { requested: input.url } : {}), status: response.status, bytes: buffer.byteLength, title, ...(image ? { image } : {}) },
         !response.ok
       );
     } finally {

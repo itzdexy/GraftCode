@@ -19,6 +19,43 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.24 richer replies (2026-10-11)
+
+Asked for from a screen recording of another assistant researching a person, writing an
+SVG and making a picture: how the work shows while it runs, and how the result arrives.
+Built in Graft's own look, on what was already there (web search, sources, the media tool).
+
+- **A picture being made.** `GenerateImage`, and a ComfyUI run, show a grid of dots while
+  they run (`GeneratingImage.tsx`): a line of six dots walks to a leaf-green dot, a new
+  dot appears, and it sets off again (`snakeModel.ts`, pure and seeded). The corner shows
+  the engine's last progress line, else the time so far. The block's line reads "Creating
+  image". Reduced motion holds the grid still.
+- **A picture that was made.** It comes into focus (`.graft-reveal`) when its card arrives
+  while the session is open; a session opened later shows it as it is. One picture shows
+  at its own shape, up to 440 px wide. A click opens `ImageViewer.tsx`: zoom steps, Fit,
+  and the card's own Save, Open and Show in folder. In a code session the viewer loads the
+  file itself; in a chat it shows the stored preview (512 px wide), since a chat's files
+  have no preview address yet.
+- **SVG in a reply.** A fenced block that is one complete SVG drawing shows as the drawing
+  (`svgPreview.ts`), through an `<img>` with a `data:` address, so no script in it runs and
+  nothing loads from outside. A button switches to the code and back. A drawing that fails
+  to load falls back to its code.
+- **Research.** A live block that is searching counts the pages found so far ("Searching 12
+  websites"). `WebFetch` keeps the picture a page names for itself (`og:image`, else the
+  Twitter card; https only), sources carry it, and the Sources card shows it in a tile
+  that shimmers until it loads. The main process fetches it as it fetches site icons
+  (`pagePicture` in `app/favicons.ts`): public https hosts, no cookies, at most 6 MB,
+  decoded and re-encoded as a 360 px JPEG. Only PNG and JPEG decode, so a page whose
+  picture is WebP or AVIF keeps its site icon.
+- **Reports.** In a chat a blockquote is a card with a leaf-green edge.
+
+Not built: pictures inside the text of a reply (a model-written image address is a way to
+leak a conversation, so remote images in Markdown stay links), editing a generated picture
+(markup, erase, background removal), and a progress percentage (no image provider reports
+one).
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.24.
+
 ### 0.6.23 diagrams (2026-10-11)
 
 One build holds 0.6.17, 0.6.22 and this round, so it is numbered above all three; the
