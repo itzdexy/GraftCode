@@ -45,6 +45,7 @@ import { loadAgents } from './agents';
 import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
+import { reconcileInterrupted, type Cut } from './journal';
 import { SessionHost, type TurnScope } from './sessionHost';
 import type { TurnLimits } from './turnBudget';
 import { MemoryLoader } from './memory';
@@ -223,6 +224,8 @@ export class AgentSession {
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
   private deltaTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  /** Whether this runtime has started a turn since it was made. */
+  private ranTurn = false;
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
 
@@ -1189,6 +1192,10 @@ export class AgentSession {
     this.emit({ type: 'turn-start', turnId });
     // The limits count for this turn and everything it starts; "Continue" after a pause is a new turn.
     this.host.beginTurn();
+    // Calls an earlier turn left without an answer are answered before anything is added behind them. On this
+    // session's first turn they are from before the app last stopped; later, from a turn that failed.
+    this.reconcile(this.ranTurn ? 'failed' : 'stopped');
+    this.ranTurn = true;
     let endReason: TurnEnd = 'completed';
     let failure: string | null = null;
     try {
@@ -1320,9 +1327,20 @@ export class AgentSession {
       this.setStatus('error', info);
       this.deps.notify(this.summary, 'error', info.message);
     } finally {
+      // A turn that failed between a tool and its answer: what the tool returned is put into the conversation now.
+      this.reconcile('failed');
       this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
+    }
+  }
+
+  /** Answers tool calls that were left open, from the journal (agent/journal.ts), and shows what was added. */
+  private reconcile(cut: Cut): void {
+    try {
+      for (const message of reconcileInterrupted(this.deps.store, this.id, cut)?.messages ?? []) this.emit({ type: 'message', message });
+    } catch (error) {
+      this.deps.log('error', 'Could not reconcile the tool journal', { session: this.id, message: (error as Error).message });
     }
   }
 

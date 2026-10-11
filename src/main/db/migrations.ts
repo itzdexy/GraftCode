@@ -225,5 +225,24 @@ CREATE INDEX idx_missions_session ON missions (session_id, created_at);
       unpriced INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, provider_id, model_id)
     ) STRICT;`
+  },
+  {
+    // Tool calls from the moment they start until their results are in the conversation
+    // (agent/journal.ts). Rows are few: a call is forgotten as soon as its result is stored.
+    version: 9,
+    name: 'tool journal',
+    sql: `CREATE TABLE tool_journal (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      tool_use_id TEXT NOT NULL,
+      root_id TEXT NOT NULL,
+      agent TEXT,
+      name TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      effect TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      result TEXT,
+      PRIMARY KEY (session_id, tool_use_id)
+    ) STRICT;`
   }
 ];

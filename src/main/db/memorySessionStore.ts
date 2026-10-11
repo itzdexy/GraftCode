@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { GraftError } from '@shared/errors';
-import type { ContentBlock, MessageMeta, StoredMessage } from '@shared/schemas/messages';
+import type { ContentBlock, MessageMeta, StoredMessage, ToolResultBlock } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
 import { addUsage, EMPTY_USAGE } from '@shared/schemas/common';
 import type { UsageDay, UsageEntry } from '@shared/usage';
+import { keepable, type JournalEntry, type JournalStart } from '../agent/journal';
 import type { SessionPatch, SessionStore } from './sessionsRepo';
 
 /**
@@ -21,6 +22,7 @@ export class MemorySessionStore implements SessionStore {
   private readonly missions = new Map<string, Mission[]>();
   private readonly pruneCutoffs = new Map<string, number>();
   private readonly usage: UsageDay[] = [];
+  private readonly journal = new Map<string, JournalEntry[]>();
 
   getPruneBeforeSeq(sessionId: string): number {
     this.getSummary(sessionId);
@@ -50,6 +52,7 @@ export class MemorySessionStore implements SessionStore {
     this.todos.delete(sessionId);
     this.agentRuns.delete(sessionId);
     this.missions.delete(sessionId);
+    this.journal.delete(sessionId);
   }
 
   list(): SessionSummary[] {
@@ -202,5 +205,27 @@ export class MemorySessionStore implements SessionStore {
     const list = this.messages.get(sessionId);
     if (!list) throw new GraftError('session_not_found', `Session ${sessionId} does not exist.`);
     return list;
+  }
+
+  journalStart(entry: JournalStart): void {
+    const kept = (this.journal.get(entry.sessionId) ?? []).filter((other) => other.toolUseId !== entry.toolUseId);
+    this.journal.set(entry.sessionId, [...kept, { ...entry, endedAt: null, result: null }]);
+  }
+
+  journalEnd(sessionId: string, toolUseId: string, result: ToolResultBlock, at: number): void {
+    const entry = this.journal.get(sessionId)?.find((other) => other.toolUseId === toolUseId);
+    if (!entry) return;
+    entry.endedAt = at;
+    entry.result = keepable(result);
+  }
+
+  journalSettle(sessionId: string, rootIds: string[]): void {
+    const kept = (this.journal.get(sessionId) ?? []).filter((entry) => !rootIds.includes(entry.rootId));
+    if (kept.length > 0) this.journal.set(sessionId, kept);
+    else this.journal.delete(sessionId);
+  }
+
+  journalOpen(sessionId: string): JournalEntry[] {
+    return (this.journal.get(sessionId) ?? []).map((entry) => ({ ...entry }));
   }
 }
