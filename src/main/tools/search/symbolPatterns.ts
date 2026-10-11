@@ -301,10 +301,15 @@ export function aliasesFrom(configText: string): PathAlias[] {
 const TEST_FOLDER = /(^|\/)(tests?|__tests__|specs?|e2e)\//;
 const TEST_NAME = /(\.(test|spec)\.[\w.]+|_test\.\w+|_spec\.rb|Tests?\.(java|kt|cs|swift))$/;
 
+/** Whether a file's own name says it is a test (routes.test.ts, test_routes.py, RoutesTest.java). */
+export function isTestByName(file: string): boolean {
+  const name = file.slice(file.lastIndexOf('/') + 1);
+  return TEST_NAME.test(name) || /^test_.*\.py$/.test(name);
+}
+
 /** Whether a path (forward slashes) is a test by its name or its folder. */
 export function isTestFile(file: string): boolean {
-  const name = file.slice(file.lastIndexOf('/') + 1);
-  return TEST_FOLDER.test(file) || TEST_NAME.test(name) || /^test_.*\.py$/.test(name);
+  return TEST_FOLDER.test(file) || isTestByName(file);
 }
 
 /** The name a file is known by: its own, or its folder's when it is an index of one. */

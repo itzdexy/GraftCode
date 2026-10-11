@@ -9,6 +9,7 @@ import {
   definitionRegex,
   importSpecifiers,
   importsTarget,
+  isTestByName,
   isTestFile,
   LANGUAGE_NAMES,
   languageOf,
@@ -20,12 +21,12 @@ import {
 
 export const SymbolsInput = z.object({
   action: z
-    .enum(['outline', 'definition', 'references', 'importers', 'tests'])
+    .enum(['outline', 'definition', 'references', 'importers', 'tests', 'impact'])
     .describe(
-      '"outline": the definitions in a file. "definition": where a name is defined. "references": where a name is used, by file. "importers": which files import a file. "tests": the tests of a file (named after it, or importing it).'
+      '"outline": the definitions in a file. "definition": where a name is defined. "references": where a name is used, by file. "importers": which files import a file. "tests": the tests of a file (named after it, or importing it). "impact": everything a change to a file can reach through imports, step by step, with the tests among it.'
     ),
   name: z.string().min(1).max(200).optional().describe('The symbol for "definition" and "references": a function, class, type, variable or macro name.'),
-  path: z.string().optional().describe('The file for "outline", "importers" and "tests"; a folder to search in for "definition" and "references" (default: the working directory).')
+  path: z.string().optional().describe('The file for "outline", "importers", "tests" and "impact"; a folder to search in for "definition" and "references" (default: the working directory).')
 });
 export type SymbolsInput = z.infer<typeof SymbolsInput>;
 
@@ -36,6 +37,11 @@ const MAX_HITS = 5_000;
 const SHOWN_FILES = 40;
 const SHOWN_LINES_PER_FILE = 5;
 const SHOWN_DEFINITIONS = 40;
+/** "impact" stops here: a file imported this widely is one where a list of every user says little. */
+const MAX_REACH = 200;
+const SHOWN_PER_STEP = 30;
+/** Each file followed is one search of the project; this many run at a time. */
+const IMPACT_AT_ONCE = 6;
 
 /** ripgrep arguments every search here shares: honour .gitignore even outside a git repository, and never read dependencies or git's own files. */
 const BASE_ARGS = ['--no-config', '--color=never', '--hidden', '--no-require-git', '--glob', '!.git', '--glob', '!node_modules'];
@@ -191,8 +197,15 @@ async function definitionOrReferences(action: 'definition' | 'references', name:
   return grepDisplay(`uses of ${name}`, uses.length, [...header, summary, ...rows, ...more].join('\n'));
 }
 
-/** The files under `root` that import `target` (a path relative to root, forward slashes), each with the line that does. */
-async function findImporters(target: string, root: string, ctx: ToolContext): Promise<{ sure: Hit[]; maybe: Hit[] } | { error: string }> {
+/** A line that brings in types and nothing that exists at run time: `import type … from`, `export type … from`. */
+const TYPES_ONLY = /^\s*(?:import|export)\s+type\b/;
+
+/**
+ * The files under `root` that import `target` (a path relative to root, forward slashes), each with the line that does.
+ * `typesOnly` names the importers every one of whose imports of the target is a type import written on one line; an
+ * import spread over several lines is taken as a full one, since the line with the path doesn't say.
+ */
+async function findImporters(target: string, root: string, ctx: ToolContext): Promise<{ sure: Hit[]; maybe: Hit[]; typesOnly: Set<string> } | { error: string }> {
   const found = await occurrences(moduleStem(target), root, ctx);
   if ('error' in found) return found;
   const aliases = projectAliases(root);
@@ -205,20 +218,28 @@ async function findImporters(target: string, root: string, ctx: ToolContext): Pr
   };
   const sure = new Map<string, Hit>();
   const maybe = new Map<string, Hit>();
+  const typesOnly = new Set<string>();
   for (const hit of found.hits) {
-    if (hit.file === target || sure.has(hit.file)) continue;
+    // A file already known to import it is read on only while all it has taken is types: a later line may take more.
+    if (hit.file === target || (sure.has(hit.file) && !typesOnly.has(hit.file))) continue;
     const language = languageOf(hit.file);
     for (const specifier of importSpecifiers(hit.text, language)) {
       const verdict = importsTarget(specifier, language, hit.file, target, exists, aliases);
       if (verdict === 'yes') {
-        sure.set(hit.file, hit);
+        const types = language === 'js' && TYPES_ONLY.test(hit.text);
+        if (!sure.has(hit.file)) {
+          sure.set(hit.file, hit);
+          if (types) typesOnly.add(hit.file);
+        } else if (!types) {
+          typesOnly.delete(hit.file);
+        }
         maybe.delete(hit.file);
         break;
       }
-      if (verdict === 'maybe' && !maybe.has(hit.file)) maybe.set(hit.file, hit);
+      if (verdict === 'maybe' && !maybe.has(hit.file) && !sure.has(hit.file)) maybe.set(hit.file, hit);
     }
   }
-  return { sure: [...sure.values()], maybe: [...maybe.values()] };
+  return { sure: [...sure.values()], maybe: [...maybe.values()], typesOnly };
 }
 
 async function fileTarget(input: SymbolsInput, ctx: ToolContext): Promise<{ abs: string; rel: string; root: string; shown: string } | ToolResult> {
@@ -240,7 +261,7 @@ async function importers(input: SymbolsInput, ctx: ToolContext): Promise<ToolRes
   if ('isError' in target) return target;
   const found = await findImporters(target.rel, target.root, ctx);
   if ('error' in found) return errorResult(`Search failed: ${found.error}`);
-  const show = (hit: Hit): string => `${displayPath(path.join(target.root, hit.file), ctx.cwd, ctx.platform)}:${String(hit.line)}${isTestFile(hit.file) ? ' (test)' : ''}`;
+  const show = (hit: Hit): string => `${displayPath(path.join(target.root, hit.file), ctx.cwd, ctx.platform)}:${String(hit.line)}${isTestFile(hit.file) ? ' (test)' : ''}${found.typesOnly.has(hit.file) ? ' (types only)' : ''}`;
   const sure = [...found.sure].sort((a, b) => Number(isTestFile(a.file)) - Number(isTestFile(b.file)) || a.file.localeCompare(b.file));
   if (sure.length === 0 && found.maybe.length === 0) {
     return grepDisplay(`importers of ${target.shown}`, 0, `Nothing imports ${target.shown}. It may be an entry point, be loaded by name at run time, or be unused.`);
@@ -256,13 +277,8 @@ async function importers(input: SymbolsInput, ctx: ToolContext): Promise<ToolRes
 async function tests(input: SymbolsInput, ctx: ToolContext): Promise<ToolResult> {
   const target = await fileTarget(input, ctx);
   if ('isError' in target) return target;
-  const named = await runFile(ctx.rgPath, [...BASE_ARGS, '--files', ...testNameGlobs(target.rel).flatMap((glob) => ['--glob', glob])], { cwd: target.root, signal: ctx.signal, timeoutMs: 60_000 });
-  if (named.code === 2 || named.code === null) return errorResult(`Search failed: ${named.stderr.trim().split('\n').slice(0, 3).join('\n') || 'ripgrep error'}`);
-  const byName = named.stdout
-    .split(/\r?\n/)
-    .filter((l) => l.length > 0)
-    .map(slashes)
-    .filter((file) => file !== target.rel);
+  const byName = await testsNamedAfter(target.rel, target.root, ctx);
+  if ('error' in byName) return errorResult(`Search failed: ${byName.error}`);
   const imported = await findImporters(target.rel, target.root, ctx);
   if ('error' in imported) return errorResult(`Search failed: ${imported.error}`);
   const byImport = imported.sure.filter((hit) => isTestFile(hit.file)).map((hit) => hit.file);
@@ -275,11 +291,111 @@ async function tests(input: SymbolsInput, ctx: ToolContext): Promise<ToolResult>
   return grepDisplay(`tests of ${target.shown}`, all.length, [`${String(all.length)} test ${all.length === 1 ? 'file' : 'files'} for ${target.shown}:`, ...rows].join('\n'));
 }
 
+/** The test files named after a file (see testNameGlobs), whether or not they import it. */
+async function testsNamedAfter(rel: string, root: string, ctx: ToolContext): Promise<string[] | { error: string }> {
+  const named = await runFile(ctx.rgPath, [...BASE_ARGS, '--files', ...testNameGlobs(rel).flatMap((glob) => ['--glob', glob])], { cwd: root, signal: ctx.signal, timeoutMs: 60_000 });
+  if (named.code === 2 || named.code === null) return { error: named.stderr.trim().split('\n').slice(0, 3).join('\n') || 'ripgrep error' };
+  return named.stdout
+    .split(/\r?\n/)
+    .filter((l) => l.length > 0)
+    .map(slashes)
+    .filter((file) => file !== rel);
+}
+
+/**
+ * Everything a change to a file can reach through imports: the files that import it, the files
+ * that import those, and so on, each with the step it is at and the file it is reached through.
+ * The same search "importers" does, repeated outwards; nothing is kept between calls, because
+ * one step takes tens of milliseconds on a project of a thousand files.
+ */
+async function impact(input: SymbolsInput, ctx: ToolContext): Promise<ToolResult> {
+  const target = await fileTarget(input, ctx);
+  if ('isError' in target) return target;
+  const show = (file: string): string => displayPath(path.join(target.root, file), ctx.cwd, ctx.platform);
+  const reached = new Map<string, { steps: number; through: string | null; typesOnly: boolean }>();
+  // Files in a test folder that turned out to be imported: what tests share, not tests.
+  const helpers = new Set<string>();
+  let frontier = [target.rel];
+  let unfollowed = 0;
+  let full = false;
+  for (let steps = 1; frontier.length > 0 && !full; steps++) {
+    const next: string[] = [];
+    for (let i = 0; i < frontier.length && !full; i += IMPACT_AT_ONCE) {
+      if (ctx.signal.aborted) return errorResult('Interrupted.');
+      const batch = frontier.slice(i, i + IMPACT_AT_ONCE);
+      const found = await Promise.all(batch.map((file) => findImporters(file, target.root, ctx)));
+      for (const [index, importing] of found.entries()) {
+        if ('error' in importing) return errorResult(`Search failed: ${importing.error}`);
+        if (importing.sure.length > 0 && isTestFile(batch[index]!)) helpers.add(batch[index]!);
+        unfollowed += importing.maybe.length;
+        for (const hit of [...importing.sure].sort((a, b) => a.file.localeCompare(b.file))) {
+          if (hit.file === target.rel || reached.has(hit.file)) continue;
+          if (reached.size >= MAX_REACH) {
+            full = true;
+            break;
+          }
+          const typesOnly = importing.typesOnly.has(hit.file);
+          reached.set(hit.file, { steps, through: steps === 1 ? null : batch[index]!, typesOnly });
+          // A file named as a test is where a chain ends: tests are run, not imported. A file that merely sits in a
+          // test folder may be a helper tests share, so it is looked at. A file that took only types ends a chain
+          // too: what it does at run time is the same after the change, and so is everything behind it.
+          if (!isTestByName(hit.file) && !typesOnly) next.push(hit.file);
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  const named = await testsNamedAfter(target.rel, target.root, ctx);
+  if ('error' in named) return errorResult(`Search failed: ${named.error}`);
+  const onlyNamed = named.filter((file) => !reached.has(file)).sort();
+  const namedLine = onlyNamed.length > 0 ? [`Named after it, though no import was found: ${onlyNamed.map(show).join(', ')}`] : [];
+  if (reached.size === 0) {
+    return grepDisplay(
+      `reach of ${target.shown}`,
+      0,
+      [`Nothing imports ${target.shown}, so a change to it reaches no other file through imports. It may be an entry point, be loaded by name at run time, or be unused.`, ...namedLine].join('\n')
+    );
+  }
+
+  const isTest = (file: string): boolean => isTestFile(file) && !helpers.has(file);
+  const mark = (file: string): string => (helpers.has(file) ? ' (test helper)' : isTestFile(file) ? ' (test)' : '');
+  const order = (a: string, b: string): number => Number(isTestFile(a)) - Number(isTestFile(b)) || a.localeCompare(b);
+  const deepest = Math.max(...[...reached.values()].map((r) => r.steps));
+  const rows: string[] = [
+    `A change to ${target.shown} can reach ${full ? 'at least ' : ''}${String(reached.size)} ${reached.size === 1 ? 'file' : 'files'} through imports${full ? '.' : `, ${String(deepest)} ${deepest === 1 ? 'step' : 'steps'} at the most.`}`
+  ];
+  for (let steps = 1; steps <= deepest; steps++) {
+    const files = [...reached.entries()].filter(([, r]) => r.steps === steps).map(([file]) => file).sort(order);
+    rows.push(steps === 1 ? `Import it (${String(files.length)}):` : `${String(steps)} steps away (${String(files.length)}):`);
+    for (const file of files.slice(0, SHOWN_PER_STEP)) {
+      const how = reached.get(file);
+      rows.push(`  ${show(file)}${mark(file)}${how?.typesOnly ? ' (types only)' : ''}${how?.through ? `  through ${show(how.through)}` : ''}`);
+    }
+    if (files.length > SHOWN_PER_STEP) rows.push(`  … ${String(files.length - SHOWN_PER_STEP)} more.`);
+  }
+  const tests = [...reached.entries()].filter(([file]) => isTest(file)).sort((a, b) => a[1].steps - b[1].steps || a[0].localeCompare(b[0]));
+  if (tests.length > 0) {
+    rows.push(`Tests among them, the nearest first (${String(tests.length)}):`);
+    for (const [file, r] of tests.slice(0, SHOWN_PER_STEP)) rows.push(`  ${show(file)}  ${r.steps === 1 ? 'imports it' : `${String(r.steps)} steps`}`);
+    if (tests.length > SHOWN_PER_STEP) rows.push(`  … ${String(tests.length - SHOWN_PER_STEP)} more.`);
+  } else {
+    rows.push('No test file is among them.');
+  }
+  rows.push(...namedLine);
+  if (full) rows.push(`Stopped at ${String(MAX_REACH)} files: it is imported so widely that the rest would say little. Use "importers" on a file of interest to go on from there.`);
+  if (unfollowed > 0) rows.push(`${String(unfollowed)} ${unfollowed === 1 ? 'import' : 'imports'} could not be followed to a file and ${unfollowed === 1 ? 'is' : 'are'} not counted.`);
+  if ([...reached.values()].some((r) => r.typesOnly)) rows.push('A file marked (types only) takes nothing but types from the file before it, so nothing behind it is followed; the type check covers those.');
+  rows.push('Imports only: code loaded by name at run time, or reached through a dependency, is not found this way.');
+  return grepDisplay(`reach of ${target.shown}`, reached.size, rows.join('\n'));
+}
+
 export const symbolsTool: ToolDefinition<SymbolsInput> = {
   name: 'Symbols',
   description: [
     'Answers questions about the code\'s structure in one step: the definitions in a file ("outline"), where a name is defined ("definition"),',
-    'every use of a name grouped by file with tests marked ("references"), which files import a file ("importers"), and which tests cover a file ("tests").',
+    'every use of a name grouped by file with tests marked ("references"), which files import a file ("importers"), which tests cover a file ("tests"),',
+    'and everything a change to a file can reach through imports, with the tests among it nearest first ("impact": use it to pick the tests to run after a change).',
     'Use it before a broad Grep when you need to know what a change touches. It reads the text with patterns (JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C#, C/C++, Ruby, PHP, Swift),',
     'so check what it finds with Read before relying on it, and fall back to Grep for anything it says it cannot find.'
   ].join(' '),
@@ -298,9 +414,11 @@ export const symbolsTool: ToolDefinition<SymbolsInput> = {
             ? `Find uses of ${input.name ?? ''}`
             : input.action === 'importers'
               ? `Find what imports ${input.path ?? ''}`
-              : `Find the tests of ${input.path ?? ''}`;
-    // Importers and tests look through the whole project for the file.
-    const reads = input.action === 'importers' || input.action === 'tests' ? [ctx.projectRoot] : [target];
+              : input.action === 'impact'
+                ? `Find what a change to ${input.path ?? ''} can reach`
+                : `Find the tests of ${input.path ?? ''}`;
+    // Importers, tests and impact look through the whole project for the file.
+    const reads = input.action === 'importers' || input.action === 'tests' || input.action === 'impact' ? [ctx.projectRoot] : [target];
     return Promise.resolve({ summary: what.trim(), reads, preview: { kind: 'path', path: reads[0] ?? target, access: 'read' } });
   },
   async execute(input, ctx) {
@@ -318,6 +436,9 @@ export const symbolsTool: ToolDefinition<SymbolsInput> = {
       case 'tests':
         if (!input.path) return errorResult('Give the file as path.');
         return tests(input, ctx);
+      case 'impact':
+        if (!input.path) return errorResult('Give the file as path.');
+        return impact(input, ctx);
     }
   }
 };
