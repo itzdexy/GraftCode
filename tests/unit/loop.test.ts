@@ -218,3 +218,110 @@ describe('a model that keeps failing', () => {
     expect(h.notices()).toEqual([]);
   });
 });
+
+describe('stopping a turn while a tool runs', () => {
+  it('stops waiting for a tool that does not stop when asked, and says that it may still be finishing', async () => {
+    const stop = new AbortController();
+    let answerLate: () => void = () => undefined;
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'slow', name: 'Hang', input: {} }] }, { text: 'never asked for' }],
+      // Ten seconds is the tool's own limit: before this, the turn sat there until it ran out.
+      tools: [testTool('Hang', { run: () => new Promise<string>((resolve) => { answerLate = () => resolve('late'); setTimeout(() => stop.abort(), 20); }) })],
+      stopGraceMs: 40
+    });
+    const startedAt = Date.now();
+    const result = await h.run('go', stop.signal);
+    expect(result.reason).toBe('interrupted');
+    expect(Date.now() - startedAt).toBeLessThan(3000);
+    expect(resultTexts(h.stored.at(-1))).toEqual(['Interrupted by the user. The tool did not stop when asked and may still be finishing.']);
+    expect(h.provider.requests).toHaveLength(1);
+    // Its answer, when it comes after all, changes nothing.
+    const stored = h.stored.length;
+    answerLate();
+    await wait(20);
+    expect(h.stored).toHaveLength(stored);
+  });
+
+  it('takes what a tool returns when it stops in time', async () => {
+    const stop = new AbortController();
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'polite', name: 'Wind', input: {} }] }, { text: 'never asked for' }],
+      tools: [testTool('Wind', { run: () => new Promise<string>((resolve) => { setTimeout(() => stop.abort(), 20); setTimeout(() => resolve('half done, stopped cleanly'), 40); }) })],
+      stopGraceMs: 2000
+    });
+    const result = await h.run('go', stop.signal);
+    expect(result.reason).toBe('interrupted');
+    expect(resultTexts(h.stored.at(-1))).toEqual(['half done, stopped cleanly']);
+  });
+});
+
+describe('what a loop writes down about its tool calls', () => {
+  /** A journal that notes what it is told, in order. */
+  function noted(seen: string[], storedResults: () => number) {
+    return {
+      started: (call: { id: string; name: string; summary: string; effect: string }, agent: string | null) => seen.push(`started ${call.id}: ${call.name}, ${call.effect}, by ${String(agent)}, shown as "${call.summary}"`),
+      finished: (id: string, result: { isError: boolean; content: Array<{ type: string; text?: string }> }) => seen.push(`finished ${id}: ${result.isError ? 'error' : 'ok'}, ${result.content.map((c) => c.text ?? '').join('')}`),
+      settled: (ids: string[]) => seen.push(`settled ${ids.join(' ')} with ${String(storedResults())} stored`)
+    };
+  }
+
+  it('writes a call down before it runs, what it returned after, and forgets it once the result is stored', async () => {
+    const seen: string[] = [];
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'c1', name: 'Change', input: { n: 1 } }] }, { text: 'Done.' }],
+      tools: [testTool('Change', { run: () => (seen.push('ran'), 'changed') })],
+      journal: noted(seen, () => resultTexts(h.stored.at(-1)).length)
+    });
+    await h.run('go');
+    expect(seen).toEqual(['started c1: Change, change, by null, shown as "Change {"n":1}"', 'ran', 'finished c1: ok, changed', 'settled c1 with 1 stored']);
+  });
+
+  it('marks a call that only looks as a read, and one that starts agents as a read too: what its agents do decides', async () => {
+    const seen: string[] = [];
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'r', name: 'Read', input: {} }, { id: 'g', name: 'RunAgents', input: {} }, { id: 'm', name: 'mcp__files__delete', input: {} }] }, { text: 'Done.' }],
+      tools: [testTool('Read', { safe: true }), testTool('RunAgents'), testTool('mcp__files__delete')],
+      journal: noted(seen, () => 0)
+    });
+    await h.run('go');
+    expect(seen.filter((line) => line.startsWith('started')).map((line) => line.split(', by')[0])).toEqual([
+      'started r: Read, read',
+      'started g: RunAgents, read',
+      // A tool Graft knows nothing about is taken to change something.
+      'started m: mcp__files__delete, change'
+    ]);
+  });
+
+  it('writes down how a call ended when it failed or was stopped', async () => {
+    const seen: string[] = [];
+    const stop = new AbortController();
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'bad', name: 'Break', input: {} }] }, { toolCalls: [{ id: 'slow', name: 'Hang', input: {} }] }, { text: 'never' }],
+      tools: [
+        testTool('Break', { run: () => { throw new Error('disk full'); } }),
+        testTool('Hang', { run: () => new Promise<string>(() => { setTimeout(() => stop.abort(), 20); }) })
+      ],
+      journal: noted(seen, () => 0),
+      stopGraceMs: 30
+    });
+    await h.run('go', stop.signal);
+    expect(seen.filter((line) => line.startsWith('finished'))).toEqual([
+      'finished bad: error, Break failed: disk full',
+      'finished slow: error, Interrupted by the user. The tool did not stop when asked and may still be finishing.'
+    ]);
+  });
+
+  it('writes nothing down for a call that never starts', async () => {
+    const seen: string[] = [];
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'no', name: 'Change', input: {} }, { id: 'what', name: 'Missing', input: {} }] }, { text: 'Done.' }],
+      tools: [testTool('Change')],
+      decide: () => ({ ...allow, behavior: 'deny', reason: 'not here' }),
+      journal: noted(seen, () => resultTexts(h.stored.at(-1)).length)
+    });
+    await h.run('go');
+    // Refused or unknown: nothing ran, so nothing is in doubt. Their answers are stored like any other.
+    expect(seen).toEqual(['settled no what with 2 stored']);
+  });
+});
+

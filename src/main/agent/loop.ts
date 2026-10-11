@@ -10,6 +10,8 @@ import { streamWithRetry, type RetryPolicy } from '../providers/retry';
 import type { FinishReason, LLMProvider, RequestPrivacy, StreamRequest } from '../providers/types';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { classifyCommand } from '../permissions/commandRisk';
+import { NOT_RUN } from './history';
+import type { LoopJournal } from './journal';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
@@ -104,6 +106,11 @@ export interface LoopHost {
    * passed), or null. The same answer goes to every loop of a turn: the limits are the turn's.
    */
   overBudget?(): string | null;
+  /**
+   * Where tool calls are written down as they start and end, so that a turn the app stops in
+   * the middle of can be answered truthfully afterwards (agent/journal.ts).
+   */
+  journal?: LoopJournal;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -123,6 +130,8 @@ export interface LoopConfig {
   /** Model steps before the turn pauses; null runs until the work is done (the repeat guard still applies). */
   maxIterations: number | null;
   retryPolicy?: RetryPolicy;
+  /** How long a tool may take to return once the turn is stopped, before it is no longer waited for (default 2 s). */
+  stopGraceMs?: number;
   /** Label shown on permission prompts raised by a sub-agent. */
   agentLabel: string | null;
   /** Taproot: one forced verification pass before the turn may end. */
@@ -133,6 +142,9 @@ export interface LoopConfig {
   stripThinking: boolean;
   sessionId: string;
 }
+
+/** How long a tool is waited for after the turn was stopped, when the config says nothing. */
+const STOP_GRACE_MS = 2_000;
 
 export interface LoopResult {
   reason: 'completed' | 'interrupted' | 'error' | 'guard';
@@ -180,18 +192,37 @@ function resultBlock(toolUseId: string, result: ToolResult, extra: string[]): To
   };
 }
 
-async function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Promise<T | 'timeout'> {
-  let timer: NodeJS.Timeout | undefined;
+/**
+ * Waits for a tool: until it returns, until its time is up, or, once the turn is stopped,
+ * for `graceMs` more. A tool is asked to stop through its own signal and most return what
+ * they have; one that ignores it is no longer waited for ('ignored'), so that Stop works
+ * whatever a tool does. Its late answer, if one comes, is dropped.
+ */
+async function waitForTool<T>(work: Promise<T>, timeoutMs: number, onTimeout: () => void, stopped: AbortSignal, graceMs: number): Promise<T | 'timeout' | 'ignored'> {
+  let limit: NodeJS.Timeout | undefined;
+  let grace: NodeJS.Timeout | undefined;
+  let arm: (() => void) | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => {
+    limit = setTimeout(() => {
       onTimeout();
       resolve('timeout');
-    }, ms);
+    }, timeoutMs);
+  });
+  const ignored = new Promise<'ignored'>((resolve) => {
+    arm = () => {
+      grace = setTimeout(() => resolve('ignored'), graceMs);
+    };
+    if (stopped.aborted) arm();
+    else stopped.addEventListener('abort', arm, { once: true });
   });
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race([work, timeout, ignored]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(limit);
+    clearTimeout(grace);
+    if (arm) stopped.removeEventListener('abort', arm);
+    // Whatever the tool does after this is nobody's to handle.
+    work.catch(() => undefined);
   }
 }
 
@@ -246,28 +277,37 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
       },
       signal
     );
-    if (signal.aborted) return errorBlock(call.id, 'Not run: the turn was interrupted.');
+    if (signal.aborted) return errorBlock(call.id, NOT_RUN);
     if (answer.decision === 'deny') {
       const feedback = answer.feedback?.trim();
       return errorBlock(call.id, `The user denied this action.${feedback ? ` Their feedback: ${feedback}` : ' Choose a different approach or ask what they want.'}`, true);
     }
   }
 
+  // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.
+  host.journal?.started({ id: call.id, name: tool.name, summary: p.descriptor.summary, effect: effectOf(call) }, config.agentLabel);
+  /** How the call ended, written down before anything else is done with it. */
+  const ended = (block: ToolResultBlock): ToolResultBlock => {
+    host.journal?.finished(call.id, block);
+    return block;
+  };
   host.emit({ type: 'tool-start', toolUseId: call.id, name: tool.name, summary: p.descriptor.summary });
   const controller = new AbortController();
   const forward = (): void => controller.abort();
   signal.addEventListener('abort', forward, { once: true });
-  let result: ToolResult | 'timeout';
+  let result: ToolResult | 'timeout' | 'ignored';
   try {
-    result = await withTimeout(tool.execute(p.input as never, host.toolContext(call.id, controller.signal)), tool.timeoutMs, () => controller.abort());
+    result = await waitForTool(tool.execute(p.input as never, host.toolContext(call.id, controller.signal)), tool.timeoutMs, () => controller.abort(), signal, config.stopGraceMs ?? STOP_GRACE_MS);
   } catch (error) {
     signal.removeEventListener('abort', forward);
-    if (signal.aborted || isAbortError(error)) return errorBlock(call.id, 'Interrupted by the user.');
+    if (signal.aborted || isAbortError(error)) return ended(errorBlock(call.id, 'Interrupted by the user.'));
     host.log('error', `Tool ${tool.name} failed`, { message: (error as Error).message });
-    return errorBlock(call.id, `${tool.name} failed: ${(error as Error).message}`);
+    return ended(errorBlock(call.id, `${tool.name} failed: ${(error as Error).message}`));
   }
   signal.removeEventListener('abort', forward);
-  if (result === 'timeout') return errorBlock(call.id, `${tool.name} timed out after ${Math.round(tool.timeoutMs / 1000)}s and was stopped.`);
+  if (result === 'timeout') return ended(errorBlock(call.id, `${tool.name} timed out after ${Math.round(tool.timeoutMs / 1000)}s and was stopped.`));
+  if (result === 'ignored') return ended(errorBlock(call.id, 'Interrupted by the user. The tool did not stop when asked and may still be finishing.'));
+  ended(resultBlock(call.id, result, []));
 
   const extra: string[] = [];
   if (host.hooks?.has('PostToolUse')) {
@@ -310,7 +350,7 @@ async function executeCalls(calls: ToolUseBlock[], config: LoopConfig, host: Loo
   const results: ToolResultBlock[] = [];
   for (const batch of toBatches(prepared, overlaps)) {
     if (signal.aborted) {
-      results.push(...batch.map((p) => errorBlock(p.call.id, 'Not run: the turn was interrupted.')));
+      results.push(...batch.map((p) => errorBlock(p.call.id, NOT_RUN)));
       continue;
     }
     results.push(...(await Promise.all(batch.map((p) => runCall(p, config, host, signal)))));
@@ -337,6 +377,14 @@ function changesSomething(call: ToolUseBlock): boolean {
   // Looking at what ComfyUI has installed changes nothing; running a workflow saves files.
   if (call.name === 'ComfyUI') return (call.input as { action?: unknown } | null)?.action === 'run';
   return !LOOKING_TOOLS.has(call.name);
+}
+
+/**
+ * Whether running a call again could do harm, for the journal. A call that starts agents
+ * changes nothing itself: what its agents did decides, and that is written down under it.
+ */
+function effectOf(call: ToolUseBlock): 'read' | 'change' {
+  return call.name === 'RunAgents' || !changesSomething(call) ? 'read' : 'change';
 }
 
 /**
@@ -600,6 +648,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       });
     }
     const stored = host.append('user', userContent, { turnId: config.turnId });
+    host.journal?.settled(results.map((r) => r.toolUseId));
     host.emit({ type: 'message', message: stored });
     // Display metadata is for the UI only; keep it out of what the model is sent.
     history.push({
