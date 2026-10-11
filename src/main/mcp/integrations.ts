@@ -160,7 +160,8 @@ export function integrationSetup(
   const runtime = integration.runtime ? findCommand(RUNTIME_COMMAND[integration.runtime], platform, env, exists) : null;
   return {
     name: integration.serverName,
-    config: { type: 'stdio', command: runtime ?? fill(launch.command, env), args: launch.args.map((a) => fill(a, env)), env: entries, keepEnv: [], cwd: null, enabled: true },
+    // What an integration needs is in `entries`; this computer's keys and tokens are not its business.
+    config: { type: 'stdio', command: runtime ?? fill(launch.command, env), args: launch.args.map((a) => fill(a, env)), env: entries, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true },
     secrets
   };
 }

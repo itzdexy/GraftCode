@@ -187,7 +187,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
-      turnBudget: { tokens: null, costUsd: null, minutes: null, ...options.turnBudget },
+      turnBudget: { tokens: null, costUsd: null, minutes: null, toolCalls: null, retries: null, ...options.turnBudget },
       agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents },
       checkEdits: options.checkEdits ?? true
     }),

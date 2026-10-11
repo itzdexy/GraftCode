@@ -4,7 +4,7 @@ import type { McpServerInput, McpServerView } from '@shared/schemas/customize';
 /** Config as shown in the UI: names of environment variables and headers, never their values. */
 export function maskConfig(config: McpServerConfig): McpServerView['config'] {
   if (config.type === 'stdio') {
-    return { type: 'stdio', command: config.command, args: config.args, envKeys: Object.keys(config.env), cwd: config.cwd ?? null, enabled: config.enabled };
+    return { type: 'stdio', command: config.command, args: config.args, envKeys: Object.keys(config.env), cwd: config.cwd ?? null, inherit: config.inherit ?? 'all', enabled: config.enabled };
   }
   return { type: 'http', url: config.url, headerKeys: Object.keys(config.headers), enabled: config.enabled };
 }
@@ -13,7 +13,7 @@ export function maskConfig(config: McpServerConfig): McpServerView['config'] {
 export function mergeMcpConfig(input: McpServerInput, previous: McpServerConfig | undefined): McpServerConfig {
   if (input.type === 'stdio') {
     const kept = previous?.type === 'stdio' ? Object.fromEntries(Object.entries(previous.env).filter(([k]) => input.keepEnv.includes(k))) : {};
-    return { type: 'stdio', command: input.command, args: input.args, env: { ...kept, ...input.env }, ...(input.cwd ? { cwd: input.cwd } : {}), enabled: input.enabled };
+    return { type: 'stdio', command: input.command, args: input.args, env: { ...kept, ...input.env }, ...(input.cwd ? { cwd: input.cwd } : {}), inherit: input.inherit, enabled: input.enabled };
   }
   const kept = previous?.type === 'http' ? Object.fromEntries(Object.entries(previous.headers).filter(([k]) => input.keepHeaders.includes(k))) : {};
   return { type: 'http', url: input.url, headers: { ...kept, ...input.headers }, enabled: input.enabled };

@@ -3,7 +3,7 @@ import { serverSummary } from '../../../src/renderer/src/features/customize/mcpM
 
 type Server = Parameters<typeof serverSummary>[0];
 
-const tool = { name: 't', description: '', readOnly: false };
+const tool = { name: 't', registeredAs: 'mcp__s__t', description: '', readOnly: false };
 const prompt = { command: 'mcp__s__p', description: '', argumentHint: null };
 const server = (over: Partial<Server> = {}): Server => ({ state: 'connected', tools: [], prompts: [], resources: false, ...over });
 

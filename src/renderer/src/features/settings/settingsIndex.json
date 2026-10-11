@@ -169,6 +169,10 @@
   },
   {
     "section": "permissions",
+    "label": "Limits for one turn"
+  },
+  {
+    "section": "permissions",
     "label": "Steps per turn"
   },
   {
@@ -182,6 +186,14 @@
   {
     "section": "permissions",
     "label": "Time per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Tool calls per turn"
+  },
+  {
+    "section": "permissions",
+    "label": "Retries per turn"
   },
   {
     "section": "permissions",
