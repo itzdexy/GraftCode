@@ -1785,6 +1785,35 @@ describe('prompt commands', () => {
     expect(JSON.stringify(code.provider.requests[0]!.messages.at(-1))).toContain('Research this and write a report: what changed in HTTP/3');
   });
 
+  it('expands /diagram into the brief for a drawn diagram, in a chat as in a code session, and asks when nothing is named', async () => {
+    const code = harness({ script: [{ text: 'a' }, { text: 'b' }] });
+    code.session.send('/diagram how a request reaches the database');
+    await code.session.idle();
+    code.session.send('/diagram');
+    await code.session.idle();
+    const sent = code.provider.requests.map((r) => JSON.stringify(r.messages.at(-1)));
+    expect(sent[0]).toContain('Draw a diagram: how a request reaches the database');
+    expect(sent[0]).toContain('Use the diagram-design skill: read its SKILL.md first and follow it');
+    expect(sent[1]).toContain('Ask me what I want drawn, then draw it as a diagram.');
+    expect(sent[1]).not.toContain('Use the diagram-design skill');
+    expect(code.store.listMessages('session-1').filter((m) => m.role === 'user').map((m) => m.meta.typed)).toEqual(['/diagram how a request reaches the database', '/diagram']);
+
+    const { BUILTIN_COMMANDS, PROMPT_COMMANDS, diagramPrompt } = await import('../../src/main/agent/slashCommands');
+    expect(diagramPrompt('')).toBe('Ask me what I want drawn, then draw it as a diagram.');
+    expect(diagramPrompt('how a request reaches the database')).toBe(
+      'Draw a diagram: how a request reaches the database\n\nUse the diagram-design skill: read its SKILL.md first and follow it, including the reference it names for the kind of diagram you choose. Read the code or the material the diagram is about before you draw, so that every box and arrow is true. Save the diagram as one .html file and tell me where it is.'
+    );
+    expect(BUILTIN_COMMANDS.find((c) => c.name === 'diagram')).toMatchObject({ description: 'Draw a diagram of something, shown in the conversation', argumentHint: '[what to draw]' });
+    expect(BUILTIN_COMMANDS.findIndex((c) => c.name === 'diagram')).toBe(BUILTIN_COMMANDS.findIndex((c) => c.name === 'research') + 1);
+    expect(PROMPT_COMMANDS.has('diagram')).toBe(true);
+    expect(CODE_ONLY_COMMANDS.has('diagram')).toBe(false);
+
+    const chat = harness({ kind: 'chat', script: [{ text: 'a' }] });
+    chat.session.send('/diagram the water cycle');
+    await chat.session.idle();
+    expect(JSON.stringify(chat.provider.requests[0]!.messages.at(-1))).toContain('Draw a diagram: the water cycle');
+  });
+
   it('/plan turns Plan mode on and asks for a plan of what was typed', async () => {
     const h = harness({ mode: 'auto-edit', script: [{ text: 'Here is the plan.' }] });
     h.session.send('/plan add rate limiting to the API');
