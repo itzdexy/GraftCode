@@ -1940,6 +1940,62 @@ describe('steps per turn', () => {
   });
 });
 
+describe('changes that nothing checked', () => {
+  const notes = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Nothing checked') ? [e.text] : []));
+  const write = (file: string) => ({ toolCalls: [{ name: 'Write', input: { file_path: file, content: 'export {};\n' } }] });
+
+  it('says so once, and names the checks the project could have', async () => {
+    const h = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }, write('b.ts'), { text: 'Added b.' }] });
+    writeFile(h.projectDir, 'package.json', JSON.stringify({ scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' } }));
+    h.session.send('add a');
+    await h.session.idle();
+    expect(notes(h)).toEqual([
+      'Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files. Found here: npm run typecheck, npm test.'
+    ]);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Nothing checked'))).toMatchObject({ level: 'info' });
+    // Once for the session, not after every turn.
+    h.session.send('add b');
+    await h.session.idle();
+    expect(notes(h)).toHaveLength(1);
+  });
+
+  it('says it without a list when the project shows nothing to run', async () => {
+    const h = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }] });
+    h.session.send('add a');
+    await h.session.idle();
+    expect(notes(h)).toEqual(['Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files.']);
+  });
+
+  it('says nothing after a turn that changed nothing, in a chat, or when the project has checks', async () => {
+    const asked = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.ts' } }] }, { text: 'Two files.' }] });
+    asked.session.send('what is here?');
+    await asked.session.idle();
+    expect(notes(asked)).toEqual([]);
+
+    const chat = harness({ kind: 'chat', script: [{ text: 'Hello.' }] });
+    chat.session.send('hi');
+    await chat.session.idle();
+    expect(notes(chat)).toEqual([]);
+
+    const checked = harness({ mode: 'auto-edit', script: [write('a.ts'), { text: 'Added a.' }] });
+    writeFile(checked.projectDir, '.graft/settings.local.json', JSON.stringify({ checks: { commands: ['node -e 0'], fix: true, timeoutSec: 60 } }));
+    checked.session.send('add a');
+    await checked.session.idle();
+    expect(notes(checked)).toEqual([]);
+    expect(checked.store.listMessages('session-1').filter((m) => m.meta.kind === 'check')).toHaveLength(1);
+  });
+
+  it('says that the project is not trusted when that is why its checks did not run', async () => {
+    const h = harness({ mode: 'auto-edit', trusted: () => false, script: [write('a.ts'), { text: 'Added a.' }] });
+    writeFile(h.projectDir, '.graft/settings.json', JSON.stringify({ checks: { commands: ['node -e 0'], fix: true, timeoutSec: 60 } }));
+    h.session.send('add a');
+    await h.session.idle();
+    expect(h.events.flatMap((e) => (e.type === 'notice' && e.text.includes('checks') ? [e.text] : []))).toEqual([
+      'Nothing checked these changes: this project has checks, and they run only once you trust the project (Settings → Permissions).'
+    ]);
+  });
+});
+
 describe('a turn that is cut off', () => {
   const question = { questions: [{ question: 'Which DB?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] }] };
   const resultsSent = (h: Harness): Array<[string, string]> =>
