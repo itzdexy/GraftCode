@@ -31,7 +31,7 @@ import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
-import { runChecks } from './checks';
+import { runChecks, suggestChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { modelOrder, toLlmHistory, withSentTimes } from './history';
 import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
@@ -226,6 +226,8 @@ export class AgentSession {
   private disposed = false;
   /** Whether this runtime has started a turn since it was made. */
   private ranTurn = false;
+  /** Whether this runtime has said that nothing checks the project's changes (see sayUnchecked). */
+  private saidUnchecked = false;
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
 
@@ -725,6 +727,27 @@ export class AgentSession {
     if (this.summary.kind !== 'code') return null;
     const root = this.settingsRoot();
     return root ? this.deps.settings.checks(root, this.deps.isTrusted(root)) : null;
+  }
+
+  /**
+   * Said once for the session when a turn changed files and none of the project's checks ran:
+   * a finished turn is not a checked one, and nothing else on the screen says which it was.
+   */
+  private sayUnchecked(): void {
+    if (this.saidUnchecked || this.summary.kind !== 'code' || this.checksConfig()) return;
+    const root = this.settingsRoot();
+    if (!root) return;
+    this.saidUnchecked = true;
+    // The project has checks; it is trust that is missing.
+    if (this.deps.settings.checks(root, true)) {
+      this.notice('info', 'Nothing checked these changes: this project has checks, and they run only once you trust the project (Settings → Permissions).');
+      return;
+    }
+    const found = suggestChecks(root);
+    this.notice(
+      'info',
+      `Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files.${found.length > 0 ? ` Found here: ${found.join(', ')}.` : ''}`
+    );
   }
 
   /** Runs the checks; null when the turn was stopped or they couldn't run. */
@@ -1308,6 +1331,7 @@ export class AgentSession {
         this.deps.notify(this.summary, 'error', result.error.message);
         return;
       }
+      if (result.reason === 'completed' && result.changed) this.sayUnchecked();
       if (result.reason === 'completed' && userText !== null) this.maybeTitle(starting ? starting.objective : userText);
       // A turn of a mission that is still going isn't the end of anything: the mission says when it is done or needs the user.
       const onMission = this.missions.current()?.status === 'active';
