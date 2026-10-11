@@ -1,7 +1,7 @@
 import type { Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import { ProviderError } from './errors';
-import { parseSse } from './sse';
+import { isDamagedEvent, parseSse } from './sse';
 import type { FinishReason, StreamEvent, StreamRequest } from './types';
 
 /**
@@ -148,6 +148,7 @@ export async function* readResponsesStream(body: ReadableStream<Uint8Array>, sig
   let refused = false;
   let fromResponse: ResponsesItem[] | null = null;
   let ended = false;
+  let damaged = 0;
 
   for await (const msg of parseSse(body)) {
     if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
@@ -156,6 +157,7 @@ export async function* readResponsesStream(body: ReadableStream<Uint8Array>, sig
     try {
       event = JSON.parse(msg.data) as Record<string, unknown>;
     } catch {
+      if (isDamagedEvent(msg.data)) damaged++;
       continue;
     }
     const type = typeof event.type === 'string' ? event.type : (msg.event ?? '');
@@ -251,5 +253,5 @@ export async function* readResponsesStream(body: ReadableStream<Uint8Array>, sig
   if (incomplete === 'max_output_tokens') reason = 'max_tokens';
   else if (incomplete === 'content_filter' || refused) reason = 'refusal';
   else if (incomplete !== null) reason = 'other';
-  yield { type: 'finish', reason };
+  yield { type: 'finish', reason, ...(damaged > 0 ? { damaged } : {}) };
 }

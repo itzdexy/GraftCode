@@ -194,3 +194,85 @@ Measured, not estimated: `out/main/index.js` is 1,107.35 kB against 1,094.43 kB 
 Monaco chunk is unchanged at 2,930.11 kB. No start-up time, memory or frame-rate
 measurement was taken, and no speed-up is claimed. The first check of an edit after a
 language server starts was not timed on a large project.
+
+## 0.6.22 round (2026-10-11)
+
+Branch `feat/durable-agent-and-isolation`, on top of `origin/main` at `84a2269`
+(0.6.16). The last commit that changes code or tests is `7bf76e2`; what follows it is
+Markdown only. Two systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm`
+container (Node 24.21.0, Docker 29.8.0) packed from the working tree. Nothing here
+ran on macOS, on GitHub's runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `7bf76e2` | exit 0 |
+| `npx eslint . --max-warnings 0` | Windows, `7bf76e2` | exit 0 |
+| `npx vitest run` | Windows, `7bf76e2` | 87 files passed, 2 skipped; 1125 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, `7bf76e2` | exit 0 |
+| `npx playwright test` | Windows, `7bf76e2` | 53 passed, 5 skipped, 0 failed (4.3 min) |
+| `GRAFT_DOCKER_TESTS=1 npx vitest run tests/unit/sandbox.docker.test.ts` | Windows with Docker, `7bf76e2` | 13 passed (real containers) |
+| `npm run dist:win` | Windows, `7bf76e2` | exit 0, `dist/Graft-Setup-0.6.22.exe` |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.22 build | 2 passed (10.8 s) |
+| `npm run typecheck`, `npx eslint . --max-warnings 0` | Linux container, `7bf76e2` | exit 0, exit 0 |
+| `npx vitest run`, twice | Linux container, `7bf76e2` | each time 87 files passed, 2 skipped; 1117 tests passed, 37 skipped, 0 failed |
+| `npm run build`, `xvfb-run -a npx playwright test` | Linux container, `7bf76e2` | exit 0; 53 passed, 5 skipped, 0 failed (4.2 min) |
+
+What each fix was seen to fail on first:
+
+| Fix | Before | After |
+| --- | --- | --- |
+| The tool journal (`70cd28b`) | A turn that failed after a search had returned told the model "Not run: the turn was interrupted" (`expected 'Not run…' to contain 'kept.ts'`). With the journal switched off, `tests/e2e/recovery.spec.ts` finds no note after the app is killed. | The search's result is in the next request; the note is on screen when the session is opened, and the model is sent "Outcome unknown". |
+| Stop for a tool that ignores it (`70cd28b`) | The turn ended 10,003 ms after Stop, when the tool's own limit ran out. | Under 3 s, with the tool reported as possibly still finishing. |
+| A damaged reply (`e21cf48`) | A call whose arguments lost a piece ran as `rm -rf ./build`. | Neither call of that reply runs; the model asks again and `rm -rf ./build/cache` runs. |
+| Quitting in stages (`25cdca7`) | One `try` around every part (by reading; no test existed). | Four tests: a failing and a stuck stage are left behind and the later ones run. |
+| What a server inherits (`a08acd3`) | A server process had every variable of the app's environment. | A real server set to leave keys out does not have `GRAFT_TEST_API_KEY` and has the variable its settings give it. |
+
+One unit test failed once in a full run and passed when repeated, alone and in the next
+two full runs: `computer.test.ts`, "starts and round-trips the pointer position". It
+reads the live pointer twice a second and a half apart and expects it not to have moved;
+the pointer had moved one pixel. The computer was in use. It is not a result of this
+round and was not changed.
+
+Skipped, and never counted as passed:
+
+- Desktop, 5: two packaged-app cases (run separately above: 2 passed) and three
+  opt-in README screenshot cases (not run).
+- Unit on Windows, 29: 14 in `mcp.live.test.ts` (opt-in, starts real MCP servers; not
+  run), 13 in `sandbox.docker.test.ts` (opt-in; run separately above: 13 passed), the
+  sandbox's planted-link case and the SIGKILL case, which need POSIX (both pass in the
+  Linux container).
+- Unit on Linux, 37: the same 27 opt-in cases and 10 that need Windows.
+
+Measured, with the conditions:
+
+- Startup and quit, `npm run measure:startup`, 7 runs of each kind, Windows 11, Ryzen 7
+  9800X3D, 32 GB, medians in milliseconds, Playwright attached (so for comparing builds,
+  not for quoting):
+
+  | | window | interface | quit |
+  | --- | --- | --- | --- |
+  | `origin/main`, new profile | 317 | 460 | 97 |
+  | this branch, new profile | 313 | 456 | 109 |
+  | `origin/main`, second start | 312 | 449 | 87 |
+  | this branch, second start | 307 | 448 | 96 |
+
+- The tool journal: 2,000 calls written, ended and forgotten against a database file,
+  102 microseconds per call with a 200-character result and 279 with a 50,000-character
+  one.
+- The `Symbols` tool on this repository (583 tracked files), medians of five: outline
+  1 ms, definition 45 ms, references 46 to 47 ms, importers 50 to 52 ms, tests 69 ms.
+  "impact", added in this round: 132 ms for a file that reaches 5 others, 278 ms for
+  30, 821 ms for the most widely imported file (139 files, 5 steps).
+- `out/main/index.js` is 1,120.28 kB against 1,094.43 kB on `origin/main` (+2.4%); the
+  renderer's entry chunk 1,000.96 kB against 999.08 kB (+0.2%).
+
+No memory or frame-rate measurement was taken.
+
+Installer: `dist/Graft-Setup-0.6.22.exe`, 123,799,146 bytes, SHA-256
+`3945a18de76bf0c736cf0ffc461a6f7221e40f95ce50ef110333a9e7ce737d72`.
+`Get-AuthenticodeSignature` reports `NotSigned` for it and for `Graft.exe`. It was not
+installed: the Graft already on this computer and its profile were left alone, so the
+step from schema 8 to 9 is covered by `tests/unit/journal.test.ts` and
+`tests/unit/contextState.test.ts`, not by a real profile. No release was published and
+no tag was made.
+

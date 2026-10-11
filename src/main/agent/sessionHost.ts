@@ -25,6 +25,7 @@ import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
 import { skillReadRoots } from './skills';
+import type { LoopJournal } from './journal';
 import { shouldCompact } from './tokens';
 import { TurnBudget } from './turnBudget';
 
@@ -126,7 +127,7 @@ export class SessionHost {
    */
   beginTurn(): void {
     const limits = this.deps.preferences().turnBudget;
-    this.turn = limits.tokens !== null || limits.costUsd !== null || limits.minutes !== null ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
+    this.turn = Object.values(limits).some((limit) => limit !== null) ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
   }
 
   // ---- what the user is being asked ----------------------------------------
@@ -273,7 +274,39 @@ export class SessionHost {
    * and counts usage with: each loop passes its own, and it becomes the backup model when that
    * takes over, which `needs` decides.
    */
-  loopHost(scope: TurnScope, answering: Answering, needs: BackupNeeds): LoopHost {
+  /**
+   * What a loop writes down about its tool calls. `root` is the call of the turn's own agent
+   * that an agent's calls belong to; null for that agent itself. A journal that cannot be
+   * written must not stop the work: it is logged, and that call simply has no record.
+   */
+  private journal(root: string | null): LoopJournal {
+    const store = this.deps.store;
+    const write = (action: () => void): void => {
+      try {
+        action();
+      } catch (error) {
+        this.deps.log('error', 'Could not write the tool journal', { session: this.id, message: (error as Error).message });
+      }
+    };
+    return {
+      started: (call, agent) => {
+        // Every loop of the turn starts its calls here, which makes it the place to count them.
+        this.turn?.toolCall();
+        write(() => store.journalStart({ sessionId: this.id, toolUseId: call.id, rootId: root ?? call.id, agent, name: call.name, summary: call.summary, effect: call.effect, startedAt: this.deps.now().getTime() }));
+      },
+      finished: (toolUseId, result) => write(() => store.journalEnd(this.id, toolUseId, result, this.deps.now().getTime())),
+      // An agent's own conversation is not stored: what it did stays on record until the call that started it is answered.
+      settled: (toolUseIds) => {
+        if (root === null) write(() => store.journalSettle(this.id, toolUseIds));
+      }
+    };
+  }
+
+  /**
+   * `root`: for a loop that runs for an agent, the call of the turn's own agent that started
+   * it (see journal); left out for the turn's own loop.
+   */
+  loopHost(scope: TurnScope, answering: Answering, needs: BackupNeeds, root: string | null = null): LoopHost {
     const cwd = this.ports.workingDir();
     const describeContext = { cwd, projectRoot: scope.root ?? cwd, platform: this.deps.platform };
     return {
@@ -297,7 +330,8 @@ export class SessionHost {
           },
           signal
         ),
-      toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, answering, scope),
+      toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, answering, scope, root ?? toolUseId),
+      journal: this.journal(root),
       describeContext: () => describeContext,
       hooks: scope.hooks,
       todos: () => this.deps.store.getTodos(this.id),
@@ -324,6 +358,7 @@ export class SessionHost {
         if (unfollowed) this.ports.notice('warning', unfollowed);
       },
       overBudget: () => this.turn?.exceeded() ?? null,
+      onRetry: () => this.turn?.retry(),
       fallback: async (_error, signal) => {
         const backup = await this.backupFor(answering.model, needs, signal);
         // From here the loop is measured against the backup, its tools know that model, and what it uses is the backup's.
@@ -376,7 +411,7 @@ export class SessionHost {
     };
   }
 
-  private toolContext(toolUseId: string, signal: AbortSignal, answering: Answering, scope: TurnScope): ToolContext {
+  private toolContext(toolUseId: string, signal: AbortSignal, answering: Answering, scope: TurnScope, root: string): ToolContext {
     const { model, provider } = answering;
     const cwd = this.ports.workingDir();
     const work = this.ports.chatWork(model);
@@ -444,8 +479,8 @@ export class SessionHost {
         const edited = answer.plan?.trim() ?? '';
         return { approved: true, feedback: null, plan: edited.length > 0 && edited !== plan.trim() ? edited : plan };
       },
-      runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, scope),
-      runAgents: (input) => this.runAgents(input, toolUseId, signal, model, provider, scope),
+      runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, scope, root),
+      runAgents: (input) => this.runAgents(input, toolUseId, signal, model, provider, scope, root),
       notesForPaths: (paths) => this.ports.notesForPaths(paths),
       search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
       computer: this.deps.computer,
@@ -499,7 +534,8 @@ export class SessionHost {
     signal: AbortSignal,
     model: ModelInfo,
     provider: LLMProvider,
-    scope: TurnScope
+    scope: TurnScope,
+    root: string
   ): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }> {
     const prefs = this.deps.preferences();
     const chat = this.summary.kind === 'chat';
@@ -526,7 +562,7 @@ export class SessionHost {
         ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {}),
         candidates: async (s) => (await this.deps.models.candidates?.(s)) ?? [model],
         resolve: (ref, s) => this.deps.models.resolve(ref, s),
-        loopHost: (m, p, needsVision) => this.loopHost(scope, { model: m, provider: p }, { tools: true, vision: needsVision, agent: true }),
+        loopHost: (m, p, needsVision) => this.loopHost(scope, { model: m, provider: p }, { tools: true, vision: needsVision, agent: true }, root),
         ...(this.deps.workspaces ? { workspaces: this.deps.workspaces } : {}),
         effort: (m) => this.agentEffort(m),
         save: (run) => {
@@ -557,7 +593,8 @@ export class SessionHost {
     signal: AbortSignal,
     model: ModelInfo,
     provider: LLMProvider,
-    scope: TurnScope
+    scope: TurnScope,
+    root: string
   ): Promise<{ text: string; toolCalls: number }> {
     const custom = loadAgents(this.deps.graftHome, this.ports.projectRoot());
     const builtin = (BUILTIN_AGENTS as readonly string[]).includes(input.type);
@@ -572,7 +609,7 @@ export class SessionHost {
     let system = `${this.ports.system() ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${readOnly ? ' You are read-only: research and report; do not try to change anything.' : ''}${role}`;
     const scratch: StoredMessage[] = [];
     // Its own, so a backup model that takes over the sub-agent's task doesn't become the main agent's.
-    const original = this.loopHost(scope, { model, provider }, { tools: true, vision: false, agent: true });
+    const original = this.loopHost(scope, { model, provider }, { tools: true, vision: false, agent: true }, root);
     // A sub-agent that writes works in a private checkout; what it changed is put back when it is done.
     const lease = this.deps.workspaces && !readOnly && this.summary.kind === 'code' ? await this.deps.workspaces.create(original.describeContext().cwd, signal) : null;
     let privateHost: Awaited<ReturnType<typeof workspaceHost>> | null;

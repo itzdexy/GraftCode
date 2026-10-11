@@ -7,6 +7,7 @@ import { backoffDelay, DEFAULT_RETRY_POLICY, streamWithRetry } from '../../src/m
 import { AnthropicProvider, toAnthropicMessages } from '../../src/main/providers/anthropic';
 import { OpenAiChatProvider, toChatMessages } from '../../src/main/providers/openaiChat';
 import { GeminiProvider, toGeminiContents } from '../../src/main/providers/gemini';
+import { readResponsesStream } from '../../src/main/providers/openaiResponses';
 import { ProviderCatalog } from '../../src/main/providers/presets';
 import { OllamaProvider } from '../../src/main/providers/ollama';
 import { arrangeModels, familyOf, formatTokens } from '../../src/main/providers/catalog';
@@ -866,3 +867,80 @@ describe('Ollama adapter', () => {
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'bad_base_url', retryable: false });
   });
 });
+
+describe('an event of a stream that cannot be read', () => {
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    await server.close();
+  });
+  const finish = (events: StreamEvent[]): StreamEvent | undefined => events.findLast((e) => e.type === 'finish');
+
+  it('is reported by the OpenAI-style adapter, where what is left of a tool call can parse and mean something else', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) =>
+      sse(res, [
+        { data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'Shell', arguments: '{"command":"rm -rf ./build' } }] } }] } },
+        // Cut off in the middle: this piece carried "/cache".
+        { data: '{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"/cac' },
+        { data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"}' } }] } }] } },
+        { data: { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] } },
+        { data: '[DONE]' }
+      ])
+    );
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const events = await collect(provider.streamText(request({ model: fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null }) }), new AbortController().signal));
+    // The call still arrives, whole-looking and wrong, which is why the count has to travel with it.
+    expect(events.filter((e) => e.type === 'block')).toEqual([{ type: 'block', block: { type: 'tool_use', id: 'call_1', name: 'Shell', input: { command: 'rm -rf ./build' } } }]);
+    expect(finish(events)).toEqual({ type: 'finish', reason: 'tool_use', damaged: 1 });
+  });
+
+  it('is not what a keep-alive is: a line that is not an event at all is passed over as before', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) =>
+      sse(res, [
+        { data: 'ping' },
+        { data: { choices: [{ index: 0, delta: { content: 'ok' } }] } },
+        { data: '' },
+        { data: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } },
+        { data: '[DONE]' }
+      ])
+    );
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const events = await collect(provider.streamText(request({ model: fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null }) }), new AbortController().signal));
+    expect(finish(events)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('is reported by the Gemini adapter', async () => {
+    const listed = { name: 'models/gen-pro-3', displayName: 'Gen Pro 3', inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking: true };
+    server.route('GET', '/v1beta/models', (_req, res) => json(res, 200, { models: [listed] }));
+    server.route('POST', /:streamGenerateContent/, (_req, res) =>
+      sse(res, [
+        { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'First, ' }] } }] } },
+        { data: '{"candidates":[{"content":{"role":"model","parts":[{"text":"the part that was lo' },
+        { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'and the end.' }] }, finishReason: 'STOP' }] } }
+      ])
+    );
+    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+    const [model] = await provider.listModels();
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    expect(finish(events)).toMatchObject({ type: 'finish', reason: 'stop', damaged: 1 });
+  });
+
+  it('is reported by the OpenAI Responses reader', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const lines = [
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'Half ' })}`,
+          'data: {"type":"response.output_text.delta","delta":"of th',
+          `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Half ' }] }], usage: { input_tokens: 1, output_tokens: 1 } } })}`
+        ];
+        controller.enqueue(new TextEncoder().encode(lines.map((line) => `${line}\n\n`).join('')));
+        controller.close();
+      }
+    });
+    const events = await collect(readResponsesStream(body, new AbortController().signal, 'gpt-test'));
+    expect(finish(events)).toMatchObject({ type: 'finish', damaged: 1 });
+  });
+});
+

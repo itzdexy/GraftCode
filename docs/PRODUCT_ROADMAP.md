@@ -19,6 +19,63 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.22 a journal of tool calls, MCP permissions, stricter stops (2026-10-11)
+
+Numbered after 0.6.17 to 0.6.21, which other branches hold; none of them is on `main` yet.
+
+- **A journal of tool calls** (`agent/journal.ts`, table `tool_journal`, migration 9).
+  A call left without an answer was reported to the model as "Not run: the turn was
+  interrupted" whatever had happened to it, so after a crash, a kill or a power cut the
+  agent was told to repeat work that might have run. Every loop now writes a call down
+  before it runs and writes down what it returned, and forgets both once the results are in
+  the conversation. At the next start each open call gets one of three answers the
+  conversation alone cannot tell apart: its recorded result, "outcome unknown, check what it
+  left behind before you repeat it" (or "can simply be run again" for a call that changes
+  nothing), or "not run". What an agent did is kept under the `Task` or `RunAgents` call that
+  started it. The answers are stored, so the conversation reads the same from then on, and a
+  note tells the user. The same happens when a turn fails between a tool and its answer.
+  Cost, measured: 102 microseconds per call with a short result, 279 with a 50,000-character
+  one. `tests/e2e/recovery.spec.ts` kills the real app while a command runs.
+- **Stop works for a tool that ignores it.** A tool was asked to stop and then waited for
+  until its own time ran out, up to an hour for a delegated task. It now has two seconds,
+  after which the turn goes on and says the tool may still be finishing.
+- **A reply that lost an event does not have its tool calls run.** Three adapters passed
+  over an event that would not parse. What is left of a tool call's arguments can still
+  parse and mean something else (`rm -rf ./build/cache` arriving as `rm -rf ./build`), and it
+  ran. The adapters count such events (`finish.damaged`), the loop runs none of that reply's
+  calls and asks again, and the transcript says the reply may have gaps. A keep-alive line
+  that was never an event is passed over as before.
+- **Quitting in stages** (`app/shutdown.ts`). One `try` held all of it: when stopping the MCP
+  servers threw, sessions and commands were never stopped and the database never closed, and
+  nothing bounded a part that never finished. Each stage now has a time limit, 24 seconds in
+  all; one that fails or runs out is logged and left behind.
+- **MCP: a permission for each tool and for a server** (`shared/mcpPolicy.ts`, Customize →
+  Integrations). Ordinary permission rules under the name the agent calls the tool by, so
+  the engine decides in one place as before; the screen's model is checked against
+  `decide()` for every mix of a tool's rule and its server's. A tool's "read-only" label is
+  the server's own word, which Auto mode and plan mode act on; a rule set here is not a hint.
+- **MCP: what a local server inherits** (`McpInherit`). Everything, everything except
+  variables named like a key, token or password and addresses with a password in them, or
+  only what a program needs to start (the SDK's own default list and what resolves commands
+  and temporary files). A server that is already set up keeps inheriting everything; a new
+  one starts without keys and tokens. Tested with a real server process asked which
+  variables it has.
+- **Limits on tool calls and on retries for one turn**, counted like the others for the
+  turn and every agent it starts. A retry that would pass the limit is not made: the turn
+  pauses with what failed, instead of becoming an error or moving to the backup model.
+- **`Symbols` "impact"**: imports followed outwards from a file, each file with the step it
+  is at and the file it is reached through, and the tests among them nearest first. An
+  import that takes only types is listed and not followed; a file tests share is followed
+  and not counted as a test. No index: measured first, the tool's lookups take 1 to 69 ms on
+  this repository (583 files), and "impact" 130 ms to 820 ms.
+- **A turn that changed files says when nothing checked them**, once for the session, with
+  the checks the project could have or that it waits to be trusted.
+- **Startup and quit are measured** (`npm run measure:startup`). On this computer the first
+  window is there after about 310 ms and the first screen after about 450 ms, the same as on
+  `main`; quitting takes about 100 ms, 10 ms more than before.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.22.
+
 ### 0.6.17 session view and checked edits (2026-10-10)
 
 - **Transcript views** (`appearance.transcriptView`; `groupActivity(items, turnActive, view)`
@@ -554,11 +611,17 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 - The limits for one turn are checked before each model request, so a turn can pass one by
   the requests already under way when it is reached: one for the turn itself, one for each
   agent of a group working at that moment. The summaries and titles Graft asks for itself
-  are not counted. Cost follows only models with a published price. There is no limit on
-  the number of tool calls or of retries as such (steps per turn and the retry policy bound
-  those), none for a whole session, a day or a project, and a mission's turns each get the
-  allowance again. The choices are fixed lists; another value has to be put in the settings
-  by hand.
+  are not counted. Cost follows only models with a published price. A reply that asks for
+  several tool calls at once runs them all before the limit on tool calls can pause the
+  turn. There is no limit for a whole session, a day or a project, and a mission's turns
+  each get the allowance again. The choices are fixed lists; another value has to be put in
+  the settings by hand.
+- The tool journal answers what was open when the app stopped; it does not find a command
+  again. A command the app had started keeps running after a crash and nothing ends it at
+  the next start: its call is answered "outcome unknown". A result above 200,000 characters
+  is kept as the start of its text. Writes survive the app dying, not the computer losing
+  power in the same instant (WAL with `synchronous = NORMAL`). A turn cut off by an earlier
+  version left no journal, so its calls are still answered "not run".
 - A rewind brings back only what was replaced from 0.6.13 on: messages summarized or
   cleared by an earlier version carry no `compactedBy` and stay out of the context.
 - Needs you lists by status only: a session whose turn finished with a question in plain
@@ -616,10 +679,12 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   with a live key. Models are told apart by name (`gemini-3` and up take a level): a tuned or
   renamed model is asked by budget. A Gemini 3 model the catalog doesn't know is offered
   `low` and `high` only.
-- A stream is taken as complete on its provider's own terminal marker. A malformed event in
-  the middle of a stream is still skipped, on every adapter: a reply that lost a chunk and
-  then ended properly is accepted as it arrived. A reply that breaks off has no usage
-  recorded, though the provider may bill what it produced.
+- A stream is taken as complete on its provider's own terminal marker. An event that is cut
+  or corrupted is counted, and a reply with one has none of its tool calls run; an event
+  that goes missing whole, with nothing left to fail to parse, cannot be seen. A reply that
+  breaks off has no usage recorded, though the provider may bill what it produced.
+- A tool that ignores Stop is no longer waited for after two seconds, but it is not ended
+  either: what it started may go on in the background, and the turn says so.
 - Stopping a command: a process a command started with `&` and left running after the
   command itself finished is not tracked, so it lives on until it ends by itself, as in a
   terminal. On Windows without Git Bash (PowerShell), only the launcher's process tree is
@@ -632,16 +697,18 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   `sprintf-js`, reached through electron-builder → @electron/get → global-agent → roarr.
   Every published version is affected (latest 1.1.3, range `<=1.1.3`), so no upgrade or
   override fixes it; it is used while building, not in the packaged app.
-- A stdio MCP server is a program started as you: it gets this computer's whole
-  environment (so `npx` and `uvx` behave as in a terminal), tokens that are set there
-  included, and can read what you can read. The MCP SDK's own default hands a server a short
-  list of variables instead. Graft neither sandboxes a server nor narrows its environment;
-  a server's own secrets can be kept in the key store. Commands run in a sandboxed session
-  see only the variables Graft names, not the host's.
-- Quitting waits for every session, terminal and server to stop and has no deadline of its
-  own: a stage that never finishes would keep the app from closing. If Graft itself is
-  killed or crashes, commands it started keep running and nothing ends them at the next
-  start.
+- A stdio MCP server is a program started as you and can read what you can read: narrowing
+  its environment keeps secrets out of a process with no use for them and does not contain
+  one that goes looking. A server set up before 0.6.22 still inherits everything until its
+  setting is changed. Keys are told by the names of variables (`TOKEN`, `KEY`, `SECRET`,
+  `PASSWORD` and the like as words between underscores) and by a password inside an address:
+  a secret under another name passes, and a harmless variable with such a name is held back.
+  There is no list of single variables to pass through; a server gets the ones written into
+  its own settings. A tool's permission is stored under the server's name, so two servers of
+  the same name in two projects share it.
+- Quitting takes 24 seconds at the most. A stage that is left behind after its time is not
+  ended by force: `app.exit` ends the process, and what that stage had started outside it
+  may live on.
 - The editor's save has unit tests for its order and an end-to-end test; the timing fault it
   fixes showed on Linux only, and was not reproduced on Windows before or after.
 - A progress note an MCP server sends in the same breath as its result can be lost: the
@@ -732,13 +799,15 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
 1. Done in 0.6.16: the loop host and the mission controller are out of `session.ts`. Next
    seam: what a model is offered (tools, web access, waiting MCP tools).
 2. Expand recovery and cleanup controls for the writing-agent worktrees introduced
-   in 0.6.14; then best-of-N.
+   in 0.6.14; then best-of-N. Done in 0.6.22: a journal of tool calls, so a turn the app
+   stops in the middle of is answered truthfully. Still open there: finding a command again
+   that outlived the app, and ending it.
 3. Expand the TypeScript LSP and tabbed editor foundation to indexing, splits,
    dockable layouts and semantic edits. Tabs and their preview/edit mode persistence
    are implemented in 0.6.15.
 4. Done in 0.6.16: a backup model for agents of a group, spend by day, limits for one
-   turn. Next: a limit for a session or a day, and narrowing what a stdio MCP server
-   inherits (a choice that can break servers relying on an inherited token).
+   turn. Done in 0.6.22: limits on tool calls and retries, a permission for each MCP tool,
+   and a choice of what a local server inherits. Next: a limit for a session or a day.
 5. Done in 0.6.16: Gemini `thinkingLevel`. Still open: measure the `ToolSearch` threshold on
    real setups; MCP elicitation and @-mentioning resources.
 6. Diagrams and equations in replies; reading PDFs from the web.
