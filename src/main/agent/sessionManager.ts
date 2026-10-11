@@ -203,7 +203,7 @@ export class SessionManager {
           computerUse: s.behavior.computerUse,
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
-          turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes },
+          turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes, toolCalls: s.behavior.turnToolCalls, retries: s.behavior.turnRetries },
           agents: s.agents
         };
       },

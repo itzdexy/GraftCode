@@ -2143,6 +2143,40 @@ describe('limits for one turn', () => {
     expect(pauses(h)).toEqual(['Paused after 10 minutes of work, the limit for one turn set in Settings → Permissions.']);
   });
 
+  it('pauses after the tool calls of the turn and of the agent it started, and continues when told to', async () => {
+    const h = harness({
+      turnBudget: { toolCalls: 3 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }, { id: 'task-1', name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }] },
+        // The sub-agent's own call is the third of the turn, so it is stopped before it can report.
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Finished after continuing.' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    expect(pauses(h)).toEqual(['Paused after 3 tool calls, the limit for one turn set in Settings → Permissions.']);
+    expect(h.provider.requests).toHaveLength(2);
+    h.session.retry();
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Finished after continuing.');
+  });
+
+  it('stops trying a failing request again at the limit, says what failed, and does not call that an error', async () => {
+    const overloaded = (): { error: ProviderError } => ({ error: new ProviderError('overloaded', 'The model is overloaded.', { retryable: true }) });
+    const h = harness({
+      turnBudget: { retries: 1 },
+      // The harness would try three times; the turn allows one retry.
+      script: [overloaded(), overloaded(), overloaded(), { text: 'never asked for' }]
+    });
+    h.session.send('hello');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual(['Paused after 1 retry of a failed request, the limit for one turn set in Settings → Permissions. The request that failed: The model is overloaded.']);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Paused'))).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.session.summary.status).toBe('idle');
+  });
+
   it('pauses on cost for a model with a price, and says the amount is an estimate', async () => {
     const h = harness({
       model: { pricing: { input: 1000, output: 1000 } },

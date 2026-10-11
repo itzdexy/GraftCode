@@ -126,7 +126,7 @@ export class SessionHost {
    */
   beginTurn(): void {
     const limits = this.deps.preferences().turnBudget;
-    this.turn = limits.tokens !== null || limits.costUsd !== null || limits.minutes !== null ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
+    this.turn = Object.values(limits).some((limit) => limit !== null) ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
   }
 
   // ---- what the user is being asked ----------------------------------------
@@ -287,8 +287,11 @@ export class SessionHost {
       }
     };
     return {
-      started: (call, agent) =>
-        write(() => store.journalStart({ sessionId: this.id, toolUseId: call.id, rootId: root ?? call.id, agent, name: call.name, summary: call.summary, effect: call.effect, startedAt: this.deps.now().getTime() })),
+      started: (call, agent) => {
+        // Every loop of the turn starts its calls here, which makes it the place to count them.
+        this.turn?.toolCall();
+        write(() => store.journalStart({ sessionId: this.id, toolUseId: call.id, rootId: root ?? call.id, agent, name: call.name, summary: call.summary, effect: call.effect, startedAt: this.deps.now().getTime() }));
+      },
       finished: (toolUseId, result) => write(() => store.journalEnd(this.id, toolUseId, result, this.deps.now().getTime())),
       // An agent's own conversation is not stored: what it did stays on record until the call that started it is answered.
       settled: (toolUseIds) => {
@@ -353,6 +356,7 @@ export class SessionHost {
         if (unfollowed) this.ports.notice('warning', unfollowed);
       },
       overBudget: () => this.turn?.exceeded() ?? null,
+      onRetry: () => this.turn?.retry(),
       fallback: async (_error, signal) => {
         const backup = await this.backupFor(answering.model, needs, signal);
         // From here the loop is measured against the backup, its tools know that model, and what it uses is the backup's.
