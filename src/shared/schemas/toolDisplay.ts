@@ -31,6 +31,17 @@ export const MediaFileSchema = z.object({
 });
 export type MediaFile = z.infer<typeof MediaFileSchema>;
 
+/**
+ * A diagram a tool wrote (see shared/diagrams.ts): what the transcript needs to hold a place for it
+ * before it is drawn. The size is its viewBox's.
+ */
+export const DiagramInfoSchema = z.object({
+  title: z.string().max(120),
+  width: z.number().int().min(100).max(8000),
+  height: z.number().int().min(100).max(8000)
+});
+export type DiagramInfo = z.infer<typeof DiagramInfoSchema>;
+
 export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   /** Generated media (GenerateImage, ComfyUI). `costUsd` is what the provider charged: 0 on this computer, null when unknown. */
   z.object({
@@ -63,7 +74,9 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
         total: z.number().int(),
         items: z.array(z.object({ line: z.number().int(), column: z.number().int(), code: z.union([z.string(), z.number()]).nullable(), text: z.string() }))
       })
-      .optional()
+      .optional(),
+    /** Present when the file, as this change left it, is a diagram: the transcript then shows it at the end of the turn. */
+    diagram: DiagramInfoSchema.optional()
   }),
   z.object({ kind: z.literal('glob'), pattern: z.string(), count: z.number().int(), files: z.array(z.string()) }),
   z.object({ kind: z.literal('grep'), pattern: z.string(), count: z.number().int(), preview: z.string() }),

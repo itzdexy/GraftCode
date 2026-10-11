@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { diagramInfo } from '@shared/diagrams';
 import { GraftError } from '@shared/errors';
+import type { DiagramInfo } from '@shared/schemas/toolDisplay';
 import { makeDir, refusedChange } from '../../files/makeDir';
 import { problemsNote, type Problem } from '../../languages/problems';
 import { unifiedDiff } from '../diffUtil';
@@ -71,6 +73,13 @@ export async function problemsAfter(
   return { note: problemsNote(shown, found), display: { problems: { source: found.source, total: found.total, items: found.problems } } };
 }
 
+/** What an edit's result says when the file it left behind is a diagram (an .html page that meets the diagram contract); nothing otherwise. */
+export function diagramMark(file: string, content: string): { diagram?: DiagramInfo } {
+  if (!/\.html?$/i.test(file)) return {};
+  const diagram = diagramInfo(content, path.basename(file));
+  return diagram ? { diagram } : {};
+}
+
 export const writeTool: ToolDefinition<WriteInput> = {
   name: 'Write',
   description: [
@@ -120,7 +129,8 @@ export const writeTool: ToolDefinition<WriteInput> = {
       patch: diff.patch,
       added: diff.added,
       removed: diff.removed,
-      ...checked.display
+      ...checked.display,
+      ...diagramMark(abs, input.content)
     });
   }
 };
