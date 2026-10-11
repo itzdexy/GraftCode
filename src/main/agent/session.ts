@@ -957,10 +957,11 @@ export class AgentSession {
   }
 
   /** CreateFile and RunCode, for chats with a model that uses tools. Incognito chats get neither: they never write to disk. */
-  private chatWork(model: ModelInfo): { files: boolean; code: boolean } {
+  private chatWork(model: ModelInfo): { files: boolean; code: boolean; skills: boolean } {
     const summary = this.summary;
     const files = summary.kind === 'chat' && !summary.incognito && model.supportsTools && this.deps.chatFiles !== null;
-    return { files, code: files && this.deps.runCode !== null };
+    // A skill ends in a file the chat saves, so Skill comes with CreateFile and never without it.
+    return { files, code: files && this.deps.runCode !== null, skills: files && this.deps.builtinSkills !== null };
   }
 
   /**
@@ -1028,6 +1029,7 @@ export class AgentSession {
             ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
             ...(work.files ? ['CreateFile'] : []),
             ...(work.code ? ['RunCode'] : []),
+            ...(work.skills ? ['Skill'] : []),
             // A chat keeps what it makes in its own files, so pictures need those.
             ...(work.files && media.image !== null ? ['GenerateImage'] : [])
           ];

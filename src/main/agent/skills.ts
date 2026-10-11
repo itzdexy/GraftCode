@@ -48,6 +48,11 @@ function scan(dir: string, scope: SkillInfo['scope']): SkillInfo[] {
   return skills;
 }
 
+/** The skills Graft ships, and nothing of the user's or a project's: what a chat may read. */
+export function scanBuiltinSkills(builtinDir: string | null): SkillInfo[] {
+  return builtinDir ? scan(builtinDir, 'builtin') : [];
+}
+
 /**
  * Skills from the folder Graft ships (`builtinDir`), ~/.graft/skills/<name>/SKILL.md and
  * <project>/.graft/skills/<name>/SKILL.md. On a name clash the project's skill wins, then
@@ -55,7 +60,7 @@ function scan(dir: string, scope: SkillInfo['scope']): SkillInfo[] {
  */
 export function loadSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null): SkillInfo[] {
   const byName = new Map<string, SkillInfo>();
-  if (builtinDir) for (const s of scan(builtinDir, 'builtin')) byName.set(s.name, s);
+  for (const s of scanBuiltinSkills(builtinDir)) byName.set(s.name, s);
   for (const s of scan(path.join(graftHome, 'skills'), 'user')) byName.set(s.name, s);
   if (projectRoot) for (const s of scan(path.join(projectRoot, '.graft', 'skills'), 'project')) byName.set(s.name, s);
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));

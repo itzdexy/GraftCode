@@ -241,6 +241,19 @@ describe('turn activity', () => {
     expect(summarizeCalls([call('SemanticCode', { action: 'symbol', file: 'a.ts', name: 'allow' }, found), call('Symbols', { action: 'outline', path: 'src/a.ts' }, found)])).toBe('Looked up the code’s structure 2 times');
   });
 
+  it('words a chat reading a skill: the skill once, however many of its files were read', () => {
+    const read = { display: { kind: 'text' as const, text: 'SKILL.md of the diagram-design skill (9 KB)' } };
+    const skill = call('Skill', { name: 'diagram-design' }, read);
+    const file = call('Skill', { name: 'diagram-design', file: 'references/type-flowchart.md' }, read);
+    expect(callParts(call('Skill', { name: 'diagram-design' }))).toMatchObject({ verb: 'Reading', target: 'the diagram-design skill' });
+    expect(callParts(skill)).toMatchObject({ verb: 'Read', target: 'the diagram-design skill' });
+    expect(callParts(file)).toMatchObject({ verb: 'Read', target: 'references/type-flowchart.md', title: 'references/type-flowchart.md of the diagram-design skill' });
+    expect(describeCall(file)).toBe('Read references/type-flowchart.md of the diagram-design skill');
+    expect(describeCall(call('Skill', { name: 'diagram-design' }))).toBe('Reading the diagram-design skill');
+    expect(summarizeCalls([skill, file, file])).toBe('Read the diagram-design skill');
+    expect(summarizeCalls([skill, call('Skill', { name: 'other' }, read)])).toBe('Read 2 skills');
+  });
+
   it('words a search for tools, and what an agent reads from an MCP server’s resources', () => {
     expect(callParts(call('ToolSearch', { query: 'create issue' }))).toMatchObject({ verb: 'Searching tools for', target: '“create issue”' });
     expect(callParts(call('ToolSearch', { query: 'create issue' }, { display: { kind: 'text', text: 'Loaded 1 tool' } }))).toMatchObject({ verb: 'Searched tools for' });

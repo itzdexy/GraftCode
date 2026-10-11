@@ -334,8 +334,8 @@ export function buildChatSystemPrompt(ctx: {
   web?: { search: boolean; fetch: boolean };
   /** RunAgents, for researchers that search and read the web side by side. */
   researchers?: boolean;
-  /** CreateFile and RunCode; incognito chats have neither, since they never write to disk. */
-  workspace?: { files: boolean; code: boolean };
+  /** CreateFile, RunCode and Skill; incognito chats have none of them, since they never write to disk. */
+  workspace?: { files: boolean; code: boolean; skills?: boolean };
   /** Incognito chats pass null: they don't tell the provider about the user. */
   personalization?: Personalization | null;
   /** Apps connected through MCP (Blender, Roblox Studio…) whose tools the chat can use. */
@@ -363,6 +363,11 @@ export function buildChatSystemPrompt(ctx: {
   if (work.files) {
     tools.push(
       'CreateFile saves a file the user can download from the chat. Use it when they ask for a file or a document, or when the result is long and meant to be kept (a script, data, a report). For a PDF or a text document, write Markdown and name the file .pdf or .docx. For slides, name it .pptx, put a line of --- between slides and start each with its title as a heading. For a spreadsheet, name it .xlsx and give CSV. A picture made in this chat can be placed in a document by its file name. Afterwards say in a sentence or two what the file holds instead of repeating its content.'
+    );
+  }
+  if (work.files && work.skills) {
+    tools.push(
+      'For a diagram, read the diagram-design skill with Skill (name "diagram-design") and follow it, then save the result with CreateFile as one .html file: the user sees the diagram in the chat. A chat has no project, so keep the skill\'s default style unless they ask for another, and skip its script checks.'
     );
   }
   if (work.code) {

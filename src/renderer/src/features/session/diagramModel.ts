@@ -31,15 +31,20 @@ const MAX_REPORTED = 20_000;
 /**
  * The diagrams of a turn's tool calls: one for each file, in the order the
  * files were first written, each as its newest change left it. A page whose
- * newest change is no diagram any more is none.
+ * newest change is no diagram any more is none. A chat saves a file once,
+ * under a name of its own, so each diagram it saved is one.
  */
 export function madeDiagrams(calls: ToolCall[]): MadeDiagram[] {
   const byFile = new Map<string, MadeDiagram | null>();
   for (const call of calls) {
     const d = call.result?.display;
-    if (d?.kind !== 'edit' || call.result?.isError) continue;
-    const name = d.path.split(/[\\/]/).pop() ?? d.path;
-    byFile.set(`project:${d.path}`, d.diagram ? { source: { kind: 'project', path: d.path }, name, ...d.diagram } : null);
+    if (!d || call.result?.isError) continue;
+    if (d.kind === 'edit') {
+      const name = d.path.split(/[\\/]/).pop() ?? d.path;
+      byFile.set(`project:${d.path}`, d.diagram ? { source: { kind: 'project', path: d.path }, name, ...d.diagram } : null);
+    } else if (d.kind === 'file' && d.diagram) {
+      byFile.set(`chat:${d.name}`, { source: { kind: 'chat', name: d.name }, name: d.name, ...d.diagram });
+    }
   }
   return [...byFile.values()].filter((diagram): diagram is MadeDiagram => diagram !== null);
 }
