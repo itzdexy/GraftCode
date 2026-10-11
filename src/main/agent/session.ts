@@ -62,6 +62,7 @@ import {
   planPrompt,
   prPrompt,
   PROMPT_COMMANDS,
+  diagramPrompt,
   researchPrompt,
   reviewPrompt,
   securityReviewPrompt,
@@ -850,6 +851,8 @@ export class AgentSession {
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'research':
         return { text: researchPrompt(slash.args), typed: item.text };
+      case 'diagram':
+        return { text: diagramPrompt(slash.args), typed: item.text };
       case 'test':
         return { text: testPrompt(slash.args), typed: item.text };
       case 'decompile':
