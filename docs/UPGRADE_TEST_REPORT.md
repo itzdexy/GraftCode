@@ -380,9 +380,13 @@ here ran on macOS, on GitHub's runners, or against a paid provider.
 | `npm run lint` | Windows, tree of `d0ce442` | exit 0 |
 | `npm test` | Windows, tree of `d0ce442` | 101 files passed, 2 skipped; 1246 tests passed, 29 skipped, 0 failed |
 | `npm run test:e2e` (build, then the desktop suite) | Windows, tree of `d0ce442` | 57 passed, 6 skipped, 0 failed (4.6 min) |
-| `npm run dist:win` | Windows, `d0ce442` | exit 0, `dist/Graft-Setup-0.6.24.exe`, 127,745,501 bytes, SHA-256 `299780aba658bb3d993e9b6ea03b145492e0ae91c38721651fbaa85e4cfe7069`; its signature was not checked this round |
-| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.24 build | 3 passed (12.3 s) |
+| `npm run dist:win` | Windows, `c5ac340` | exit 0, `dist/Graft-Setup-0.6.24.exe`, 127,745,592 bytes, SHA-256 `a09fac8a20a5604f31fcd21cf0135e0460a5114ce66c43e5d7af16ffdbfabd1e`; its signature was not checked this round |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.24 build of `c5ac340` | 3 passed (23.3 s) |
 | `npm run verify:docker` | Linux container, `d0ce442` | typecheck, lint, unit and build exit 0; desktop suite 57 passed, 6 skipped, 0 failed (4.7 min) |
+
+`c5ac340` follows `d0ce442` with one change to a stylesheet (a quoted block in a chat lost
+its coloured edge) and one line of the roadmap. The installer was rebuilt from it; the
+suites above it in the table ran on `d0ce442` and were not run again.
 
 The six skipped desktop tests are the three of the packaged app (run separately, above) and
 the three that take README screenshots.
