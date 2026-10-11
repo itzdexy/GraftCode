@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { unifiedDiff } from '../diffUtil';
 import { displayPath, resolvePath } from '../paths';
 import { errorResult, textResult, type ToolDefinition } from '../types';
-import { freshnessError, problemsAfter, writeFileAtomic } from './write';
+import { diagramMark, freshnessError, problemsAfter, writeFileAtomic } from './write';
 
 const EditSpec = z.object({
   old_string: z.string().describe('Exact text to replace, including indentation. Must be unique unless replace_all is set.'),
@@ -209,7 +209,8 @@ async function runEdits(filePath: string, edits: EditSpec[], ctx: Parameters<Too
     patch: diff.patch,
     added: diff.added,
     removed: diff.removed,
-    ...checked.display
+    ...checked.display,
+    ...diagramMark(abs, current)
   });
 }
 
