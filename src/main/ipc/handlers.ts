@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, clipboard, ClipboardItem, dialog, nativeImage, Notification, shell as electronShell, type BrowserWindow } from 'electron';
+import { standaloneSvg } from '@shared/diagrams';
 import { GraftError } from '@shared/errors';
+import type { DiagramSource } from '@shared/schemas/diagrams';
 import { fuzzyScore } from '@shared/fuzzy';
 import { dataHandling } from '@shared/privacy';
 import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
@@ -33,7 +35,8 @@ import { localServers } from '../browser/servers';
 import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
-import { listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { diagramFile, listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
 import { deleteAgent, deleteCommand, deleteSkill, listAgents, listCommands, listMemory, listSkills, saveAgent, saveCommand, saveMemory, saveSkill } from '../customize/customize';
 import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS } from '../tools/builtin';
@@ -219,6 +222,15 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   const files = async (): Promise<FileIndex> => (fileIndex ??= new FileIndex((await ctx.services()).rgPath));
   const emitProviders = async (): Promise<void> => {
     ctx.emit({ type: 'providers:changed', providers: (await ctx.services()).registry.summaries() });
+  };
+  /** Draws pictures of diagrams; its hidden window and session are made the first time one is asked for. */
+  let diagramPictures: DiagramRenderer | null = null;
+  const pictures = (): DiagramRenderer => (diagramPictures ??= createDiagramRenderer(ctx.artifacts));
+  /** The diagram a card names, checked, with the folder a copy of it is offered in. A code session's own files only. */
+  const diagramOf = async (sessionId: string, source: DiagramSource): Promise<Awaited<ReturnType<typeof diagramFile>> & { folder: string }> => {
+    if (source.kind === 'chat') throw new GraftError('not_a_diagram', `Couldn't find the diagram in ${source.name}.`);
+    const found = await diagramFile(await workDirFor(sessionId), source.path);
+    return { ...found, folder: path.dirname(found.file) };
   };
   /** The folder a session works in (its worktree, else its project folder). */
   const workDirFor = async (sessionId: string): Promise<string> => {
@@ -729,6 +741,32 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return saved;
     },
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
+    'diagrams:previewUrl': async ({ sessionId, source }) => ({ url: `${ctx.artifacts.urlForFile((await diagramOf(sessionId, source)).file)}?report=size` }),
+    'diagrams:copyImage': async ({ sessionId, source }) => {
+      const { file, info } = await diagramOf(sessionId, source);
+      const png = await pictures().png(file, info.width);
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })]);
+    },
+    'diagrams:save': async ({ sessionId, source, format }) => {
+      // Found and checked before the dialog, so a diagram that is gone says so instead of asking where to save it.
+      const { file, html, info, folder } = await diagramOf(sessionId, source);
+      const win = ctx.window();
+      const options = {
+        title: 'Save diagram',
+        defaultPath: path.join(folder, exportName(file, format)),
+        filters: [format === 'png' ? { name: 'PNG image', extensions: ['png'] } : { name: 'SVG image', extensions: ['svg'] }]
+      };
+      const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) return { path: null };
+      if (format === 'png') {
+        await fs.promises.writeFile(result.filePath, await pictures().png(file, info.width));
+      } else {
+        const svg = standaloneSvg(html);
+        if (svg === null) throw new GraftError('not_a_diagram', `Couldn't find the diagram in ${path.basename(file)}.`);
+        await fs.promises.writeFile(result.filePath, svg, 'utf8');
+      }
+      return { path: result.filePath };
+    },
     'files:open': async ({ sessionId, path }) => {
       const failure = await electronShell.openPath(await openableFile(await workDirFor(sessionId), path));
       if (failure) throw new GraftError('open_failed', failure);
