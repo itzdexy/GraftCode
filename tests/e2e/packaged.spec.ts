@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { listPackage } from '@electron/asar';
 import { expect, test } from '@playwright/test';
-import { launchGraft, type LaunchedApp } from './support/launch';
+import { launchGraft, makeTempDir, type LaunchedApp } from './support/launch';
 import { MockProvider } from './support/mockProvider';
 import { completeOnboarding, makeGitProject } from './support/onboard';
 
@@ -125,4 +125,63 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
   // Nothing was logged at error level.
   const logs = fs.readdirSync(path.join(app.userData, 'logs')).map((f) => fs.readFileSync(path.join(app.userData, 'logs', f), 'utf8')).join('\n');
   expect(logs).not.toMatch(/\bERROR\b/);
+});
+
+test('packaged app: the skill and the fonts in the package draw a diagram, and its picture is saved', async () => {
+  expect(exe && fs.existsSync(exe)).toBe(true);
+  const resources = resourcesDir(exe!);
+  const skill = path.join(resources, 'skills', 'diagram-design');
+  expect(fs.existsSync(path.join(skill, 'SKILL.md'))).toBe(true);
+  expect(fs.readdirSync(path.join(resources, 'fonts')).sort()).toEqual(['Geist.woff2', 'GeistMono.woff2', 'InstrumentSerif-Italic.woff2', 'InstrumentSerif-Regular.woff2', 'OFL.txt']);
+
+  const mock = await MockProvider.start();
+  provider = mock;
+  const project = makeGitProject();
+  const app = await launchGraft({ executablePath: exe! });
+  graft = app;
+  const w = app.window;
+  await completeOnboarding(app, mock, { project });
+
+  // A diagram as the skill writes one, from the template in the package.
+  const page = fs
+    .readFileSync(path.join(skill, 'assets', 'template.html'), 'utf8')
+    .replaceAll('[diagram-slug]', 'orders')
+    .replaceAll('[Diagram title]', 'Orders')
+    .replace('<!-- Draw arrows first, then nodes. Replace with your content. -->', '<rect x="80" y="80" width="240" height="120" rx="6" fill="#ffffff" stroke="#2d3142"/>');
+  mock.script({ toolCalls: [{ name: 'Write', input: { file_path: 'docs/diagrams/orders.html', content: page } }] }, { text: 'Saved the diagram.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('/diagram how an order is paid');
+  await composer.press('Enter');
+  await w.getByRole('alertdialog').getByRole('button', { name: /Allow once/ }).click();
+  await expect(w.getByText('Saved the diagram.')).toBeVisible();
+  // The session was told about the skill, which only a skill found in the package is.
+  expect(JSON.stringify(mock.chatRequests()[0]?.body)).toContain("Graft's copy of this skill is read-only");
+
+  // The page is drawn with the fonts from the package.
+  const card = w.getByRole('region', { name: 'Diagrams from this turn' });
+  const inner = card.frameLocator('iframe[title="Diagram: Orders"]');
+  await expect(inner.locator('style[data-graft-fonts]')).toHaveCount(1);
+  const loaded = await inner.locator('svg[role="img"]').evaluate(async () => {
+    await document.fonts.ready;
+    const families: string[] = [];
+    document.fonts.forEach((face) => {
+      if (face.status === 'loaded') families.push(face.family.replace(/['"]/g, ''));
+    });
+    return families;
+  });
+  expect(loaded).toEqual(expect.arrayContaining(['Instrument Serif', 'Geist Mono']));
+
+  // The picture comes from the package's own hidden window, at twice the diagram's size.
+  const target = path.join(makeTempDir('graft-packaged-diagram-'), 'orders.png');
+  await app.app.evaluate(({ dialog }, chosen) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath: chosen });
+  }, target);
+  await card.getByRole('button', { name: 'Save as…' }).click();
+  await w.getByRole('menuitem', { name: 'PNG image' }).click();
+  await expect.poll(() => fs.existsSync(target), { timeout: 30_000 }).toBe(true);
+  const png = fs.readFileSync(target);
+  expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1920, 1200]);
+  fs.mkdirSync(SHOTS, { recursive: true });
+  await w.screenshot({ path: path.join(SHOTS, 'packaged-diagram.png') });
 });
