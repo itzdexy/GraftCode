@@ -259,6 +259,18 @@ defaults (`appearance.transcriptView`, `behavior.checkEdits`), so older settings
 as they are. Commands, commits and what failed on the way: `UPGRADE_TEST_REPORT.md`,
 section 0.6.17.
 
+### Local 0.6.23 build
+
+On `feat/richer-graft` (local, not pushed): the 0.6.17 branch, the diagrams round and
+`origin/main` at 0.6.22 in one tree, merged at `aeb7155`. Typecheck, lint, 1234 unit tests
+and 57 desktop tests pass on Windows; 1226 unit tests and the 57 desktop tests pass in a
+Linux container. The Windows package builds (`dist/Graft-Setup-0.6.23.exe`) and its three
+smoke tests pass, one of them a diagram drawn from the skill and the fonts in the package;
+it is unsigned and was not installed. The schema is 9, as in 0.6.22: this round adds no
+table. Tool results gain one optional field (`diagram`), so older conversations load as
+they are, and diagrams made before this build have no card. Commands, commits, skips and
+what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.23.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof

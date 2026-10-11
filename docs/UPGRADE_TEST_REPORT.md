@@ -276,3 +276,93 @@ step from schema 8 to 9 is covered by `tests/unit/journal.test.ts` and
 `tests/unit/contextState.test.ts`, not by a real profile. No release was published and
 no tag was made.
 
+## 0.6.23 build (2026-10-11)
+
+Branch `feat/richer-graft`, local only: nothing of it was pushed and no release was made.
+It holds three rounds in one tree: `feat/claude-like-session-view` (0.6.17, `728bc7c`), the
+diagrams round (`d962aee` to `2be9cef`, then `0657bf9`) and `origin/main` at `2097f7e`
+(0.6.22), merged at `aeb7155`. The installer was built from `f61ff60`; `214f306` after it
+adds one test of the package, and what follows that is a test step and Markdown. Two
+systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm` container (Docker 29.8.0)
+packed from the working tree. Nothing here ran on macOS, on GitHub's runners, or against
+a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `f61ff60` | exit 0 |
+| `npx eslint . --max-warnings 0` | Windows, `f61ff60` | exit 0 |
+| `npx vitest run` | Windows, `f61ff60` | 99 files passed, 2 skipped; 1234 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, `f61ff60` | exit 0 |
+| `npx playwright test` | Windows, `f61ff60` | 57 passed, 5 skipped, 0 failed (5.0 min) |
+| `npm run dist:win` | Windows, `f61ff60` | exit 0, `dist/Graft-Setup-0.6.23.exe`, 127,740,749 bytes, SHA-256 `47d9ca59fa43198fef61246d81a6768337a73e4406f66847623adbc50a0951e7`, not signed |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.23 build, tests at `214f306` | 3 passed (12.5 s) |
+| `npm run verify:docker` | Linux container, `214f306` | typecheck, lint and build exit 0; 99 files passed, 2 skipped; 1226 tests passed, 37 skipped, 0 failed; desktop suite 57 passed, 6 skipped, 0 failed (4.6 min) |
+| `npx playwright test tests/e2e/diagrams.spec.ts` | Windows, `214f306` with the clipboard step | 3 passed (17.5 s) |
+
+The Windows desktop run was made on the tree that became `f61ff60` while two of that
+commit's Markdown files were still being written; the app and the tests were as committed.
+The clipboard step (Copy image puts a PNG on the clipboard) was added to the diagram test
+after the container run and has run on Windows only.
+
+What the tests of this round show, and with what:
+
+- A code session writes a diagram and the turn ends with its card: the page in a frame
+  with `sandbox="allow-scripts"`, the bundled fonts loaded (`Instrument Serif`, `Geist
+  Mono`), no sideways scroll, at most 520 px high. Save as PNG gives 1920 by 1200 for a
+  960 by 600 diagram; Save as SVG gives a file that starts with the `svg` element and
+  carries the page's styles; Copy image puts a PNG on the clipboard; the viewer opens,
+  zooms and goes back to Fit; a diagram whose file is gone says so before any dialog.
+- A chat is offered `Skill` and told how to use it, reads `SKILL.md` and the template
+  without being asked anything, saves the page with `CreateFile`, lists it with its files
+  and draws it; a copy is offered in Downloads.
+- The packaged app has `resources/skills/diagram-design` and `resources/fonts`, tells a
+  session about the skill, draws a diagram with those fonts and makes its PNG.
+- Every diagram here is the skill's own template with one rectangle, written by a scripted
+  provider. No model drew anything.
+
+What failed on the way, and where it came from:
+
+| Check | Where | Result | Cause |
+| --- | --- | --- | --- |
+| `git merge origin/main` into the branch | Windows | 12 files in conflict | Both sides had added lines in the same places: the version (two files), imports in `sessionHost.ts`, settings passed in `sessionManager.ts`, a default in `appSettings.ts`, the session harness, `db.test.ts`, the release notes and four documents. Both sides were kept, and the build numbered 0.6.23. |
+| `npm run typecheck` after the merge | Windows | 1 error in `tests/e2e/diagrams.spec.ts` | `[...document.fonts]`: a `FontFaceSet` is not iterable with the library the desktop tests are compiled for. Written with `forEach`. |
+| `npx vitest run` after the merge | Windows | `settingsIndex.test.ts`: the file snapshot differed | 0.6.22 added three settings rows the snapshot of 0.6.17 did not have. Regenerated with `-u` and read. |
+| `npm run typecheck` with the new tool | Windows | `skillTool.ts`: `timeoutMs` missing | Every tool has a time limit; this one has 30 seconds. |
+| `npx vitest run`, first full run at `0657bf9` | Windows | 1 failed, 1233 passed | `computer.test.ts`, "starts and round-trips the pointer position": the real pointer moved one pixel (`342 64` to `342 65`) between a move and a read. The computer was in use. It passed alone (9 of 9) and in the next full run, and was not changed. |
+
+Skipped, and never counted as passed:
+
+- Desktop on Windows, 5 in the full run: the two packaged-app cases there were then (all
+  three were run separately above: 3 passed) and three opt-in README screenshot cases (not
+  run). In the container, 6: the three packaged cases and the three screenshot cases.
+- Unit on Windows, 29: 14 in `mcp.live.test.ts` and 13 in `sandbox.docker.test.ts` (both
+  opt-in, not run in this round), and two that need POSIX (both pass in the container).
+- Unit on Linux, 37: the same 27 opt-in cases and 10 that need Windows.
+
+Not verified:
+
+- That a model follows the skill. Nothing here used a real provider, so what a given
+  model draws, and whether a small or local one manages at all, is not known from this.
+- The skill's own Python scripts: not run.
+- The installer: built, not run, and nothing was installed. The tests start
+  `dist/win-unpacked/Graft.exe` with a temporary profile. An update from an installed
+  copy was not tried. The copy installed on this computer is 0.6.17, whose database is
+  schema 8; this build's is 9 (the tool journal of 0.6.22), so the first start after
+  installing it changes `%APPDATA%\Graft\graft.db`, and 0.6.17 will not open that file
+  afterwards.
+- By hand: nothing in this round was looked at by a person in the running app. The two
+  screenshots the tests take (`test-results/shots/diagram-card.png`,
+  `packaged-diagram.png`) were looked at: the card, the serif title and the saved-picture
+  notice are there.
+
+Measured, not estimated: `out/main/index.js` is 1,154.35 kB against 1,120.28 kB at 0.6.22
+(+3.0%) and 1,107.35 kB at 0.6.17 (+4.2%); the renderer's entry chunk is 1,040.17 kB
+against 1,000.96 kB (+3.9%) and 1,024.55 kB (+1.5%); the Monaco chunk is unchanged at
+2,930.11 kB. The package gains the skill (5.6 MB on disk) and four font files (120 KB);
+the installer is 127,740,749 bytes against 126,515,528 for the 0.6.17 one built on this
+computer (+1.0%). No start-up time, memory or frame-rate measurement was taken, and no
+speed-up is claimed.
+
+From 13:12 local time another session began editing the same folder (uncommitted changes
+to the session view). Every run above had finished by then, or used a build made before
+it; none of those changes is in a commit named here or in the installer.

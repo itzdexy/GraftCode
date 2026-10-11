@@ -97,6 +97,12 @@ test('a diagram the agent writes is shown, opens large, and saves as PNG and SVG
   expect(svg).toContain('--color-paper');
   expect(svg.trimEnd().endsWith('</svg>')).toBe(true);
 
+  // The same picture goes on the clipboard.
+  await card.getByRole('button', { name: 'Copy image' }).click();
+  await expect(w.getByText('Copied the diagram')).toBeVisible();
+  const kinds = await graft.app.evaluate(async ({ clipboard }) => (await clipboard.read()).flatMap((item) => item.types));
+  expect(kinds).toContain('image/png');
+
   // The viewer: the same page, large, with zoom.
   await card.getByRole('button', { name: 'Open Orders' }).click();
   const viewer = w.getByRole('dialog', { name: 'Diagram: Orders' });
