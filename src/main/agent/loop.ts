@@ -106,6 +106,8 @@ export interface LoopHost {
    * passed), or null. The same answer goes to every loop of a turn: the limits are the turn's.
    */
   overBudget?(): string | null;
+  /** A failed request is about to be sent again (counted against the turn's limit on retries). */
+  onRetry?(): void;
   /**
    * Where tool calls are written down as they start and end, so that a turn the app stops in
    * the middle of can be answered truthfully afterwards (agent/journal.ts).
@@ -475,7 +477,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         active.provider,
         request,
         signal,
-        (info) => host.emit({ type: 'retrying', attempt: info.attempt, delayMs: info.delayMs, reason: info.error.message }),
+        (info) => {
+          host.onRetry?.();
+          // The turn's limit on retries: this one is not made. What failed is reported below, as a pause.
+          if ((host.overBudget?.() ?? null) !== null) return false;
+          host.emit({ type: 'retrying', attempt: info.attempt, delayMs: info.delayMs, reason: info.error.message });
+          return true;
+        },
         config.retryPolicy
       )) {
         switch (event.type) {
@@ -538,6 +546,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       overflow = true;
       iteration--;
       continue;
+    }
+    // The turn's own limit ended the retries (see onRetry above): a pause that says why and what failed,
+    // not an error and not another model.
+    const limit = failure && content.length === 0 ? (host.overBudget?.() ?? null) : null;
+    if (failure && limit !== null) {
+      if (config.agentLabel === null) host.emit({ type: 'notice', level: 'warning', text: `${limit} The request that failed: ${failure.message}`, action: 'continue' });
+      return done('guard');
     }
     // The model kept failing through its retries and nothing of a reply arrived, so nothing would be
     // said twice: another model may finish the turn. Once, so two failing models can't trade it forever.

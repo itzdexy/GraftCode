@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spentTokens, TurnBudget } from '../../src/main/agent/turnBudget';
 
 const used = (inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0) => ({ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
-const NONE = { tokens: null, costUsd: null, minutes: null };
+const NONE = { tokens: null, costUsd: null, minutes: null, toolCalls: null, retries: null };
 
 /** A clock the test moves by hand. */
 function clock(start = 1_000_000): { now: () => number; pass: (ms: number) => void } {
@@ -90,9 +90,45 @@ describe('the limits of one turn', () => {
     expect(budget.exceeded()).toBe('Paused after 1 minute of work, the limit for one turn set in Settings → Permissions.');
   });
 
+  it('pauses once the turn and its agents have made their tool calls, and says by how many it went over', () => {
+    const budget = new TurnBudget({ ...NONE, toolCalls: 3 });
+    budget.toolCall();
+    budget.toolCall();
+    expect(budget.exceeded()).toBeNull();
+    budget.toolCall();
+    expect(budget.exceeded()).toBe('Paused after 3 tool calls, the limit for one turn set in Settings → Permissions.');
+    // A reply can ask for several at once; they all ran before the turn could be paused.
+    budget.toolCall();
+    budget.toolCall();
+    expect(budget.exceeded()).toBe('Paused after 5 tool calls, past the limit of 3 for one turn set in Settings → Permissions.');
+  });
+
+  it('lets a failed request be tried again as often as the limit says, and no more', () => {
+    const budget = new TurnBudget({ ...NONE, retries: 2 });
+    budget.retry();
+    budget.retry();
+    expect(budget.exceeded()).toBeNull();
+    // The third is the one that is refused.
+    budget.retry();
+    expect(budget.exceeded()).toBe('Paused after 2 retries of failed requests, the limit for one turn set in Settings → Permissions.');
+    const one = new TurnBudget({ ...NONE, retries: 1 });
+    one.retry();
+    one.retry();
+    expect(one.exceeded()).toBe('Paused after 1 retry of a failed request, the limit for one turn set in Settings → Permissions.');
+  });
+
+  it('counts nothing against a limit that is not set', () => {
+    const budget = new TurnBudget(NONE);
+    for (let i = 0; i < 1000; i++) {
+      budget.toolCall();
+      budget.retry();
+    }
+    expect(budget.exceeded()).toBeNull();
+  });
+
   it('names the first limit that was passed: tokens, then cost, then time', () => {
     const time = clock();
-    const budget = new TurnBudget({ tokens: 100, costUsd: 0.01, minutes: 1 }, time.now);
+    const budget = new TurnBudget({ ...NONE, tokens: 100, costUsd: 0.01, minutes: 1 }, time.now);
     budget.add(used(1000, 0), 1, 'Priced Model');
     time.pass(5 * 60_000);
     expect(budget.exceeded()).toMatch(/^Paused after about 1,000 tokens/);

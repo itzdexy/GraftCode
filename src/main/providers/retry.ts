@@ -65,7 +65,8 @@ export async function* streamWithRetry(
   provider: LLMProvider,
   request: StreamRequest,
   signal: AbortSignal,
-  onRetry: (info: RetryInfo) => void,
+  /** Told before each retry. Returning false stops retrying: the failure surfaces as it is. */
+  onRetry: (info: RetryInfo) => unknown,
   policy: RetryPolicy = DEFAULT_RETRY_POLICY
 ): AsyncGenerator<StreamEvent> {
   for (let attempt = 1; ; attempt++) {
@@ -84,7 +85,7 @@ export async function* streamWithRetry(
       // Surface the rate limit instead of sending another request too early.
       if (error.retryAfterMs !== undefined && error.retryAfterMs > policy.maxRetryAfterMs) throw error;
       const delayMs = backoffDelay(attempt, error, policy);
-      onRetry({ attempt, delayMs, error });
+      if (onRetry({ attempt, delayMs, error }) === false) throw error;
       await sleep(delayMs, signal);
     }
   }

@@ -21,6 +21,8 @@ const STEP_LIMITS = [100, 250, 500, 1000, 2500] as const;
 const TOKEN_LIMITS = [250_000, 1_000_000, 5_000_000, 20_000_000] as const;
 const COST_LIMITS = [1, 5, 10, 25, 100] as const;
 const MINUTE_LIMITS = [10, 30, 60, 180] as const;
+const TOOL_CALL_LIMITS = [50, 100, 250, 500, 1000] as const;
+const RETRY_LIMITS = [0, 1, 3, 5, 10, 25] as const;
 
 const dollars = (n: number): string => `$${Number.isInteger(n) ? String(n) : n.toFixed(2)}`;
 const duration = (minutes: number): string =>
@@ -225,6 +227,9 @@ export function PermissionsSection() {
             }
           />
         ) : null}
+      </Group>
+
+      <Group title="Limits for one turn" description="Reaching one pauses the turn and offers to continue. All but the steps count the sub-agents and groups the turn starts as well. None is set until you set one.">
         <SettingRow
           label="Steps per turn"
           description="How many steps the agent may take before it pauses and offers to continue. With no limit it works until the task is done; it still stops if it repeats the same actions."
@@ -251,6 +256,20 @@ export function PermissionsSection() {
           description="Pause a turn after it has worked this long. The time it waits for your answer doesn't count."
           control={
             <LimitSelect label="Time per turn" value={settings.behavior.turnMinutes} choices={MINUTE_LIMITS} format={duration} onChange={(turnMinutes) => saveSettings({ behavior: { turnMinutes } })} />
+          }
+        />
+        <SettingRow
+          label="Tool calls per turn"
+          description="Pause a turn once it has started this many tool calls. A reply that asks for several at once runs them all first."
+          control={
+            <LimitSelect label="Tool calls per turn" value={settings.behavior.turnToolCalls} choices={TOOL_CALL_LIMITS} format={(n) => `${n.toLocaleString()} calls`} onChange={(turnToolCalls) => saveSettings({ behavior: { turnToolCalls } })} />
+          }
+        />
+        <SettingRow
+          label="Retries per turn"
+          description="How often a failed request may be sent again in one turn. At the limit the turn pauses and says what failed, instead of trying on or switching to the backup model."
+          control={
+            <LimitSelect label="Retries per turn" value={settings.behavior.turnRetries} choices={RETRY_LIMITS} format={(n) => (n === 0 ? 'No retries' : n === 1 ? '1 retry' : `${String(n)} retries`)} onChange={(turnRetries) => saveSettings({ behavior: { turnRetries } })} />
           }
         />
       </Group>
