@@ -174,6 +174,7 @@ export class SessionManager {
       hooks: (root, trusted) => new HookRunner(() => d.settingsFiles.hooks(root, trusted), d.shell, () => root ?? process.cwd()),
       rgPath: d.rgPath,
       graftHome: d.paths.graftHome,
+      builtinSkills: d.paths.builtinSkills,
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),

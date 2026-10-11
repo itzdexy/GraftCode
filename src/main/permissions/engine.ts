@@ -35,6 +35,8 @@ export interface PermissionEnv {
   allowNetwork?: boolean;
   /** Commands run in the session's sandbox container, which reaches nothing outside the project folder. */
   sandboxed?: boolean;
+  /** Folders outside the project whose files are read without asking: the skills (see skillReadRoots). Only reads; a link out of one is outside it. */
+  readRoots?: string[];
 }
 
 export interface Decision {
@@ -112,7 +114,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
   const target: RuleTarget = { toolName: query.toolName, command: d.command, reads: d.reads, writes: d.writes, url: d.url };
   const reads = d.reads ?? [];
   const writes = d.writes ?? [];
-  const outsideReads = reads.filter((p) => !isInsideReal(env.projectRoot, p, env.platform));
+  const inReadRoot = (p: string): boolean => (env.readRoots ?? []).some((root) => isInsideReal(root, p, env.platform));
+  const outsideReads = reads.filter((p) => !isInsideReal(env.projectRoot, p, env.platform) && !inReadRoot(p));
   const outsideWrites = writes.filter((p) => !isInsideReal(env.projectRoot, p, env.platform));
   const outsideCommand = d.command !== undefined ? outsidePaths(d.command, env.projectRoot, env.platform, home) : [];
   const outsideProject = outsideReads.length + outsideWrites.length + outsideCommand.length > 0;
@@ -175,7 +178,7 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
     case 'none':
       return result('allow', 'No side effects outside the conversation.');
     case 'read':
-      if (outsideReads.length === 0) return result('allow', 'Reads inside the project.');
+      if (outsideReads.length === 0) return result('allow', reads.length > 0 && reads.every(inReadRoot) ? "Reads a skill's own files." : 'Reads inside the project.');
       return mode === 'bypass' ? result('allow', 'Bypass mode.') : result('ask', 'Reads outside the project folder.');
     case 'write':
       if (mode === 'auto-edit' || mode === 'auto' || mode === 'bypass') return result('allow', 'Edits inside the project are allowed in this mode.');

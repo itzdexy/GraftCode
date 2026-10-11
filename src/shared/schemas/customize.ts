@@ -30,7 +30,8 @@ export type AgentFileView = z.infer<typeof AgentFileSchema>;
 export const SkillFileSchema = z.object({
   name: z.string(),
   description: z.string(),
-  scope: CustomScopeSchema,
+  /** `builtin`: ships with Graft. Saving a skill takes CustomScopeSchema, which has no such choice. */
+  scope: z.enum(['user', 'project', 'builtin']),
   path: z.string(),
   body: z.string()
 });

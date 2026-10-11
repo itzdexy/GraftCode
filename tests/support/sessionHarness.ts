@@ -169,6 +169,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     hooks: () => (options.hooks ? new HookRunner(() => options.hooks ?? {}, shell, () => projectDir) : null),
     rgPath: RG_PATH,
     graftHome: home,
+    builtinSkills: null,
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
