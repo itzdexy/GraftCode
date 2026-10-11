@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { canOpenProjectFile } from '@shared/chatFileTypes';
+import { diagramInfo, MAX_DIAGRAM_CHARS } from '@shared/diagrams';
 import { GraftError } from '@shared/errors';
+import type { DiagramInfo } from '@shared/schemas/toolDisplay';
 import { looksBinary } from '../tools/fs/read';
 import { isInsideReal } from '../tools/paths';
 import { writeFileAtomic } from '../tools/fs/write';
@@ -158,6 +160,39 @@ export async function mediaFile(root: string, rel: string): Promise<{ file: stri
   if (!kind || !stat) throw new GraftError('not_media', `${rel} is not a picture, a clip or a sound.`);
   if (stat.size > MAX_MEDIA_BYTES) throw new GraftError('too_large', `${rel} is too large to show here (${String(Math.round(stat.size / 1048576))} MB).`);
   return { file, kind, size: stat.size };
+}
+
+/** The diagram a file holds, as text: what a card shows for it, or the refusal a card shows instead. `name` is the file's own name. */
+export function diagramIn(html: string, name: string): { html: string; info: DiagramInfo } {
+  const info = diagramInfo(html, name);
+  if (!info) throw new GraftError('not_a_diagram', `Couldn't find the diagram in ${name}.`);
+  return { html, info };
+}
+
+/**
+ * A diagram in the session's folder (see shared/diagrams.ts), by the path its
+ * edit showed: where it is, its text, and its title and size. A file that is
+ * gone, lies outside the folder, is too large to be one or is no diagram any
+ * more is refused with the sentence its card shows.
+ */
+export async function diagramFile(root: string, rel: string): Promise<{ file: string; html: string; info: DiagramInfo }> {
+  const name = rel.split(/[\\/]/).pop() || rel;
+  const gone = (): GraftError => new GraftError('not_found', `${name} was moved or deleted.`);
+  const none = (): GraftError => new GraftError('not_a_diagram', `Couldn't find the diagram in ${name}.`);
+  const file = path.resolve(root, rel);
+  if (!isInsideReal(root, file)) throw none();
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw gone();
+    throw error;
+  }
+  if (!stat.isFile()) throw gone();
+  // A character takes four bytes at most, so a file past this is past the limit for a diagram whatever it holds.
+  if (stat.size > MAX_DIAGRAM_CHARS * 4) throw none();
+  return { file, ...diagramIn(await fs.promises.readFile(file, 'utf8'), name) };
 }
 
 /** Whether a click may open a file with the computer's own app for it: documents, pictures, clips and sound, never scripts or programs. */

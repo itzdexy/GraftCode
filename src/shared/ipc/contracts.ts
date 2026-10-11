@@ -15,6 +15,7 @@ import {
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
 import { ChecksConfigSchema, HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
+import { DiagramSourceSchema } from '../schemas/diagrams';
 import { SiteViewSchema } from '../schemas/sites';
 import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
 import {
@@ -335,6 +336,12 @@ export const contracts = {
   'files:open': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
   /** Puts a picture from the session's folder on the clipboard, as a picture. */
   'files:copyImage': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
+  /** An address that shows one diagram of the session (a page the tools marked as one, and nothing beside it) and lets it tell its frame how large it is. */
+  'diagrams:previewUrl': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema }), z.object({ url: z.string() })),
+  /** Puts a picture of the diagram alone, without its page, on the clipboard. */
+  'diagrams:copyImage': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema }), Void),
+  /** Saves the diagram alone as a PNG or an SVG where the user says; `path` is null when they closed the dialog. */
+  'diagrams:save': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema, format: z.enum(['png', 'svg']) }), z.object({ path: z.string().nullable() })),
   'pty:create': channel(
     z.object({ sessionId: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }),
     TerminalInfoSchema
