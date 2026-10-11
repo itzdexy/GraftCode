@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.6.22",
+    "date": "2026-10-11",
+    "items": [
+      "After a crash, a forced quit or a power cut, the agent is told the truth about what it was doing. A command that had started has an unknown outcome and is checked before it is repeated; one that had finished keeps its result; one that never started is said not to have run. A note in the session says what was cut off. Before, all of it was reported as \"not run\".",
+      "A reply that arrives damaged no longer has its commands run. When part of a model's reply is lost on the way, what is left of a command can still look complete and mean something else, so the agent is asked again and the reply is marked as possibly incomplete.",
+      "Stop works even when a tool ignores it: after two seconds the turn goes on without it and says the tool may still be finishing.",
+      "Quitting can no longer hang. Each part of shutting down has a time limit, and one that fails no longer leaves your commands running.",
+      "Integrations: every tool of an MCP server has a permission of its own (Default, Always ask, Allow, Never), and so does the server as a whole. A tool's \"read-only\" label is the server's own word; your choice is not.",
+      "Integrations: choose what a local MCP server gets from your computer's environment. New servers start without your keys, tokens and passwords; servers you already have keep what they had until you change it.",
+      "Limits for one turn: two more, tool calls and retries, and all six now have a group of their own in Settings → Permissions.",
+      "The agent can ask what a change to a file can reach: every file that imports it, directly or through others, and the tests among them, the nearest first.",
+      "A turn that changed files in a project with no checks says so once, and names the checks the project could have."
+    ]
+  },
+  {
     "version": "0.6.16",
     "date": "2026-10-10",
     "items": [
