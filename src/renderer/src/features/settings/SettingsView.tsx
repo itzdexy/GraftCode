@@ -5,7 +5,6 @@ import { useNav, type SettingsSection } from '../../stores/nav';
 import { HooksSection } from '../customize/HooksSection';
 import { McpSection } from '../customize/McpSection';
 import { MemorySection } from '../customize/MemorySection';
-import { ViewHeader } from '../shell/ViewHeader';
 import { AboutSection } from './AboutSection';
 import { AppearanceSection } from './AppearanceSection';
 import { FoundSetting } from './common';
@@ -203,7 +202,8 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
   );
 }
 
-export function SettingsView({ section }: { section: SettingsSection }) {
+/** Settings without a frame of its own: the list of pages and the page that is open. The window around it is SettingsWindow. */
+export function SettingsBody({ section }: { section: SettingsSection }) {
   const info = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0]!;
   // The setting a search landed on: its row brings itself into view and stays marked for a moment.
   const [found, setFound] = useState<{ section: SettingsSection; setting: string } | null>(null);
@@ -217,22 +217,19 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     useNav.getState().go({ name: 'settings', section: hit.section });
   };
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <ViewHeader />
-      <div className="flex min-h-0 flex-1">
-        <SettingsNav current={info.id} onFind={onFind} />
-        {/* Keyed by section, so each one opens at its top instead of where the last one was scrolled to. */}
-        <div key={info.id} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[720px] px-24 pt-4 pb-40">
-            <header className="mb-20">
-              <h2 className="text-xl font-medium text-fg-strong">{info.label}</h2>
-              <p className="mt-4 text-base text-fg-muted">{info.description}</p>
-            </header>
-            <div className="motion-rise">
-              <FoundSetting.Provider value={found?.section === info.id ? found.setting : null}>
-                <SectionBody section={info.id} />
-              </FoundSetting.Provider>
-            </div>
+    <div className="flex min-h-0 flex-1">
+      <SettingsNav current={info.id} onFind={onFind} />
+      {/* Keyed by section, so each one opens at its top instead of where the last one was scrolled to. */}
+      <div key={info.id} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[720px] px-24 pt-16 pb-40">
+          <header className="mb-20">
+            <h2 className="text-xl font-medium text-fg-strong">{info.label}</h2>
+            <p className="mt-4 text-base text-fg-muted">{info.description}</p>
+          </header>
+          <div className="motion-rise">
+            <FoundSetting.Provider value={found?.section === info.id ? found.setting : null}>
+              <SectionBody section={info.id} />
+            </FoundSetting.Provider>
           </div>
         </div>
       </div>
