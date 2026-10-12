@@ -304,6 +304,21 @@ installed. It carries 0.6.25 and 0.6.26 as well. The schema is 9: no new table, 
 message changed, no new setting. No new package. Commands, commits, what the suite found on
 the way, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.27.
 
+### Local 0.6.28 build
+
+On `feat/richer-graft` (local, not pushed), ending at `3c56f6a`: a side question (`/btw`) and
+the lively motion style. Typecheck, lint and the build pass on both systems. The desktop
+suite: 70 pass in a Linux container at `3c56f6a`; on Windows 69 of 70 passed at `fbf2a59` and
+the one that failed, a test that had to learn of the new setting, passes at `3c56f6a`. The
+unit suite: 1359 pass in the container; on Windows 1367 pass in six of nine full runs, and
+three runs had one failure each in the language-server tests, a fault in removing a temporary
+folder that the 0.6.27 commit shows as well. The Windows package builds
+(`dist/Graft-Setup-0.6.28.exe`) and its three smoke tests pass; it was not installed. It
+carries 0.6.25 to 0.6.27 as well. The schema is 9: no new table and no stored message
+changed. One new setting, `appearance.motionStyle`, which an older profile gets as "lively".
+No new package. Commands, commits, what the suite found on the way, skips and what was not
+verified: `UPGRADE_TEST_REPORT.md`, section 0.6.28.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
