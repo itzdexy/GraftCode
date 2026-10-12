@@ -418,3 +418,74 @@ Not verified:
   computer over http, and only https pictures are taken.
 - The viewer loading the file itself in a code session was not exercised; the preview
   showed the stored 512 px picture.
+
+## 0.6.25 round (2026-10-12)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Six
+commits, `6313f83` to `b7dbb41`, on top of the 0.6.24 build. Two systems: Windows 11 (Node
+26.7.0) and a clean `node:24-bookworm` container (Docker 29.8.0) packed from a separate
+checkout of `b7dbb41`. Nothing here ran on macOS, on GitHub's runners, or against a paid
+provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `b7dbb41` | exit 0 |
+| `npm run lint` | Windows, `b7dbb41` | exit 0 |
+| `npm test` | Windows, tree of `b7dbb41` (see below) | 107 files passed, 2 skipped; 1286 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, tree of `b7dbb41` (see below) | exit 0; two warnings from the CSS optimizer, which does not know `::highlight()` |
+| `npx playwright test` | Windows, tree of `b7dbb41` (see below) | 60 passed, 6 skipped, 0 failed (4.9 min) |
+| `npm run dist:win` | Windows, `b7dbb41` | exit 0, `dist/Graft-Setup-0.6.25.exe`, 128,584,310 bytes, SHA-256 `4e8c3a7d86938c734deaba713d11f8bec693e162d601a446aa102963c85ee7f0`; its signature was not checked this round |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.25 build of `b7dbb41`, the spec as of `10a835a` | 3 passed (12.9 s) |
+| `npm run verify:docker` | Linux container, `b7dbb41` | typecheck, lint, unit and build exit 0; unit 1278 passed, 37 skipped; desktop suite 60 passed, 6 skipped, 0 failed (4.9 min) |
+
+The first Windows run of the five failed its type check and its lint, both in the new
+desktop test: `tsconfig.e2e.json` did not list `DOM.Iterable`, which the highlight
+registry's `has()` and `size` need. One line was added to that file and the two commands
+were run again, exit 0. The unit tests, the build and the desktop suite are the ones of
+that first run, on the tree without that line; it changes what is type-checked, not what
+runs. An earlier full unit run, before the equations task, had one failure:
+`languageServers.test.ts` could not remove its temporary folder (`EPERM`). The file passed
+alone right after and in the two full runs that followed.
+
+The six skipped desktop tests are the three of the packaged app (run separately, above) and
+the three that take README screenshots. The unit tests skipped on Linux only are the ones
+that need a Windows host.
+
+What the tests of this round show, and with what:
+
+- Unit, 40 new cases in seven files. A request to open a file or to type a line reaches
+  the panel once and is counted. The first changed line of a patch. Which code spans are
+  file names (`src/app.ts:42`, a Windows path, `Dockerfile`) and which are not (`0.6.18`,
+  `health()`, an address). Names are asked about 200 at a time after 50 ms, once each, by
+  session, and a batch that fails answers "no file". `FileIndex.resolve` on real folders:
+  the path as written, an absolute path inside, the one file that ends with it, nothing for
+  two such files or a path that leads out, and a file made after the list was read. What a
+  fence says about its block; folding; which blocks are a command for the terminal, with
+  none for a block that holds a carriage return, a tab, an escape or a line break.
+  Finding text across the pieces a word is drawn in and never across two blocks, beside a
+  letter whose lower case is longer, with the limit of 1,000. Math in each of the four
+  ways it is written, and money, shell variables, code, escaped brackets and unfinished
+  math left alone.
+- Desktop, 3 new tests in `conversation.spec.ts`, with a scripted reply (no model). The
+  names of files that exist once are links and open the editor at line 14; a name two
+  files share and one no file has stay code. `$5 and $10` stays text beside one set
+  formula. A block of 45 lines names its file, shows 20, unfolds and wraps. A command is
+  typed into the terminal, is seen there not run, and Enter runs it. Find counts 7
+  matches, steps round, marks without adding an element and leaves no mark behind;
+  Escape returns the keyboard to the message box. A Mermaid block sends `/diagram`. The
+  editor keeps its own Ctrl+F. Escape in the find bar leaves a running turn running.
+- Packaged app: a reply with a formula sets it, so the math chunk, its stylesheet and
+  fonts load from the package; a file the reply names is a link.
+- By eye, three of the four screenshots the desktop test takes
+  (`test-results/shots/conversation-*.png`): the reply, the file at its line, the find bar.
+
+Not verified:
+
+- No model wrote any of the replies: what a real model names, fences and writes as math
+  was not seen. One formula was set in a test; the range of LaTeX that KaTeX takes, a
+  formula that fails, and math in a chat were not exercised.
+- File links on a large project (the file list holds up to 200,000 names) and find on a
+  long conversation were not measured.
+- The find bar's entrance and the fade on a folded block were not looked at with motion
+  on: Windows has animations off on this PC, so the tests ran with motion reduced.
+- The installer was built and its unpacked app tested; the installer itself was not run.
