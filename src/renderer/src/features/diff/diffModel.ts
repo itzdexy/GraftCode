@@ -61,6 +61,24 @@ export function firstChangedLine(patch: string): number {
   return 1;
 }
 
+/** A line a comment can be on: of the file as it was (`old`, for a removed line) or as it is now. */
+export interface CommentAnchor {
+  line: number;
+  side: 'old' | 'new';
+}
+
+/** Where a comment on this row sits: the old line of a removed row, the new line of every other; nothing for headers and notes. */
+export function commentAnchor(row: DiffRow): CommentAnchor | null {
+  if (row.type === 'del') return row.oldNo === null ? null : { line: row.oldNo, side: 'old' };
+  if (row.type === 'add' || row.type === 'ctx') return row.newNo === null ? null : { line: row.newNo, side: 'new' };
+  return null;
+}
+
+/** The comments shown under a line: those that end on it, on its side. */
+export function commentsAt<T extends { endLine: number; side: 'old' | 'new' }>(list: readonly T[], anchor: CommentAnchor): T[] {
+  return list.filter((comment) => comment.endLine === anchor.line && comment.side === anchor.side);
+}
+
 /** Rows for hunks already split out by the git layer (header + body lines each). */
 export function rowsFromHunks(hunks: ReadonlyArray<{ header: string; lines: string[] }>): DiffRow[] {
   return hunks.flatMap((h, index) => parsePatch(`${h.header}\n${h.lines.join('\n')}`).map((row) => ({ ...row, hunk: index })));
