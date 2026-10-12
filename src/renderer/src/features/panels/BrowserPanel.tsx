@@ -277,12 +277,23 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
     const overlays = new MutationObserver(send);
     overlays.observe(document.body, { childList: true });
     window.addEventListener('resize', send);
+    // The column this panel is in slides open and shut. The page is a native view, which can't be clipped with the
+    // column, so it steps out while the column moves and is put back where the panel then is once it is still.
+    const onSlide = (event: TransitionEvent): void => {
+      if (event.propertyName !== 'grid-template-columns' || !(event.target instanceof Node) || !event.target.contains(el)) return;
+      if (event.type !== 'transitionrun') return send();
+      cancelAnimationFrame(frame);
+      invoke('browser:bounds', { bounds: null }).catch((error: unknown) => logError('Could not hide the browser view', error));
+    };
+    const slides = ['transitionrun', 'transitionend', 'transitioncancel'] as const;
+    for (const slide of slides) document.addEventListener(slide, onSlide);
     send();
     return () => {
       cancelAnimationFrame(frame);
       resize.disconnect();
       overlays.disconnect();
       window.removeEventListener('resize', send);
+      for (const slide of slides) document.removeEventListener(slide, onSlide);
       invoke('browser:bounds', { bounds: null }).catch((error: unknown) => logError('Could not hide the browser view', error));
     };
   }, [hasPage]);

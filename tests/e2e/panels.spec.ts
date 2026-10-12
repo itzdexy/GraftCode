@@ -151,7 +151,8 @@ test('the files panel shows a picture with its size, and the Read step shows it 
   await w.getByRole('button', { name: 'More actions' }).click();
   await w.getByRole('menuitem', { name: /^Files/ }).click();
   const panel = w.getByRole('region', { name: 'Changes', exact: true });
-  await panel.getByRole('button', { name: 'art', exact: true }).click();
+  // The folder's row gains a mark once git has said that something in it changed, so it is found by its name's start.
+  await panel.getByRole('button', { name: /^art\b/ }).click();
   await panel.getByRole('button', { name: /^picture\.png/ }).click();
 
   // The picture itself, not "binary file" or "too large to preview", with its size in pixels once it has loaded.
