@@ -132,6 +132,27 @@ describe('a change of view', () => {
     await page.finish();
   });
 
+  it('marks the window for as long as a change of page takes, so that the page alone can move', async () => {
+    const page = fadingPage(true);
+    const mark = (): string | undefined => (document as unknown as { documentElement: { dataset: { viewChange?: string } } }).documentElement.dataset.viewChange;
+    withViewTransition(() => undefined, 'page');
+    expect(mark()).toBe('page');
+    await page.finish();
+    expect(mark()).toBeUndefined();
+    // Another kind of change (a theme, the transcript's view) fades the window as a whole.
+    withViewTransition(() => undefined);
+    expect(mark()).toBeUndefined();
+    await page.finish();
+  });
+
+  it('leaves the window unmarked when a change of page is made at once', () => {
+    fadingPage(true);
+    const root = (document as unknown as { documentElement: { dataset: { motion: string; viewChange?: string } } }).documentElement;
+    root.dataset.motion = 'reduced';
+    withViewTransition(() => undefined, 'page');
+    expect(root.dataset.viewChange).toBeUndefined();
+  });
+
   it('does not fade with motion reduced or the window hidden, and still makes the change', () => {
     const page = fadingPage(true);
     (document as unknown as { documentElement: { dataset: { motion: string } } }).documentElement.dataset.motion = 'reduced';

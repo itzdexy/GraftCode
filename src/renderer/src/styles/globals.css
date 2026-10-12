@@ -663,6 +663,112 @@
   scale: 0.4;
 }
 
+/*
+ * Lively (Settings → Appearance → Motion style; its times are in tokens.css). What a person does is
+ * answered with movement that is seen: a page that is opened, a window, a menu, a message that was
+ * sent, a panel that was asked for, a home screen that was gone to. What Graft does by itself (a step
+ * joining a turn, a reply being written) moves as little as in Calm: that happens all the time.
+ * Only opacity and transforms move, things leave as fast as they do in Calm, and the rules for reduced
+ * motion below set all of it to nothing.
+ */
+@keyframes graft-page-out {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes graft-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+@keyframes graft-spring-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+  }
+}
+@keyframes graft-pop-spring {
+  from {
+    opacity: 0;
+    transform: translate(var(--g-pop-x, 0), var(--g-pop-y, 0)) scale(0.88);
+  }
+}
+@keyframes graft-sent {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.96);
+  }
+}
+@keyframes graft-settle {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.98);
+  }
+}
+@keyframes graft-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+/*
+ * A page giving way to another. While that takes (data-view-change, see withViewTransition) the page has a
+ * frame of its own: the old page sinks back and is gone, the new one rises into place, and the sidebar
+ * beside them holds still. A new theme is no change of page and still fades the window as a whole.
+ */
+:root[data-motion-style='lively'][data-view-change='page'] .graft-page {
+  view-transition-name: graft-page;
+}
+:root[data-motion-style='lively']::view-transition-old(graft-page) {
+  animation: graft-page-out var(--g-duration-exit) var(--g-ease-in) both;
+}
+:root[data-motion-style='lively']::view-transition-new(graft-page) {
+  animation: graft-page-in var(--g-duration-view) var(--g-ease-out) both;
+}
+
+/* Windows spring open; menus and popovers spring from the control that opened them. Both are in place a third of the way in. */
+:root[data-motion-style='lively'] .overlay-dialog[data-state='open'] {
+  animation: graft-spring-in var(--g-duration-lively) var(--g-ease-lively);
+}
+:root[data-motion-style='lively'] .overlay-pop[data-state='open'],
+:root[data-motion-style='lively'] .overlay-pop[data-state='delayed-open'] {
+  animation: graft-pop-spring var(--g-duration-slow) var(--g-ease-lively);
+}
+
+/* What the person just sent or asked for travels up from the message box. */
+:root[data-motion-style='lively'] .motion-sent {
+  transform-origin: bottom center;
+  animation: graft-sent var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
+/* A home screen settles in piece by piece, and a toast lands. */
+:root[data-motion-style='lively'] .motion-stagger > * {
+  animation: graft-settle var(--g-duration-lively) var(--g-ease-lively) both;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(2) {
+  animation-delay: 50ms;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(3) {
+  animation-delay: 100ms;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+:root[data-motion-style='lively'] .graft-toast:not([data-state='closed']) {
+  animation: graft-settle var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
+/*
+ * A panel comes in from the edge it sits by, also when it joins panels that are already open. The browser's
+ * panel does not: its page is a native view placed over it by its measured place, and it would be measured mid-way.
+ */
+:root[data-motion-style='lively'] .graft-panel:not(.graft-panel--still) {
+  animation: graft-panel-in var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
 /* Reduced motion (see tokens.css): the system's request unless Motion is On, or Motion set to Reduced. */
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) *,

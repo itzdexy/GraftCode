@@ -59,6 +59,9 @@ export type AccentId = (typeof ACCENT_IDS)[number];
 /** Settings → Appearance → Motion. */
 export const MOTION_SETTINGS = ['system', 'on', 'reduced'] as const;
 export type MotionSetting = (typeof MOTION_SETTINGS)[number];
+/** Settings → Appearance → Motion style: how much moves when motion is on. */
+export const MOTION_STYLES = ['lively', 'calm'] as const;
+export type MotionStyle = (typeof MOTION_STYLES)[number];
 
 /**
  * How a code session's transcript shows a turn's work. "normal": what the agent says stays in view and
@@ -106,6 +109,8 @@ export const AppSettingsSchema = z.object({
     codeFontSize: z.number().int().min(10).max(20),
     /** "system" follows the operating system's animation setting; "on" animates even when it asks for less. */
     motion: z.enum(MOTION_SETTINGS),
+    /** "lively": pages rise in, windows spring open, a sent message travels. "calm": short fades and a few pixels. */
+    motionStyle: z.enum(MOTION_STYLES),
     /** Width of the transcript and composer column. */
     transcriptWidth: z.enum(['narrow', 'medium', 'wide']),
     transcriptView: z.enum(TRANSCRIPT_VIEWS)
@@ -232,7 +237,7 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow', transcriptView: 'normal' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', motionStyle: 'lively', transcriptWidth: 'narrow', transcriptView: 'normal' },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, checkEdits: true },

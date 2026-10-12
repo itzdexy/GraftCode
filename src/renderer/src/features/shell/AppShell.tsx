@@ -88,9 +88,10 @@ export function AppShell() {
   const sidebarPresent = usePresence(!collapsed, SLIDE_EXIT_MS);
   const route = useNav((s) => s.route);
   const back = useNav((s) => s.back);
-  // The page that is drawn. Settings lies over the page it was opened from; and from one page to another the window
-  // cross-fades, so the page drawn follows the route a frame behind it while the route itself changes at once.
-  const page = useCrossFaded(route.name === 'settings' ? pageUnder(back) : route, routeKey(route.name === 'settings' ? pageUnder(back) : route));
+  // The page that is drawn. Settings lies over the page it was opened from; and from one page to another the page
+  // gives way (a cross-fade, or the new page rising in: see .graft-page), so the page drawn follows the route a frame
+  // behind it while the route itself changes at once.
+  const page = useCrossFaded(route.name === 'settings' ? pageUnder(back) : route, routeKey(route.name === 'settings' ? pageUnder(back) : route), 'page');
   const loaded = useSessions((s) => s.loaded);
   const loadError = useSessions((s) => s.loadError);
 
@@ -123,7 +124,7 @@ export function AppShell() {
         {/* The column can only narrow around something without a width of its own; the sidebar keeps its width inside. */}
         <div>{sidebarPresent ? <Sidebar /> : null}</div>
       </div>
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="graft-page flex min-w-0 flex-1 flex-col">
         <ErrorBoundary label="This view" resetKey={routeKey(page)}>
           {loadError ? (
             <ErrorState title="Couldn't load your sessions" message={loadError} onRetry={() => void useSessions.getState().loadList()} />

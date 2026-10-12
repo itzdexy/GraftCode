@@ -174,8 +174,12 @@ function makeWaiting(): void {
  * no page at all, the change is made at once. So is a change that comes while
  * another is fading, after the one that fade is for. Each change is made
  * exactly once, in the order they came, and none is dropped.
+ *
+ * A change of `kind` "page" marks the window (data-view-change) for as long
+ * as it takes: the stylesheet then lets the page give way in its own frame,
+ * and what is beside it holds still.
  */
-export function withViewTransition(update: () => void): void {
+export function withViewTransition(update: () => void, kind?: 'page'): void {
   if (typeof document === 'undefined') {
     update();
     return;
@@ -187,8 +191,12 @@ export function withViewTransition(update: () => void): void {
   }
   fading = true;
   waiting = update;
+  // Marked before the browser takes its picture of the page as it was: the page is in a frame of its own in both pictures.
+  const root = document.documentElement;
+  if (kind) root.dataset.viewChange = kind;
   const settle = (): void => {
     fading = false;
+    delete root.dataset.viewChange;
   };
   try {
     // React draws the change before the callback returns: that is the page the browser fades to.
@@ -208,15 +216,16 @@ export function withViewTransition(update: () => void): void {
  * the page cross-fades from what the old value drew to what the new one draws:
  * until the browser has its picture of the old page (a frame), the old value
  * is still the one drawn. The stores change at once; only the drawing follows.
+ * `kind` says what gives way (see withViewTransition).
  */
-export function useCrossFaded<T>(value: T, key: string): T {
+export function useCrossFaded<T>(value: T, key: string, kind?: 'page'): T {
   const [drawn, setDrawn] = useState({ key, value });
   const latest = useRef({ key, value });
   useLayoutEffect(() => {
     latest.current = { key, value };
   });
   useLayoutEffect(() => {
-    if (drawn.key !== key) withViewTransition(() => setDrawn(latest.current));
-  }, [key, drawn.key]);
+    if (drawn.key !== key) withViewTransition(() => setDrawn(latest.current), kind);
+  }, [key, drawn.key, kind]);
   return drawn.key === key ? value : drawn.value;
 }

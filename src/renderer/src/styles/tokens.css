@@ -355,6 +355,26 @@
 }
 
 /*
+ * Settings → Appearance → Motion style. Lively is what the page is marked with unless Calm was chosen:
+ * what a person does is answered with movement that is seen. A page that is opened rises into place,
+ * a window springs open, a sent message travels up from the message box (globals.css has the rules).
+ * Calm is everything above as it stands: short fades and a few pixels of travel.
+ * Leaving takes the same time in both, so closing never feels like waiting.
+ * This block has to stay above the ones that set every time to nothing: at the same weight the later one wins.
+ */
+:root[data-motion-style='lively'] {
+  /* A page giving way to another: the new one rises in. */
+  --g-duration-view: 300ms;
+  /* An arrival that springs: a window, a sent message, a panel, a home screen. */
+  --g-duration-lively: 380ms;
+  /* A damped spring sampled into linear(): 7% past its place at the half-way mark, settled at the end. */
+  --g-ease-lively: linear(
+    0, 0.0496, 0.1692, 0.3229, 0.4842, 0.6356, 0.7666, 0.8724, 0.9522, 1.008, 1.0431, 1.0617, 1.068, 1.0657, 1.0582, 1.048, 1.037, 1.0265,
+    1.0173, 1.0098, 1.0041, 1
+  );
+}
+
+/*
  * Reduced motion. Settings → Appearance → Motion marks the page:
  * data-motion="reduced" keeps it still, data-motion="full" animates even when
  * the operating system asks for less, and no mark (System) follows the system.
@@ -367,6 +387,7 @@
     --g-duration-exit: 0ms;
     --g-duration-spring: 0ms;
     --g-duration-view: 0ms;
+    --g-duration-lively: 0ms;
   }
 }
 :root[data-motion='reduced'] {
@@ -376,4 +397,5 @@
   --g-duration-exit: 0ms;
   --g-duration-spring: 0ms;
   --g-duration-view: 0ms;
+  --g-duration-lively: 0ms;
 }
