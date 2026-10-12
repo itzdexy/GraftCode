@@ -140,6 +140,21 @@ test('the browser panel opens local pages and blocks non-web addresses', async (
   // No preload: the page can't reach Graft's bridge.
   expect(page?.hasBridge).toBe('undefined');
   await shot(w, 'panel-browser');
+
+  // The page is a native view laid over its place in the panel. How far it is from that place, on each side:
+  const offPlace = async (): Promise<number[] | null> => {
+    const place = await panel.locator('[data-browser-host]').boundingBox();
+    const view = await graft.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.contentView.children.at(-1)?.getBounds() ?? null);
+    return place && view ? [Math.round(place.x) - view.x, Math.round(place.y) - view.y, Math.round(place.width) - view.width, Math.round(place.height) - view.height] : null;
+  };
+  await expect.poll(offPlace).toEqual([0, 0, 0, 0]);
+  // Closed and opened again, the panel's column slides with the page already there. The view cannot be cut to the
+  // column as the panel is, so it steps out while the column moves, and is back exactly on its place once it is still.
+  await w.getByRole('button', { name: 'Browser', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await w.getByRole('button', { name: 'Browser', exact: true }).click();
+  await expect(panel).toBeVisible();
+  await expect.poll(offPlace).toEqual([0, 0, 0, 0]);
 });
 
 test('the files panel shows a picture with its size, and the Read step shows it too; its path, itself and a mention can be taken from it', async () => {
