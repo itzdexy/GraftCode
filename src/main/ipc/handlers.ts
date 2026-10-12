@@ -721,6 +721,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if (!known) throw new GraftError('unknown_folder', 'File search works in project folders only.');
       return (await files()).search(root, query, 40);
     },
+    'files:resolve': async ({ sessionId, paths, fresh }) => {
+      // A chat has no folder: nothing a reply names there is a project file.
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') return paths.map(() => null);
+      return (await files()).resolve(await workDirFor(sessionId), paths, fresh ?? false);
+    },
 
     'files:list': async ({ sessionId, dir }) => listDirectory(await workDirFor(sessionId), dir),
     'files:read': async ({ sessionId, path }) => readPreview(await workDirFor(sessionId), path),

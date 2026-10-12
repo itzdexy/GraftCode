@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -7,6 +7,7 @@ import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
 import { useApp } from '../../stores/app';
+import { useFileRefs } from '../../stores/fileRefs';
 import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
 import {
@@ -21,6 +22,7 @@ import {
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
+import { ConversationContext, type Conversation } from './conversation';
 import { DiagramCard } from './DiagramCard';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
@@ -57,6 +59,8 @@ interface TranscriptProps {
   onEdit: ((message: StoredMessage) => void) | null;
   onRetry: () => void;
   onRegenerate: (() => void) | null;
+  /** Sends a message as if it had been typed: a part of a reply can ask for something (a drawing of its diagram). */
+  onSend: (text: string) => void;
   /** Bottom padding so the last message clears overlays. */
   className?: string;
 }
@@ -88,8 +92,25 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 }
 
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
-export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, className }: TranscriptProps) {
+export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, onSend, className }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
+  // What a piece of a reply needs to act on its conversation. It changes with the session only: the newest
+  // onSend is reached through a ref, so a reply that streams does not draw every code span again on each word.
+  const sendNow = useRef(onSend);
+  useEffect(() => {
+    sendNow.current = onSend;
+  }, [onSend]);
+  const canDraw = summary.kind === 'code' || !summary.incognito;
+  const conversation = useMemo<Conversation>(
+    () => ({ sessionId: summary.id, kind: variant, canDraw, send: (text) => sendNow.current(text) }),
+    [summary.id, variant, canDraw]
+  );
+  // Files are made and deleted while a turn runs: what was learned about the names in this session's replies is asked again once it ends.
+  const turn = useRef({ id: summary.id, active: view.turnActive });
+  useEffect(() => {
+    if (turn.current.id === summary.id && turn.current.active && !view.turnActive) useFileRefs.getState().forget(summary.id);
+    turn.current = { id: summary.id, active: view.turnActive };
+  }, [summary.id, view.turnActive]);
   // While a "!" command or the project's checks run no model is working, so the last turn stays as it finished.
   const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
   // Chats fold a turn's work into one line; a code session shows it the way Settings → Appearance says.
@@ -304,14 +325,16 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       {variant === 'code' ? <Timeline turns={turns} current={currentTurn} onJump={jumpTo} /> : null}
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
-          <SourcesContext.Provider value={sources}>
-            {items.map((item) => (
-              <Arrival key={item.key} live={view.turnActive}>
-                {/* Verbose opens rows by default, and a row on screen keeps the state it has: what an item holds is drawn afresh when Verbose goes on or off. */}
-                <Fragment key={grouping === 'verbose' ? 'opened' : 'folded'}>{render(item)}</Fragment>
-              </Arrival>
-            ))}
-          </SourcesContext.Provider>
+          <ConversationContext.Provider value={conversation}>
+            <SourcesContext.Provider value={sources}>
+              {items.map((item) => (
+                <Arrival key={item.key} live={view.turnActive}>
+                  {/* Verbose opens rows by default, and a row on screen keeps the state it has: what an item holds is drawn afresh when Verbose goes on or off. */}
+                  <Fragment key={grouping === 'verbose' ? 'opened' : 'folded'}>{render(item)}</Fragment>
+                </Arrival>
+              ))}
+            </SourcesContext.Provider>
+          </ConversationContext.Provider>
           {view.retrying ? (
             <p className="text-md text-fg-muted">
               {view.retrying.reason}. Retrying in {Math.ceil(view.retrying.delayMs / 1000)}s (attempt {view.retrying.attempt})…
