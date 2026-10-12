@@ -19,6 +19,60 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.25 code in the conversation (2026-10-12)
+
+The second of the four rounds planned on 2026-10-11 (diagrams was the first, as 0.6.23): a
+reply that works like an editor's page. All of it is the renderer drawing stored text
+differently, plus one read-only lookup in the main process. No stored message changes.
+
+- **File names that open the file.** In a code session, an inline code span that is the
+  whole name of a file (`fileRefs.ts`: `src/app.ts`, then `:42`, `:42-50`, `:42:7` or
+  `#L42`; a Windows path; `Dockerfile`, `Makefile`) is asked about through `files:resolve`
+  (`FileIndex.resolve`): the path as written when it is a file inside the session's folder,
+  an absolute path inside it, else the one listed file that ends with it. Two such files:
+  it stays code. Names are asked about in batches of 200 after 50 ms (`stores/fileRefs.ts`)
+  and forgotten when a turn ends. A link opens the Files panel's editor at the line
+  (`usePanels.openFile`). The edited-files card has Open on each row, at the first line its
+  first change touched (`firstChangedLine`).
+- **Code blocks** (`codeBlockModel.ts`, `CodeBlock.tsx`). A fence names a file
+  (`ts src/app.ts`, `title=`, `filename=`, or the file as its first word); the header shows
+  it, as a link when the project has it, and the number of lines from 12 on. A finished
+  block of more than 40 lines shows 20 until it is opened. Lines wrap on request. A block
+  that is one line of a shell language has Type into the terminal: the line is written to
+  the terminal in front with no line break after it, and the keyboard moves there. A
+  Mermaid block has Draw this, which sends `/diagram`.
+- **Find in the conversation** (`findModel.ts`, `FindBar.tsx`): `Ctrl+F`, shortcut
+  `findInTranscript`. It searches the text the transcript shows, block by block, and marks
+  matches with the CSS Custom Highlight API, so no element of the page changes. The first
+  1,000 are marked. It searches again 150 ms after the transcript changes. The editor and
+  the terminal keep their own Ctrl+F, and Escape in the bar does not stop a running turn.
+- **Equations** (`mathModel.ts`, `mathPlugins.ts`, `useMath.ts`). `$$…$$`, `\[…\]`, `\(…\)`
+  and `$…$` are rewritten to the one form `remark-math` is set to read. A single dollar is
+  math only when what it encloses looks like math, so `$5 and $10`, `$5-$10` and
+  `$HOME/$USER` stay text. KaTeX, `remark-math` and `rehype-katex` are one chunk, fetched
+  the first time a reply has a formula.
+
+Different from the plan, and why:
+
+- `katex` is 0.16.47, not 0.19.0. `rehype-katex` 7.0.1 depends on `katex ^0.16`, so 0.19.0
+  would have put two copies of KaTeX in the app: the stylesheet of one and the markup of
+  the other.
+- `\[…\]` is math only on lines of its own, as the design says and the plan's step did
+  not: in a sentence, `\[1\]` is an escaped bracket.
+- A `$$…$$` alone on its line is set as a display (the parser would set it inside a
+  sentence), and a display in a list item keeps the item's indent. A `$$` that never closes
+  is escaped once the text has other math, so it cannot take the rest of a reply for a
+  formula.
+- A command that holds any control character is never typed: a carriage return would run
+  it. The plan checked for line breaks only.
+- Find starts at the first match on screen, not at the first one in the conversation.
+- When a turn ends the project's file list is read again (`fresh`). The list is kept for 15
+  seconds, so a file made in the turn would otherwise be missed by its bare name.
+- The Files view takes a requested file through a store subscription and when its drafts
+  are back, not in an effect that sets state (the lint rule for that is on).
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.25.
+
 ### 0.6.24 richer replies (2026-10-11)
 
 Asked for from a screen recording of another assistant researching a person, writing an
@@ -646,6 +700,23 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- A file name in a reply is a link only as the whole of an inline code span, in a code
+  session, for a file inside the session's folder. A name with a space in it never is. A
+  name in a folder git ignores is found by its exact path only, since the file list leaves
+  ignored files out. Within a turn the answers are not asked again, so a file deleted
+  mid-turn keeps its link until the turn ends (the Files panel then says it is gone).
+- Find looks at what the transcript shows: a folded step or a folded code block is searched
+  only once it is opened. It has no whole-word, case or pattern search, and no replace.
+  On a very long conversation every search walks all of its text.
+- A command of several lines can't be typed into the terminal, and neither can one in a
+  language the list of shells does not name (`console`, `shell-session`).
+- Single-dollar math needs a mark of math in it, so `$abcd$` stays text, and `$a=$b` in a
+  sentence about a shell is read as a formula. `\[…\]` inside a sentence is not math.
+  KaTeX is 0.16.47 because `rehype-katex` has no release for a newer one. Its fonts add
+  about 1.2 MB to the installed app, the `.woff` and `.ttf` copies Electron never loads
+  among them.
+- The build prints two warnings for `::highlight()`: the CSS optimizer does not know the
+  selector yet. The rules are written out correctly.
 - Diagrams are only as good as the model that draws them. The skill is long (its
   `SKILL.md` is 30 KB and the references it sends an agent to run from 1 KB to 106 KB), and
   the result is a hand-placed page of a few thousand tokens: a small or local model may
@@ -904,6 +975,7 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
 5. Done in 0.6.16: Gemini `thinkingLevel`. Still open: measure the `ToolSearch` threshold on
    real setups; MCP elicitation and @-mentioning resources.
 6. Done in 0.6.23: diagrams, drawn with the bundled skill and shown when the turn ends.
-   Still open: equations in replies; reading PDFs from the web.
-7. Planned in October 2026 and not built: code in the conversation, review and navigation,
-   windows and motion (Settings as a window among them).
+   Done in 0.6.25: equations in replies. Still open: reading PDFs from the web.
+7. Planned in October 2026: code in the conversation (done in 0.6.25), then review and
+   navigation, then windows and motion (Settings as a window among them). The last two are
+   not built.

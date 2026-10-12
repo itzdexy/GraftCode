@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.25",
+    "date": "2026-10-12",
+    "items": [
+      "A file named in a reply opens that file. Click src/app.ts:42 and the Files panel shows it in the editor at that line. Each file on the edited-files card has Open as well.",
+      "Code blocks say which file they are for and how long they are. A block of more than 40 lines shows its first 20 until you open it, and Wrap lines wraps it. Copy still copies all of the code.",
+      "A one-line shell command has a button that types it into the terminal. Graft never runs it: you press Enter.",
+      "Ctrl+F finds text in the conversation you are in. Enter and Shift+Enter step through the matches, and Esc closes it.",
+      "Equations are set as equations. Prices and shell variables are left as they are.",
+      "A Mermaid block has Draw this, which asks Graft to redraw it as a proper diagram."
+    ]
+  },
+  {
     "version": "0.6.24",
     "date": "2026-10-11",
     "items": [

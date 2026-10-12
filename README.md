@@ -130,6 +130,23 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Code in the conversation (0.6.25)
+
+A file named in a reply is a link. `src/app.ts:42`, a Windows path, or a bare name that
+only one file has opens that file in the Files panel's editor at its line; a name two
+files share stays plain. The **Edited files** card has **Open** on every row. A code
+block's header names the file it is for (a fence such as `ts src/app.ts`) or its
+language, and from a dozen lines on how long it is. A block of more than 40 lines shows
+its first 20 until you open it, **Wrap lines** wraps it, and **Copy** always copies all
+of it. A one-line shell command has **Type into the terminal**: Graft types the line and
+you press Enter. A block with a line break in it is never typed.
+
+`Ctrl+F` finds text in the conversation, marks every match and steps through them with
+`Enter` and `Shift+Enter`; the editor and the terminal keep their own find while the
+keyboard is in them. Formulas written as `$$…$$`, `\[…\]`, `\(…\)` or `$…$` are set
+with KaTeX, which loads the first time a reply has math; `$5 and $10` and `$HOME/$USER`
+stay text. A Mermaid block has **Draw this**, which asks for it as a drawn diagram.
+
 ### Pictures, drawings and research (0.6.24)
 
 While a picture is being made, a grid of dots stands in for it and a line of dots walks
@@ -354,6 +371,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Toggle changes | `Ctrl+Shift+D` |
 | Toggle files | `Ctrl+Shift+F` |
 | Focus the message box | `Ctrl+L` |
+| Find in the conversation | `Ctrl+F` |
 | Stop the agent | `Esc` |
 | Cycle permission mode | `Shift+Tab` |
 | Settings | `Ctrl+,` |
