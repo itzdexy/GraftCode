@@ -6,6 +6,7 @@ import type { Source } from '@shared/sources';
 import { madeDiagrams, type MadeDiagram } from './diagramModel';
 import { turnSources } from './sourcesModel';
 import { inTense } from './verbs';
+import { changedTodos } from './todoMotion';
 
 /**
  * Turns stored messages into display items: consecutive tool calls collapse
@@ -28,7 +29,7 @@ export type TranscriptItem =
   | { kind: 'text'; key: string; messageId: string; text: string; live: boolean; closing: boolean; endOfTurn: boolean; at: number }
   | { kind: 'thinking'; key: string; text: string; live: boolean; progress: boolean; at: number }
   | { kind: 'tools'; key: string; calls: ToolCall[]; at: number }
-  | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean }
+  | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean; /** The tasks whose state differs from the list before it in the same turn (see todoMotion.ts). */ changed: string[] }
   | { kind: 'plan'; key: string; callId: string; plan: string; display: Extract<ToolDisplay, { kind: 'plan' }> | null }
   | { kind: 'provider'; key: string; summary: string; at: number; search: SearchInfo | null }
   | { kind: 'compaction'; key: string; text: string }
@@ -194,7 +195,7 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
           if (block.name === 'TodoWrite') {
             flush();
             const todos = inputOf<{ todos: TodoItem[] }>(block.input).todos;
-            items.push({ kind: 'todos', key, callId: block.id, todos: Array.isArray(todos) ? todos : [], latest: false });
+            items.push({ kind: 'todos', key, callId: block.id, todos: Array.isArray(todos) ? todos : [], latest: false, changed: [] });
           } else if (block.name === 'ExitPlanMode') {
             flush();
             items.push({ kind: 'plan', key, callId: block.id, plan: String(inputOf<{ plan: string }>(block.input).plan ?? ''), display: null });
@@ -241,6 +242,15 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
   }
   const lastTodos = items.findLast((i) => i.kind === 'todos');
   if (lastTodos?.kind === 'todos') lastTodos.latest = true;
+  // Each list says which of its tasks changed since the list before it. That list is forgotten at every message of
+  // the user, so what a finished turn shows never depends on another turn.
+  let listBefore: TodoItem[] | null = null;
+  for (const item of items) {
+    if (item.kind === 'user') listBefore = null;
+    if (item.kind !== 'todos') continue;
+    item.changed = changedTodos(listBefore, item.todos);
+    listBefore = item.todos;
+  }
 
   for (const [id, state] of Object.entries(live.running)) {
     const call = calls.get(id);

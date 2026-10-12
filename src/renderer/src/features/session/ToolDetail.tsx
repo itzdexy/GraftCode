@@ -23,6 +23,7 @@ import { FileMenu, useFileActions } from '../panels/FileMenu';
 import { fileSize } from './FilesCard';
 import { Markdown } from './Markdown';
 import { Output, SecretsToggle } from './Output';
+import { todoKey } from './todoMotion';
 import type { ToolCall } from './transcriptModel';
 
 /** The command a step ran, in full: its row shows the first line only, with any key in it covered. */
@@ -46,24 +47,31 @@ function revealLog(path: string): void {
   invoke('app:revealPath', { path }).catch((error: unknown) => reportError("Couldn't open the log", error));
 }
 
-export function TodoList({ todos, className }: { todos: TodoItem[]; className?: string }) {
+/**
+ * A task list. `changed` names the tasks whose state differs from the list before (see todoMotion.ts): their marks
+ * pop in when the list arrives while its turn runs, so a task that was just finished shows it.
+ */
+export function TodoList({ todos, changed, className }: { todos: TodoItem[]; changed?: readonly string[]; className?: string }) {
   if (todos.length === 0) return <p className="text-sm text-fg-muted">The task list is empty.</p>;
   return (
     <ul className={cn('flex flex-col gap-3', className)} aria-label="Task list">
-      {todos.map((todo, i) => (
+      {todos.map((todo, i) => {
+        const mark = cn('mt-2 size-14 shrink-0', changed?.includes(todoKey(todo, i)) && 'todo-mark--changed');
+        return (
         <li key={todo.id || i} className="flex items-start gap-8 text-md">
           {todo.status === 'completed' ? (
-            <CircleCheck className="mt-2 size-14 shrink-0 text-success" aria-label="Done" />
+            <CircleCheck className={cn(mark, 'text-success')} aria-label="Done" />
           ) : todo.status === 'in_progress' ? (
-            <CircleDot className="mt-2 size-14 shrink-0 text-blue" aria-label="In progress" />
+            <CircleDot className={cn(mark, 'text-blue')} aria-label="In progress" />
           ) : (
-            <CircleDashed className="mt-2 size-14 shrink-0 text-icon-muted" aria-label="To do" />
+            <CircleDashed className={cn(mark, 'text-icon-muted')} aria-label="To do" />
           )}
           <span className={cn(todo.status === 'completed' ? 'text-fg-muted line-through decoration-fg-faint' : todo.status === 'in_progress' ? 'text-fg-strong' : 'text-fg-secondary')}>
             {todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content}
           </span>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
