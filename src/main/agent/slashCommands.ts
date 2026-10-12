@@ -18,7 +18,8 @@ export interface CustomCommand extends SlashCommandInfo {
  * Built-in commands. Some act inside the session (clear, compact, cost,
  * context, help, model, effort, permissions, plan), some send a prepared prompt (init,
  * review, security-review, explain, research, diagram, test, decompile, commit, pr), and the rest open UI
- * in the renderer (mcp, resume, rewind, config, export, system, new, mission).
+ * in the renderer (mcp, resume, rewind, config, export, system, new, mission). The renderer also asks a
+ * side question (btw) itself, beside the session: it must never wait in the queue or enter the conversation.
  */
 export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'clear', description: 'Start over with an empty context (the transcript stays visible)', argumentHint: null },
@@ -43,6 +44,7 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'new', description: 'Start a new session', argumentHint: null },
   { name: 'cost', description: 'Show token usage for this session', argumentHint: null },
   { name: 'context', description: 'Show what fills the context window', argumentHint: null },
+  { name: 'btw', description: 'Ask a side question: answered from this conversation and kept out of it', argumentHint: '[question]' },
   { name: 'rewind', description: 'Restore files and/or conversation to an earlier message', argumentHint: null },
   { name: 'export', description: 'Save this session as Markdown', argumentHint: null },
   { name: 'system', description: 'Show the system prompt and tools this session sends', argumentHint: null },

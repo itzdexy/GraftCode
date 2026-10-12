@@ -30,6 +30,7 @@ import type { ChatFile } from '../chat/chatFiles';
 import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
+import { answerAside } from './aside';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
 import { runChecks, suggestChecks } from './checks';
@@ -212,6 +213,8 @@ export class AgentSession {
   private queue: InternalQueued[] = [];
   /** Queued messages sent with "Send now": they join the running turn after its next tool step. */
   private steering: InternalQueued[] = [];
+  /** Side questions being answered, by the id their asker gave them. */
+  private readonly asides = new Map<string, AbortController>();
   readonly files: FileStateTracker;
   private readonly missions: MissionController;
   /** What this session's agent loops get from it: the user's answers, tool context, usage, sub-agents and groups. */
@@ -407,6 +410,44 @@ export class AgentSession {
   }
 
   /**
+   * Answers a side question from the conversation as it stands. It is one request beside whatever the session is
+   * doing: no turn starts or is disturbed and nothing is stored. The answer goes to the asker alone; `aside` events
+   * carry it while it arrives. It reads the steps that are finished, not the reply being written at that moment.
+   */
+  async aside(askId: string, question: string): Promise<string> {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    const asked = question.trim();
+    if (asked.length === 0) throw new GraftError('empty_question', 'Type a question after /btw.');
+    const controller = new AbortController();
+    this.asides.set(askId, controller);
+    try {
+      const { provider, model } = await this.resolveModel(controller.signal);
+      return await answerAside({
+        provider,
+        model,
+        history: this.history(),
+        question: asked,
+        cacheKey: this.id,
+        privacy: this.privacy(),
+        signal: controller.signal,
+        // Not through emit: that would end the batch of the reply a running turn is streaming with every piece.
+        onText: (text) => {
+          if (!this.disposed) this.deps.emit(this.id, { type: 'aside', askId, text });
+        }
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new GraftError('aside_cancelled', 'The side question was cancelled.');
+      throw error;
+    } finally {
+      this.asides.delete(askId);
+    }
+  }
+
+  cancelAside(askId: string): void {
+    this.asides.get(askId)?.abort();
+  }
+
+  /**
    * Runs a command the user typed after "!" in the message box, in this
    * session's shell (so a cd carries over to the agent's Shell tool). The
    * command and its output join the conversation as context for the next
@@ -585,6 +626,7 @@ export class AgentSession {
     // keep writing to a session that is being removed.
     this.disposed = true;
     this.interrupt();
+    for (const aside of this.asides.values()) aside.abort();
     await this.idle();
     this.flushDeltas();
     await this.deps.shells.disposeSession(this.id);
@@ -821,6 +863,11 @@ export class AgentSession {
     }
     if (UI_COMMANDS.has(slash.name)) {
       this.commandOutput(`/${slash.name} opens in the app: type it on its own, or use the command palette (Ctrl+Shift+P).`);
+      return null;
+    }
+    if (slash.name === 'btw') {
+      // A side question is asked beside the conversation (see aside). As a message of its own it would become part of it.
+      this.commandOutput('A side question is asked on its own: type /btw and the question in the message box, with nothing attached.');
       return null;
     }
     if (slash.name.startsWith('mcp__')) return this.runMcpPrompt(slash.name, slash.args, item.text);

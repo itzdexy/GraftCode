@@ -316,6 +316,12 @@ export const contracts = {
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   /** "Send now": a queued message reaches the agent after its next tool step instead of after the turn. */
   'sessions:steer': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
+  /**
+   * A side question about a session's conversation. It is answered beside whatever the session is doing and is
+   * never stored or sent with a later request; the answer also arrives piece by piece as `aside` events.
+   */
+  'sessions:aside': channel(z.object({ id: IdSchema, askId: IdSchema, question: z.string().max(8_000) }), z.object({ text: z.string() })),
+  'sessions:cancelAside': channel(z.object({ id: IdSchema, askId: IdSchema }), Ok),
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),
   'sessions:feedback': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, value: z.union([z.literal(-1), z.literal(0), z.literal(1)]) }), Ok),
