@@ -109,6 +109,8 @@
   --g-duration-slow: 250ms;
   --g-duration-exit: 110ms;
   --g-duration-spring: 280ms;
+  /* A whole view giving way to another (a cross-fade). */
+  --g-duration-view: 150ms;
   --g-ease: cubic-bezier(0.2, 0, 0, 1);
   --g-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --g-ease-in: cubic-bezier(0.4, 0, 1, 1);
@@ -117,11 +119,16 @@
     1.0056, 1.0035, 1
   );
 
-  /* Stacking */
+  /*
+   * Stacking. A menu or a popover opens from a control and is drawn at the top of the page, so it has to
+   * lie over a dialog: Settings is one, and its menus open inside it. What floats over its own part of
+   * the page without leaving it (the list above the message box) stays under every dialog.
+   */
   --g-z-sticky: 10;
   --g-z-panel: 20;
-  --g-z-popover: 50;
+  --g-z-float: 50;
   --g-z-dialog: 60;
+  --g-z-popover: 65;
   --g-z-toast: 70;
 }
 
@@ -359,6 +366,7 @@
     --g-duration-slow: 0ms;
     --g-duration-exit: 0ms;
     --g-duration-spring: 0ms;
+    --g-duration-view: 0ms;
   }
 }
 :root[data-motion='reduced'] {
@@ -367,4 +375,5 @@
   --g-duration-slow: 0ms;
   --g-duration-exit: 0ms;
   --g-duration-spring: 0ms;
+  --g-duration-view: 0ms;
 }

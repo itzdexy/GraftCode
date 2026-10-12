@@ -409,6 +409,24 @@
   transition-duration: var(--g-duration-base);
   transition-timing-function: var(--g-ease);
 }
+/* A column at the page's far edge is cut exactly at its edge: nothing of it may reach past the page while it slides. */
+.graft-slide-x--flush > * {
+  overflow-clip-margin: 0px;
+}
+
+/*
+ * A whole view giving way to another (the page, the session, the theme, the
+ * transcript view): a short cross-fade of the window, and nothing that moves.
+ * The page stays usable while it fades: a click is never lost to it.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--g-duration-view);
+  animation-timing-function: var(--g-ease);
+}
+::view-transition {
+  pointer-events: none;
+}
 
 /*
  * Entrances for new content: messages rise in, panels slide from the side,
@@ -472,6 +490,11 @@
     opacity: 0;
     transform: translateX(12px) scale(0.98);
   }
+}
+
+/* A task whose state just changed: its mark pops in, once, and only in a list that arrived while its turn ran. */
+.motion-rise .todo-mark--changed {
+  animation: graft-pop var(--g-duration-base) var(--g-ease-out) both;
 }
 
 @layer utilities {

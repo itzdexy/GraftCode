@@ -6,6 +6,7 @@ import { sourceIndex, sourcesOf } from '@shared/sources';
 import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
+import { useCrossFaded } from '../../lib/motion';
 import { overlayOpen, useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useFileRefs } from '../../stores/fileRefs';
@@ -117,7 +118,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
   // Chats fold a turn's work into one line; a code session shows it the way Settings → Appearance says.
   const chosen = useApp((s) => s.settings?.appearance.transcriptView ?? 'normal');
-  const grouping = variant === 'chat' ? 'summary' : chosen;
+  // From one transcript view to another the window cross-fades, so the view drawn follows the setting a frame behind.
+  const groupingNow = variant === 'chat' ? 'summary' : chosen;
+  const grouping = useCrossFaded(groupingNow, groupingNow);
   const projectTranscript = useMemo(() => createTranscriptProjection(), []);
   const items = useMemo(
     () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking, grouping),
