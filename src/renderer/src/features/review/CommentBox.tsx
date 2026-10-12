@@ -1,14 +1,15 @@
 import { useState, type KeyboardEvent } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { Button } from '../../components/Button';
+import { cn } from '../../lib/cn';
 import { MAX_TEXT, type ReviewComment } from './reviewModel';
 
 /**
  * The box a comment for the agent is written in: under a line of a diff, or
- * in the editor's dialog. Ctrl+Enter saves and Escape cancels. Escape stays
- * in the box: the page would take it for "stop the running session".
+ * (`plain`) in the editor's dialog. Ctrl+Enter saves and Escape cancels. Escape
+ * stays in the box: the page would take it for "stop the running session".
  */
-export function CommentBox({ initial = '', onSave, onCancel }: { initial?: string; onSave: (text: string) => void; onCancel: () => void }) {
+export function CommentBox({ initial = '', plain = false, onSave, onCancel }: { initial?: string; plain?: boolean; onSave: (text: string) => void; onCancel: () => void }) {
   const [text, setText] = useState(initial);
   const written = text.trim();
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -22,7 +23,8 @@ export function CommentBox({ initial = '', onSave, onCancel }: { initial?: strin
     }
   };
   return (
-    <div className="motion-step flex flex-col gap-6 rounded-md border border-border bg-surface p-8 font-sans">
+    // In a dialog the dialog is the frame; under a line of a diff the box has its own.
+    <div className={cn('flex flex-col gap-6 font-sans', !plain && 'motion-step rounded-md border border-border bg-surface p-8')}>
       <textarea
         autoFocus
         aria-label="Comment for the agent"

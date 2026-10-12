@@ -1,8 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, Minimize, Pencil, Save, X } from 'lucide-react';
+import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, MessageSquarePlus, Minimize, Pencil, Save, X } from 'lucide-react';
 import type { TreeEntryView, FilePreviewView } from '@shared/schemas/panels';
 import type { CodeLocation } from '@shared/schemas/semantic';
+import { coveredLines } from '@shared/secrets';
 import { Button, IconButton } from '../../components/Button';
+import { Dialog, DialogContent } from '../../components/Dialog';
 import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { languageForPath } from '../../lib/highlight';
@@ -10,12 +12,16 @@ import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useLoad } from '../../lib/useLoad';
 import { usePanels } from '../../stores/panels';
+import { useReview } from '../../stores/review';
+import { CommentBox } from '../review/CommentBox';
+import { commentPlace } from '../review/reviewModel';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
 import { draftSaves, type SaveTarget } from './draftSaves';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
+import type { EditorComment } from './TextEditor';
 import { closeWorkspaceTab, loadWorkspaceLayout, openWorkspaceTab, saveWorkspaceLayout, setWorkspaceTabMode, type WorkspaceTab } from './workspaceLayout';
 
 const TextEditor = lazy(() => import('./TextEditor'));
@@ -268,6 +274,9 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   const saver = useRef<((target: SaveTarget) => void) | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [position, setPosition] = useState<CodeLocation | null>(null);
+  // A comment for the agent on lines of the file in the editor: asked for by the button or the key, written in a dialog.
+  const [commentAsked, setCommentAsked] = useState(0);
+  const [commenting, setCommenting] = useState<(EditorComment & { path: string }) | null>(null);
 
   const open = useCallback((path: string, location: CodeLocation | null = null, recovery = false, mode: WorkspaceTab['mode'] = 'preview'): void => {
     const requestedMode = location || recovery ? 'edit' : mode;
@@ -435,6 +444,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
               else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); setLayout((current) => setWorkspaceTabMode(current, selected, 'edit')); }
             }}><Pencil className="size-13" /></IconButton> : null}
             {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={save}><Save className="size-13" /></IconButton> : null}
+            {edit ? <IconButton label="Comment for the agent" shortcut="Ctrl+Alt+M" size="xs" onClick={() => setCommentAsked((n) => n + 1)}><MessageSquarePlus className="size-13" /></IconButton> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
@@ -464,6 +474,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
             {edit && draft ? <Suspense fallback={<LoadingState label="Loading editor…" />}><TextEditor key={`${sessionId}:${selected}:${opened}`} sessionId={sessionId} file={selected} value={draft.content} position={position} onNavigate={(location) => open(location.file, location)}
+              commentRequest={commentAsked} onComment={(at) => setCommenting({ ...at, path: selected })}
               onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={save} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}
@@ -471,6 +482,24 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
           </div>
         </div>
       ) : null}
+      <Dialog open={commenting !== null} onOpenChange={(next) => (next ? undefined : setCommenting(null))}>
+        {commenting ? (
+          <DialogContent title="Comment for the agent" description={<span className="font-mono text-sm">{commentPlace({ ...commenting, side: 'new' })}</span>} hideClose>
+            <div className="pb-16">
+              <CommentBox
+                plain
+                onCancel={() => setCommenting(null)}
+                onSave={(text) => {
+                  // A line that looks like a key or a password is not quoted: the comment goes to the model.
+                  const quote = coveredLines(commenting.quote).covered[0] ? '' : commenting.quote;
+                  useReview.getState().add(sessionId, { path: commenting.path, line: commenting.line, endLine: commenting.endLine, side: 'new', quote, text });
+                  setCommenting(null);
+                }}
+              />
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }
