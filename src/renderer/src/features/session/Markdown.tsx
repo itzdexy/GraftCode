@@ -178,7 +178,9 @@ function buildComponents(live: boolean): Components {
       const className =
         code && code.type === 'element' && Array.isArray(code.properties.className) ? code.properties.className.map(String) : [];
       const language = className.find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? null;
-      return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} live={live} />;
+      // What follows the language on the fence line (a file name, a title) is kept on the code element.
+      const meta = code && code.type === 'element' && typeof code.data?.meta === 'string' ? code.data.meta : null;
+      return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} meta={meta} live={live} />;
     },
     code({ children }) {
       // A file name becomes a link once its message is finished: while it streams, the name may still be growing.

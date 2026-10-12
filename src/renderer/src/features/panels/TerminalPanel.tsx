@@ -10,7 +10,7 @@ import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useApp } from '../../stores/app';
-import { panelBus } from '../../stores/panels';
+import { panelBus, usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { PanelFrame } from './PanelFrame';
 import { StreamJoiner } from './terminalStream';
@@ -68,7 +68,7 @@ function themeNow(): ITheme {
 }
 
 /** One xterm.js view bound to a pty: input goes to main, output streams back. */
-function XtermView({ terminal, active }: { terminal: TerminalInfoView; active: boolean }) {
+function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; active: boolean; typed: number }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -138,11 +138,12 @@ function XtermView({ terminal, active }: { terminal: TerminalInfoView; active: b
     fitRef.current?.fit();
   }, [fontSize]);
 
+  // `typed` counts the lines typed in from outside: after each, the keyboard is here, so Enter runs the line.
   useEffect(() => {
     if (!active) return;
     fitRef.current?.fit();
     termRef.current?.focus();
-  }, [active]);
+  }, [active, typed]);
 
   return <div ref={hostRef} className={cn('min-h-0 flex-1 px-6 py-4', active ? 'block' : 'hidden')} data-testid={`terminal-${terminal.id}`} />;
 }
@@ -187,6 +188,20 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
       cancelled = true;
     };
   }, [sessionId, create]);
+
+  // A line asked for from outside the panel (a command in a reply) is typed into the terminal in front and never
+  // run: it goes in without a line break. A session without a terminal gets one above, and the line waits for it.
+  const [typed, setTyped] = useState(0);
+  const wanted = usePanels((s) => (s.terminalInput?.sessionId === sessionId ? s.terminalInput.seq : null));
+  useEffect(() => {
+    if (wanted === null || activeId === null) return;
+    const line = usePanels.getState().takeTerminalInput(sessionId);
+    if (line === null) return;
+    invoke('pty:write', { id: activeId, data: line }).then(
+      () => setTyped((n) => n + 1),
+      (error: unknown) => reportError("Couldn't type into the terminal", error)
+    );
+  }, [wanted, activeId, sessionId]);
 
   const closeTab = async (id: string): Promise<void> => {
     try {
@@ -237,7 +252,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
       {load.state === 'loading' ? <LoadingState label="Starting a shell…" /> : null}
       {load.state === 'error' ? <ErrorState title="Couldn't start a terminal" message={load.message} onRetry={() => void create()} /> : null}
       {terminals.map((t) => (
-        <XtermView key={t.id} terminal={t} active={t.id === activeId} />
+        <XtermView key={t.id} terminal={t} active={t.id === activeId} typed={typed} />
       ))}
     </PanelFrame>
   );
