@@ -184,6 +184,13 @@ test('a file opens by name with Ctrl+P, at a line when one is given', async () =
   await box.fill('@health');
   await expect(palette.getByRole('combobox', { name: 'Go to a symbol' })).toHaveValue('health');
   await expect(palette.getByText('Go to symbol needs a trusted project.')).toBeVisible();
+  await w.keyboard.press('Escape');
+
+  // Problems are the language server's too: in a project that is not trusted the tab says so and checks nothing.
+  // The panel is open already, on the file that was opened.
+  const panel = w.getByRole('region', { name: 'Changes', exact: true });
+  await panel.getByRole('tab', { name: 'Problems' }).click();
+  await expect(panel.getByText('Problems need a trusted project.')).toBeVisible();
 });
 
 test('a symbol opens by name with Ctrl+T in a trusted project', async () => {
@@ -213,4 +220,45 @@ test('a symbol opens by name with Ctrl+T in a trusted project', async () => {
   await w.keyboard.press('Control+t');
   await box.fill('nothingnamedthis');
   await expect(palette.getByText('No symbol matches "nothingnamedthis".')).toBeVisible({ timeout: 30_000 });
+});
+
+test('the problems of the changed files are listed, open their place and are handed to the message box', async () => {
+  const { w, model } = await start(
+    {
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, target: 'ES2022' } }),
+      'src/a.ts': 'export function double(n: number): number {\n  return n * 2;\n}\n'
+    },
+    true
+  );
+  model.script({ toolCalls: [{ name: 'Write', input: { file_path: 'src/b.ts', content: "import { double } from './a';\nexport const wrong: string = double(2);\n" } }] }, { text: 'Written.' });
+  await w.getByRole('textbox', { name: 'Describe a task or ask a question' }).fill('write b');
+  await w.keyboard.press('Enter');
+  await w.getByRole('alertdialog').getByRole('button', { name: /Allow once/ }).click();
+  await expect(w.getByText('Written.', { exact: true })).toBeVisible({ timeout: 60_000 });
+
+  await w.keyboard.press('Control+Shift+D');
+  const panel = w.getByRole('region', { name: 'Changes', exact: true });
+  await panel.getByRole('tab', { name: 'Problems' }).click();
+  const row = panel.getByRole('button', { name: /Type 'number' is not assignable to type 'string'\./ });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await expect(row).toContainText('2:14');
+  await expect(row).toContainText('(2322)');
+  await expect(row.getByRole('img', { name: 'Error' })).toBeVisible();
+  await expect(panel.getByRole('tab', { name: 'Problems (1)' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panel.getByText('1 problem in 1 changed file')).toBeVisible();
+  await shot(w, 'review-problems');
+
+  // The button writes the request into the message box and sends nothing.
+  const asked = model.chatRequests().length;
+  await panel.getByRole('button', { name: 'Ask Graft to fix these' }).click();
+  const box = w.getByRole('textbox', { name: SESSION_BOX });
+  await expect(box).toHaveValue("Fix these problems:\n- src/b.ts:2:14 Type 'number' is not assignable to type 'string'. (2322)");
+  await expect(box).toBeFocused();
+  expect(model.chatRequests()).toHaveLength(asked);
+
+  // A row opens its file in the editor at the problem.
+  await row.click();
+  await expect(w.getByRole('tab', { name: 'src/b.ts' })).toHaveAttribute('aria-selected', 'true');
+  await expect(w.locator('.monaco-editor .line-numbers.active-line-number')).toHaveText('2');
+  await expect(panel.getByRole('tab', { name: 'Problems (1)' })).toHaveAttribute('aria-selected', 'false');
 });

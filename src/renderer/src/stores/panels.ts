@@ -5,7 +5,7 @@ export type PanelId = 'terminal' | 'changes' | 'browser' | 'tasks' | 'agents';
 
 export interface SessionPanels {
   open: PanelId[];
-  changesTab: 'changes' | 'files';
+  changesTab: 'changes' | 'files' | 'problems';
   /** Set once the tasks panel opened itself for this session's first background command. */
   tasksAutoOpened: boolean;
   /** Set once the agents panel opened itself for this session's first group of agents. */

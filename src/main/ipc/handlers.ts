@@ -68,6 +68,7 @@ import type { Services } from '../app/services';
 import type { SiteView } from '@shared/schemas/sites';
 import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
+import { changedProblems } from '../languages/changedProblems';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
 
@@ -744,6 +745,18 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
         throw new GraftError('project_untrusted', 'Language intelligence requires a trusted code project. Review project trust in Settings before checking types or definitions.');
       }
       return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content);
+    },
+    'problems:changed': async ({ sessionId }) => {
+      const summary = (await ctx.sessions()).summary(sessionId);
+      if (summary.kind !== 'code') throw new GraftError('no_folder', 'Problems belong to code sessions.');
+      const s = await ctx.services();
+      const dir = await workDirFor(sessionId);
+      const trusted = !!summary.projectId && s.projects.get(summary.projectId)?.trusted === true;
+      // Language intelligence stays behind project trust: without it nothing is listed and no server is asked.
+      const changed = trusted && (await gitInfo(dir)).isRepo
+        ? (await listChanges(dir)).map((file) => file.path).filter((file) => fs.statSync(path.join(dir, file), { throwIfNoEntry: false })?.isFile() === true)
+        : [];
+      return changedProblems({ root: dir, trusted, changed, source: s.languages });
     },
     'files:save': async ({ sessionId, path, content, revision }) => {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');

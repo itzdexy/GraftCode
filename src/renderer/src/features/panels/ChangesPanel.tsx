@@ -16,6 +16,8 @@ import { useDiffComments } from '../review/useDiffComments';
 import { SecretsToggle } from '../session/Output';
 import { FilesView } from './FilesPanel';
 import { PanelFrame } from './PanelFrame';
+import { problemsTab } from './problemsModel';
+import { ProblemsView } from './ProblemsView';
 
 type Selection = { path: string; staged: boolean } | null;
 type Confirm = { title: string; detail: string; run: () => Promise<void> } | null;
@@ -363,17 +365,22 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
   );
 }
 
-/** Changes / Files panel: stage, unstage and discard by file or hunk, commit; browse files read-only. */
+const TABS = ['changes', 'files', 'problems'] as const;
+
+/** Changes / Files / Problems panel: stage, unstage and discard by file or hunk, commit; browse and edit files; see the errors in what changed. */
 export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: string; refreshKey: unknown; onClose: () => void }) {
   const tab = usePanels((s) => panelsOf(s, sessionId).changesTab);
   const setTab = usePanels((s) => s.setChangesTab);
+  /** What the last check of this session found: the Problems tab says how many once there are any. */
+  const [found, setFound] = useState<{ sessionId: string; count: number } | null>(null);
+  const problems = found?.sessionId === sessionId ? found.count : 0;
   return (
     <PanelFrame
       label="Changes"
       onClose={onClose}
       title={
-        <div role="tablist" aria-label="Changes or files" className="flex items-center gap-2">
-          {(['changes', 'files'] as const).map((t) => (
+        <div role="tablist" aria-label="Changes, files or problems" className="flex items-center gap-2">
+          {TABS.map((t) => (
             <button
               key={t}
               type="button"
@@ -382,13 +389,19 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
               onClick={() => setTab(sessionId, t)}
               className={cn('h-24 rounded-sm px-8 text-sm', tab === t ? 'bg-hover text-fg' : 'text-fg-muted hover:text-fg-secondary')}
             >
-              {t === 'changes' ? 'Changes' : 'Files'}
+              {t === 'changes' ? 'Changes' : t === 'files' ? 'Files' : problemsTab(problems)}
             </button>
           ))}
         </div>
       }
     >
-      {tab === 'changes' ? <ChangesView sessionId={sessionId} refreshKey={refreshKey} /> : <FilesView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} />}
+      {tab === 'changes' ? (
+        <ChangesView sessionId={sessionId} refreshKey={refreshKey} />
+      ) : tab === 'files' ? (
+        <FilesView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} />
+      ) : (
+        <ProblemsView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} onCount={(count) => setFound({ sessionId, count })} />
+      )}
     </PanelFrame>
   );
 }
