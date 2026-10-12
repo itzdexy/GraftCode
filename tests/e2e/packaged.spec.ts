@@ -74,7 +74,7 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
     { toolCalls: [{ name: 'Grep', input: { pattern: 'needle' } }, { name: 'Read', input: { file_path: 'notes.txt' } },
       { name: 'SemanticCode', input: { action: 'outline', file: 'src/app.ts' } }] },
     { toolCalls: [{ name: 'Edit', input: { file_path: 'notes.txt', old_string: 'hello', new_string: 'hello from the installer' } }] },
-    { text: 'Found it and updated the notes.' }
+    { text: 'Found it and updated the notes. See `src/app.ts:1`; a circle covers $\\pi r^2$.' }
   );
   const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
   await composer.fill('Find the needle and update the notes');
@@ -84,6 +84,12 @@ test('packaged app: onboarding, a session with native tools (SQLite, ripgrep, pt
   await card.getByRole('button', { name: /Allow once/ }).click();
   await expect(w.getByText('Found it and updated the notes.')).toBeVisible();
   expect(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8')).toBe('hello from the installer\n');
+  // The math renderer is a chunk of its own: it and its stylesheet load from the package the first time a reply has a formula.
+  const log = w.getByRole('log', { name: 'Conversation' });
+  await expect(log.locator('.katex')).toHaveCount(1);
+  await expect(log.locator('.katex-error')).toHaveCount(0);
+  // A file the reply names is a link to it, answered from the file list the bundled ripgrep makes.
+  await expect(log.getByRole('button', { name: 'src/app.ts:1' })).toHaveAttribute('title', 'Open src/app.ts at line 1');
   // The Grep result that went back to the model came from the bundled ripgrep.
   const toolResults = JSON.stringify((mock.chatRequests()[1]!.body as { messages: unknown[] }).messages.slice(-2));
   expect(toolResults).toContain('src/app.ts');
