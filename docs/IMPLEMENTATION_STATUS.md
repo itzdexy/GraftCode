@@ -271,6 +271,19 @@ table. Tool results gain one optional field (`diagram`), so older conversations 
 they are, and diagrams made before this build have no card. Commands, commits, skips and
 what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.23.
 
+### Local 0.6.25 build
+
+On `feat/richer-graft` (local, not pushed), six commits on the 0.6.24 build, ending at
+`b7dbb41`: code in the conversation. Typecheck, lint, 1286 unit tests and 60 desktop tests
+pass on Windows; 1278 unit tests and the 60 desktop tests pass in a Linux container. The
+Windows package builds (`dist/Graft-Setup-0.6.25.exe`) and its three smoke tests pass, one
+of them now with a formula and a file link; it is unsigned and was not installed. The
+schema is 9, as in 0.6.22: this round adds no table and changes no stored message. Settings
+gain one shortcut with a default (`findInTranscript`, Ctrl+F), so older settings load as
+they are. Three packages are new, all for equations: `katex` 0.16.47, `remark-math` 6.0.0
+and `rehype-katex` 7.0.1. Commands, commits, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.25.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
