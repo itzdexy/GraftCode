@@ -491,3 +491,58 @@ Not verified:
   app), and none of them checks an animation. The only new one is the find bar's entrance,
   which uses the shared utility that reduced motion switches off.
 - The installer was built and its unpacked app tested; the installer itself was not run.
+
+## 0.6.26 round (2026-10-12)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Seven
+commits on top of the 0.6.25 round, `832caa1` to `7523d86`, after `10a835a`, which gave the
+packaged test a formula and a file link. Two systems: Windows 11 (Node 26.7.0) and a clean
+`node:24-bookworm` container (Docker 29.8.0) packed from a separate checkout of `7523d86`.
+Nothing here ran on macOS, on GitHub's runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `7523d86` | exit 0 |
+| `npm run lint` | Windows, `7523d86` | exit 0 |
+| `npm test` | Windows, `7523d86` | 111 files passed, 2 skipped; 1319 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, `7523d86` | exit 0 |
+| `npx playwright test` | Windows, `7523d86` | 64 passed, 6 skipped, 0 failed (5.4 min) |
+| `npm run verify:docker` | Linux container, `7523d86` | typecheck, lint, unit and build exit 0; unit 1311 passed, 37 skipped; desktop suite 64 passed, 6 skipped, 0 failed (5.3 min) |
+
+No installer was built for 0.6.26 by itself. The 0.6.27 build, made the same day from the
+commits that follow, carries it.
+
+The six skipped desktop tests are the three of the packaged app and the three that take
+README screenshots.
+
+What the tests of this round show, and with what:
+
+- Unit, 33 new cases in five files. A comment as the agent reads it: its place, the line
+  in backticks, a removed line marked, line breaks turned into spaces. Comments after a
+  message by file and line; alone under a line of their own; left waiting by a `/` or `!`
+  command. What is kept (100 a session, 50 sessions) and nothing for stored text that does
+  not fit. Where a comment sits in a diff, and which lines an editor's selection covers.
+  The palette's three modes, a line after a file's name, the file that names a project,
+  and an answer to an older query dropped. `changedProblems` against a stand-in server:
+  errors and warnings in order, a file that is slow or fails named with the reason, a
+  question that ran out of time called off, nothing asked in a project that is not
+  trusted or has no packages, 50 files at most.
+- Desktop, 4 new tests in `review.spec.ts`. A comment written on a line of the diff in the
+  Changes panel, edited, left waiting by `/cost`, kept in the window's storage, sent after
+  the next message with its place and its line, and gone afterwards. A comment from the
+  editor with Ctrl+Alt+M and one on a removed line under an edit in the conversation; the
+  list above the message box, one comment deleted, the rest sent with nothing typed.
+  Ctrl+P finds a file loosely, opens it, opens another at a line, says when nothing
+  matches, and turns into the command and the symbol palette. Ctrl+T finds a function
+  through the real language server and opens it at its line. Problems lists a real type
+  error of a file the agent wrote, opens it at the problem, writes the request to fix it
+  into the message box and sends nothing; in a project that is not trusted both say so.
+
+Not verified:
+
+- No model wrote a reply here or read a comment: the requests were read from a stand-in
+  provider. Whether a model acts well on "Comments on the code:" was not tried.
+- Problems and Go to symbol ran on fixture projects of one and two files. The limits of 50
+  files and 60 seconds were met with a stand-in server only, never a slow real one.
+- A comment on several selected lines, and comments when the window's storage is full or
+  missing, are covered by unit tests of the model and not by a run of the app.

@@ -284,6 +284,16 @@ they are. Three packages are new, all for equations: `katex` 0.16.47, `remark-ma
 and `rehype-katex` 7.0.1. Commands, commits, skips and what was not verified:
 `UPGRADE_TEST_REPORT.md`, section 0.6.25.
 
+### Local 0.6.26 round
+
+On `feat/richer-graft` (local, not pushed), seven commits on the 0.6.25 build, ending at
+`7523d86`: review and navigation. Typecheck, lint, 1319 unit tests and 64 desktop tests pass
+on Windows; 1311 unit tests and the 64 desktop tests pass in a Linux container. No installer
+was built for it alone. The schema is 9: no new table, no stored message changed. Settings
+gain two shortcuts with defaults (`quickOpen`, Ctrl+P; `goToSymbol`, Ctrl+T), and the
+window's storage gains `graft.review.v1` for comments that wait. No new package. Commands,
+commits, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.26.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
