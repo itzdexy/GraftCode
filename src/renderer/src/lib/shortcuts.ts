@@ -23,7 +23,9 @@ export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
   openSettings: 'Open settings',
   toggleFiles: 'Show or hide the files panel',
   commandPalette: 'Open the command palette',
-  findInTranscript: 'Find in the conversation'
+  findInTranscript: 'Find in the conversation',
+  quickOpen: 'Open a file by name',
+  goToSymbol: 'Go to a symbol by name'
 };
 
 /** Shortcuts that act inside the message box may use bare keys; the rest need Ctrl or Alt. */

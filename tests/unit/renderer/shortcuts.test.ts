@@ -59,4 +59,11 @@ describe('recording shortcuts', () => {
     expect(lib.shortcutProblem('findInTranscript', 'Ctrl+F', DEFAULT_SHORTCUTS)).toBeNull();
     expect(lib.shortcutProblem('search', 'Ctrl+F', DEFAULT_SHORTCUTS)).toMatch(/Find in the conversation/);
   });
+
+  it('has keys for opening a file and a symbol by name', () => {
+    expect([DEFAULT_SHORTCUTS.quickOpen, DEFAULT_SHORTCUTS.goToSymbol]).toEqual(['Ctrl+P', 'Ctrl+T']);
+    expect([lib.SHORTCUT_DESCRIPTIONS.quickOpen, lib.SHORTCUT_DESCRIPTIONS.goToSymbol]).toEqual(['Open a file by name', 'Go to a symbol by name']);
+    expect(lib.shortcutProblem('quickOpen', 'Ctrl+P', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('goToSymbol', 'Ctrl+T', DEFAULT_SHORTCUTS)).toBeNull();
+  });
 });
