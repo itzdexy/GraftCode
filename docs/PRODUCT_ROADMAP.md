@@ -19,6 +19,54 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.26 review and navigation (2026-10-12)
+
+The third of the four rounds planned on 2026-10-11. No new package, no new table.
+
+- **Comments for the agent** (`features/review/`, `stores/review.ts`). A comment is a file,
+  a line or lines, the side of a change, the line's text and what should change. It is
+  written on any line of a diff (`DiffView`'s `comments`, used by the Changes panel and by
+  `EditDiff` in a code session's transcript) or from the editor (`Ctrl+Alt+M`, or the
+  button above it; `selectionAnchor`). Comments wait per session in the window's storage
+  (`graft.review.v1`, 100 a session, 50 sessions), show in a bar above the message box
+  (`ReviewBar`), and are written after the next ordinary message by `withComments`, by
+  file and line. A message that starts with `/` or `!` goes as typed and leaves them
+  waiting. Nothing in the project or in a stored message changes. A line that looks like
+  a key or a password is never quoted.
+- **Open a file or a symbol by name** (`paletteModel.ts`, `CommandPalette.tsx`). The
+  palette has three modes. `Ctrl+P` (`quickOpen`) lists the files open in the Files panel,
+  then the project's, through `files:search`; `name:42` opens the editor at the line.
+  `Ctrl+T` (`goToSymbol`) asks `files:semantic` for declarations by name, 250 ms after the
+  last key, from two characters. `>` and `@` first turn the file palette into the other
+  two. An answer to an older query is dropped (`latestOnly`). The kinds of symbol are named
+  from one table both processes share (`shared/symbolKinds.ts`).
+- **Problems** (`main/languages/changedProblems.ts`, `ProblemsView.tsx`, channel
+  `problems:changed`). A third tab of the Changes panel: the server's errors and warnings
+  for the changed TypeScript and JavaScript files, 50 files, 5 seconds a file and 60 in
+  all, in a trusted project only. Files are asked about one after another; a question that
+  runs out of time is called off. Every file is either checked or listed under Not checked
+  with the reason.
+
+Different from the plan, and why:
+
+- The editor has no context menu, so Comment for the agent is a button above it and a key.
+  Monaco's menu would bring a Paste entry that cannot work: the window refuses clipboard
+  reads.
+- A file whose packages are not installed is listed under Not checked instead of being
+  asked about: each of its imports would be an error that the change did not cause. The
+  plan handled only the case where every file is like that.
+- While it checks, the tab says how many files (`Checking 3 files…`), as the design asks;
+  the plan had dropped the number. The count comes from git's status, asked for beside the
+  check.
+- When the files change after a check, the list says it is older and offers Refresh.
+- The symbol search asks for the project's `.ts` and `.js` files by name to find one that
+  says which project is meant; the first files of a project alone may all be something
+  else.
+- The command palette lists both new palettes as commands, so they are found without
+  knowing the keys.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.26.
+
 ### 0.6.25 code in the conversation (2026-10-12)
 
 The second of the four rounds planned on 2026-10-11 (diagrams was the first, as 0.6.23): a
@@ -700,6 +748,17 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- A comment for the agent is text in the next message, not a thread: the agent's answer is
+  not tied back to the line, and a comment is gone from the code once it is sent. Comments
+  are kept in the window's storage, so another computer does not have them. A comment's
+  line number is the one it had when it was written; when the file moves on, the quote is
+  what still says what it was about. On a line that did not change, the "+" is reached
+  with the pointer only. The editor has no context menu.
+- Go to symbol and Problems cover TypeScript and JavaScript, in trusted projects, through
+  one language server. Problems looks at changed files only, 50 at most, so a file broken
+  by a change made elsewhere is not listed, and it checks when asked, not after every turn.
+  There is no rename and no call hierarchy.
+- Open a file by name lists 40 results and does not show a preview before it opens.
 - A file name in a reply is a link only as the whole of an inline code span, in a code
   session, for a file inside the session's folder. A name with a space in it never is. A
   name in a folder git ignores is found by its exact path only, since the file list leaves
@@ -928,7 +987,7 @@ praise and complain about (October 2026).
 | Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
 | A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | Open; small. Graft notifies but has no sound |
-| Comments on a diff that go back to the agent | Cursor and Codex review | Open |
+| Comments on a diff that go back to the agent | Cursor and Codex review | Shipped in 0.6.26 |
 | Where the context and the money went, by category | Claude Code `/context` and `/cost` | The context half shipped in 0.6.13 as `/context` and the popover; spend by day is open |
 | A side question that doesn't derail the turn | Claude Code `/btw` | Open |
 | Watch a pull request's CI and fix what fails | Claude Code desktop, Codex | Open |
@@ -976,6 +1035,6 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    real setups; MCP elicitation and @-mentioning resources.
 6. Done in 0.6.23: diagrams, drawn with the bundled skill and shown when the turn ends.
    Done in 0.6.25: equations in replies. Still open: reading PDFs from the web.
-7. Planned in October 2026: code in the conversation (done in 0.6.25), then review and
-   navigation, then windows and motion (Settings as a window among them). The last two are
-   not built.
+7. Planned in October 2026: code in the conversation (done in 0.6.25), review and
+   navigation (done in 0.6.26), then windows and motion (Settings as a window among them),
+   which is not built.

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.26",
+    "date": "2026-10-12",
+    "items": [
+      "Comment on any line of a diff, in the Changes panel or under an edit in the conversation, or on a line or selection in the editor (Ctrl+Alt+M, or the button above it). Your comments wait above the message box and go to Graft with your next message, each with its file, its line and the code it is about.",
+      "Ctrl+P opens a file by typing part of its name; add :42 to land on a line. Ctrl+T finds a function, class or type by name in a trusted TypeScript or JavaScript project.",
+      "The Changes panel has a Problems tab: the errors and warnings in the files you have changed, from the built-in language server, each opening at its place. Ask Graft to fix these writes the request into the message box for you to send."
+    ]
+  },
+  {
     "version": "0.6.25",
     "date": "2026-10-12",
     "items": [

@@ -1,6 +1,6 @@
-# Try Graft 0.6.25
+# Try Graft 0.6.26
 
-1. Open **Settings → About** and confirm version **0.6.25**. In
+1. Open **Settings → About** and confirm version **0.6.26**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -94,6 +94,19 @@
 24. Ask a model for the quadratic formula, and for what two things cost in dollars. The
     formula is set as an equation; `$5 and $10` stays as written. A reply with a Mermaid
     block has **Draw this** on it, which asks for the diagram to be drawn.
+25. Have Graft change a file, open **Changes** (Ctrl+Shift+D) and its diff. Point at a
+    line: a **+** appears in the gutter. Write a comment and press Ctrl+Enter: it sits
+    under the line and a bar above the message box reads "1 comment". Type `/cost` and
+    send: the comment is still waiting. Send an ordinary message: your message in the
+    conversation ends with "Comments on the code:" and the line, and the bar is gone.
+    In the editor, select two lines and press **Ctrl+Alt+M**.
+26. Press **Ctrl+P** in a code session and type part of a file's name; Enter opens it.
+    Type a name and `:12`: the editor opens at line 12. In a trusted TypeScript project
+    press **Ctrl+T** and type the start of a function's name.
+27. In a trusted TypeScript project, have Graft write something that does not compile and
+    open **Changes → Problems**: the error is listed with its line; click it. **Ask Graft
+    to fix these** fills the message box and sends nothing. In a project that is not
+    trusted the tab says so.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

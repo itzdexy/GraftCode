@@ -130,6 +130,27 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Review and navigation (0.6.26)
+
+Point at the code instead of describing it. Any line of a diff, in the **Changes** panel
+or under an edit in the conversation, shows a **+** in its gutter: write what should
+change, and the comment sits under the line. In the editor, `Ctrl+Alt+M` (or the button
+above it) comments on the cursor's line or the selected lines. Comments wait above the
+message box and go to Graft with your next message, each with its file, its line and the
+line of code it is about; **Send comments** sends them by themselves. A `/` or `!` command
+goes as typed and leaves them waiting.
+
+`Ctrl+P` opens a file by part of its name, with the files you have open first; `app.ts:42`
+opens the editor at that line. `Ctrl+T` finds a function, class or type by name through
+the language server Graft already runs, in a trusted TypeScript or JavaScript project.
+In the file palette, `>` turns it into the command palette and `@` into the symbol one.
+
+The **Changes** panel has a **Problems** tab: the errors and warnings the language server
+reports for the files you have changed, in one list, each opening its file at the
+problem. It checks when the tab opens and on **Refresh**, 50 changed files at most, and
+names any file it could not check with the reason. **Ask Graft to fix these** writes the
+request into the message box and sends nothing.
+
 ### Code in the conversation (0.6.25)
 
 A file named in a reply is a link. `src/app.ts:42`, a Windows path, or a bare name that
@@ -372,6 +393,9 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Toggle files | `Ctrl+Shift+F` |
 | Focus the message box | `Ctrl+L` |
 | Find in the conversation | `Ctrl+F` |
+| Open a file by name | `Ctrl+P` |
+| Go to a symbol by name | `Ctrl+T` |
+| Comment for the agent (in the editor) | `Ctrl+Alt+M` |
 | Stop the agent | `Esc` |
 | Cycle permission mode | `Shift+Tab` |
 | Settings | `Ctrl+,` |
