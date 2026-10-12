@@ -1,6 +1,6 @@
-# Try Graft 0.6.26
+# Try Graft 0.6.27
 
-1. Open **Settings → About** and confirm version **0.6.26**. In
+1. Open **Settings → About** and confirm version **0.6.27**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -107,6 +107,17 @@
     open **Changes → Problems**: the error is listed with its line; click it. **Ask Graft
     to fix these** fills the message box and sends nothing. In a project that is not
     trusted the tab says so.
+28. Open **Settings** from the account menu while a session is open: it opens as a
+    window over the session. Press **Esc**: the session is back as it was. Press
+    **Forward**: Settings opens again. In **Shortcuts**, start recording a shortcut and
+    press Esc: the recording ends and Settings stays.
+29. With **Appearance → Motion** set to **On**, go from a session to **New** and back,
+    change the theme, and open and close a panel (Ctrl+Shift+D): pages and themes
+    cross-fade, and the panel column slides while the conversation moves aside. Set
+    Motion to **Reduced** and do the same: nothing moves, and everything still opens.
+30. Give a code session a task with several steps and watch its task list: the mark of a
+    task pops when it changes state. With two sessions in the sidebar, send a message in
+    the lower one: its row travels to the top.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

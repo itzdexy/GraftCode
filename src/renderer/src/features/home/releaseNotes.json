@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.6.27",
+    "date": "2026-10-12",
+    "items": [
+      "Settings opens as a window over what you were doing, and Esc puts you back there. The session underneath keeps working.",
+      "Changing page, session, theme or transcript view cross-fades instead of cutting.",
+      "The panel column slides open and shut, and the conversation moves aside with it.",
+      "A session that moves in the sidebar, into Needs you or to the top after a reply, travels to its new place.",
+      "A task that finishes shows it as it happens.",
+      "A menu opened inside a dialog is drawn over it, not behind it.",
+      "If Graft looks still, Windows may have animations turned off: Settings → Appearance → Motion → On animates Graft anyway."
+    ]
+  },
+  {
     "version": "0.6.26",
     "date": "2026-10-12",
     "items": [
