@@ -79,7 +79,9 @@ test('settings are found by searching: a setting opens its page and shows itself
   const hits = nav.getByRole('list', { name: 'Settings found' });
   // The setting comes with the page it is on, before the page that only mentions it.
   await expect(hits.getByRole('button').first()).toHaveText(/Motion\s*Appearance/);
-  await hits.getByRole('button', { name: /^Motion/ }).click();
+  // Two settings carry the word: whether anything moves, and how much. Both are found, the one that is the word first.
+  await expect(hits.getByRole('button', { name: /^Motion style/ })).toBeVisible();
+  await hits.getByRole('button', { name: /^Motion\s*Appearance/ }).click();
   await expect(w.getByRole('heading', { level: 2, name: 'Appearance' })).toBeVisible();
   await expect(w.getByText('Motion', { exact: true })).toBeInViewport();
   // The search is over once something is taken: the list of pages is back.
