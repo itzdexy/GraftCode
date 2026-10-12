@@ -294,6 +294,16 @@ gain two shortcuts with defaults (`quickOpen`, Ctrl+P; `goToSymbol`, Ctrl+T), an
 window's storage gains `graft.review.v1` for comments that wait. No new package. Commands,
 commits, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.26.
 
+### Local 0.6.27 build
+
+On `feat/richer-graft` (local, not pushed), ending at `3c63364`: windows and motion.
+Typecheck, lint, 1340 unit tests and 68 desktop tests pass on Windows; 1332 unit tests and
+the 68 desktop tests pass in a Linux container. The Windows package builds
+(`dist/Graft-Setup-0.6.27.exe`) and its three smoke tests pass; it is unsigned and was not
+installed. It carries 0.6.25 and 0.6.26 as well. The schema is 9: no new table, no stored
+message changed, no new setting. No new package. Commands, commits, what the suite found on
+the way, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.27.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
