@@ -27,6 +27,7 @@ import { ReviewBar } from '../review/ReviewBar';
 import { withComments } from '../review/reviewModel';
 import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
+import { AsideCards } from './AsideCards';
 import { MissionBar } from './MissionBar';
 import { PermissionCard } from './PermissionCard';
 import { PlanBar } from './PlanBar';
@@ -161,6 +162,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
           <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
+            <AsideCards sessionId={summary.id} />
             <QueueBar sessionId={summary.id} queue={view.queue} />
             <MissionBar sessionId={summary.id} mission={view.mission} checking={view.checking !== null} />
             <PlanBar plan={plan} todos={view.todos} />
@@ -254,6 +256,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           ) : null}
           {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
           {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
+          <AsideCards sessionId={summary.id} />
           <QueueBar sessionId={summary.id} queue={view.queue} />
           <Composer
             draftKey={summary.id}

@@ -185,6 +185,7 @@ function reduce(view: SessionView, event: AgentEvent): SessionView {
     case 'usage':
     case 'mode':
     case 'title':
+    case 'aside': // A side question's answer is no part of the conversation: stores/asides.ts keeps it.
       return view;
   }
 }
