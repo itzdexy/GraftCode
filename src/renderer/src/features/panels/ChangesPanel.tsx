@@ -12,6 +12,7 @@ import { panelsOf, usePanels } from '../../stores/panels';
 import { reportError, useToasts } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { coveredRows, rowsFromHunks } from '../diff/diffModel';
+import { useDiffComments } from '../review/useDiffComments';
 import { SecretsToggle } from '../session/Output';
 import { FilesView } from './FilesPanel';
 import { PanelFrame } from './PanelFrame';
@@ -207,6 +208,8 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
   const covers = useMemo(() => coveredRows(rows), [rows]);
   const fileKey = current ? `${current.path}:${String(current.staged)}` : null;
   const revealed = fileKey !== null && uncovered === fileKey;
+  // Comments for the agent, on the lines of the file whose diff is shown.
+  const comments = useDiffComments(sessionId, current?.path ?? null);
 
   if (load.state === 'loading') return <LoadingState label="Reading changes…" />;
   if (load.state === 'error') return <ErrorState message={load.message} onRetry={refresh} />;
@@ -295,6 +298,7 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
               mode={mode}
               language={languageForPath(current.path)}
               covers={revealed ? null : covers}
+              comments={comments}
               hunkActions={(hunk) => (
                 <span className="flex shrink-0 gap-4 font-sans text-2xs">
                   {current.staged ? (

@@ -1,8 +1,19 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { highlightLines, type Token } from '../../lib/highlight';
 import { logError } from '../../lib/log';
-import { hunkTexts, inlineSpans, pieces, toSplitRows, type DiffRow, type Span } from './diffModel';
+import { CommentBox, CommentNote } from '../review/CommentBox';
+import { quoteOf, type ReviewComment } from '../review/reviewModel';
+import { commentAnchor, commentsAt, coveredRows, hunkTexts, inlineSpans, pieces, toSplitRows, type CommentAnchor, type DiffRow, type Span } from './diffModel';
+
+/** Comments on the lines of a diff: the ones that wait for the next message, and what writing, changing and deleting one does. */
+export interface DiffComments {
+  list: ReviewComment[];
+  onAdd: (at: CommentAnchor & { quote: string }, text: string) => void;
+  onEdit: (id: string, text: string) => void;
+  onDelete: (id: string) => void;
+}
 
 interface DiffViewProps {
   rows: DiffRow[];
@@ -17,6 +28,8 @@ interface DiffViewProps {
   covers?: ReadonlyMap<number, string> | null;
   /** Extra controls rendered at the end of each hunk header row (e.g. stage/revert). */
   hunkActions?: (hunk: number) => ReactNode;
+  /** With these, every line can be commented on and shows the comments that wait on it. Left out or null: a diff to read. */
+  comments?: DiffComments | null;
   className?: string;
 }
 
@@ -32,6 +45,46 @@ const SIGN: Record<DiffRow['type'], string> = { add: '+', del: '-', ctx: ' ', hu
 
 function Gutter({ value }: { value: number | null }) {
   return <span className="w-36 shrink-0 pr-6 text-right text-fg-faint select-none">{value ?? ''}</span>;
+}
+
+/**
+ * The "+" in a line's gutter. It shows while the pointer is on the line or the keyboard on the button. A changed
+ * line's button is in the tab order; an unchanged line's is for the pointer (the editor's command reaches every line).
+ */
+function CommentButton({ anchor, changed, onClick }: { anchor: CommentAnchor; changed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Comment on line ${String(anchor.line)}`}
+      tabIndex={changed ? 0 : -1}
+      onClick={onClick}
+      className="absolute inset-y-0 left-1 my-auto flex size-16 items-center justify-center rounded-xs bg-btn-primary text-btn-primary-fg opacity-0 transition-ui group-hover/line:opacity-100 hover:bg-btn-primary-hover focus-visible:opacity-100"
+    >
+      <Plus className="size-12" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** Under a line: the comments that wait on it, and the box while one is being written. It keeps to the part of a wide diff that is in view. */
+function LineComments({ comments, anchor, quote, writing, onClose }: { comments: DiffComments; anchor: CommentAnchor; quote: string; writing: boolean; onClose: () => void }) {
+  const here = commentsAt(comments.list, anchor);
+  if (here.length === 0 && !writing) return null;
+  return (
+    <div className="sticky left-0 flex w-[100cqw] flex-col gap-4 border-y border-border-subtle bg-sunken px-8 py-6">
+      {here.map((comment) => (
+        <CommentNote key={comment.id} comment={comment} onEdit={(text) => comments.onEdit(comment.id, text)} onDelete={() => comments.onDelete(comment.id)} />
+      ))}
+      {writing ? (
+        <CommentBox
+          onSave={(text) => {
+            comments.onAdd({ ...anchor, quote }, text);
+            onClose();
+          }}
+          onCancel={onClose}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function HunkRow({ row, actions }: { row: DiffRow; actions?: ReactNode }) {
@@ -92,7 +145,15 @@ function LineText({ text, ink, tone }: { text: string; ink: LineInk; tone: DiffR
 }
 
 /** Unified or side-by-side diff; rows come from parsePatch / rowsFromHunks. */
-export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, covers = null, hunkActions, className }: DiffViewProps) {
+export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, covers = null, hunkActions, comments = null, className }: DiffViewProps) {
+  /** The line a comment is being written on. */
+  const [writing, setWriting] = useState<CommentAnchor | null>(null);
+  const isWriting = (anchor: CommentAnchor): boolean => writing?.line === anchor.line && writing.side === anchor.side;
+  // A comment goes to the model with its line quoted. A line that looks like a key or a password is never quoted, shown or not.
+  const commenting = comments !== null;
+  const secret = useMemo(() => (commenting ? coveredRows(rows) : null), [commenting, rows]);
+  const place = useMemo(() => new Map(rows.map((row, i): [DiffRow, number] => [row, i])), [rows]);
+  const quoteFor = (row: DiffRow): string => (secret?.has(place.get(row) ?? -1) ? '' : quoteOf(row.text));
   const spans = useMemo(() => inlineSpans(rows), [rows]);
   const tokens = useRowTokens(rows, language);
   // Rows are looked up by identity, so the side-by-side pairs find the same ink as the unified rows.
@@ -111,47 +172,59 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
   };
 
   return (
-    <div className={cn('selectable overflow-x-auto font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.55]', className)}>
+    // With comments the diff is a size container: a comment under a line is as wide as the part in view, however long the lines are.
+    <div className={cn('selectable overflow-x-auto font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.55]', comments && '[container-type:inline-size]', className)}>
       <div className="min-w-max">
         {mode === 'unified'
-          ? rows.map((row, i) =>
-              row.type === 'hunk' || row.type === 'note' ? (
-                header(row, i)
-              ) : (
-                <div key={i} data-find-block className={cn('flex', LINE_BG[row.type])}>
-                  {gutter === 'both' ? (
-                    <>
-                      <Gutter value={row.oldNo} />
-                      <Gutter value={row.newNo} />
-                    </>
-                  ) : (
-                    <Gutter value={row.type === 'del' ? row.oldNo : row.newNo} />
-                  )}
-                  <span className={cn('w-14 shrink-0 select-none', row.type === 'add' ? 'text-diff-add' : row.type === 'del' ? 'text-diff-del' : '')}>
-                    {SIGN[row.type]}
-                  </span>
-                  <span className="pr-12 whitespace-pre">
-                    <LineText text={row.text} ink={inkOf(row)} tone={row.type} />
-                  </span>
-                </div>
-              )
-            )
-          : toSplitRows(rows).map((pair, i) =>
-              pair.full ? (
-                header(pair.full, i)
-              ) : (
-                <div key={i} className="grid grid-cols-2">
-                  {[pair.left, pair.right].map((side, j) => (
-                    <Fragment key={j}>
-                      <div data-find-block className={cn('flex min-w-0', side ? LINE_BG[side.type] : 'bg-sunken', j === 0 && 'border-r border-border-subtle')}>
+          ? rows.map((row, i) => {
+              if (row.type === 'hunk' || row.type === 'note') return header(row, i);
+              const anchor = comments ? commentAnchor(row) : null;
+              return (
+                <Fragment key={i}>
+                  <div data-find-block className={cn('flex', anchor && 'group/line relative', LINE_BG[row.type])}>
+                    {anchor ? <CommentButton anchor={anchor} changed={row.type !== 'ctx'} onClick={() => setWriting(anchor)} /> : null}
+                    {gutter === 'both' ? (
+                      <>
+                        <Gutter value={row.oldNo} />
+                        <Gutter value={row.newNo} />
+                      </>
+                    ) : (
+                      <Gutter value={row.type === 'del' ? row.oldNo : row.newNo} />
+                    )}
+                    <span className={cn('w-14 shrink-0 select-none', row.type === 'add' ? 'text-diff-add' : row.type === 'del' ? 'text-diff-del' : '')}>
+                      {SIGN[row.type]}
+                    </span>
+                    <span className="pr-12 whitespace-pre">
+                      <LineText text={row.text} ink={inkOf(row)} tone={row.type} />
+                    </span>
+                  </div>
+                  {comments && anchor ? <LineComments comments={comments} anchor={anchor} quote={quoteFor(row)} writing={isWriting(anchor)} onClose={() => setWriting(null)} /> : null}
+                </Fragment>
+              );
+            })
+          : toSplitRows(rows).map((pair, i) => {
+              if (pair.full) return header(pair.full, i);
+              // A line that did not change is on both sides; it is commented on once, on the right.
+              const sides = [pair.left, pair.right].map((side, j) => ({ side, anchor: comments && side && (j === 1 || side.type === 'del') ? commentAnchor(side) : null }));
+              return (
+                <Fragment key={i}>
+                  <div className="grid grid-cols-2">
+                    {sides.map(({ side, anchor }, j) => (
+                      <div key={j} data-find-block className={cn('flex min-w-0', anchor && 'group/line relative', side ? LINE_BG[side.type] : 'bg-sunken', j === 0 && 'border-r border-border-subtle')}>
+                        {side && anchor ? <CommentButton anchor={anchor} changed={side.type !== 'ctx'} onClick={() => setWriting(anchor)} /> : null}
                         <Gutter value={side ? (j === 0 ? side.oldNo : side.newNo) : null} />
                         <span className="pr-12 whitespace-pre">{side ? <LineText text={side.text} ink={inkOf(side)} tone={side.type} /> : ' '}</span>
                       </div>
-                    </Fragment>
-                  ))}
-                </div>
-              )
-            )}
+                    ))}
+                  </div>
+                  {comments
+                    ? sides.map(({ side, anchor }, j) =>
+                        side && anchor ? <LineComments key={j} comments={comments} anchor={anchor} quote={quoteFor(side)} writing={isWriting(anchor)} onClose={() => setWriting(null)} /> : null
+                      )
+                    : null}
+                </Fragment>
+              );
+            })}
       </div>
     </div>
   );
