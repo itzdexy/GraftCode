@@ -254,7 +254,7 @@ export function TodosItem({ item }: { item: Item<'todos'> }) {
       <p className="mb-6 text-sm text-fg-muted">
         Tasks · {done} of {item.todos.length} done
       </p>
-      <TodoList todos={item.todos} />
+      <TodoList todos={item.todos} changed={item.changed} />
     </section>
   );
 }
