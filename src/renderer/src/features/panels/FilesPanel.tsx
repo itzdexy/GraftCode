@@ -303,6 +303,20 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
       });
   }, [sessionId]);
 
+  /** Set once the drafts are back: until then a file that is asked for waits, as the restored tab does. */
+  const draftsBack = useRef(false);
+  /**
+   * Opens the file something outside this view asked for (a name in a reply, the edits card), in the editor at
+   * its line when it has one. False when nothing is waiting for this session. A file that can't be read shows
+   * this view's own error, as one opened from the tree does.
+   */
+  const openAsked = useCallback((): boolean => {
+    const asked = usePanels.getState().takeFileRequest(sessionId);
+    if (!asked) return false;
+    open(asked.path, asked.line === null ? null : { file: asked.path, line: asked.line, column: asked.column ?? 1 });
+    return true;
+  }, [sessionId, open]);
+
   // Draft hydration comes first so a restored edit tab keeps its original revision.
   useEffect(() => {
     let active = true;
@@ -310,6 +324,9 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
       .finally(() => {
         if (!active) return;
         setRecoveredSession(sessionId);
+        draftsBack.current = true;
+        // The panel was opened for a file: that one is shown, not the tab that was in front last time.
+        if (openAsked()) return;
         const tab = restoredLayout.tabs.find((item) => item.path === restoredLayout.activePath);
         if (tab) {
           const previous = useEditorDrafts.getState().drafts[`${sessionId}:${tab.path}`];
@@ -317,16 +334,16 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
         }
       });
     return () => { active = false; void flushEditorRecovery(sessionId); };
-  }, [restoredLayout, sessionId, open]);
+  }, [restoredLayout, sessionId, open, openAsked]);
 
-  // A file asked for from outside this view (a name in a reply, the edits card). Taken after the drafts are
-  // back and declared after the effect above, so it is the file shown, not the tab restored a moment before.
-  const requested = usePanels((s) => (s.fileRequest?.sessionId === sessionId ? s.fileRequest.seq : null));
-  useEffect(() => {
-    if (!recovered || requested === null) return;
-    const asked = usePanels.getState().takeFileRequest(sessionId);
-    if (asked) open(asked.path, asked.line === null ? null : { file: asked.path, line: asked.line, column: asked.column ?? 1 });
-  }, [requested, recovered, sessionId, open]);
+  // A file asked for while this view is open. One asked for before the drafts were back is taken above, when they are.
+  useEffect(
+    () =>
+      usePanels.subscribe((state, before) => {
+        if (draftsBack.current && state.fileRequest !== null && state.fileRequest !== before.fileRequest) openAsked();
+      }),
+    [openAsked]
+  );
 
   const activateTab = (tab: WorkspaceTab): void => {
     const previous = useEditorDrafts.getState().drafts[`${sessionId}:${tab.path}`];
