@@ -43,6 +43,24 @@ export function parsePatch(patch: string): DiffRow[] {
   return rows;
 }
 
+/**
+ * The line of the file as it is now where a patch's first change is: its
+ * first added line, or the line that took the place of what it removed.
+ */
+export function firstChangedLine(patch: string): number {
+  const rows = parsePatch(patch);
+  let last = 0;
+  for (const [index, row] of rows.entries()) {
+    if (row.type === 'hunk') last = Number(HUNK.exec(row.text)?.[2] ?? 1) - 1;
+    else if (row.type === 'add') return Math.max(1, row.newNo ?? 1);
+    else if (row.type === 'del') {
+      const next = rows.slice(index + 1).find((r) => r.hunk === row.hunk && r.newNo !== null);
+      return Math.max(1, next?.newNo ?? last + 1);
+    } else if (row.newNo !== null) last = row.newNo;
+  }
+  return 1;
+}
+
 /** Rows for hunks already split out by the git layer (header + body lines each). */
 export function rowsFromHunks(hunks: ReadonlyArray<{ header: string; lines: string[] }>): DiffRow[] {
   return hunks.flatMap((h, index) => parsePatch(`${h.header}\n${h.lines.join('\n')}`).map((row) => ({ ...row, hunk: index })));
