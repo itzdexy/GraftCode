@@ -12,20 +12,33 @@ import { useApp } from '../../stores/app';
 import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { Button } from '../../components/Button';
+import { selectionAnchor } from '../review/reviewModel';
 import { Markdown } from '../session/Markdown';
 
 // Bundled Vite workers use local URLs allowed by the existing CSP; no CDN/eval is needed.
 const editorGlobal = globalThis as typeof globalThis & { MonacoEnvironment?: { getWorker(): Worker } };
 editorGlobal.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
-export default function TextEditor({ sessionId, file, value, position, onChange, onSave, onNavigate }: {
+/** The lines a comment for the agent is about, and the text of the first of them. */
+export interface EditorComment { line: number; endLine: number; quote: string }
+
+export default function TextEditor({ sessionId, file, value, position, onChange, onSave, onNavigate, onComment, commentRequest = 0 }: {
   sessionId: string; file: string; value: string; position: CodeLocation | null;
   onChange: (value: string) => void; onSave: () => void; onNavigate: (location: CodeLocation) => void;
+  /** Asked for with Ctrl+Alt+M, or by raising `commentRequest`: the cursor's line, or the lines that are selected. */
+  onComment?: (at: EditorComment) => void; commentRequest?: number;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const callbacks = useRef({ onChange, onSave, onNavigate });
-  useEffect(() => { callbacks.current = { onChange, onSave, onNavigate }; }, [onChange, onSave, onNavigate]);
+  const callbacks = useRef({ onChange, onSave, onNavigate, onComment });
+  useEffect(() => { callbacks.current = { onChange, onSave, onNavigate, onComment }; }, [onChange, onSave, onNavigate, onComment]);
+  // A request made from outside (the button above the editor) runs the same action as the key. One made before this editor was there is not its own.
+  const commentSeen = useRef(commentRequest);
+  useEffect(() => {
+    if (commentRequest === commentSeen.current) return;
+    commentSeen.current = commentRequest;
+    void editor.current?.getAction('graft.comment')?.run();
+  }, [commentRequest]);
   const epoch = useRef(0);
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
@@ -90,6 +103,10 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     const definition = instance.addAction({ id: 'graft.definition', label: 'Go to definition', keybindings: [monaco.KeyCode.F12], run: () => runQuery.current('definition') });
     const referencesAction = instance.addAction({ id: 'graft.references', label: 'Find references', keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12], run: () => runQuery.current('references') });
     const hoverAction = instance.addAction({ id: 'graft.hover', label: 'Symbol information', keybindings: [monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI)], run: () => runQuery.current('hover') });
+    const comment = instance.addAction({ id: 'graft.comment', label: 'Comment for the agent', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM], run: () => {
+      const selection = instance.getSelection();
+      if (selection) callbacks.current.onComment?.(selectionAnchor({ startLine: selection.startLineNumber, endLine: selection.endLineNumber, endColumn: selection.endColumn }, (line) => model.getLineContent(line)));
+    } });
     const theme = (): void => {
       const css = getComputedStyle(container.current!);
       const color = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback;
@@ -99,7 +116,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     };
     theme();
     const observer = new MutationObserver(theme); observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'data-accent'] });
-    return () => { observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    return () => { observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); comment.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
     // The model owns edits. Recreate it only for another file; content changes flow through onChange.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
