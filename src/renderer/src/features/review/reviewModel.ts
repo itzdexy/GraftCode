@@ -49,6 +49,11 @@ export function commentLine(comment: ReviewComment): string {
   return `- ${commentPlace(comment)}${quote} — ${comment.text.split(/\s+/).join(' ').trim()}`;
 }
 
+/** Comments as they are listed and sent: by file, then line, then when they were written. */
+export function inOrder(comments: readonly ReviewComment[]): ReviewComment[] {
+  return [...comments].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.line - b.line || a.at - b.at));
+}
+
 export function commentsLabel(count: number): string {
   return count === 1 ? '1 comment' : `${String(count)} comments`;
 }
@@ -62,9 +67,8 @@ export function commentsLabel(count: number): string {
 export function withComments(text: string, comments: ReviewComment[]): { text: string; attached: boolean } {
   const typed = text.trim();
   if (comments.length === 0 || typed.startsWith('/') || typed.startsWith('!')) return { text, attached: false };
-  const ordered = [...comments].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.line - b.line || a.at - b.at));
   const message = typed.length > 0 ? text.trimEnd() : 'Address these comments.';
-  return { text: `${message}\n\nComments on the code:\n${ordered.map(commentLine).join('\n')}`, attached: true };
+  return { text: `${message}\n\nComments on the code:\n${inOrder(comments).map(commentLine).join('\n')}`, attached: true };
 }
 
 /** What is kept: the newest comments of each session, for the sessions commented on last. A session without comments is not kept. */
