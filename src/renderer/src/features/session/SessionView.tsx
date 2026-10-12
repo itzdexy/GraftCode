@@ -148,7 +148,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             onEdit={null}
             onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
             onRegenerate={null}
-            onSend={(text) => void send(text, [], [])}
+            onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
           />
           <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
@@ -235,7 +235,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           onEdit={busy ? null : (message) => useRewind.getState().open({ sessionId: summary.id, messageId: message.id, chat: true })}
           onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
           onRegenerate={() => invoke('sessions:regenerate', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
-          onSend={(text) => void send(text, [], [])}
+          onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
         />
         <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
           {missing ? (

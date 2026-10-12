@@ -1,6 +1,6 @@
-# Try Graft 0.6.24
+# Try Graft 0.6.25
 
-1. Open **Settings → About** and confirm version **0.6.24**. In
+1. Open **Settings → About** and confirm version **0.6.25**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -79,6 +79,21 @@
     finished picture comes into focus; click it for the viewer, and try **+**, **−** and
     **0**. With **Appearance → Motion** set to Reduced the grid holds still and the
     picture just appears.
+21. In a code session, ask Graft where something in your project is. A file it names in
+    its answer (`src/app.ts:42`) is a link: click it and the Files panel opens that file
+    in the editor at that line. A name two files share stays plain. On the **Edited
+    files** card of a turn that changed something, press **Open** on a row.
+22. Ask for a long file to be shown in a code block and for the command that runs the
+    tests. The long block shows its first 20 lines and **Show all … lines**; **Wrap
+    lines** wraps it. The one-line command has **Type into the terminal**: the Terminal
+    panel opens with the line typed and not run, and Enter runs it.
+23. Press **Ctrl+F** on a session's page and type a word the conversation has: the count
+    reads "1 of 7", every match is marked, **Enter** and **Shift+Enter** step through
+    them and **Esc** closes the bar. With the keyboard in the editor or the terminal,
+    Ctrl+F is theirs.
+24. Ask a model for the quadratic formula, and for what two things cost in dollars. The
+    formula is set as an equation; `$5 and $10` stays as written. A reply with a Mermaid
+    block has **Draw this** on it, which asks for the diagram to be drawn.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:
