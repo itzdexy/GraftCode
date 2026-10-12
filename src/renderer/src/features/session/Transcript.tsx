@@ -7,6 +7,7 @@ import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
 import { useApp } from '../../stores/app';
+import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
 import {
   AssistantText,
@@ -239,7 +240,13 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
           />
         );
       case 'edits':
-        return <EditsCard files={item.files} onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null} />;
+        return (
+          <EditsCard
+            files={item.files}
+            onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null}
+            onOpen={summary.kind === 'code' ? (path, line) => usePanels.getState().openFile(summary.id, path, { line }) : null}
+          />
+        );
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
       case 'diagrams':

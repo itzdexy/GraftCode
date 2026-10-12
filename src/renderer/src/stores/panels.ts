@@ -26,6 +26,10 @@ interface PanelsState {
   browser: BrowserStateView | null;
   /** The last browser key the page passed on (find, the address bar); seq tells repeats apart. */
   browserShortcut: { name: 'find' | 'address'; seq: number } | null;
+  /** A file something outside the Files view asked it to open; seq tells one request from the next. */
+  fileRequest: { sessionId: string; path: string; line: number | null; column: number | null; seq: number } | null;
+  /** A line something outside the Terminal panel asked it to type. */
+  terminalInput: { sessionId: string; text: string; seq: number } | null;
   toggle: (sessionId: string, panel: PanelId) => void;
   show: (sessionId: string, panel: PanelId) => void;
   close: (sessionId: string, panel: PanelId) => void;
@@ -38,6 +42,13 @@ interface PanelsState {
   toggleWide: () => void;
   setBrowser: (state: BrowserStateView | null) => void;
   browserKey: (name: 'find' | 'address') => void;
+  /** Shows the Files view of the session's panel and asks it for this file; with a line, in the editor at that place. */
+  openFile: (sessionId: string, path: string, at?: { line: number; column?: number | null } | null) => void;
+  /** The request waiting for this session, handed over once. */
+  takeFileRequest: (sessionId: string) => PanelsState['fileRequest'];
+  /** Shows the Terminal panel and leaves a line for its terminal in front to type. */
+  typeInTerminal: (sessionId: string, text: string) => void;
+  takeTerminalInput: (sessionId: string) => string | null;
 }
 
 export const usePanels = create<PanelsState>((set, get) => {
@@ -45,12 +56,16 @@ export const usePanels = create<PanelsState>((set, get) => {
     const current = get().bySession[sessionId] ?? EMPTY;
     set({ bySession: { ...get().bySession, [sessionId]: patch(current) } });
   };
+  // Counted here and not in the state, so a request made after one was taken is still a new number.
+  let requests = 0;
   return {
     bySession: {},
     width: PANEL_DEFAULT_WIDTH,
     wide: false,
     browser: null,
     browserShortcut: null,
+    fileRequest: null,
+    terminalInput: null,
     toggle: (sessionId, panel) =>
       update(sessionId, (p) => ({ ...p, open: p.open.includes(panel) ? p.open.filter((x) => x !== panel) : [...p.open, panel] })),
     show: (sessionId, panel) => update(sessionId, (p) => (p.open.includes(panel) ? p : { ...p, open: [...p.open, panel] })),
@@ -67,7 +82,27 @@ export const usePanels = create<PanelsState>((set, get) => {
     setWidth: (width) => set({ width, wide: false }),
     toggleWide: () => set({ wide: !get().wide }),
     setBrowser: (browser) => set({ browser }),
-    browserKey: (name) => set({ browserShortcut: { name, seq: (get().browserShortcut?.seq ?? 0) + 1 } })
+    browserKey: (name) => set({ browserShortcut: { name, seq: (get().browserShortcut?.seq ?? 0) + 1 } }),
+    openFile: (sessionId, path, at = null) => {
+      update(sessionId, (p) => ({ ...p, changesTab: 'files', open: p.open.includes('changes') ? p.open : [...p.open, 'changes'] }));
+      set({ fileRequest: { sessionId, path: path.replace(/\\/g, '/'), line: at?.line ?? null, column: at?.column ?? null, seq: ++requests } });
+    },
+    takeFileRequest: (sessionId) => {
+      const request = get().fileRequest;
+      if (request?.sessionId !== sessionId) return null;
+      set({ fileRequest: null });
+      return request;
+    },
+    typeInTerminal: (sessionId, text) => {
+      update(sessionId, (p) => (p.open.includes('terminal') ? p : { ...p, open: [...p.open, 'terminal'] }));
+      set({ terminalInput: { sessionId, text, seq: ++requests } });
+    },
+    takeTerminalInput: (sessionId) => {
+      const input = get().terminalInput;
+      if (input?.sessionId !== sessionId) return null;
+      set({ terminalInput: null });
+      return input.text;
+    }
   };
 });
 

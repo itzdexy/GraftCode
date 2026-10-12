@@ -9,6 +9,7 @@ import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useLoad } from '../../lib/useLoad';
+import { usePanels } from '../../stores/panels';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
@@ -317,6 +318,15 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
       });
     return () => { active = false; void flushEditorRecovery(sessionId); };
   }, [restoredLayout, sessionId, open]);
+
+  // A file asked for from outside this view (a name in a reply, the edits card). Taken after the drafts are
+  // back and declared after the effect above, so it is the file shown, not the tab restored a moment before.
+  const requested = usePanels((s) => (s.fileRequest?.sessionId === sessionId ? s.fileRequest.seq : null));
+  useEffect(() => {
+    if (!recovered || requested === null) return;
+    const asked = usePanels.getState().takeFileRequest(sessionId);
+    if (asked) open(asked.path, asked.line === null ? null : { file: asked.path, line: asked.line, column: asked.column ?? 1 });
+  }, [requested, recovered, sessionId, open]);
 
   const activateTab = (tab: WorkspaceTab): void => {
     const previous = useEditorDrafts.getState().drafts[`${sessionId}:${tab.path}`];
