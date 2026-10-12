@@ -1,6 +1,6 @@
-# Try Graft 0.6.27
+# Try Graft 0.6.28
 
-1. Open **Settings → About** and confirm version **0.6.27**. In
+1. Open **Settings → About** and confirm version **0.6.28**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -112,12 +112,27 @@
     **Forward**: Settings opens again. In **Shortcuts**, start recording a shortcut and
     press Esc: the recording ends and Settings stays.
 29. With **Appearance → Motion** set to **On**, go from a session to **New** and back,
-    change the theme, and open and close a panel (Ctrl+Shift+D): pages and themes
-    cross-fade, and the panel column slides while the conversation moves aside. Set
+    change the theme, and open and close a panel (Ctrl+Shift+D): pages give way (step
+    32 has the two styles), themes cross-fade, and the panel column slides while the
+    conversation moves aside. Set
     Motion to **Reduced** and do the same: nothing moves, and everything still opens.
 30. Give a code session a task with several steps and watch its task list: the mark of a
     task pops when it changes state. With two sessions in the sidebar, send a message in
     the lower one: its row travels to the top.
+31. Give a code session a task that takes a while. While it works, type
+    `/btw what are you doing right now?` and press Enter: a card with a dashed edge
+    appears above the message box, the answer writes itself in, and it ends with "Kept
+    out of the conversation". The turn goes on meanwhile and nothing is queued. Scroll
+    the conversation: neither the question nor the answer is in it. Send `/context`
+    afterwards: the question is not counted. Dismiss the card. Type `/btw` with nothing
+    after it: a note says what is missing and what you typed stays in the box.
+32. In **Settings → Appearance**, **Motion style** reads **Lively**. Go from a session to
+    **New** and back: the page rises into place and the sidebar does not move. Open
+    Settings and a menu: they spring open. Send a message: it travels up from the
+    message box. Open the terminal beside the Changes panel (Ctrl+`): it comes in from
+    the edge. Choose **Calm** and do the same: short fades only. Set **Motion** to
+    **Reduced**: the row says "Nothing moves while motion is reduced", and nothing does
+    in either style.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.28",
+    "date": "2026-10-12",
+    "items": [
+      "Type /btw and a question to ask something on the side, also while Graft is working. The answer appears above the message box, written from the conversation so far. Neither the question nor the answer is added to the conversation: Graft does not see them, now or later.",
+      "Graft moves more. A page you open rises into place while the sidebar holds still, windows and menus spring open, and a message you send travels up from the message box. A panel comes in from its edge, also when it joins others.",
+      "Settings → Appearance → Motion style chooses between Lively and Calm. Calm is the short fades of 0.6.27. With Motion on Reduced, or a system that asks for less motion, nothing moves in either."
+    ]
+  },
+  {
     "version": "0.6.27",
     "date": "2026-10-12",
     "items": [

@@ -130,6 +130,25 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### A side question and livelier motion (0.6.28)
+
+**`/btw`** asks something on the side. Type `/btw` and a question in a session, also
+while Graft is working: the answer appears above the message box, written from the
+conversation as it stands. It is one request with no tools and it never waits in the
+queue. Neither the question nor the answer is added to the conversation, so the agent
+does not see them, now or later. Copy the answer or dismiss it; a restart forgets it.
+It reads the steps that are finished, not the reply being written at that moment.
+
+Motion has two styles under **Settings → Appearance → Motion style**. **Lively**, the
+default, answers what you do with movement you can see: a page you open rises into
+place over 300 ms while the sidebar holds still, windows and menus spring open, a
+message you send travels up from the message box, and a panel comes in from its edge,
+also when it joins panels already open (the Browser panel alone stays put: its page is
+laid over it where it was measured). What Graft does by itself (a step joining a
+turn, a reply being written) moves as little as before. **Calm** is the motion of
+0.6.27: a 150 ms cross-fade and a few pixels of travel. With **Motion** on Reduced, or
+a system that asks for less motion, nothing moves in either style.
+
 ### Windows and motion (0.6.27)
 
 **Settings** opens as a window over the page you were on. The session underneath stays
@@ -138,7 +157,8 @@ again. Settings is still part of the history: **Forward** opens it again, and ev
 into a settings page works as before.
 
 Changes of view are shown instead of cut. Going to another page or session, a new theme,
-palette or accent, and another transcript view cross-fade over 150 ms. The panel column
+palette or accent, and another transcript view cross-fade over 150 ms (the Calm style
+since 0.6.28; Lively takes 300 ms and moves the page). The panel column
 slides open and shut and the conversation moves aside with it. A session that changes
 place in the sidebar travels there, and a task that changes state pops as its list
 arrives. All of it follows **Settings → Appearance → Motion**: with Reduced, or a system
@@ -287,7 +307,7 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
-- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/research`, `/test`, `/decompile` and `/init` send carefully written prompts; `/plan`, `/mission`, `/context`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session. A command file with the same name replaces any of the prompt commands.
+- **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/research`, `/test`, `/decompile` and `/init` send carefully written prompts; `/plan`, `/mission`, `/context`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session; `/btw` asks a side question that stays out of it. A command file with the same name replaces any of the prompt commands.
 - **Decompilation:** `/decompile` rebuilds compiled code as source one function at a time: a fresh agent per function, the project's own match check as the judge, a limit on attempts, and no editing of the target or the comparison tools. With the Ghidra integration connected, the agent imports binaries, decompiles functions and follows cross-references there.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
 

@@ -19,6 +19,60 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.28 a side question and lively motion (2026-10-12)
+
+Two things from the list that was still open. No new package, no new table; one new
+setting (`appearance.motionStyle`, which an older profile gets as "lively"), two channels
+(`sessions:aside`, `sessions:cancelAside`) and one event (`aside`).
+
+- **A side question** (`/btw`, `agent/aside.ts`, `AgentSession.aside`). It is one request
+  beside whatever the session is doing: the conversation written out as text
+  (`renderTranscript`, the budget of a summary), then the question, with no tools and the
+  session's own model at its lowest effort. Nothing is stored and no turn starts or is
+  disturbed. The answer streams to the asker as `aside` events and is the result of the
+  request; the renderer keeps it in the window only (`stores/asides.ts`, three a session)
+  and shows it above the message box (`AsideCards.tsx`): copy, dismiss, ask again after a
+  failure. Dismissing a question that is still being answered cancels its request, and so
+  does closing the session.
+- **Lively motion** (`:root[data-motion-style='lively']` in `tokens.css` and
+  `globals.css`). What a person does is answered with movement that is seen; what Graft
+  does by itself moves as little as before. A change of page marks the window
+  (`data-view-change`, `withViewTransition(update, 'page')`), and while it is marked the
+  page has a view-transition frame of its own (`.graft-page`): the old page sinks back in
+  110 ms, the new one rises 18 px in 300 ms, and the sidebar beside them holds still.
+  Dialogs spring open (a damped spring sampled into `linear()`, 7% past its place, 380 ms),
+  menus and popovers spring from their control, what was just sent travels up from the
+  message box (`.motion-sent`: the user's message, a side question), a home screen settles
+  in piece by piece, a toast lands, and a panel comes in from its edge (`.graft-panel`).
+- **Motion style** (Settings → Appearance): Lively, the default, or Calm, which is every
+  value of 0.6.27 as it stood. The row says so when motion is reduced.
+
+Different from what was first meant, and why:
+
+- The side question does not go through the turn loop or the message queue. It had to be
+  answered while a turn runs, and a message in the history of a turn that is in the middle
+  of a tool call would be refused by a provider (a call without its result), so the
+  conversation goes as text.
+- Lively is not a third value of Motion. Whether anything moves (System, On, Reduced) and
+  how much (Lively, Calm) are two questions, and someone who needs Reduced should not have
+  to find out which of three "on" values is the still one.
+- The lively rules add to the stylesheet and change none of its values: with the page not
+  marked lively, every rule is the one 0.6.27 had. Their block of tokens stands above the
+  ones that set every time to nothing, since at the same weight the later rule wins; a
+  test reads the stylesheet for that order.
+- The page moves in a frame of its own only while a page changes. Named for good, the
+  frame would also have moved the page on a change of theme.
+- Steps joining a turn and a reply being written were left as they were. They are not
+  answers to something a person did, they happen all the time, and moving them further
+  is what makes motion tiring.
+- The browser's panel does not travel into place: its page is a native view laid over the
+  panel where it was measured, and it would have been measured mid-way.
+- A notification sound was on the list as missing. It is not: questions, approvals and
+  errors have had one since the Notifications page was built, for sessions that are not
+  on screen. The row in the table below said otherwise and is corrected.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.28.
+
 ### 0.6.27 windows and motion (2026-10-12)
 
 The last of the four rounds planned on 2026-10-11. No new package, no new table. Motion
@@ -804,11 +858,23 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 - While Settings is open the page under it cannot be used: the sidebar and the account
   menu are reached again once it is closed. A permission prompt of the session underneath
   waits there unseen until then; the sidebar's Needs you and the notification still say so.
-- When two changes of view come together, the second is made at once and gets no fade of
-  its own. The browser panel's page is a native view, so it does not fade with the rest
-  and is hidden for the moment its column slides. Rows travel in the sidebar only. The
-  panel column slides, but a panel that joins others already open just appears. The
-  cross-fade is 150 ms and plain; nothing else about a change of page moves.
+- A side question reads the steps of the conversation that are finished: the reply being
+  written at that moment is not in it yet. It has no tools, so it cannot look anything up,
+  and it is asked of the session's own model, whatever that costs. Its request is not
+  counted in the session's usage or the day's (as titles and summaries are not). The
+  answer lives in the window: a restart, or another window, does not have it, and it
+  cannot be sent on into the conversation except by copying it. A session keeps three;
+  a fourth pushes the oldest out. `/btw` typed on a home screen, or with an attachment,
+  is explained instead of asked. No live model answered one in testing: the tests script
+  the provider.
+- When two changes of view come together, the second is made at once and gets no motion of
+  its own. The browser panel's page is a native view, so it does not move or fade with the
+  rest, is hidden for the moment its column slides, and its panel alone does not travel
+  into place. Rows travel in the sidebar only. In the lively style a change of page moves
+  the page up into place whichever way the change went: Back does not come from the other
+  side. Lively was looked at in the renderer preview and its values are checked in the
+  desktop tests; nobody has yet lived with it for a week, so its distances and its 380 ms
+  are a first setting.
 - A comment for the agent is text in the next message, not a thread: the agent's answer is
   not tied back to the line, and a comment is gone from the code once it is sent. Comments
   are kept in the window's storage, so another computer does not have them. A comment's
@@ -1046,10 +1112,10 @@ praise and complain about (October 2026).
 | Worktree per agent that writes | Claude Code, Cursor | Implemented for writing groups and Tasks in 0.6.14; stronger shell enforcement and recovery controls remain open |
 | Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
-| A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | Open; small. Graft notifies but has no sound |
+| A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | There since the Notifications page: shown for sessions that are not on screen, with a sound for questions, approvals and errors. A finished session is quiet by choice |
 | Comments on a diff that go back to the agent | Cursor and Codex review | Shipped in 0.6.26 |
 | Where the context and the money went, by category | Claude Code `/context` and `/cost` | The context half shipped in 0.6.13 as `/context` and the popover; spend by day is open |
-| A side question that doesn't derail the turn | Claude Code `/btw` | Open |
+| A side question that doesn't derail the turn | Claude Code `/btw` | Shipped in 0.6.28 as `/btw`: answered beside the turn, never stored |
 | Watch a pull request's CI and fix what fails | Claude Code desktop, Codex | Open |
 | Sandbox by default instead of prompts | Codex (workspace-write sandbox, asks only to leave it) | Graft's container sandbox is opt-in; default-on is open |
 | Diagnostics after each edit | OpenCode and Zed LSP integration | Shipped in 0.6.17 for TypeScript and JavaScript, for the edited file only; other languages and files broken by the edit are open |
@@ -1097,6 +1163,8 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    Done in 0.6.25: equations in replies. Still open: reading PDFs from the web.
 7. The four rounds planned in October 2026 are done: diagrams (0.6.23), code in the
    conversation (0.6.25), review and navigation (0.6.26), windows and motion (0.6.27).
-   Still open from the larger request: a side chat that stays out of the context, split
-   view and session groups, rename and call hierarchy from the language server, a VS Code
-   extension, moving a session between computers.
+   Done in 0.6.28: a side question that stays out of the context (`/btw`), and motion in
+   the lively style that was chosen and not yet built. Still open from the larger
+   request: split view and session groups, rename and call hierarchy from the language
+   server, a VS Code extension, moving a session between computers; and for the side
+   question, an answer that streams the reply being written and one that can use tools.
