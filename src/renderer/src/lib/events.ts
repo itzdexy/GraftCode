@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useApp } from '../stores/app';
+import { useAsides } from '../stores/asides';
 import { useNav } from '../stores/nav';
 import { panelBus, usePanels } from '../stores/panels';
 import { useSessions } from '../stores/sessions';
@@ -27,13 +28,16 @@ export function useGraftEvents(): void {
             useApp.getState().catalogChanged(event.status);
             break;
           case 'session:event':
-            useSessions.getState().applyEvent(event.sessionId, event.event);
+            // A side question's answer goes to the one who asked; the conversation's own state never sees it.
+            if (event.event.type === 'aside') useAsides.getState().hear(event.sessionId, event.event.askId, event.event.text);
+            else useSessions.getState().applyEvent(event.sessionId, event.event);
             break;
           case 'session:summary':
             useSessions.getState().applySummary(event.summary);
             break;
           case 'session:removed':
             useEditorDrafts.getState().forgetSession(event.sessionId);
+            useAsides.getState().forget(event.sessionId);
             useSessions.getState().remove(event.sessionId);
             useNav.getState().forget(event.sessionId);
             break;

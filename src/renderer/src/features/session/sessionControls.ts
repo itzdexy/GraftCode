@@ -8,6 +8,7 @@ import type { SessionSummary } from '@shared/schemas/sessions';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useApp } from '../../stores/app';
+import { asideQuestion, useAsides } from '../../stores/asides';
 import { useSessions, viewOf } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
@@ -126,10 +127,18 @@ export function openMissionDialog(summary: SessionSummary, objective: string): v
 
 /**
  * Commands that open app UI instead of going to the agent. Returns true when
- * the text was one of them and has been handled.
+ * the text was one of them and has been handled; throws when one of them
+ * lacks what it needs (the message box then keeps what was typed).
  */
 export function handleUiCommand(text: string, ctx: UiCommandContext): boolean {
   if (handleAppCommand(text)) return true;
+  // /btw is asked beside the session at once: it never waits in the queue and never enters the conversation.
+  const question = asideQuestion(text);
+  if (question !== null) {
+    if (question.length === 0) throw new Error('Type the question after /btw, for example /btw what does this function return?');
+    useAsides.getState().ask(ctx.summary.id, question);
+    return true;
+  }
   // /mission takes the objective after it; the rest of a mission is filled in the dialog.
   const mission = /^\/mission(?:\s+([\s\S]*))?$/i.exec(text.trim());
   if (mission) {
