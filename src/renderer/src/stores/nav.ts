@@ -43,6 +43,15 @@ function same(a: Route, b: Route): boolean {
   return true;
 }
 
+/**
+ * The page Settings lies over. Settings is a route, so links into it and the
+ * history work as for any other, but it is drawn as a window over the newest
+ * route in the history that is not Settings; over home when there is none.
+ */
+export function pageUnder(back: readonly Route[]): Route {
+  return back.findLast((route) => route.name !== 'settings') ?? { name: 'home' };
+}
+
 interface NavState {
   route: Route;
   back: Route[];
@@ -50,6 +59,8 @@ interface NavState {
   go: (route: Route) => void;
   goBack: () => void;
   goForward: () => void;
+  /** Leaves Settings for the page underneath, with the history as it was before Settings opened; the way back in is Forward. */
+  closeSettings: () => void;
   /** Drops a removed session from history. */
   forget: (sessionId: string) => void;
 }
@@ -75,6 +86,13 @@ export const useNav = create<NavState>((set, get) => ({
     const next = forward[0];
     if (!next) return;
     set({ route: next, back: [...back, route], forward: forward.slice(1) });
+  },
+  closeSettings() {
+    const { route, back, forward } = get();
+    if (route.name !== 'settings') return;
+    // What pressing Back until the route is not Settings would do, as one change: the sections passed go to the front of Forward, in order.
+    const under = back.findLastIndex((r) => r.name !== 'settings');
+    set({ route: back[under] ?? { name: 'home' }, back: back.slice(0, Math.max(0, under)), forward: [...back.slice(under + 1), route, ...forward] });
   },
   forget(sessionId) {
     const keep = (r: Route): boolean => !(r.name === 'session' && r.id === sessionId);

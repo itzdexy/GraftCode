@@ -19,14 +19,24 @@ test.afterEach(async () => {
   await provider.close();
 });
 
+/** The Settings window, found whether or not another dialog lies over it (one that does hides it from a search by role). */
+const SETTINGS_WINDOW = '[role="dialog"][aria-label="Settings"]';
+
+/** Shows a page of Settings. Settings is a window over the page: it is opened from the account menu unless it is open already. */
 async function openSettings(w: Page, section: string): Promise<void> {
   const nav = w.getByRole('navigation', { name: 'Settings' });
-  if (!(await nav.isVisible())) {
+  if ((await w.locator(SETTINGS_WINDOW).count()) === 0) {
     await w.getByRole('button', { name: /^Account menu for/ }).click();
     await w.getByRole('menuitem', { name: 'Settings' }).click();
   }
   await nav.getByRole('button', { name: section, exact: true }).click();
   await expect(w.getByRole('heading', { level: 2, name: section })).toBeVisible();
+}
+
+/** Closes the Settings window, so the page underneath takes clicks again. */
+async function closeSettings(w: Page): Promise<void> {
+  await w.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(0);
 }
 
 test('web search is free by default; picking an engine updates what Graft searches with', async () => {
@@ -136,8 +146,15 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await shot(w, 'settings-shortcuts');
   await w.locator('body').click({ position: { x: 600, y: 700 } });
   await w.keyboard.press('Control+Shift+O');
-  await expect(w.getByRole('dialog', { name: /Search/ })).toBeVisible();
-  await w.keyboard.press('Escape');
+  const searchDialog = w.getByRole('dialog', { name: /Search/ });
+  await expect(searchDialog).toBeVisible();
+  // Escape closes the search and leaves Settings, which it lies over, open. Pressed the instant the search appears the
+  // key can go unheard (the search is not yet the layer that listens), so it is pressed until the search is gone.
+  await expect(async () => {
+    await w.keyboard.press('Escape');
+    await expect(searchDialog).toBeHidden({ timeout: 1000 });
+  }).toPass();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(1);
 
   // A second provider, verified before it is saved, then tested from its menu.
   await openSettings(w, 'Providers');
@@ -287,6 +304,7 @@ test('Settings → Usage counts a request on the day it was made, and a chat lis
   await expect(w.getByText('Nothing used in the last 30 days')).toBeVisible();
 
   // One reply in a chat: one request, with the tokens the provider reported.
+  await closeSettings(w);
   await w.getByRole('radio', { name: 'Chat' }).click();
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   provider.script({ text: 'Counted.' });
@@ -370,6 +388,7 @@ test('a turn pauses at the limit set in Settings → Permissions, and goes on wh
   await expect(tokens).toHaveValue('250000');
   await shot(w, 'settings-turn-limits');
 
+  await closeSettings(w);
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   provider.script(
     { toolCalls: [{ name: 'Glob', input: { pattern: '*.txt' } }], usage: { prompt_tokens: 300_000, completion_tokens: 30 } },

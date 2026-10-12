@@ -12,6 +12,9 @@ async function setMotion(w: Page, mode: 'On' | 'Reduced' | 'System'): Promise<vo
   await expect(choice).toHaveAttribute('aria-checked', 'true');
   if (mode === 'System') await expect(w.locator('html')).not.toHaveAttribute('data-motion');
   else await expect(w.locator('html')).toHaveAttribute('data-motion', mode === 'On' ? 'full' : 'reduced');
+  // Settings is a window over the page: it is closed before the page underneath is used.
+  await w.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(w.locator('[role="dialog"][aria-label="Settings"]')).toHaveCount(0);
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   await expect(w.locator('.motion-stagger')).toBeVisible();
 }

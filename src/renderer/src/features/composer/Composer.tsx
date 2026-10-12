@@ -380,7 +380,7 @@ export function Composer({
       id={listId}
       role="listbox"
       aria-label={token?.kind === 'slash' ? 'Commands' : 'Files'}
-      className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-popover)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
+      className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-float)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
     >
       {suggestions.items.length === 0 ? <p className="px-8 py-6 text-base text-fg-muted">Searching files…</p> : null}
       {suggestions.items.map((item, i) => (
