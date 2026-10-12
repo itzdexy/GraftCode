@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
+import type { PaletteMode } from '../features/shell/paletteModel';
 import { DEFAULT_FILTER, type SessionFilter } from '../features/shell/sessionLists';
 import { loadDrafts, mayStore, saveDrafts, trackPrivate } from '../lib/draftStore';
 import { useSessions } from './sessions';
@@ -15,9 +16,12 @@ export type InfoDialog = 'shortcuts' | 'about' | null;
 
 interface UiState {
   searchOpen: boolean;
-  /** The command palette (Ctrl+Shift+P, or ">" in search) and the text it opens with. */
+  /** The palette (Ctrl+Shift+P, or ">" in search; Ctrl+P for files, Ctrl+T for symbols), the text it opens with and what it looks for. */
   paletteOpen: boolean;
   paletteQuery: string;
+  paletteMode: PaletteMode;
+  /** Counts the openings, so one that follows a closing at once still starts fresh. */
+  paletteOpened: number;
   moreOpen: boolean;
   chatListExpanded: boolean;
   /** The next chat started from Chat home is incognito (not saved). */
@@ -34,7 +38,8 @@ interface UiState {
   /** Attachments sent to a composer from elsewhere (the Browser panel), waiting for the composer with that draft key. */
   inbox: { key: string; images: ImageBlock[]; files: FileAttachment[] } | null;
   setSearchOpen: (open: boolean) => void;
-  setPaletteOpen: (open: boolean, query?: string) => void;
+  /** Opens or closes the palette. Left out, it opens for commands. */
+  setPaletteOpen: (open: boolean, query?: string, mode?: PaletteMode) => void;
   setMoreOpen: (open: boolean) => void;
   setChatListExpanded: (expanded: boolean) => void;
   setIncognito: (incognito: boolean) => void;
@@ -71,6 +76,8 @@ export const useUi = create<UiState>((set, get) => ({
   searchOpen: false,
   paletteOpen: false,
   paletteQuery: '',
+  paletteMode: 'commands',
+  paletteOpened: 0,
   moreOpen: false,
   chatListExpanded: false,
   incognito: false,
@@ -82,7 +89,8 @@ export const useUi = create<UiState>((set, get) => ({
   focusComposer: null,
   inbox: null,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
-  setPaletteOpen: (paletteOpen, paletteQuery = '') => set(paletteOpen ? { paletteOpen, paletteQuery, searchOpen: false } : { paletteOpen }),
+  setPaletteOpen: (paletteOpen, paletteQuery = '', paletteMode = 'commands') =>
+    set(paletteOpen ? { paletteOpen, paletteQuery, paletteMode, paletteOpened: get().paletteOpened + 1, searchOpen: false } : { paletteOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
   setChatListExpanded: (chatListExpanded) => set({ chatListExpanded }),
   setIncognito: (incognito) => {

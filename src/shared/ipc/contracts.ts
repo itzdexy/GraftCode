@@ -335,7 +335,8 @@ export const contracts = {
   'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
   'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
-  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024) }), SemanticResultSchema),
+  // `content` is the editor's unsaved text for the file asked about; left out, the server reads the file from disk.
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional() }), SemanticResultSchema),
   'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),
   /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),

@@ -89,6 +89,13 @@ export function AppShell() {
   useShortcut('focusComposer', () => useUi.getState().focusComposer?.());
   useShortcut('openSettings', () => openSettings());
   useShortcut('commandPalette', () => useUi.getState().setPaletteOpen(true));
+  // A file and a symbol are opened by name in the code session on screen; elsewhere the keys are left alone.
+  const inProject = useSessions((s) => {
+    const session = activeSession ? s.summaries[activeSession] : undefined;
+    return session?.kind === 'code' && (session.worktreePath ?? session.cwd) !== null;
+  });
+  useShortcut('quickOpen', () => useUi.getState().setPaletteOpen(true, '', 'files'), inProject);
+  useShortcut('goToSymbol', () => useUi.getState().setPaletteOpen(true, '', 'symbols'), inProject);
 
   return (
     <div className="flex h-full bg-bg">

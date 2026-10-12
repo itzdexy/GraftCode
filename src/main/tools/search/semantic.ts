@@ -1,10 +1,8 @@
 import path from 'node:path';
+import { symbolKind } from '@shared/symbolKinds';
 import { SemanticQuerySchema, type SemanticQuery } from '../../languages/types';
 import type { LanguageServers } from '../../languages/servers';
 import { errorResult, textResult, type ToolDefinition } from '../types';
-
-/** The server's numbers for kinds of symbol (LSP SymbolKind), as words a model reads without the table. */
-const KINDS = ['', 'file', 'module', 'namespace', 'package', 'class', 'method', 'property', 'field', 'constructor', 'enum', 'interface', 'function', 'variable', 'constant', 'string', 'number', 'boolean', 'array', 'object', 'key', 'null', 'enum member', 'struct', 'event', 'operator', 'type parameter'];
 
 /** Semantic answers use a real local server; text-pattern Symbols remains available for other languages. */
 export function semanticCodeTool(servers: LanguageServers | null): ToolDefinition<SemanticQuery> {
@@ -28,7 +26,7 @@ export function semanticCodeTool(servers: LanguageServers | null): ToolDefinitio
       if (!servers) return errorResult('The local language-server runtime is unavailable. Use Symbols or Grep.');
       try {
         const result = await servers.query(ctx.projectRoot, input, ctx.signal);
-        const text = JSON.stringify(result.symbols ? { ...result, symbols: result.symbols.map((symbol) => ({ ...symbol, kind: KINDS[symbol.kind] ?? symbol.kind })) } : result, null, 2);
+        const text = JSON.stringify(result.symbols ? { ...result, symbols: result.symbols.map((symbol) => ({ ...symbol, kind: symbolKind(symbol.kind) })) } : result, null, 2);
         const count = result.locations?.length ?? result.symbols?.length ?? result.diagnostics?.length ?? (result.hover ? 1 : 0);
         return textResult(text, { kind: 'grep', pattern: `Semantic ${input.action}: ${input.action === 'symbol' ? (input.name ?? '') : input.file}`, count, preview: text.slice(0, 16_000) });
       } catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
