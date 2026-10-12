@@ -44,16 +44,15 @@ export function SettingsWindow({ open, section }: { open: boolean; section: Sett
           // 1,000 by 720 at most, and never nearer than 32 px to the window's edge; its page scrolls inside it.
           className="overlay-dialog fixed top-1/2 left-1/2 z-[var(--g-z-dialog)] flex h-[min(720px,calc(100vh-64px))] w-[min(1000px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-bg text-fg shadow-popover outline-none"
         >
-          <div className="flex h-40 shrink-0 items-center gap-8 border-b border-border-subtle pr-8 pl-16">
-            <RD.Title className="min-w-0 flex-1 truncate text-md font-semibold text-fg-strong">Settings</RD.Title>
-            <RD.Description className="sr-only">Escape closes Settings and shows the page underneath.</RD.Description>
-            <RD.Close asChild>
-              <IconButton label="Close" shortcut="Esc" size="sm">
-                <X className="size-14" />
-              </IconButton>
-            </RD.Close>
-          </div>
+          {/* The list of pages has the heading "Settings": it is the window's title, so the window adds none of its own. */}
+          <RD.Title className="sr-only">Settings</RD.Title>
+          <RD.Description className="sr-only">Escape closes Settings and shows the page underneath.</RD.Description>
           <SettingsBody section={section} />
+          <RD.Close asChild>
+            <IconButton label="Close" shortcut="Esc" size="sm" className="absolute top-8 right-8">
+              <X className="size-14" />
+            </IconButton>
+          </RD.Close>
         </RD.Content>
       </RD.Portal>
     </RD.Root>

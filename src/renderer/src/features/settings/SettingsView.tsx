@@ -137,7 +137,7 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
   };
 
   return (
-    <nav aria-label="Settings" className="flex w-[204px] shrink-0 flex-col overflow-y-auto pt-4 pr-8 pb-24 pl-16">
+    <nav aria-label="Settings" className="flex w-[204px] shrink-0 flex-col overflow-y-auto pt-16 pr-8 pb-24 pl-16">
       <h1 className="px-8 pb-10 text-xl font-medium text-fg-strong">Settings</h1>
       <div className="relative mb-8">
         <Search className="pointer-events-none absolute top-1/2 left-8 size-13 -translate-y-1/2 text-icon-muted" aria-hidden="true" />
