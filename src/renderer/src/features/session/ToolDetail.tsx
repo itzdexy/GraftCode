@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { SearchResultList } from '../web/SearchResults';
 import { CircleCheck, CircleDashed, CircleDot, Copy, FileText, FolderOpen } from 'lucide-react';
 import type { ToolResultBlock } from '@shared/schemas/messages';
@@ -15,7 +15,9 @@ import { usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { countChanges, coveredRows, parsePatch } from '../diff/diffModel';
+import { useDiffComments } from '../review/useDiffComments';
 import { CodeBlock } from './CodeBlock';
+import { ConversationContext } from './conversation';
 import { AGENT_STATUS_LABEL, AgentStatusGlyph, isAgentStatus } from '../panels/AgentStatus';
 import { FileMenu, useFileActions } from '../panels/FileMenu';
 import { fileSize } from './FilesCard';
@@ -360,6 +362,9 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
  */
 export function EditDiff({ patch, path, named = true, covered = true }: { patch: string; path?: string; named?: boolean; covered?: boolean }) {
   const rows = useMemo(() => parsePatch(patch), [patch]);
+  // In a code session's transcript the lines can be commented on for the agent. A change waiting for approval is outside it.
+  const conversation = useContext(ConversationContext);
+  const comments = useDiffComments(conversation?.kind === 'code' ? conversation.sessionId : null, path ?? null);
   const covers = useMemo(() => (covered ? coveredRows(rows) : null), [rows, covered]);
   const [shown, setShown] = useState(false);
   const { added, removed } = countChanges(rows);
@@ -378,7 +383,7 @@ export function EditDiff({ patch, path, named = true, covered = true }: { patch:
         <span className="shrink-0 text-diff-del">-{removed}</span>
         {covers && covers.size > 0 ? <SecretsToggle shown={shown} onChange={setShown} /> : null}
       </div>
-      <DiffView rows={rows} mode="unified" language={path ? languageForPath(path) : null} gutter="one" hunkHeaders={false} covers={shown ? null : covers} className="max-h-[320px] overflow-y-auto" />
+      <DiffView rows={rows} mode="unified" language={path ? languageForPath(path) : null} gutter="one" hunkHeaders={false} covers={shown ? null : covers} comments={comments} className="max-h-[320px] overflow-y-auto" />
     </div>
   );
 }
