@@ -120,21 +120,43 @@ test('Settings opens over the session, fits the smallest window, and closes back
   await expect(w.getByText('Hi from the session.', { exact: true })).toBeVisible();
 });
 
-test('views cross-fade with motion on and never with it reduced', async () => {
+/** Records, inside the page, every change of the mark a change of page puts on the window (data-view-change). */
+const watchPageMarks = (w: Page): Promise<void> =>
+  w.evaluate(() => {
+    const page = window as unknown as { marks: string[] };
+    page.marks = [];
+    new MutationObserver(() => page.marks.push(document.documentElement.dataset.viewChange ?? '')).observe(document.documentElement, { attributes: true, attributeFilter: ['data-view-change'] });
+  });
+const pageMarks = (w: Page): Promise<string[]> => w.evaluate(() => (window as unknown as { marks: string[] }).marks);
+/** The frame the page gives way in while a page changes: one of its own, or none (the window then fades as a whole). Ask only while nothing fades. */
+const pageFrame = (w: Page): Promise<string> =>
+  w.evaluate(() => {
+    const root = document.documentElement;
+    root.dataset.viewChange = 'page';
+    const frame = getComputedStyle(document.querySelector('main')!).viewTransitionName;
+    delete root.dataset.viewChange;
+    return frame;
+  });
+
+test('views give way with motion on, a page in its own frame when lively, and never with motion reduced', async () => {
   const w = graft.window;
   await firstTurn(w, 'One.');
   await w.emulateMedia({ reducedMotion: 'reduce' });
 
+  // Lively is how Graft moves unless Calm is chosen: the new page rises in over 300 ms, and the window is marked for that long.
   await motion(w, 'On');
+  await expect(w.locator('html')).toHaveAttribute('data-motion-style', 'lively');
   await countTransitions(w);
+  await watchPageMarks(w);
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   await expect(w.getByRole('textbox', { name: 'Describe a task or ask a question' })).toBeVisible();
   expect(await transitions(w)).toBeGreaterThanOrEqual(1);
-  expect(await viewDuration(w)).toBe(150);
-  // The page stays usable while it fades: a click is never lost to the fade.
+  expect(await viewDuration(w)).toBe(300);
+  // The page stays usable while it gives way: a click is never lost to it.
   expect(await w.evaluate(() => getComputedStyle(document.documentElement, '::view-transition').pointerEvents)).toBe('none');
-  // A new theme fades in the same way, once the fade before it is over.
+  await expect.poll(() => pageMarks(w)).toEqual(['page', '']);
   await w.waitForTimeout(400);
+  // A new theme fades the window as a whole, once the change before it is over: it is no change of page.
   await countTransitions(w);
   await openSettings(w);
   const settings = w.getByRole('dialog', { name: 'Settings' });
@@ -143,8 +165,19 @@ test('views cross-fade with motion on and never with it reduced', async () => {
   await settings.getByRole('radio', { name: before === 'dark' ? 'Light' : 'Dark', exact: true }).click();
   await expect(w.locator('html')).toHaveAttribute('data-theme', before === 'dark' ? 'light' : 'dark');
   expect(await transitions(w)).toBeGreaterThanOrEqual(1);
+  expect(await pageMarks(w)).toEqual(['page', '']);
+  // (Asked last: asking marks the window for a moment itself.)
+  await w.waitForTimeout(400);
+  expect(await pageFrame(w)).toBe('graft-page');
+
+  // Calm: the short cross-fade of the whole window that it was before there was a choice.
+  await settings.getByRole('radiogroup', { name: 'Motion style', exact: true }).getByRole('radio', { name: 'Calm', exact: true }).click();
+  await expect(w.locator('html')).toHaveAttribute('data-motion-style', 'calm');
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(0);
+  await w.waitForTimeout(400);
+  expect(await viewDuration(w)).toBe(150);
+  expect(await pageFrame(w)).toBe('none');
 
   await motion(w, 'Reduced');
   await countTransitions(w);
@@ -152,6 +185,16 @@ test('views cross-fade with motion on and never with it reduced', async () => {
   await expect(w.getByText('One.', { exact: true })).toBeVisible();
   expect(await transitions(w)).toBe(0);
   expect(await viewDuration(w)).toBe(0);
+
+  // Lively does not outlast a request for less motion: with the style back on Lively every one of its times is still nothing.
+  await openSettings(w);
+  await settings.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Appearance', exact: true }).click();
+  await settings.getByRole('radiogroup', { name: 'Motion style', exact: true }).getByRole('radio', { name: 'Lively', exact: true }).click();
+  await expect(w.locator('html')).toHaveAttribute('data-motion-style', 'lively');
+  await expect(settings.getByText('Nothing moves while motion is reduced.')).toBeVisible();
+  expect(await viewDuration(w)).toBe(0);
+  expect(await w.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--g-duration-lively')))).toBe(0);
+  expect(await w.evaluate(() => parseFloat(getComputedStyle(document.querySelector('[role="dialog"][aria-label="Settings"]')!).animationDuration))).toBe(0);
 });
 
 /** Starts timing, inside the page, how long the panels stay after their column is told to close. */
@@ -195,6 +238,16 @@ test('the panel column slides shut with its panels in it, and is gone at once wi
   // The transcript has the room back, and the panel is there again when it is asked for.
   await w.keyboard.press('Control+Shift+D');
   await expect(panels.getByRole('region', { name: 'Changes', exact: true })).toBeVisible();
+  // In the lively style a panel comes in from the edge, also one that joins a panel already open. The browser's
+  // panel stays where it is: its page is a native view laid over it where it was measured.
+  const arrival = (name: string): Promise<string> => panels.getByRole('region', { name, exact: true }).evaluate((el) => getComputedStyle(el).animationName);
+  expect(await arrival('Changes')).toBe('graft-panel-in');
+  await w.keyboard.press('Control+`');
+  await expect(panels.getByRole('region', { name: 'Terminal', exact: true })).toBeVisible();
+  expect(await arrival('Terminal')).toBe('graft-panel-in');
+  expect(await panels.getByRole('region', { name: 'Terminal', exact: true }).evaluate((el) => parseFloat(getComputedStyle(el).animationDuration))).toBeCloseTo(0.38, 2);
+  await w.keyboard.press('Control+`');
+  await expect(panels.getByRole('region', { name: 'Terminal', exact: true })).toHaveCount(0);
   await w.keyboard.press('Control+Shift+D');
   await expect(panels).toHaveCount(0);
 
