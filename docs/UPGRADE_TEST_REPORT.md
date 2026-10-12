@@ -546,3 +546,88 @@ Not verified:
   files and 60 seconds were met with a stand-in server only, never a slow real one.
 - A comment on several selected lines, and comments when the window's storage is full or
   missing, are covered by unit tests of the model and not by a run of the app.
+
+## 0.6.27 round (2026-10-12)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Eight
+commits of this round, `a49bd66` to `110490c` (`16566bf` among them is the report of
+0.6.26), and one test commit after them, `3c63364`. Two systems: Windows 11 (Node 26.7.0) and a clean `node:24-bookworm` container
+(Docker 29.8.0) packed from a separate checkout. Nothing here ran on macOS, on GitHub's
+runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `110490c` | exit 0 |
+| `npm run lint` | Windows, `110490c` | exit 0 |
+| `npm test` | Windows, `110490c` | 114 files passed, 2 skipped; 1340 tests passed, 29 skipped, 0 failed |
+| `npm run build` | Windows, `110490c` | exit 0 |
+| `npx playwright test` | Windows, `110490c` | 68 passed, 6 skipped, 0 failed (6.0 min) |
+| `npm run dist:win` | Windows, `110490c` | exit 0, `dist/Graft-Setup-0.6.27.exe`, 128,593,538 bytes, SHA-256 `3b4151b9eaed5c0b2dc368cebae9775206d9e0e5518550488473a93c8c1c02c4`; its signature was not checked this round |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.27 build of `110490c` | 3 passed (13.9 s) |
+| `npm run verify:docker` | Linux container, `110490c` | typecheck, lint, unit and build exit 0; unit 1332 passed, 37 skipped; desktop suite 68 passed, 6 skipped, 0 failed (5.9 min) |
+| `npx playwright test tests/e2e/panels.spec.ts` | Windows, `3c63364` | the browser test with its new check: 1 passed |
+| `node scripts/e2e-docker.mjs tests/e2e/panels.spec.ts` | Linux container, `3c63364` | the four panel tests, the browser one with its new check among them: 4 passed (21.6 s) |
+
+`3c63364` adds one check to one desktop test and changes no code of the app; the installer
+and the full runs are those of `110490c`.
+
+What the suite found on the way, each fixed before the runs above:
+
+- A full Windows run of the commit before, `0393063`, had one failure of 68: at 900 by 600
+  the strip under the editor was out of view. The wrapper that lets the panel column slide
+  let the column grow to the height of what it held. Fixed in `110490c`.
+- With Settings as a window, a menu opened inside it was drawn behind it: menus and
+  popovers lay under dialogs. Found by the settings test that opens a provider's menu.
+- While the panel column slid, 4 px of it reached past the page (the layout test), first
+  through the margin kept for its resize handle, then through the handle itself.
+- Pressed in the same frame in which a search opened over Settings, Escape closed Settings
+  and left the search open. Found by a test that presses it that fast.
+
+Desktop tests that were changed, and why. No assertion was removed from any of them.
+
+- `settings.spec.ts`, `motion.spec.ts`, `layout.spec.ts`: each clicked the sidebar, the
+  account menu or the mode switch with Settings open. Settings is a window over the page
+  now, so they close it first. The helper that opens a settings page finds the window by
+  its attributes: found by role, it is hidden for a moment while another dialog closes
+  over it. `layout.spec.ts` also checks the window's frame at every size.
+- `settings.spec.ts`: Escape after opening the search is pressed until the search is gone.
+- `panels.spec.ts`: a folder in the file tree was found by its exact name, which gains a
+  mark once git has answered; the slide of the column gave git the time. It is found by
+  the start of its name.
+
+The six skipped desktop tests are the three of the packaged app (run separately, above) and
+the three that take README screenshots.
+
+What the tests of this round show, and with what:
+
+- Unit, 21 new cases in four files. A change of view fades only when nothing speaks
+  against it; it is made once and at once where there is no page; with a browser that
+  runs the change a frame later, a second change makes the first one first and neither
+  twice; none fades with motion reduced or the window hidden. The page Settings lies
+  over, closing it with the history as it was, stepping back through its sections, and a
+  removed session under it. Rows that changed place and how far, none for more than 600
+  px or more than 30 at once. Tasks that changed since the list before, by id, by place
+  and by their words, and never across two turns.
+- Desktop, 4 new tests in `windows.spec.ts`. The Settings window at 900 by 600: at most
+  1,000 by 720, 32 px clear on every side, the session still under it, the keyboard on
+  the window and no tooltip open, Escape left to a shortcut that is being recorded, then
+  closing; Forward opens it again and a click beside it closes it. A change of page and of
+  theme starts a view transition with motion on, and none with motion reduced, where the
+  duration is zero. The panels stay in their column for at least 150 ms while it slides
+  shut, and are gone within 50 ms with motion reduced. A task that finished carries the
+  mark with its animation in a list that arrived while the turn ran, and the mark without
+  an animation after a restart.
+- The browser panel's page sits exactly on its place after the page loads, and again
+  after the panel is closed and opened with the page there. With the handling of the
+  slide switched off for one run, it ended 19 px beside its place and the test failed.
+
+Not verified:
+
+- How any of the motion looks. The tests read computed styles, counts and timings; the
+  screenshots are of settled states. Nobody watched a cross-fade, the slide or a row
+  travel, and no recording was made.
+- A row travelling in the sidebar: the arithmetic is unit-tested and the rows carry their
+  keys, but no run moved a row and looked for its animation.
+- A cross-fade with a long conversation on screen (the browser takes a picture of the
+  window for it) was not timed.
+- The installer was built and its unpacked app tested; the installer itself was not run.
