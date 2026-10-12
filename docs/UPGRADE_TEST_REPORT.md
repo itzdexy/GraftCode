@@ -486,6 +486,8 @@ Not verified:
   formula that fails, and math in a chat were not exercised.
 - File links on a large project (the file list holds up to 200,000 names) and find on a
   long conversation were not measured.
-- The find bar's entrance and the fade on a folded block were not looked at with motion
-  on: Windows has animations off on this PC, so the tests ran with motion reduced.
+- Nothing of this round was run with motion reduced. The desktop tests ran with motion on
+  (this PC does not ask for less of it: `prefers-reduced-motion` was false in the test
+  app), and none of them checks an animation. The only new one is the find bar's entrance,
+  which uses the shared utility that reduced motion switches off.
 - The installer was built and its unpacked app tested; the installer itself was not run.
