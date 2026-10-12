@@ -48,11 +48,13 @@ const leftAt = new Map<string, number>();
 /**
  * One transcript item. Items that appear while a turn runs (the message just
  * sent, the reply, tool work) rise in; what is already there when a session
- * opens just appears. The choice is made once, when the item mounts.
+ * opens just appears. The choice is made once, when the item mounts. What
+ * the person sent themselves is marked as that (.motion-sent travels further
+ * in the lively style).
  */
-function Arrival({ live, children }: { live: boolean; children: ReactNode }) {
+function Arrival({ live, sent, children }: { live: boolean; sent: boolean; children: ReactNode }) {
   const [rise] = useState(live);
-  return <div className={rise ? 'motion-rise' : undefined}>{children}</div>;
+  return <div className={rise ? (sent ? 'motion-rise motion-sent' : 'motion-rise') : undefined}>{children}</div>;
 }
 
 interface TranscriptProps {
@@ -347,7 +349,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
           <ConversationContext.Provider value={conversation}>
             <SourcesContext.Provider value={sources}>
               {items.map((item) => (
-                <Arrival key={item.key} live={view.turnActive}>
+                <Arrival key={item.key} live={view.turnActive} sent={item.kind === 'user'}>
                   {/* Verbose opens rows by default, and a row on screen keeps the state it has: what an item holds is drawn afresh when Verbose goes on or off. */}
                   <Fragment key={grouping === 'verbose' ? 'opened' : 'folded'}>{render(item)}</Fragment>
                 </Arrival>

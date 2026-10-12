@@ -351,6 +351,8 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
   return (
     <PanelFrame
       label="Browser"
+      // The page is a native view laid over this panel where it was measured: the panel must not travel into place.
+      className="graft-panel--still"
       onClose={() => {
         command('close');
         onClose();

@@ -226,6 +226,15 @@ describe('app settings', () => {
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ reducedMotion: false }));
     expect(new AppSettingsService(db).get().appearance.motion).toBe('system');
   });
+
+  it('moves in the lively style until someone asks for calm, also in a profile from before there was a choice', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ theme: 'dark', motion: 'on' }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance).toMatchObject({ theme: 'dark', motion: 'on', motionStyle: 'lively' });
+    settings.update({ appearance: { motionStyle: 'calm' } });
+    expect(new AppSettingsService(db).get().appearance.motionStyle).toBe('calm');
+    expect(() => settings.update({ appearance: { motionStyle: 'wild' as 'calm' } })).toThrow(/motionStyle/);
+  });
 });
 
 describe('key store', () => {

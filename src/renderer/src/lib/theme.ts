@@ -68,6 +68,7 @@ export function applyAppearance(appearance: AppSettings['appearance'], onError: 
   if (motion === null) delete root.dataset.motion;
   else root.dataset.motion = motion;
   rememberMotion(motion);
+  root.dataset.motionStyle = appearance.motionStyle;
   root.style.setProperty('--g-font-scale', String(appearance.uiFontSize / BASE_UI_FONT_SIZE));
   root.style.setProperty('--g-code-font-size', `${appearance.codeFontSize}px`);
 }
