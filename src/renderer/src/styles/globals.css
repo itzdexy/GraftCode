@@ -815,4 +815,13 @@
   .graft-prose--chat code {
     font-family: var(--g-font-mono);
   }
+  /* Equations (KaTeX). A formula wider than the column scrolls by itself, so the reply never does. */
+  .graft-prose .katex {
+    font-size: 1.05em;
+  }
+  .graft-prose .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: 2px;
+  }
 }

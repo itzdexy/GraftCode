@@ -1,5 +1,5 @@
 import type { ElementContent, Root, RootContent } from 'hast';
-import { createContext, memo, useContext, type ReactNode } from 'react';
+import { createContext, memo, useContext, useMemo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SourceIndex } from '@shared/sources';
@@ -12,8 +12,10 @@ import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
 import { ConversationContext } from './conversation';
 import { parseFileRef, refTooltip } from './fileRefs';
+import { mathToDollars } from './mathModel';
 import { citationNote, citationState } from './sourcesModel';
 import { healMarkdown, splitBlocks } from './streaming';
+import { useMath } from './useMath';
 
 export function openLink(href: string): void {
   invoke('app:openExternal', { url: href }).catch((error: unknown) => reportError("Couldn't open the link", error));
@@ -244,11 +246,21 @@ const DONE_COMPONENTS = buildComponents(false);
 const REMARK = [remarkGfm];
 const LIVE_REHYPE = [fadeWords];
 
-/** One run of top-level blocks. Rendering is skipped while its text is unchanged, which is what keeps a long streaming reply cheap. */
+/**
+ * One run of top-level blocks. Rendering is skipped while its text is unchanged, which is what keeps a long
+ * streaming reply cheap. A text with math in it has the math renderer fetched, and is drawn as written until
+ * that is in; a text without math never asks for it and is parsed exactly as before.
+ */
 const Blocks = memo(function Blocks({ text, live }: { text: string; live: boolean }): ReactNode {
+  const tidy = tidyMarkdown(text);
+  const formulas = useMemo(() => mathToDollars(tidy), [tidy]);
+  const math = useMath(formulas.math);
+  // The words of a streaming reply are wrapped first and the formulas set after, so the fade never reaches inside one.
+  const remark = useMemo(() => (math ? [...REMARK, ...math.remark] : REMARK), [math]);
+  const rehype = useMemo(() => (math ? [...(live ? LIVE_REHYPE : []), ...math.rehype] : live ? LIVE_REHYPE : undefined), [math, live]);
   return (
-    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={live ? LIVE_REHYPE : undefined} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
-      {tidyMarkdown(text)}
+    <ReactMarkdown remarkPlugins={remark} rehypePlugins={rehype} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
+      {math ? formulas.text : tidy}
     </ReactMarkdown>
   );
 });
