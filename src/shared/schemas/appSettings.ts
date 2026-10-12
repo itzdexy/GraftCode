@@ -26,7 +26,8 @@ export const SHORTCUT_IDS = [
   'cyclePermissionMode',
   'openSettings',
   'toggleFiles',
-  'commandPalette'
+  'commandPalette',
+  'findInTranscript'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -42,7 +43,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   cyclePermissionMode: 'Shift+Tab',
   openSettings: 'Ctrl+,',
   toggleFiles: 'Ctrl+Shift+F',
-  commandPalette: 'Ctrl+Shift+P'
+  commandPalette: 'Ctrl+Shift+P',
+  findInTranscript: 'Ctrl+F'
 };
 
 /** Settings → Appearance: colour palettes (generated in styles/palettes.css) and accent colours. */

@@ -509,6 +509,12 @@
     transform-origin: bottom center;
     animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
   }
+  /* The find bar grows down from the corner it sits in. */
+  .motion-menu-down {
+    --g-pop-y: -4px;
+    transform-origin: top right;
+    animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
+  }
   .motion-stagger > * {
     animation: graft-rise var(--g-duration-slow) var(--g-ease-out) both;
   }
@@ -664,6 +670,18 @@
  * (Markdown.tsx wraps the words only while the reply streams). No fill mode,
  * so a word that has arrived carries no animation afterwards.
  */
+/*
+ * Find in the conversation marks what it found with highlights, which paint
+ * over the text without changing any element: every match, and the current
+ * one stronger.
+ */
+::highlight(graft-find) {
+  background-color: color-mix(in srgb, var(--g-amber) 28%, transparent);
+}
+::highlight(graft-find-current) {
+  background-color: color-mix(in srgb, var(--g-amber) 60%, transparent);
+}
+
 /* Behind a previewed picture: a quiet checkerboard, so transparent parts read as transparent. */
 .graft-checker {
   background: repeating-conic-gradient(var(--g-surface-control) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
