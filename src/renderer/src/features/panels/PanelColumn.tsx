@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { LoadingState } from '../../components/States';
+import { lastShown, SLIDE_EXIT_MS, usePresence } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { panelsOf, PANEL_MIN_WIDTH, usePanels, type PanelId } from '../../stores/panels';
 import { AgentsPanel } from './AgentsPanel';
@@ -13,7 +14,12 @@ const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ defaul
 /** Leave at least this much room for the transcript next to the panels. */
 const TRANSCRIPT_MIN = 420;
 
-/** Right-hand column of docked panels for a code session, resizable from its left edge. */
+/**
+ * Right-hand column of docked panels for a code session, resizable from its left edge. The column slides open when
+ * the first panel opens and shut when the last one closes, so the transcript moves aside instead of jumping. Only
+ * the column's track changes: the panels keep their width the whole time, so a terminal is not refitted on every
+ * frame, and they stay in the column while it slides shut.
+ */
 export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
   const open = usePanels((s) => panelsOf(s, sessionId).open);
   const storedWidth = usePanels((s) => s.width);
@@ -30,7 +36,10 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  if (open.length === 0) return null;
+  // What the column held last is drawn until it has slid shut.
+  const [held, setHeld] = useState(open);
+  if (open.length > 0 && open !== held) setHeld(open);
+  const present = usePresence(open.length > 0, SLIDE_EXIT_MS);
   const limit = Math.max(PANEL_MIN_WIDTH, viewport - sidebar - TRANSCRIPT_MIN);
   const width = Math.min(limit, preview ?? (wide ? limit : storedWidth));
   const clamp = (w: number): number => Math.round(Math.min(limit, Math.max(PANEL_MIN_WIDTH, w)));
@@ -81,23 +90,31 @@ export function PanelColumn({ sessionId, refreshKey }: { sessionId: string; refr
   };
 
   return (
-    <aside aria-label="Panels" className="motion-slide-left relative flex shrink-0 flex-col gap-8 py-8 pr-8" style={{ width }}>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize panels"
-        aria-valuenow={width}
-        aria-valuemin={PANEL_MIN_WIDTH}
-        aria-valuemax={limit}
-        tabIndex={0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onKeyDown={onKeyDown}
-        className="absolute top-0 -left-4 z-[var(--g-z-sticky)] h-full w-8 cursor-col-resize outline-none focus-visible:bg-focus/40"
-      />
-      {open.map(render)}
-    </aside>
+    <div className="graft-slide-x graft-slide-x--flush h-full shrink-0" data-state={open.length > 0 ? 'open' : 'closed'}>
+      {/* The column can only narrow around something without a width of its own; the panels keep theirs inside. */}
+      <div>
+        {present ? (
+          <aside aria-label="Panels" className="relative flex h-full shrink-0 flex-col gap-8 py-8 pr-8" style={{ width }}>
+            {/* Inside the column's edge and not across it: the column is cut exactly at its edge while it slides. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize panels"
+              aria-valuenow={width}
+              aria-valuemin={PANEL_MIN_WIDTH}
+              aria-valuemax={limit}
+              tabIndex={0}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onKeyDown={onKeyDown}
+              className="absolute top-0 left-0 z-[var(--g-z-sticky)] h-full w-6 cursor-col-resize outline-none focus-visible:bg-focus/40"
+            />
+            {lastShown(open, held).map(render)}
+          </aside>
+        ) : null}
+      </div>
+    </div>
   );
 }
