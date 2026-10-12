@@ -616,6 +616,14 @@ export class SessionManager {
     this.get(id).steer(queueId);
   }
 
+  aside(id: string, askId: string, question: string): Promise<string> {
+    return this.get(id).aside(askId, question);
+  }
+
+  cancelAside(id: string, askId: string): void {
+    this.live.get(id)?.cancelAside(askId);
+  }
+
   feedback(sessionId: string, messageId: string, value: -1 | 0 | 1): void {
     const store = this.storeFor(sessionId);
     const message = store.getMessage(messageId);

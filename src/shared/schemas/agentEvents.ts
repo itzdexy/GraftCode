@@ -44,6 +44,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('mission'), mission: MissionSchema.nullable() }),
   z.object({ type: z.literal('mode'), permissionMode: PermissionModeSchema }),
   z.object({ type: z.literal('title'), title: z.string() }),
+  /** More of the answer to a side question (sessions:aside), for the one who asked: it is never part of the conversation. */
+  z.object({ type: z.literal('aside'), askId: z.string(), text: z.string() }),
   z.object({
     type: z.literal('turn-end'),
     turnId: z.string(),

@@ -91,11 +91,15 @@ export interface CompactionRequest {
   signal: AbortSignal;
 }
 
+/** How many characters of a written-out conversation a model is sent: most of its window, and never more than 600,000. */
+export function transcriptBudget(model: ModelInfo): number {
+  return Math.min(600_000, Math.floor(model.contextWindow * 2.2));
+}
+
 /** Asks the model for a continuation summary of the session so far. */
 export async function summarizeSession(req: CompactionRequest): Promise<string> {
   const history = toLlmHistory(req.messages);
-  const budget = Math.min(600_000, Math.floor(req.model.contextWindow * 2.2));
-  const transcript = renderTranscript(history, budget);
+  const transcript = renderTranscript(history, transcriptBudget(req.model));
   const extra = req.instructions.trim().length > 0 ? `\n\nThe user asked the summary to keep: ${req.instructions.trim()}` : '';
   let text = '';
   for await (const event of streamWithRetry(

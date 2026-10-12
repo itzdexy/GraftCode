@@ -651,6 +651,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).steer(id, queueId);
       return { ok: true as const };
     },
+    'sessions:aside': async ({ id, askId, question }) => ({ text: await (await ctx.sessions()).aside(id, askId, question) }),
+    'sessions:cancelAside': async ({ id, askId }) => {
+      (await ctx.sessions()).cancelAside(id, askId);
+      return { ok: true as const };
+    },
     'sessions:markRead': async ({ id }) => {
       (await ctx.sessions()).markRead(id);
       return { ok: true as const };
