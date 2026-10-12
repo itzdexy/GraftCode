@@ -5,9 +5,13 @@ import remarkGfm from 'remark-gfm';
 import type { SourceIndex } from '@shared/sources';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
+import { useResolvedPath } from '../../stores/fileRefs';
+import { usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
+import { ConversationContext } from './conversation';
+import { parseFileRef, refTooltip } from './fileRefs';
 import { citationNote, citationState } from './sourcesModel';
 import { healMarkdown, splitBlocks } from './streaming';
 
@@ -59,6 +63,31 @@ function childText(children: ReactNode): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
   if (Array.isArray(children)) return children.map((c) => childText(c as ReactNode)).join('');
   return '';
+}
+
+const INLINE_CODE = 'rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em]';
+
+/**
+ * Inline code. In a code session, a span that is the name of one file of the
+ * project (`src/app.ts:42`) opens that file in the Files panel, at the line
+ * when one is given. Anything else is drawn as code.
+ */
+function InlineCode({ children }: { children: ReactNode }): ReactNode {
+  const conversation = useContext(ConversationContext);
+  const sessionId = conversation?.kind === 'code' ? conversation.sessionId : null;
+  const ref = sessionId === null ? null : parseFileRef(childText(children));
+  const file = useResolvedPath(ref === null ? null : sessionId, ref?.path ?? null);
+  if (sessionId === null || ref === null || !file) return <code className={`${INLINE_CODE} text-code-fg`}>{children}</code>;
+  return (
+    <button
+      type="button"
+      title={refTooltip(file, ref.line)}
+      onClick={() => usePanels.getState().openFile(sessionId, file, ref.line === null ? null : { line: ref.line, column: ref.column })}
+      className={`${INLINE_CODE} selectable text-link underline-offset-2 hover:underline`}
+    >
+      {children}
+    </button>
+  );
 }
 
 /** A link written as a citation: its text names the site it points to, e.g. [rolimons.com](https://www.rolimons.com/…). */
@@ -152,7 +181,8 @@ function buildComponents(live: boolean): Components {
       return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} live={live} />;
     },
     code({ children }) {
-      return <code className={`${arriving}rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em] text-code-fg`}>{children}</code>;
+      // A file name becomes a link once its message is finished: while it streams, the name may still be growing.
+      return live ? <code className={`${arriving}${INLINE_CODE} text-code-fg`}>{children}</code> : <InlineCode>{children}</InlineCode>;
     },
     a({ href, children }) {
       if (!href) return <span>{children}</span>;

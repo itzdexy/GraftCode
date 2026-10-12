@@ -324,6 +324,11 @@ export const contracts = {
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
   'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
+  /** Which of these written paths name a file of the session's folder: its path from that folder, or null. */
+  'files:resolve': channel(
+    z.object({ sessionId: IdSchema, paths: z.array(z.string().min(1).max(300)).max(200), fresh: z.boolean().optional() }),
+    z.array(z.string().nullable())
+  ),
 
   // Side panels
   'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
