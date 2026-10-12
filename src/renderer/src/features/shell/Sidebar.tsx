@@ -3,6 +3,7 @@ import { CalendarClock, ChevronDown, ChevronRight, FolderClosed, PanelsTopLeft, 
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { cn } from '../../lib/cn';
+import { useFlip } from '../../lib/flip';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { useNow } from '../../lib/time';
 import { useApp } from '../../stores/app';
@@ -189,6 +190,8 @@ export function Sidebar() {
   // What waits for the user elsewhere is listed once, at the top; the lists below go without it.
   const needing = useMemo(() => needsYou(Object.values(summaries), mode, filter, activeId), [summaries, mode, filter, activeId]);
   const rest = useMemo(() => withoutThose(sessions, needing), [sessions, needing]);
+  // A session row that changes place (into or out of Needs you, or up its list after a new message) travels there.
+  const lists = useFlip<HTMLElement>([...needing, ...rest].map((s) => s.id).join(','));
 
   const moreOpen = useUi((s) => s.moreOpen);
   const entry = (id: 'projects' | 'artifacts' | 'sites' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
@@ -221,7 +224,7 @@ export function Sidebar() {
       <div className="app-drag flex h-[var(--g-titlebar-height)] shrink-0 items-center pr-[var(--g-sidebar-inset)] pl-[calc(var(--g-controls-left)+var(--g-sidebar-inset))]">
         <TitlebarControls className="flex-1" />
       </div>
-      <nav aria-label="Main" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-8 pb-12">
+      <nav ref={lists} aria-label="Main" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-8 pb-12">
         <ul className="flex flex-col">
           {nav.map((e) => (
             <NavRow key={e.id} entry={e} active={e.isActive(route)} />
