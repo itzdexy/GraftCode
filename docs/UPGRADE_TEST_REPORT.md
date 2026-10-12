@@ -631,3 +631,112 @@ Not verified:
 - A cross-fade with a long conversation on screen (the browser takes a picture of the
   window for it) was not timed.
 - The installer was built and its unpacked app tested; the installer itself was not run.
+
+## 0.6.28 round (2026-10-12)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Six
+commits: `2fd86fb`, `7b2b3c2`, `db774f5` and `e68c1ab` (the round), `fbf2a59` (the version)
+and `3c56f6a` (one desktop test). Two systems: Windows 11 (Node 26.7.0) and a clean
+`node:24-bookworm` container (Docker 29.8.0) packed from a separate checkout. Nothing here
+ran on macOS, on GitHub's runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `fbf2a59` | exit 0 |
+| `npm run lint` | Windows, `fbf2a59` | exit 0 |
+| `npm test` | Windows, `fbf2a59` | 9 full runs: 6 passed (117 files passed, 2 skipped; 1367 tests passed, 29 skipped) and 3 had one failure each, always in `tests/unit/languageServers.test.ts` (below) |
+| `npm run build` | Windows, `fbf2a59` | exit 0 |
+| `npx playwright test` | Windows, `fbf2a59` | 69 passed, 6 skipped, 1 failed (6.7 min): the Settings search test, which `3c56f6a` corrects |
+| `npx playwright test tests/e2e/settings.spec.ts -g "found by searching"` | Windows, `3c56f6a` | 1 passed |
+| `npm run verify:docker` | Linux container, `3c56f6a` | typecheck, lint, unit and build exit 0; unit 1359 passed, 37 skipped; desktop suite 70 passed, 6 skipped, 0 failed (6.6 min) |
+| `npm run dist:win` | Windows, `3c56f6a` | exit 0, `dist/Graft-Setup-0.6.28.exe`, 128,707,206 bytes, SHA-256 `4126ba372f9ed664450a35f300be3be9e63900e5042e11668812de471c3e8643`; its signature was not checked this round |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.28 build of `3c56f6a` | 3 passed (19.0 s) |
+
+`3c56f6a` changes one desktop test and no code of the app. The full Windows desktop run is
+that of `fbf2a59`; on Windows only the corrected test was run again at `3c56f6a`. The full
+Linux run and the installer are those of `3c56f6a`.
+
+A failure that is not this round's, and is not fixed. Three of nine full runs of the unit
+suite on Windows failed with one test each, in the block "real TypeScript language-server
+queries" of `languageServers.test.ts` (two different tests of it), every time with
+`EPERM, Permission denied` while the test removed its temporary folder. That file alone
+passed three times of three. The same measurement on the untouched 0.6.27 commit `a60a6a4`,
+in a separate checkout: one of six full runs failed the same way. Docker Desktop was
+starting or running during all of these. So it was there before this round; whether the
+round or the load made it more frequent, nine and six runs cannot say. The Linux run had no
+such failure. A task to find its cause was noted for the owner.
+
+What the suite found on the way:
+
+- The full Windows run failed in `settings.spec.ts`: a search for "motion" finds two rows
+  since the new setting, and the test clicked whichever began with "Motion". The test now
+  expects both and takes the one that is the word (`3c56f6a`).
+- Typecheck: the renderer's store has a switch over every event, which had no case for the
+  new `aside` event. A test that reads the stylesheet from disk does not typecheck among
+  the renderer's tests (they are checked without Node's types): it is `motionTokens.test.ts`
+  among the others.
+- Lint: a comment between two `case` labels counts as a fall-through.
+- A built stylesheet writes `380ms` as `.38s`: the desktop test reads the panel's computed
+  animation time instead of the token's text.
+- The preview harness, which is not part of the app: its scripted agents had no `writes`
+  list, which the app fills in when it parses an event, so the Agents panel failed there.
+
+Desktop tests that were changed, and why. Where a number changed, the old one is still
+asserted for the Calm style.
+
+- `motion.spec.ts`: with Motion on, the home screen had to have arrived within 350 ms. That
+  is still asserted for Calm; for Lively, the default, it is 550 ms (380 ms and delays up to
+  150 ms). Reduced is nothing for both.
+- `windows.spec.ts`: a change of page took 150 ms. Now: Lively is 300 ms, the window is
+  marked for exactly the change of page and not for a change of theme, and the page then
+  has a frame of its own; Calm is 150 ms with no frame; with motion reduced every lively
+  time and the Settings window's own animation are zero. The panel test also checks that a
+  panel joining another comes in with the lively animation in 380 ms.
+- `settings.spec.ts`: as above.
+
+The six skipped desktop tests are the three of the packaged app (run separately, above) and
+the three that take README screenshots.
+
+What the tests of this round show, and with what:
+
+- Unit, 27 new cases in five files. A side question is asked with the conversation as text,
+  the question last, no tools, no web search, the lowest effort and the session's privacy;
+  its answer is handed on piece by piece; an empty conversation says so; a long one keeps
+  its opening and its newest part; an empty answer and a refused request fail with their
+  reason. In a session: answered while a turn runs and the turn ends as it would have,
+  nothing of it stored; answered with no turn running and none started; cancelled by its id and by closing the session; an empty question refused; as an
+  ordinary message it is explained and no request is made. In the window: asking, hearing,
+  the answer, a failure that keeps what was heard, dismissing with and without a request to
+  cancel, three kept and the fourth pushing the oldest out, each session its own. Motion:
+  the window is marked only while a change of page takes, never when the change is made at
+  once; an older profile gets the lively style and an unknown style is refused; the
+  stylesheet's lively block comes before the blocks that zero the times, and every lively
+  animation takes its time from a token (two of these were also seen failing against a
+  stylesheet broken on purpose).
+- Desktop, 2 new tests in `aside.spec.ts`. A side question typed in the middle of a held
+  turn: the card shows the question and the answer and that it is kept out, the turn's Stop
+  button is still there, nothing is queued, the transcript has neither; the request had
+  system and user only, no tools, the earlier message and the question in it; the next
+  message's request has neither question nor answer; dismissing removes the card; `/btw`
+  alone keeps the text and says what is missing; three requests were made in all. The
+  command menu lists `/btw` with its description.
+- Looked at, in the renderer preview (the app's interface in a browser, with scripted
+  turns): the card asking, answering, answered and failed; the animations a change of page
+  starts (`graft-page-in`, 300 ms, on the page's own frame; `graft-page-out`, 110 ms) and
+  the mark coming and going. Three recordings of that preview were made for a film (a task
+  with a side question, a group of agents, moving about and Settings), and frames of them
+  were looked at: a page mid-way into place, the card arriving, the panel coming in, the
+  Settings window, the Motion style row.
+
+Not verified:
+
+- No model answered a side question: the provider is scripted in the tests and in the
+  preview. Nothing shows how good an answer is, or how long one takes on a long conversation.
+- How the lively motion feels in the installed app. The tests read computed styles, marks
+  and timings; the recordings are of the preview in a headless browser, and what was looked
+  at were frames of them, not the motion playing. Nobody has used it for a day.
+- The browser's panel staying put is a rule in the stylesheet; the existing test that its
+  page is on its place passed, but no test opens it beside another panel in the lively style.
+- A side question's request is not counted in the usage of a session or a day (as titles
+  are not), and no test says so.
+- The installer was built and its unpacked app tested; the installer itself was not run.
