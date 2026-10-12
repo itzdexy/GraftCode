@@ -1092,6 +1092,10 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   `xlsx.ts`); functions that take a `LAMBDA` or name variables (`LET`) are written as typed
   and may show `#NAME?` until re-entered. Nothing here was opened in Microsoft Excel.
 - macOS builds are not published (GitHub Actions is blocked by an account billing lock).
+- The unit suite fails some of its full runs on Windows, in the language-server tests, with
+  `EPERM` while a test removes its temporary folder: one run of six at 0.6.27 and three of
+  nine at 0.6.28, measured with Docker Desktop running, and none in the Linux container. Whether a language server still
+  holds the folder after it was closed, which would also be a fault of the app, is not known.
 - Loose edit matching ignores only leading and trailing whitespace per line. Differences
   inside a line (double spaces, escaped `\n`) still fail with the exact-match error.
 
