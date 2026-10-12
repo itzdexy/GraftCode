@@ -130,6 +130,21 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Windows and motion (0.6.27)
+
+**Settings** opens as a window over the page you were on. The session underneath stays
+as it was and keeps working; `Esc`, the close button or a click beside the window shows it
+again. Settings is still part of the history: **Forward** opens it again, and every link
+into a settings page works as before.
+
+Changes of view are shown instead of cut. Going to another page or session, a new theme,
+palette or accent, and another transcript view cross-fade over 150 ms. The panel column
+slides open and shut and the conversation moves aside with it. A session that changes
+place in the sidebar travels there, and a task that changes state pops as its list
+arrives. All of it follows **Settings → Appearance → Motion**: with Reduced, or a system
+that asks for less motion, nothing moves and everything still opens, closes and lands
+where it should.
+
 ### Review and navigation (0.6.26)
 
 Point at the code instead of describing it. Any line of a diff, in the **Changes** panel

@@ -19,6 +19,59 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.27 windows and motion (2026-10-12)
+
+The last of the four rounds planned on 2026-10-11. No new package, no new table. Motion
+says that something changed and where it went; it moves opacity, transforms and one grid
+track, takes its time from the tokens, and is nothing at all with motion reduced.
+
+- **Settings is a window** (`SettingsWindow.tsx`, `pageUnder` and `closeSettings` in
+  `stores/nav.ts`). Settings stays a route; `AppShell` draws the newest route that is not
+  Settings and lays the window over it: 1,000 by 720 at most, 32 px clear of the window's
+  edge. Closing leaves the history as it was before Settings opened, and Forward opens it
+  again. Escape belongs to the innermost thing: a shortcut that is being recorded
+  (`data-recording`), or whatever is open over Settings.
+- **Views cross-fade** (`withViewTransition` and `useCrossFaded` in `lib/motion.ts`,
+  `--g-duration-view`). The page drawn follows the route inside a view transition; the
+  theme, the palette and the accent are set inside one; the transcript view follows its
+  setting the same way.
+- **The panel column slides** (`PanelColumn.tsx`, `.graft-slide-x`). Only the column's
+  track changes; the panels keep their width and stay in the column while it slides shut
+  (`lastShown`, `usePresence`). The browser panel's native page steps out while the column
+  moves.
+- **Rows travel** (`lib/flip.ts`). The sidebar's session rows carry `data-flip-key`; a row
+  that changes place is put back where it was and released. More than 600 px, or more than
+  30 rows at once: nothing travels.
+- **A task that changed shows it** (`todoMotion.ts`). Each task list in the transcript
+  says which of its tasks differ from the list before it in the same turn; their marks pop
+  when the list arrives while its turn runs.
+
+Different from the plan, and why:
+
+- The plan made each store change inside the view transition. A browser takes its picture
+  of the page first and makes the change a frame later, so navigation would have become
+  asynchronous, and two quick changes could have been applied out of order. The stores
+  change at once; only what is drawn goes through the transition, and a change that comes
+  while another waits is made after it, at once.
+- Menus and popovers lay under dialogs (`--g-z-popover` 50, `--g-z-dialog` 60), so a menu
+  opened inside the Settings window was drawn behind it. They are now above dialogs (65);
+  the list above the message box, which never leaves its part of the page, has a token of
+  its own under them (`--g-z-float`).
+- Settings asks the page whether something is open over it before it takes Escape. The
+  dialog library moves its Escape listener to a newly opened layer a frame late, and in
+  that frame Settings would have closed instead of the search that had just opened over
+  it. No person is that fast; a test was.
+- The window has no title bar of its own: the list of pages already has the heading
+  "Settings". The keyboard goes to the window as a whole when it opens, since on the close
+  button its tooltip would open too.
+- The panels' resize handle is inside the column's edge and no longer across it: across
+  it, 4 px of the column reached past the page while it slid.
+- A task whose list brings new ids every time (a model that sends none) is matched by its
+  words, or its change would never be seen.
+- While a view fades the page still takes clicks (`::view-transition` lets them through).
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.27.
+
 ### 0.6.26 review and navigation (2026-10-12)
 
 The third of the four rounds planned on 2026-10-11. No new package, no new table.
@@ -748,6 +801,14 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- While Settings is open the page under it cannot be used: the sidebar and the account
+  menu are reached again once it is closed. A permission prompt of the session underneath
+  waits there unseen until then; the sidebar's Needs you and the notification still say so.
+- When two changes of view come together, the second is made at once and gets no fade of
+  its own. The browser panel's page is a native view, so it does not fade with the rest
+  and is hidden for the moment its column slides. Rows travel in the sidebar only. The
+  panel column slides, but a panel that joins others already open just appears. The
+  cross-fade is 150 ms and plain; nothing else about a change of page moves.
 - A comment for the agent is text in the next message, not a thread: the agent's answer is
   not tied back to the line, and a comment is gone from the code once it is sent. Comments
   are kept in the window's storage, so another computer does not have them. A comment's
@@ -795,7 +856,6 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   source. A row whose name is worked out when it is drawn, a provider, a shortcut, and
   what the Integrations, Hooks and Memory pages hold are found by their page only. It
   matches words and the starts of words, not meanings: "dark" does not find Theme.
-  Settings is still a page, not a window over the session as in Claude.
 - `SemanticCode` answers for TypeScript and JavaScript only, in trusted projects, and a
   search by name needs any file of the project to say which project is meant. It finds
   what the server's own search finds: at most a few hundred names, matched by prefix,
@@ -1035,6 +1095,8 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    real setups; MCP elicitation and @-mentioning resources.
 6. Done in 0.6.23: diagrams, drawn with the bundled skill and shown when the turn ends.
    Done in 0.6.25: equations in replies. Still open: reading PDFs from the web.
-7. Planned in October 2026: code in the conversation (done in 0.6.25), review and
-   navigation (done in 0.6.26), then windows and motion (Settings as a window among them),
-   which is not built.
+7. The four rounds planned in October 2026 are done: diagrams (0.6.23), code in the
+   conversation (0.6.25), review and navigation (0.6.26), windows and motion (0.6.27).
+   Still open from the larger request: a side chat that stays out of the context, split
+   view and session groups, rename and call hierarchy from the language server, a VS Code
+   extension, moving a session between computers.
