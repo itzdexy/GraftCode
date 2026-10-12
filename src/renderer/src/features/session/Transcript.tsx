@@ -6,6 +6,7 @@ import { sourceIndex, sourcesOf } from '@shared/sources';
 import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
+import { overlayOpen, useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useFileRefs } from '../../stores/fileRefs';
 import { usePanels } from '../../stores/panels';
@@ -26,6 +27,7 @@ import { ConversationContext, type Conversation } from './conversation';
 import { DiagramCard } from './DiagramCard';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
+import { FindBar, type FindBarHandle } from './FindBar';
 import { SourcesContext } from './Markdown';
 import { MediaCard } from './MediaCard';
 import { useRewind } from './RewindDialog';
@@ -138,6 +140,19 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   const restore = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [currentTurn, setCurrentTurn] = useState(0);
+  // Find in the conversation: the shortcut opens the bar, and selects the text of one that is open.
+  const [finding, setFinding] = useState(false);
+  const findBar = useRef<FindBarHandle>(null);
+  useShortcut(
+    'findInTranscript',
+    () => {
+      if (finding) findBar.current?.focus();
+      else setFinding(true);
+    },
+    true,
+    // An editor and a terminal have a find of their own while the keyboard is in them, and a dialog covers the conversation.
+    () => !overlayOpen() && !document.activeElement?.closest('.monaco-editor, .xterm')
+  );
 
   const turns = useMemo(
     () => items.filter((i): i is Extract<TranscriptItem, { kind: 'user' }> => i.kind === 'user').map((i) => ({ key: i.key, text: i.text })),
@@ -323,6 +338,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   return (
     <div className="relative min-h-0 flex-1">
       {variant === 'code' ? <Timeline turns={turns} current={currentTurn} onJump={jumpTo} /> : null}
+      {finding ? <FindBar ref={findBar} root={contentRef} scroller={scrollRef} onClose={() => setFinding(false)} /> : null}
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
           <ConversationContext.Provider value={conversation}>

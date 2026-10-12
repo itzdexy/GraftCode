@@ -118,7 +118,7 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
               row.type === 'hunk' || row.type === 'note' ? (
                 header(row, i)
               ) : (
-                <div key={i} className={cn('flex', LINE_BG[row.type])}>
+                <div key={i} data-find-block className={cn('flex', LINE_BG[row.type])}>
                   {gutter === 'both' ? (
                     <>
                       <Gutter value={row.oldNo} />
@@ -143,7 +143,7 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
                 <div key={i} className="grid grid-cols-2">
                   {[pair.left, pair.right].map((side, j) => (
                     <Fragment key={j}>
-                      <div className={cn('flex min-w-0', side ? LINE_BG[side.type] : 'bg-sunken', j === 0 && 'border-r border-border-subtle')}>
+                      <div data-find-block className={cn('flex min-w-0', side ? LINE_BG[side.type] : 'bg-sunken', j === 0 && 'border-r border-border-subtle')}>
                         <Gutter value={side ? (j === 0 ? side.oldNo : side.newNo) : null} />
                         <span className="pr-12 whitespace-pre">{side ? <LineText text={side.text} ink={inkOf(side)} tone={side.type} /> : ' '}</span>
                       </div>

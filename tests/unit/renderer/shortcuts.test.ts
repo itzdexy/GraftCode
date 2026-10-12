@@ -52,4 +52,11 @@ describe('recording shortcuts', () => {
     expect(lib.shortcutProblem('interrupt', 'Escape', current)).toBeNull();
     expect(lib.shortcutProblem('cyclePermissionMode', 'M', current)).toMatch(/single character/);
   });
+
+  it('has a key for finding in the conversation that clashes with no other', () => {
+    expect(DEFAULT_SHORTCUTS.findInTranscript).toBe('Ctrl+F');
+    expect(lib.SHORTCUT_DESCRIPTIONS.findInTranscript).toBe('Find in the conversation');
+    expect(lib.shortcutProblem('findInTranscript', 'Ctrl+F', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('search', 'Ctrl+F', DEFAULT_SHORTCUTS)).toMatch(/Find in the conversation/);
+  });
 });
