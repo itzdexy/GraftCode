@@ -1,6 +1,6 @@
-# Try Graft 0.6.28
+# Try Graft 0.6.29
 
-1. Open **Settings → About** and confirm version **0.6.28**. In
+1. Open **Settings → About** and confirm version **0.6.29**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -133,6 +133,17 @@
     the edge. Choose **Calm** and do the same: short fades only. Set **Motion** to
     **Reduced**: the row says "Nothing moves while motion is reduced", and nothing does
     in either style.
+33. Open **Sites**. Beside the name, **React + TypeScript** is chosen (it needs Node.js;
+    without it the choice is greyed and the line under it says why). Describe a small site
+    and press **Build site**. The preview says the site is being set up. Graft asks to run
+    `npm install`, then `npm run build`: allow them. After the build the preview shows the
+    site. Open its folder: `package.json`, `tsconfig.json`, `src/` with `.tsx` components
+    and CSS modules, and `dist/`. Ask for a change and watch the preview after the next
+    build. In your own browser, open the site's address with `/package.json` on the end:
+    "Not found". Back in **Sites**, the card says **TypeScript**.
+34. In **Sites**, choose **Plain HTML** and build another: no command is asked for, the
+    folder holds `index.html` and what it links, and its card says **HTML**. The choice is
+    still Plain HTML when you come back to the page.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

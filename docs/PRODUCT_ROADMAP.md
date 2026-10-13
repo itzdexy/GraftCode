@@ -19,6 +19,58 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.29 sites in TypeScript (2026-10-12)
+
+Asked for in so many words: the Sites tab should write TypeScript, in `.ts` and `.tsx`, the
+way professional work is done. No new package in Graft, no new table. One new field in a
+site's record (`stack`), one new channel (`sites:toolchain`), one more input to
+`sites:create`.
+
+- **A site has a stack** (`SITE_STACKS` in `shared/schemas/sites.ts`): `react-ts` or `plain`.
+  It is written into `.graft-site/site.json`; a site without one is plain, so every site
+  from before stays as it was.
+- **The starter** (`sites/scaffold.ts`). A TypeScript site's folder gets a project that
+  builds as it stands: `package.json` with exact versions (React 19.3.0, Vite 8.3.4,
+  `@vitejs/plugin-react` 6.1.2, TypeScript 5.9.3), a strict `tsconfig.json`, a Vite config
+  with relative addresses, `index.html`, `src/main.tsx`, `src/App.tsx` with a CSS module,
+  tokens and base styles, a `.gitignore` and a README. Its `build` is
+  `tsc --noEmit && vite build`, so a type error stops a build; its `typecheck` script is
+  what Graft finds as the project's check.
+- **The brief** (`typedSiteSection` in `systemPrompt.ts`). The agent is told the project is
+  there, to install once and to build to show a change, and how to write it: one component
+  to a `.tsx` file with its props as a named type, what repeats as typed data, tokens and
+  CSS modules, no `any`, no invented package names. The plain brief is unchanged.
+- **Serving** (`siteServer.ts`). A site that is built is its `dist` folder and nothing
+  else: `package.json`, `src` and `node_modules` answer 404. An address that names no file
+  gets the page. Open pages reload when `dist` changes, once for a build however many
+  files it writes (250 ms of quiet), and not when a source file or a package does. Until
+  the first build a page says the site is being set up.
+- **The Sites page** (`features/sites/stack.ts`, `SitesView.tsx`). "Built with" beside the
+  name, remembered in the window's storage; React + TypeScript unless Plain HTML was
+  chosen, and Plain HTML where npm is not found, with a line that says why. Each card in
+  the gallery says which kind it is.
+
+Different from what one might expect, and why:
+
+- Graft does not install or build by itself, and adds no rule that lets the agent do so
+  unasked. A `build` script and a Vite config are code, and the agent can edit both without
+  a prompt in the mode a site's session runs in; a build that ran unasked would be a shell
+  without a prompt. The user allows `npm install` and `npm run build` from the prompt, for
+  the session or for the project.
+- It builds; it does not run a development server. A build in the foreground leaves no
+  process behind when the turn ends or the app closes, and its type check is the check the
+  work has to pass. The price is that the page changes after a build, not as each file is
+  written.
+- Graft writes the starter; the agent does not. Fixed files cost no tokens, cannot be half
+  written, and are the ones that were installed and built for real before this shipped.
+- TypeScript is 5.9.3 although 7.0 is out: it is the compiler Graft's own language server
+  runs, so an edit to a site is checked by the compiler that builds it.
+- Addresses in the built site are relative (`base: './'`), so `dist` works under any path.
+  A router with real paths would need that changed; the brief asks for one page with
+  anchors unless more is wanted.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.29.
+
 ### 0.6.28 a side question and lively motion (2026-10-12)
 
 Two things from the list that was still open. No new package, no new table; one new
@@ -855,6 +907,17 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- A TypeScript site needs Node.js with npm on the computer and the network for its first
+  install; its packages take 67 MB in every site's folder. The starter's versions are those
+  of the Graft release that made the site and are not moved forward afterwards. The user is
+  asked before `npm install` and before `npm run build` in every new site, until they
+  allow them for the project. The preview changes after a build, not while files are
+  written, and a build that fails shows nothing in the preview: the error is in the
+  session. There is one starter: React with Vite. No model built a TypeScript site in
+  testing; the starter was installed and built for real, and the flow was run with a
+  scripted model that wrote the build's output itself. An npm started from inside another
+  npm's script inherits its settings and can refuse to install (`EALLOWSCRIPTS`, seen in a
+  test run under `npx`); a Graft started from an npm script could hit the same.
 - While Settings is open the page under it cannot be used: the sidebar and the account
   menu are reached again once it is closed. A permission prompt of the session underneath
   waits there unseen until then; the sidebar's Needs you and the notification still say so.
