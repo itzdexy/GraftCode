@@ -740,3 +740,105 @@ Not verified:
 - A side question's request is not counted in the usage of a session or a day (as titles
   are not), and no test says so.
 - The installer was built and its unpacked app tested; the installer itself was not run.
+
+## 0.6.29 round (2026-10-12)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Five
+commits: `22bd3a0`, `d2a62d8` and `79b7476` (the round), `4db1fa8` (the version) and `16ea25c`
+(a fix to the site watcher, found on review). Two systems: Windows 11 (Node 26.7.0, npm
+11.19) and a clean `node:24-bookworm` container (Docker 29.8.0) packed from a separate
+checkout. Nothing here ran on macOS, on GitHub's runners, or against a paid provider.
+
+| Command | Where, commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | Windows, `16ea25c` | exit 0 |
+| `npm run lint` | Windows, `16ea25c` | exit 0 |
+| `npm test` | Windows, `16ea25c` | two full runs: one passed (119 files passed, 3 skipped; 1383 tests passed, 30 skipped); one had two failures, both the `EPERM` in `languageServers.test.ts` that the 0.6.28 report describes |
+| `npm run build` | Windows, `16ea25c` | exit 0 |
+| `npx playwright test` | Windows, `4db1fa8` | 70 passed, 6 skipped, 1 failed (7.3 min): `conversation.spec.ts:56` |
+| `npx playwright test` | Windows, `16ea25c`, first run | 70 passed, 6 skipped, 1 failed (9.1 min): `writers.spec.ts:54` |
+| `npx playwright test` | Windows, `16ea25c`, second run | 71 passed, 6 skipped, 0 failed (7.2 min) |
+| each of the two failed tests alone, `--repeat-each=3` | Windows | 3 passed, and 3 passed |
+| `npm run verify:docker` | Linux container, `16ea25c` | typecheck, lint, unit and build exit 0; unit 1375 passed, 38 skipped; desktop suite 71 passed, 6 skipped, 0 failed (6.8 min) |
+| `GRAFT_LIVE_SITE=1 npx vitest run tests/unit/sites.live.test.ts` | Windows, `16ea25c`, with the network | 1 passed (9.4 s with npm's cache warm; 19 s on its first run, before the last commit) |
+| `npm run dist:win` | Windows, `16ea25c` | exit 0, `dist/Graft-Setup-0.6.29.exe`, 128,710,313 bytes, SHA-256 `209951eb94f59bf6dd9729b038f4fea8b214b42f65c75e8b46a51b922d2b571c`; its signature was not checked this round |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | Windows, the unpacked 0.6.29 build of `16ea25c` | 3 passed (20.0 s) |
+
+Two of the three full desktop runs on Windows had one failure each, and they have to be
+read with what else the computer was doing. During the first, unit tests, a type check and
+lint of this same project were run beside it, which was a mistake. During the second
+nothing of this project ran, but Roblox Studio and the Roblox player were open on the
+computer and held between a quarter and a third of its processor when measured. The two
+failures were different tests, neither in code this round touches (text reaching the
+terminal within 15 s; an agent's failure showing in the Agents panel within 30 s); each
+passed three times of three alone, both passed in the third full run, and both pass in
+the container. That is evidence of load, not proof that there is no fault in either test.
+
+What the round found on the way:
+
+- The watcher of a site asked what the site is built with for every file that changed,
+  which reads the site's record from disk, and an install changes thousands of files. It
+  is settled once per watch now (`16ea25c`). Under such a burst Windows also reports
+  changes without a name (a probe: 80 new files gave one named change and one unnamed).
+  An unnamed change counts as a build only if the built page is no longer what it was.
+  Both were written as a failing test first.
+- An `npm install` started from inside another npm's script fails here with
+  `EALLOWSCRIPTS`: it inherits the outer npm's settings. The live test runs npm without
+  them, as a shell of the user's would. `npx remotion add` failed the same way earlier in
+  the day, in another folder.
+- npm's newest TypeScript is 7.0; the starter stays on 5.9.3, the compiler of Graft's own
+  language server.
+- Two faults of the tests themselves, fixed before the runs above: a match that minded a
+  capital letter, and a mark looked for inside the picture's button instead of the site's
+  row.
+
+Desktop tests that were changed, and why. `sites.spec.ts`: the test of a plain site now
+chooses Plain HTML first, since a new site starts as a project where npm is found, and
+checks the card's mark; nothing else of it changed. One test is new.
+
+The six skipped desktop tests are the three of the packaged app (run separately, above) and
+the three that take README screenshots. The unit suite skips one more test than before: the
+live one, which needs npm and the network and runs when asked.
+
+What the tests of this round show, and with what:
+
+- Unit, 16 new cases in two files. The starter: its twelve files, exact versions, a build
+  that type-checks first, strict settings, relative addresses, the site's name as text
+  whatever is in it, the type check found as the project's check, nothing written over. A
+  site's stack in its record, plain for a record without one, kept when the record changes.
+  Serving a built site: the page that says it is being set up before a build; after one,
+  the built page and what it links, and 404 for `package.json`, the sources, the packages
+  and the `dist` address itself; an address with no file gets the page and a missing file
+  gets 404, while a plain site has only the pages it has; one reload for a build of several
+  files, none for a change to a source, a package or `package.json`; the kind asked for
+  once per watch; a burst of 80 files in `node_modules` is no change, and a build in the
+  middle of a second burst is one. The brief for each stack. What a new site starts as,
+  with and without npm, and what the page says about it.
+- The starter for real, on Windows with the network: `npm install` (23 packages),
+  `npm run typecheck`, `npm run build`; the built page has relative addresses and holds the
+  site's name; Graft's server serves the page, its script and its stylesheet as what they
+  are and hides `package.json`; a type error (`TS2322`) fails the build and leaves the built
+  page as it was. In a folder with a space and brackets in its name. The packages take
+  67 MB.
+- Desktop, 1 new test and 1 changed. A TypeScript site through the app: the choice starts
+  on React + TypeScript and says that Graft asks before it installs or builds; the folder
+  holds the project with the site's name in it before the model has written a line; the
+  model's first request carries the brief for a project and not the plain one; the page
+  Graft serves is the one in `dist`, with `package.json` and the sources answering 404 and
+  an address without a file getting the page; the card says TypeScript; the choice is
+  still there afterwards.
+- Looked at, in the renderer preview: the Sites page with the choice, the line under it,
+  two cards with their marks, and the state without npm (the project greyed, plain chosen,
+  the line naming Node.js).
+
+Not verified:
+
+- No model built a TypeScript site. In the desktop test the model is scripted and writes
+  the build's output itself, since packages cannot be installed there. Whether a model
+  follows the brief (components, typed data, no `any`), and how the session goes through
+  the prompts for `npm install` and `npm run build`, was not watched once.
+- The starter was installed and built on Windows with Node 26.7 only: not in the
+  container, not on macOS, not with an older Node.
+- An edit to a site being checked by the language server after the install: the versions
+  are the same by choice, and no test opens a site's file to see a problem reported.
+- The installer was built and its unpacked app tested; the installer itself was not run.
