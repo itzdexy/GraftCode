@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowUp, ExternalLink, FolderOpen, Globe, Trash } from 'lucide-react';
 import type { SiteView } from '@shared/schemas/sites';
+import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
 import { TextField } from '../../components/Field';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States';
@@ -8,12 +9,14 @@ import { onChanged } from '../../lib/bus';
 import { cn } from '../../lib/cn';
 import { relativeTime } from '../../lib/format';
 import { errorText, invoke } from '../../lib/ipc';
+import { logError } from '../../lib/log';
 import { useLoad } from '../../lib/useLoad';
 import { useNav } from '../../stores/nav';
 import { usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { ConfirmDialog } from '../settings/common';
 import { PageLayout } from '../shell/PageLayout';
+import { rememberedStack, rememberStack, STACK_CHOICES, stackHint, stackToStart } from './stack';
 
 /** Starting points that show what a good brief looks like. */
 const IDEAS: Array<{ label: string; prompt: string }> = [
@@ -62,6 +65,15 @@ function NewSite({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether a project can be installed and built here. Until the answer is in, it is taken to be possible.
+  const [npm, setNpm] = useState(true);
+  const [picked, setPicked] = useState<string | null>(rememberedStack);
+  useEffect(() => {
+    invoke('sites:toolchain')
+      .then((found) => setNpm(found.npm))
+      .catch((e: unknown) => logError('Could not look for npm', e));
+  }, []);
+  const stack = stackToStart(picked, npm);
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -69,7 +81,7 @@ function NewSite({ onCreated }: { onCreated: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const { site, sessionId } = await invoke('sites:create', { prompt: prompt.trim(), ...(name.trim() ? { name: name.trim() } : {}) });
+      const { site, sessionId } = await invoke('sites:create', { prompt: prompt.trim(), stack, ...(name.trim() ? { name: name.trim() } : {}) });
       onCreated();
       await openSite(site, sessionId);
     } catch (e) {
@@ -93,11 +105,35 @@ function NewSite({ onCreated }: { onCreated: () => void }) {
       />
       <div className="flex flex-wrap items-center gap-8">
         <TextField aria-label="Site name (optional)" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" className="w-[200px]" />
+        <div role="radiogroup" aria-label="Built with" aria-describedby="site-stack-hint" className="flex rounded-md border border-border p-2">
+          {STACK_CHOICES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={stack === value}
+              disabled={value === 'react-ts' && !npm}
+              onClick={() => {
+                setPicked(value);
+                rememberStack(value);
+              }}
+              className={cn(
+                'h-24 rounded-sm px-10 text-sm transition-ui disabled:text-fg-faint',
+                stack === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary disabled:hover:text-fg-faint'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="flex-1" />
         <Button type="submit" variant="primary" disabled={!prompt.trim() || busy} trailing={<ArrowUp className="size-14" />}>
           {busy ? 'Starting…' : 'Build site'}
         </Button>
       </div>
+      <p id="site-stack-hint" className="text-sm text-fg-muted">
+        {stackHint(stack, npm)}
+      </p>
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -143,7 +179,10 @@ function SiteCard({ site, onRemove }: { site: SiteView; onRemove: () => void }) 
           <p className="truncate font-mono text-xs text-fg-faint" title={site.url}>
             {site.url.replace(/^http:\/\//, '').replace(/\/$/, '')}
           </p>
-          <p className="mt-2 text-xs text-fg-muted">Updated {relativeTime(site.updatedAt)}</p>
+          <p className="mt-2 flex items-center gap-6 text-xs text-fg-muted">
+            <Badge>{STACK_CHOICES.find((choice) => choice.value === site.stack)?.short ?? 'HTML'}</Badge>
+            Updated {relativeTime(site.updatedAt)}
+          </p>
         </div>
         <IconButton label="Open in your browser" size="sm" onClick={() => void invoke('app:openExternal', { url: site.url })}>
           <ExternalLink className="size-14" />
@@ -174,7 +213,7 @@ export function SitesView() {
     <PageLayout
       wide
       title="Sites"
-      description="Describe a website and Graft designs and builds it, then hosts it on this computer with a live preview. Each site is a plain folder on this computer, ready to publish anywhere."
+      description="Describe a website and Graft designs and builds it, then hosts it on this computer with a live preview. Each site is a folder on this computer: a TypeScript project you can keep building, or plain files ready to publish as they are."
     >
       <NewSite onCreated={reload} />
       <section aria-label="Your sites" className="mt-28">
