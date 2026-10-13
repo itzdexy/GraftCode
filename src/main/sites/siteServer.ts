@@ -105,6 +105,22 @@ interface Watch {
   lastAsked: number;
   /** For a site that is built: the wait for its build to have finished writing. */
   settle: NodeJS.Timeout | null;
+  /** For a site that is built: its built page as it was when last looked at (see buildStamp). */
+  stamp: string;
+}
+
+/**
+ * A built site's page as it is on disk right now, in a form that is different after every build
+ * that changed it. Under a burst of changes (an install) the system reports that something changed
+ * without saying what; whether that was the build is then read off the page the build writes.
+ */
+function buildStamp(folder: string): string {
+  try {
+    const stat = fs.statSync(path.join(folder, BUILD_DIR, 'index.html'));
+    return `${String(stat.mtimeMs)}:${String(stat.size)}`;
+  } catch {
+    return 'none';
+  }
 }
 
 /**
@@ -209,27 +225,34 @@ export class SiteServer {
     let watch = this.watches.get(slug);
     if (!watch) {
       try {
+        // Settled once for as long as the site is watched: an install writes thousands of files, and asking
+        // for each of them would read the site's record from disk each time. What a site is built with never changes.
+        const built = this.built(slug);
         const created: Watch = {
           watcher: fs.watch(folder, { recursive: true }, (_event, name) => {
             const top = typeof name === 'string' ? name.split(/[\\/]/)[0] : null;
             // Graft's own bookkeeping (the gallery picture) isn't a change to the site.
             if (top === '.graft-site') return;
-            if (!this.built(slug)) {
+            if (!built) {
               created.version++;
               return;
             }
             // A site that is built changes when its build does, not with its sources or its packages.
             if (top !== null && top !== BUILD_DIR) return;
+            // A change with no name: only a build if the built page is no longer what it was.
+            if (top === null && buildStamp(folder) === created.stamp) return;
             if (created.settle) clearTimeout(created.settle);
             created.settle = setTimeout(() => {
               created.settle = null;
+              created.stamp = buildStamp(folder);
               created.version++;
             }, BUILD_SETTLE_MS);
             created.settle.unref();
           }),
           version: 0,
           lastAsked: Date.now(),
-          settle: null
+          settle: null,
+          stamp: built ? buildStamp(folder) : ''
         };
         created.watcher.on('error', (error) => {
           this.log('warn', 'Site watcher stopped', { site: slug, message: error.message });
