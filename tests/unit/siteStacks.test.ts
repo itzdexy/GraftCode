@@ -199,6 +199,49 @@ describe('serving a site that is built', () => {
   });
 });
 
+describe('watching a site while its packages are installed', () => {
+  it('settles what kind of site it is once, and does not ask again for every file an install writes', async () => {
+    const root = makeTempDir();
+    const store = new SitesStore(root);
+    const site = store.create('Peach Palace', '', 'react-ts');
+    let asked = 0;
+    const server = new SiteServer(
+      root,
+      () => undefined,
+      () => null,
+      () => {
+        asked++;
+        return true;
+      }
+    );
+    const port = await server.start();
+    cleanup.push(async () => {
+      await server.close();
+      removeDir(root);
+    });
+    writeFile(site.folder, 'dist/index.html', '<h1>one</h1>');
+    const host = `peach-palace.localhost:${port}`;
+    const before = (await get(port, host, '/__graft/version')).body;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const askedBefore = asked;
+    for (let i = 0; i < 80; i++) writeFile(site.folder, `node_modules/some-package/lib/file${String(i)}.js`, 'x');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(asked - askedBefore).toBe(0);
+    // None of it was a change to the site, although under such a burst the system may only say that something changed.
+    expect((await get(port, host, '/__graft/version')).body).toBe(before);
+
+    // A build that comes while packages are still landing is seen all the same: the built page itself has changed.
+    for (let i = 0; i < 80; i++) writeFile(site.folder, `node_modules/another-package/lib/file${String(i)}.js`, 'x');
+    writeFile(site.folder, 'dist/index.html', '<h1>two, and longer</h1>');
+    let after = before;
+    for (let i = 0; i < 60 && after === before; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      after = (await get(port, host, '/__graft/version')).body;
+    }
+    expect(after).not.toBe(before);
+  });
+});
+
 describe('the brief for a site', () => {
   const ctx: CodePromptContext = {
     model: { label: 'Model', id: 'model-1', provider: 'Provider' },
