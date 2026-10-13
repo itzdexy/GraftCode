@@ -3,6 +3,7 @@ import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EMPTY_USAGE, type EffortLevel, type Usage } from '@shared/schemas/common';
 import type { LlmMessage, StoredMessage } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
+import { sizeForWidth } from '@shared/schemas/panels';
 import type { Source } from '@shared/sources';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -390,7 +391,8 @@ export class SessionHost {
         return opened;
       },
       snapshot: () => panel().snapshot(),
-      capture: () => panel().capture(),
+      capture: (width) => panel().capture(width === undefined ? undefined : sizeForWidth(width)),
+      check: (width) => panel().check(width === undefined ? undefined : sizeForWidth(width)),
       click: (target) => panel().click(target),
       type: (target, text, submit) => panel().type(target, text, submit),
       press: (key) => panel().press(key),

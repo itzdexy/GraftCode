@@ -130,7 +130,7 @@ function typedSiteSection(ctx: CodePromptContext, site: NonNullable<CodePromptCo
     '- Craft the details: hover and focus states, subtle motion that respects prefers-reduced-motion, consistent radii and shadows, a favicon in public/, a meta description and Open Graph tags in index.html.',
     `- Imagery: ${imagery} A picture a component shows is imported from src/assets/; a file the page links by its address goes in public/.`,
     '- Semantic HTML, alt text, visible focus, AA contrast and keyboard access are part of the design, not extras.',
-    `- Check your work with the Browser tool at ${site.url} after a build: read the page, look at the console, and take screenshots when you can see images. Fix what looks off before you report.`,
+    `- Check your work with the Browser tool at ${site.url} after a build: read the page, look at the console, run action check at 390 and at 1280 wide and fix what it lists, and take screenshots when you can see images. Fix what looks off before you report.`,
     '- You are done when `npm run build` passes and the page is right. Then say what you built, where its parts are (components, content, tokens) and how to change it. The dist folder is what gets published, on any static host; a host that builds for you takes the build command `npm run build` and the output folder dist.'
   );
 }
@@ -151,7 +151,7 @@ function siteSection(ctx: CodePromptContext): string {
       ? '- Imagery: use pictures the user gives you (save them in assets/). When they ask for generated or AI-made images, make them with GenerateImage: a hero image, illustrations, backgrounds or product shots that fit the concept and palette, saved in assets/ with real alt text. Draw icons, logos and simple shapes as SVG yourself. Never hotlink images that might not exist.'
       : '- Imagery: use pictures the user gives you (save them in assets/). Otherwise draw your own with SVG, CSS gradients and shapes; never hotlink images that might not exist.',
     '- Semantic HTML, alt text, visible focus, AA contrast and keyboard access are part of the design, not extras.',
-    `- Check your work with the Browser tool at ${site.url}: read the page, look at the console, and take screenshots when you can see images. Fix what looks off before you report.`,
+    `- Check your work with the Browser tool at ${site.url}: read the page, look at the console, run action check at 390 and at 1280 wide and fix what it lists, and take screenshots when you can see images. Fix what looks off before you report.`,
     '- When you finish, say what you built and how to change it; the user can open the site in their own browser from the Sites tab.'
   );
 }

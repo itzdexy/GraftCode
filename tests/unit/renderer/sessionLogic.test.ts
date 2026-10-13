@@ -254,6 +254,11 @@ describe('turn activity', () => {
     expect(summarizeCalls([skill, call('Skill', { name: 'other' }, read)])).toBe('Read 2 skills');
   });
 
+  it('words a check of the page in the browser', () => {
+    expect(describeCall(call('Browser', { action: 'check', width: 390 }))).toBe('Checking the page');
+    expect(describeCall(call('Browser', { action: 'check' }, { display: { kind: 'browser', action: 'check', url: 'http://localhost:5173/', title: 'Sign up', detail: 'Checked at 390 px wide: 1 problem' } }))).toBe('Checked the page');
+  });
+
   it('words a search for tools, and what an agent reads from an MCP server’s resources', () => {
     expect(callParts(call('ToolSearch', { query: 'create issue' }))).toMatchObject({ verb: 'Searching tools for', target: '“create issue”' });
     expect(callParts(call('ToolSearch', { query: 'create issue' }, { display: { kind: 'text', text: 'Loaded 1 tool' } }))).toMatchObject({ verb: 'Searched tools for' });

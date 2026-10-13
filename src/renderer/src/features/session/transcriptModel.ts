@@ -893,6 +893,7 @@ function browserVerb(action: string, done: boolean): string {
     open: ['Opening', 'Opened'],
     read: ['Reading the page', 'Read the page'],
     screenshot: ['Taking a screenshot', 'Took a screenshot'],
+    check: ['Checking the page', 'Checked the page'],
     click: ['Clicking', 'Clicked'],
     type: ['Typing', 'Typed'],
     press: ['Pressing a key', 'Pressed a key'],
