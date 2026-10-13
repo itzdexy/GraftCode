@@ -19,6 +19,81 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.30 search in files and a page that is checked (2026-10-13)
+
+Asked for as "improve this for devs, coders and UI makers". Two things a person at the
+keyboard did not have, and the agent's side of the second. No new package, no new table.
+One new shortcut (`searchFiles`, Ctrl+Shift+H, which an older profile gets by default),
+four channels (`files:searchText`, `browser:check`, `browser:highlight`,
+`browser:captureSizes`), one more field in the answer of `browser:pick` (`image`), one
+action and one input of the Browser tool (`check`, `width`).
+
+- **Text search** (`files/textSearch.ts`, `features/panels/SearchView.tsx`,
+  `stores/textSearch.ts`). ripgrep looks, in the session's folder, for the text as written
+  or as a pattern, with case, whole words and globs to look in or leave out. Its JSON
+  answer is read as it arrives. A match is counted in characters (ripgrep counts in bytes)
+  and its line is shown without indentation and, when long, around the first match. The
+  search stops at 2,000 lines and says there are more; a new search for a session ends the
+  one before it. The tab sits in the Changes panel beside Files; what is in the box and
+  what was found live in the window's state, so they read the same after a result took the
+  panel to the Files tab. Arrow keys walk the box and the rows as one column.
+- **The page check** (`browser/pageCheck.ts`, `PAGE_FACTS` in `browser/pageScripts.ts`,
+  `shared/pageCheck.ts`). A script in Graft's isolated world gathers facts and changes
+  nothing: each text with its colour and what is behind it, pictures, controls with where
+  their name comes from and the room they take, headings, what reaches past the right
+  edge. The judging is a module of its own, tested without a page: contrast against
+  4.5:1 and 3:1, alt text, names, a placeholder as the only name, skipped heading levels,
+  a small target with another within 24 px, a page that scrolls sideways. One finding for
+  a pair of colours however often it is used.
+- **A page at a width of its own** (`BrowserPanel.atSize`). For a check or a picture the
+  page is laid out at the size asked for through the DevTools protocol
+  (`Emulation.setDeviceMetricsOverride`, then `Page.captureScreenshot` for a picture) and
+  put back. The panel's bounds asked for meanwhile wait until it is. A page that is not in
+  the window is put there as one pixel in a corner for the moment.
+- **The agent's side.** `Browser` has `check`, and `check` and `screenshot` take `width`
+  (320 to 1920). Both only look, so Plan mode allows them. The site briefs and the browser
+  tester's brief ask for the check at 390 and at 1280.
+- **The panel** (`BrowserPanel.tsx`, `pageCheckModel.ts`). A drawer under the page lists
+  the findings; pressing one scrolls the page to it and draws a box (`highlight` in
+  `pageScripts.ts`). It checks again when the page or the chosen width changes. Its button
+  writes the request to fix into the message box. A second toolbar button sends the page
+  at 390, 768 and 1280 px to the message box. The toolbar wraps when the panel is narrow.
+- **A picked element's picture.** The picker says where the element is; the panel pictures
+  that part of the page once the picker's own box is gone. The message box takes a picture
+  that only comes along with something else when the model reads pictures, and drops it
+  without a word otherwise (`picturesTaken` in `composer/attachments.ts`).
+
+Different from what one might expect, and why:
+
+- The search key is Ctrl+Shift+H, not Ctrl+Shift+F. That one has opened the Files panel in
+  Graft since it had one, and changing what a key does under someone's fingers is worse
+  than a second key. Both can be changed in Settings.
+- There is no replace. A change to many files belongs in a turn, with its checkpoint and
+  its diff; the results go to the message box for that.
+- The search does not follow the files as they change. It says when they have changed
+  since, and searching again is one press.
+- A small target is a finding only when another target is within reach of it. "Smaller
+  than 24 px" alone would name every unstyled button (21 px tall); the guideline's test is
+  the room around it, and that is what is measured.
+- Contrast is not guessed. With a picture or a gradient behind a text, with the text
+  faded, or with a picture elsewhere in the page under its middle, the text is counted as
+  not judged, and the count is said. A wrong "this text is unreadable" would have the
+  agent repaint a page that was fine.
+- The findings are information, not a failed tool call. The model reads them and decides;
+  an error result would read as "the check did not work".
+- A hidden page is drawn as one pixel inside the window, not off screen. Measured in
+  Electron 44: a view that is not in the window, or lies outside it, is not drawn at all
+  (a screenshot of one failed or never came back, which is also what the agent's
+  screenshot did before this round when the panel was shut). Thirty-six of thirty-six
+  pictures came back from a view of one pixel inside the window.
+- The width goes through the DevTools protocol and not by resizing the view: the picture
+  is then the size asked for whatever the panel's size, and the panel does not jump about
+  on screen. While a page is laid out at another width the panel shows it so for a moment.
+- The three sizes are the top of the page, not the whole length of it. A whole page at
+  three widths is more than a message should carry.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.30.
+
 ### 0.6.29 sites in TypeScript (2026-10-12)
 
 Asked for in so many words: the Sites tab should write TypeScript, in `.ts` and `.tsx`, the
@@ -907,6 +982,24 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 
 ## Known weaknesses and technical debt
 
+- The page check measures; it does not use the page. It presses no key, so focus order, a
+  focus that cannot be seen and a trap are not found; it reads nothing aloud; it does not
+  look inside frames or shadow roots; it looks at the first 600 texts, 400 controls and
+  300 pictures of a page and says so when there were more. A text's background is its
+  ancestors and any picture under its middle: a colour drawn by a canvas, a blend mode or
+  a filter is not seen. A name is worked out the short way (labelling attributes, a
+  label, the content, a title, a placeholder), not by the whole accessible-name
+  algorithm. The lines are WCAG 2.2 AA; a check that finds nothing is not a statement
+  that a page conforms.
+- A page laid out at another width shows that layout in the panel for the moment it
+  takes (about a third of a second a size). With the page's own developer tools open,
+  attaching for it may be refused, and the check or picture then says so. `mobile` is not
+  emulated: the width is a narrow window's, so a page without a viewport tag is laid out
+  that narrow, where a phone would show it zoomed out (the check names the missing tag).
+- Text search lists lines, not files' contents: a line of a file over 4 MB long in one
+  line (a minified bundle) is passed over, a search is cut at 2,000 lines or 30 seconds,
+  and there is no replace. It needs a code session; a chat has no folder to search.
+
 - A TypeScript site needs Node.js with npm on the computer and the network for its first
   install; its packages take 67 MB in every site's folder. The starter's versions are those
   of the Graft release that made the site and are not moved forward afterwards. The user is
@@ -1187,6 +1280,8 @@ praise and complain about (October 2026).
 | Sandbox by default instead of prompts | Codex (workspace-write sandbox, asks only to leave it) | Graft's container sandbox is opt-in; default-on is open |
 | Diagnostics after each edit | OpenCode and Zed LSP integration | Shipped in 0.6.17 for TypeScript and JavaScript, for the edited file only; other languages and files broken by the edit are open |
 | Repository map from tree-sitter tags | Aider repo map | `Symbols` covers the questions without an index; a ranked map is open |
+| Find in files for the person, not only the agent | Every editor (VS Code, JetBrains, Zed) | Shipped in 0.6.30 as the Search tab; replace is left to a turn |
+| The agent checks the page it built: contrast, names, layout at a phone's width | Lighthouse and axe in a browser's tools; the preview checks of Cursor and Claude Code desktop | Shipped in 0.6.30 as the Browser tool's `check` and `width`, and the panel's drawer. Keyboard use and a screen reader's reading are open |
 
 ## The larger brief
 
@@ -1235,3 +1330,7 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    request: split view and session groups, rename and call hierarchy from the language
    server, a VS Code extension, moving a session between computers; and for the side
    question, an answer that streams the reply being written and one that can use tools.
+8. Done in 0.6.30: text search for the person, a check of the page for the person and
+   the agent, pictures of a page at a width. Next there: the check pressing keys (focus
+   order, a focus that shows), the whole length of a page as one picture, a picture
+   compared with the one before a change, and replace across files as a turn.

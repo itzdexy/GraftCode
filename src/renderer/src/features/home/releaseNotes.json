@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.30",
+    "date": "2026-10-13",
+    "items": [
+      "The Changes panel has a Search tab: every line of the project that holds what you type, under its file, with the matches marked. Ctrl+Shift+H opens it with the text you had selected in the box. Match case, whole words or a regular expression, and say which files to look in or leave out. A line opens its file in the editor at the match, and the results can go to your message.",
+      "The Browser panel checks a page. Check the page lists text that is hard to read with its contrast, pictures, buttons and fields without a name, headings out of order, small targets crowded together, and a layout wider than its window. Press a finding to see it in the page. Ask Graft to fix these writes the request for you to send.",
+      "One press sends the page as a phone, a tablet and a desktop lay it out to your message, whatever size the panel is. An element you pick arrives with a picture of itself, for a model that can see.",
+      "Graft checks its own pages the same way. When it builds a site or tests an app in the browser it runs the check at a phone's and a desktop's width, and it can take its screenshots at any width."
+    ]
+  },
+  {
     "version": "0.6.29",
     "date": "2026-10-12",
     "items": [
