@@ -36,6 +36,7 @@ import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { diagramFile, listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { searchText } from '../files/textSearch';
 import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
 import { deleteAgent, deleteCommand, deleteSkill, listAgents, listCommands, listMemory, listSkills, saveAgent, saveCommand, saveMemory, saveSkill } from '../customize/customize';
@@ -222,6 +223,8 @@ function siteView(s: Services, site: SiteRecord): SiteView {
 export function buildHandlers(ctx: AppContext): HandlerGroup {
   let fileIndex: FileIndex | null = null;
   const files = async (): Promise<FileIndex> => (fileIndex ??= new FileIndex((await ctx.services()).rgPath));
+  /** The text search each session has running, so the next one ends it. */
+  const textSearches = new Map<string, AbortController>();
   const emitProviders = async (): Promise<void> => {
     ctx.emit({ type: 'providers:changed', providers: (await ctx.services()).registry.summaries() });
   };
@@ -734,6 +737,18 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return (await files()).resolve(await workDirFor(sessionId), paths, fresh ?? false);
     },
 
+    'files:searchText': async ({ sessionId, search }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Search works in code sessions.');
+      const dir = await workDirFor(sessionId);
+      textSearches.get(sessionId)?.abort();
+      const running = new AbortController();
+      textSearches.set(sessionId, running);
+      try {
+        return await searchText((await ctx.services()).rgPath, dir, search, running.signal);
+      } finally {
+        if (textSearches.get(sessionId) === running) textSearches.delete(sessionId);
+      }
+    },
     'files:list': async ({ sessionId, dir }) => listDirectory(await workDirFor(sessionId), dir),
     'files:read': async ({ sessionId, path }) => readPreview(await workDirFor(sessionId), path),
     'files:drafts': async ({ sessionId }) => {
