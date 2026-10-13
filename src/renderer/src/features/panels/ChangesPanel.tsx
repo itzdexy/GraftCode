@@ -18,6 +18,7 @@ import { FilesView } from './FilesPanel';
 import { PanelFrame } from './PanelFrame';
 import { problemsTab } from './problemsModel';
 import { ProblemsView } from './ProblemsView';
+import { SearchView } from './SearchView';
 
 type Selection = { path: string; staged: boolean } | null;
 type Confirm = { title: string; detail: string; run: () => Promise<void> } | null;
@@ -365,9 +366,9 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
   );
 }
 
-const TABS = ['changes', 'files', 'problems'] as const;
+const TABS = ['changes', 'files', 'search', 'problems'] as const;
 
-/** Changes / Files / Problems panel: stage, unstage and discard by file or hunk, commit; browse and edit files; see the errors in what changed. */
+/** Changes / Files / Search / Problems panel: stage, unstage and discard by file or hunk, commit; browse and edit files; find text in them; see the errors in what changed. */
 export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: string; refreshKey: unknown; onClose: () => void }) {
   const tab = usePanels((s) => panelsOf(s, sessionId).changesTab);
   const setTab = usePanels((s) => s.setChangesTab);
@@ -379,7 +380,7 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
       label="Changes"
       onClose={onClose}
       title={
-        <div role="tablist" aria-label="Changes, files or problems" className="flex items-center gap-2">
+        <div role="tablist" aria-label="Changes, files, search or problems" className="flex items-center gap-2">
           {TABS.map((t) => (
             <button
               key={t}
@@ -389,7 +390,7 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
               onClick={() => setTab(sessionId, t)}
               className={cn('h-24 rounded-sm px-8 text-sm', tab === t ? 'bg-hover text-fg' : 'text-fg-muted hover:text-fg-secondary')}
             >
-              {t === 'changes' ? 'Changes' : t === 'files' ? 'Files' : problemsTab(problems)}
+              {t === 'changes' ? 'Changes' : t === 'files' ? 'Files' : t === 'search' ? 'Search' : problemsTab(problems)}
             </button>
           ))}
         </div>
@@ -399,6 +400,8 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
         <ChangesView sessionId={sessionId} refreshKey={refreshKey} />
       ) : tab === 'files' ? (
         <FilesView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} />
+      ) : tab === 'search' ? (
+        <SearchView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} />
       ) : (
         <ProblemsView key={sessionId} sessionId={sessionId} refreshKey={refreshKey} onCount={(count) => setFound({ sessionId, count })} />
       )}

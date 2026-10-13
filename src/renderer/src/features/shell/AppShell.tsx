@@ -8,6 +8,7 @@ import { useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { pageUnder, useNav, type Route, type SettingsSection } from '../../stores/nav';
 import { useSessions } from '../../stores/sessions';
+import { openSearch } from '../../stores/textSearch';
 import { useUi } from '../../stores/ui';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
@@ -117,6 +118,7 @@ export function AppShell() {
   });
   useShortcut('quickOpen', () => useUi.getState().setPaletteOpen(true, '', 'files'), inProject);
   useShortcut('goToSymbol', () => useUi.getState().setPaletteOpen(true, '', 'symbols'), inProject);
+  useShortcut('searchFiles', () => (activeSession ? openSearch(activeSession) : undefined), inProject);
 
   return (
     <div className="flex h-full bg-bg">

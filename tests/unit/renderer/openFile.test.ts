@@ -30,6 +30,17 @@ describe('opening a file from outside the Files panel', () => {
   });
 });
 
+describe('opening the search from outside the panel', () => {
+  it('shows the Search tab of the session, in the panel that was open or a new one', () => {
+    usePanels.getState().showSearch('s');
+    expect(panelsOf(usePanels.getState(), 's')).toMatchObject({ open: ['changes'], changesTab: 'search' });
+    usePanels.getState().setChangesTab('s', 'files');
+    usePanels.getState().showSearch('s');
+    expect(panelsOf(usePanels.getState(), 's')).toMatchObject({ open: ['changes'], changesTab: 'search' });
+    expect(panelsOf(usePanels.getState(), 'other').open).toEqual([]);
+  });
+});
+
 describe('where a change starts', () => {
   it('is the first added line, or where lines were removed', () => {
     expect(firstChangedLine('--- a\n+++ b\n@@ -1,4 +1,5 @@\n one\n two\n+three\n four\n')).toBe(3);

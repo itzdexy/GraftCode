@@ -4,6 +4,7 @@ import { useAsides } from '../stores/asides';
 import { useNav } from '../stores/nav';
 import { panelBus, usePanels } from '../stores/panels';
 import { useSessions } from '../stores/sessions';
+import { useTextSearch } from '../stores/textSearch';
 import { emitChanged } from './bus';
 import { onEvent } from './ipc';
 import { useEditorDrafts } from '../features/panels/editorDrafts';
@@ -38,6 +39,7 @@ export function useGraftEvents(): void {
           case 'session:removed':
             useEditorDrafts.getState().forgetSession(event.sessionId);
             useAsides.getState().forget(event.sessionId);
+            useTextSearch.getState().forget(event.sessionId);
             useSessions.getState().remove(event.sessionId);
             useNav.getState().forget(event.sessionId);
             break;

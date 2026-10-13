@@ -66,4 +66,11 @@ describe('recording shortcuts', () => {
     expect(lib.shortcutProblem('quickOpen', 'Ctrl+P', DEFAULT_SHORTCUTS)).toBeNull();
     expect(lib.shortcutProblem('goToSymbol', 'Ctrl+T', DEFAULT_SHORTCUTS)).toBeNull();
   });
+
+  it('has a key for searching the text of the project that clashes with no other', () => {
+    expect(DEFAULT_SHORTCUTS.searchFiles).toBe('Ctrl+Shift+H');
+    expect(lib.SHORTCUT_DESCRIPTIONS.searchFiles).toBe('Search in the files of the project');
+    expect(lib.shortcutProblem('searchFiles', 'Ctrl+Shift+H', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('search', 'Ctrl+Shift+H', DEFAULT_SHORTCUTS)).toMatch(/Search in the files of the project/);
+  });
 });

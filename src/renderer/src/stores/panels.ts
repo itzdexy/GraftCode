@@ -5,7 +5,7 @@ export type PanelId = 'terminal' | 'changes' | 'browser' | 'tasks' | 'agents';
 
 export interface SessionPanels {
   open: PanelId[];
-  changesTab: 'changes' | 'files' | 'problems';
+  changesTab: 'changes' | 'files' | 'search' | 'problems';
   /** Set once the tasks panel opened itself for this session's first background command. */
   tasksAutoOpened: boolean;
   /** Set once the agents panel opened itself for this session's first group of agents. */
@@ -36,6 +36,8 @@ interface PanelsState {
   setChangesTab: (sessionId: string, tab: SessionPanels['changesTab']) => void;
   /** Opens the files view of the changes panel, or closes it when it's already showing. */
   toggleFiles: (sessionId: string) => void;
+  /** Opens the search view of the changes panel. */
+  showSearch: (sessionId: string) => void;
   markTasksAutoOpened: (sessionId: string) => void;
   markAgentsAutoOpened: (sessionId: string) => void;
   setWidth: (width: number) => void;
@@ -77,6 +79,7 @@ export const usePanels = create<PanelsState>((set, get) => {
           ? { ...p, open: p.open.filter((x) => x !== 'changes') }
           : { ...p, changesTab: 'files', open: p.open.includes('changes') ? p.open : [...p.open, 'changes'] }
       ),
+    showSearch: (sessionId) => update(sessionId, (p) => ({ ...p, changesTab: 'search', open: p.open.includes('changes') ? p.open : [...p.open, 'changes'] })),
     markTasksAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, tasksAutoOpened: true })),
     markAgentsAutoOpened: (sessionId) => update(sessionId, (p) => ({ ...p, agentsAutoOpened: true })),
     setWidth: (width) => set({ width, wide: false }),
