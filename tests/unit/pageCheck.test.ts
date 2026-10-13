@@ -186,6 +186,19 @@ describe('the list of findings', () => {
   });
 });
 
+describe('what a page says about itself', () => {
+  it('is not carried when it is too long to be a place: the finding stays, without one', () => {
+    const long = `img.${'x'.repeat(400)}`;
+    const check = checkPage(facts({ images: [{ selector: long, alt: null, label: 'hero.jpg', broken: false }] }));
+    expect(check.findings).toEqual([{ rule: 'image', severity: 'error', message: 'A picture with no alt text.', selector: '', label: 'hero.jpg' }]);
+  });
+
+  it('is cut where it names or quotes something at length', () => {
+    const check = checkPage(facts({ images: [{ selector: 'img', alt: null, label: 'y'.repeat(500), broken: false }] }));
+    expect(check.findings[0]?.label).toHaveLength(120);
+  });
+});
+
 describe('the check as the agent reads it', () => {
   it('counts, lists each finding with where it is, and says what was looked at', () => {
     const page = facts({

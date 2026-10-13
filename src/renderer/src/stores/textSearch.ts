@@ -35,7 +35,7 @@ const EMPTY: SessionSearch = {
 
 interface TextSearchState {
   bySession: Record<string, SessionSearch>;
-  /** Raised to put the keyboard in the box; seq tells one request from the next. */
+  /** A request to put the keyboard in a session's box, waiting for its tab to take it; seq tells one from the next. */
   focus: { sessionId: string; seq: number } | null;
   /** Changes what is looked for. Nothing is searched until `run`. */
   change: (sessionId: string, patch: Partial<TextSearchQuery>) => void;
@@ -44,6 +44,11 @@ interface TextSearchState {
   toggleFold: (sessionId: string, path: string) => void;
   /** Asks for the keyboard in the box, with `seed` as the text to look for when there is one. */
   open: (sessionId: string, seed: string | null) => void;
+  /**
+   * Hands the waiting request to the tab of this session, once. A tab that is only shown again (its session
+   * came back on screen) finds none, and leaves the keyboard where it is.
+   */
+  takeFocus: (sessionId: string) => boolean;
   /** Drops the search of a session that was removed. */
   forget: (sessionId: string) => void;
 }
@@ -82,6 +87,11 @@ export const useTextSearch = create<TextSearchState>((set, get) => {
     open: (sessionId, seed) => {
       if (seed !== null) patch(sessionId, { query: { ...searchOf(get(), sessionId).query, text: seed } });
       set({ focus: { sessionId, seq: ++focused } });
+    },
+    takeFocus: (sessionId) => {
+      if (get().focus?.sessionId !== sessionId) return false;
+      set({ focus: null });
+      return true;
     },
     forget: (sessionId) => {
       asked.delete(sessionId);

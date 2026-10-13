@@ -62,6 +62,9 @@ export interface PageFacts {
 }
 
 export const MAX_FINDINGS = 60;
+/** A selector longer than this is not a place any more (a page can make one as long as it likes): the finding goes without. */
+const MAX_SELECTOR = 300;
+const MAX_LABEL = 120;
 const TEXT_CONTRAST = 4.5;
 const LARGE_TEXT_CONTRAST = 3;
 /** Large text: from 24 px, or from 18.66 px when it is bold (18 pt and 14 pt). */
@@ -225,7 +228,8 @@ export function checkPage(page: PageFacts): PageCheck {
     url: page.url,
     title: page.title,
     width: page.width,
-    findings: sorted.slice(0, MAX_FINDINGS),
+    // The selector and the label are the page's own words, and they travel to the model: bounded here, whatever the page did.
+    findings: sorted.slice(0, MAX_FINDINGS).map((finding) => ({ ...finding, selector: finding.selector.length > MAX_SELECTOR ? '' : finding.selector, label: finding.label.slice(0, MAX_LABEL) })),
     more: Math.max(0, sorted.length - MAX_FINDINGS),
     looked: { texts: page.texts.length, images: page.images.length, controls: page.controls.length, headings: page.headings.length },
     unjudged: page.texts.filter((item) => item.unsure).length,

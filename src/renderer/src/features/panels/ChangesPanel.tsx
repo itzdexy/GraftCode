@@ -9,6 +9,7 @@ import { cn } from '../../lib/cn';
 import { languageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { panelsOf, usePanels } from '../../stores/panels';
+import { useTextSearch } from '../../stores/textSearch';
 import { reportError, useToasts } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { coveredRows, rowsFromHunks } from '../diff/diffModel';
@@ -387,7 +388,11 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
               type="button"
               role="tab"
               aria-selected={tab === t}
-              onClick={() => setTab(sessionId, t)}
+              onClick={() => {
+                setTab(sessionId, t);
+                // Choosing the Search tab is asking to search: the keyboard goes to its box.
+                if (t === 'search') useTextSearch.getState().open(sessionId, null);
+              }}
               className={cn('h-24 rounded-sm px-8 text-sm', tab === t ? 'bg-hover text-fg' : 'text-fg-muted hover:text-fg-secondary')}
             >
               {t === 'changes' ? 'Changes' : t === 'files' ? 'Files' : t === 'search' ? 'Search' : problemsTab(problems)}

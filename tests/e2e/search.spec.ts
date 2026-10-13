@@ -71,12 +71,23 @@ test('text is found across the project, and a line opens its file at the match',
   // Back on the Search tab, the box and the list are as they were left.
   await panel.getByRole('tab', { name: 'Search' }).click();
   await expect(box).toHaveValue('total');
+  // Choosing the tab is asking to search: the keyboard is in the box.
+  await expect(box).toBeFocused();
   await expect(panel.getByText('1 line in 1 file', { exact: true })).toBeVisible();
 
   // The results go to the message box as a file.
   await panel.getByRole('button', { name: 'Send the results to chat' }).click();
   await expect(w.getByText('The results added to your message')).toBeVisible();
   await expect(w.getByText('search-results.txt')).toBeVisible();
+
+  // Coming back to the session later, the tab is as it was left, and it does not take the keyboard:
+  // what is typed then is meant for the message box.
+  await w.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await w.getByText('Scripted title', { exact: true }).first().click();
+  await expect(box).toHaveValue('total');
+  await expect(panel.getByText('1 line in 1 file', { exact: true })).toBeVisible();
+  await expect(box).not.toBeFocused();
 });
 
 test('a pattern that cannot be read is said so, in the tab', async () => {

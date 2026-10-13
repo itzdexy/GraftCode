@@ -36,9 +36,10 @@ export function SearchView({ sessionId, refreshKey }: { sessionId: string; refre
   }, [refreshKey]);
   const { query, result } = search;
 
-  // The keyboard is in the box when the tab opens, and again whenever the shortcut asks for it.
+  // The keyboard goes to the box when it was asked for: by the key, or by choosing the tab. A tab that is only
+  // shown again, because its session came back on screen, leaves the keyboard to the message box.
   useEffect(() => {
-    if (focus !== null && focus.sessionId !== sessionId) return;
+    if (focus?.sessionId !== sessionId || !useTextSearch.getState().takeFocus(sessionId)) return;
     boxRef.current?.focus();
     boxRef.current?.select();
   }, [focus, sessionId]);
