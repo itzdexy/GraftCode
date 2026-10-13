@@ -411,8 +411,9 @@ export class BrowserPanel {
   /**
    * Runs `look` while the page is laid out at `size`, whatever size the panel is, and puts everything back.
    * A page is only drawn while it is in the window, so one that is hidden is put there as a single pixel in
-   * a corner for the moment (measured: a view outside the window, or beside it, is never drawn). The layout
-   * is set through the DevTools protocol, as a browser's device toolbar does.
+   * a corner for the moment (measured in Electron 44: a view that is not in the window is never drawn, and one
+   * placed outside its area only now and then; one pixel inside it, always). The layout is set through the
+   * DevTools protocol, as a browser's device toolbar does.
    */
   private async atSize<T>(size: PageSize, look: (contents: WebContents) => Promise<T>): Promise<T> {
     const view = this.view;
