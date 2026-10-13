@@ -1,5 +1,6 @@
 import type { PermissionMode } from '@shared/schemas/common';
 import type { ResponseStyle } from '@shared/schemas/appSettings';
+import type { SiteStack } from '@shared/schemas/sites';
 import type { MemoryFile } from './memory';
 import type { SkillInfo } from './skills';
 import { rolesList } from './roles';
@@ -43,8 +44,8 @@ export interface CodePromptContext {
   personalization?: Personalization | null;
   /** Commands run in a sandbox container instead of on this computer. */
   sandbox?: { image: string; network: boolean; ports: number[] } | null;
-  /** This session builds a site from the Sites tab, served live at this address. */
-  site?: { name: string; url: string } | null;
+  /** This session builds a site from the Sites tab, served live at this address, with what it is built with. */
+  site?: { name: string; url: string; stack: SiteStack } | null;
   /** Generated media: the image model behind GenerateImage (null when none), and whether the user's ComfyUI is connected. */
   media?: { image: string | null; comfy: boolean } | null;
 }
@@ -108,9 +109,36 @@ function sandboxSection(ctx: CodePromptContext): string {
   );
 }
 
+/**
+ * The brief for a site that is a React and TypeScript project. The set-up is already in the folder
+ * (sites/scaffold.ts); what the agent is told is how to work in it: install once, build to show a
+ * change, and write the code a careful team would. Its commands ask the user as any command does.
+ */
+function typedSiteSection(ctx: CodePromptContext, site: NonNullable<CodePromptContext['site']>): string {
+  const imagery = ctx.media?.image
+    ? 'use pictures the user gives you. When they ask for generated or AI-made images, make them with GenerateImage: a hero image, illustrations, backgrounds or product shots that fit the concept and palette, with real alt text. Draw icons, logos and simple shapes as SVG components yourself. Never hotlink images that might not exist.'
+    : 'use pictures the user gives you. Otherwise draw your own as SVG components, CSS gradients and shapes; never hotlink images that might not exist.';
+  return lines(
+    '# Website',
+    `This session builds "${site.name}", a website in ${ctx.projectRoot}: a React and TypeScript project built with Vite. Graft serves what the build puts in its dist folder live at ${site.url}, and the page reloads by itself after every build, so the user watches it take shape in the Browser panel. Make it look, and read, like a studio built it:`,
+    '- The project is set up and builds as it stands: package.json, tsconfig.json (strict), vite.config.ts, index.html, src/main.tsx, src/App.tsx and src/styles/. Run `npm install` first, once. To show a change, run `npm run build`: it type-checks, then builds dist, and the preview reloads. A build that fails leaves the page as it was: read the error, fix the cause and build again. The user is asked before a command runs, so run the ones the work needs and no others.',
+    '- Start from a concept: who it is for, the tone, and one strong visual idea. Choose a type pairing (a characterful display face with a clean text face, from Google Fonts with system fallbacks, linked in index.html) and a deliberate palette with real contrast.',
+    '- Write TypeScript the way a careful team does: function components in .tsx files, one component to a file in src/components/, its props as a named type. What repeats (navigation, features, prices, opening hours) is typed data in src/content/, drawn with map(), not markup written out again and again. No `any`, no `@ts-ignore`, no `!` where a check belongs, nothing unused. Keep strict mode and the set-up as they are unless the work needs a change, and say so when it does.',
+    '- Styles: the design as custom properties in src/styles/tokens.css (colours, type scale, spacing, radii, shadows), base rules in src/styles/global.css, and each component\'s own styles in a CSS module beside it (Hero.tsx with Hero.module.css). Lay out with grid and flexbox, fluid type and spacing with clamp(). It must look right from a 360px phone to a wide desktop.',
+    '- React is enough for most sites: state with hooks, navigation within the page with anchors. Add a package only when it earns its place, say why, and install it under its exact name; never invent a package name.',
+    '- Write real content for the brand: headlines, sections, calls to action, a footer. No lorem ipsum, no "Feature 1".',
+    '- Craft the details: hover and focus states, subtle motion that respects prefers-reduced-motion, consistent radii and shadows, a favicon in public/, a meta description and Open Graph tags in index.html.',
+    `- Imagery: ${imagery} A picture a component shows is imported from src/assets/; a file the page links by its address goes in public/.`,
+    '- Semantic HTML, alt text, visible focus, AA contrast and keyboard access are part of the design, not extras.',
+    `- Check your work with the Browser tool at ${site.url} after a build: read the page, look at the console, and take screenshots when you can see images. Fix what looks off before you report.`,
+    '- You are done when `npm run build` passes and the page is right. Then say what you built, where its parts are (components, content, tokens) and how to change it. The dist folder is what gets published, on any static host; a host that builds for you takes the build command `npm run build` and the output folder dist.'
+  );
+}
+
 function siteSection(ctx: CodePromptContext): string {
   const site = ctx.site;
   if (!site) return '';
+  if (site.stack === 'react-ts') return typedSiteSection(ctx, site);
   return lines(
     '# Website',
     `This session builds "${site.name}", a website in ${ctx.projectRoot}. Graft serves the folder live at ${site.url} and the page reloads by itself whenever a file changes, so the user watches it take shape in the Browser panel. Make it look like a studio built it:`,

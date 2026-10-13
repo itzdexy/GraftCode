@@ -247,8 +247,9 @@ export async function initServices(options: {
       (level, message, fields) => log[level]('sites', message, fields),
       (slug) => {
         const site = sites.get(slug);
-        return site ? starterPage(site.name) : null;
-      }
+        return site ? starterPage(site.name, site.stack) : null;
+      },
+      (slug) => sites.get(slug)?.stack === 'react-ts'
     ),
     tools: createBuiltinRegistry(languages),
     settingsFiles: new SettingsStore(paths.graftHome),

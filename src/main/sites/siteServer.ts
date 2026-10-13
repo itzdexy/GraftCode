@@ -7,6 +7,10 @@ const PORTS = Array.from({ length: 30 }, (_, i) => 4870 + i);
 const VERSION_PATH = '/__graft/version';
 /** A site nobody has asked about for this long stops being watched. */
 const WATCH_IDLE_MS = 60_000;
+/** Where a site that is built keeps what its build made: the only part of it that is served. */
+const BUILD_DIR = 'dist';
+/** A build writes its files one after another; they count as one change once it has been quiet this long. */
+const BUILD_SETTLE_MS = 250;
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -99,11 +103,17 @@ interface Watch {
   /** Changes since the site was first watched; pages reload when it moves. */
   version: number;
   lastAsked: number;
+  /** For a site that is built: the wait for its build to have finished writing. */
+  settle: NodeJS.Timeout | null;
 }
 
 /**
  * Serves every site at http://<slug>.localhost:<port>/ from 127.0.0.1 only,
  * with live reload: open pages reload by themselves when the site's files change.
+ * A plain site is its folder. A site that is built is its dist folder and nothing
+ * else: its sources, packages and settings are not on show, an address that names
+ * no file gets its page (an app of one page draws the right view itself), and
+ * open pages reload when a build has finished, not when a source file changes.
  */
 export class SiteServer {
   private server: http.Server | null = null;
@@ -114,8 +124,10 @@ export class SiteServer {
   constructor(
     private readonly root: string,
     private readonly log: (level: 'info' | 'warn', message: string, fields?: Record<string, string>) => void,
-    /** The page a site shows before it has an index.html; null when there is no such site. */
-    private readonly starter: (slug: string) => string | null = () => null
+    /** The page a site shows before it has one of its own; null when there is no such site. */
+    private readonly starter: (slug: string) => string | null = () => null,
+    /** Whether a site is one that is built (see the class comment). */
+    private readonly built: (slug: string) => boolean = () => false
   ) {}
 
   /** Starts the server on the first free port; a no-op when it already runs. */
@@ -163,8 +175,13 @@ export class SiteServer {
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', connection: 'close' }).end(this.version(slug, folder));
       return;
     }
-    const file = fs.existsSync(folder) ? resolveSitePath(folder, urlPath) : null;
-    const starter = !file && (urlPath.split('?')[0] === '/' || urlPath === '') ? this.starter(slug) : null;
+    const built = this.built(slug);
+    const shown = built ? path.join(folder, BUILD_DIR) : folder;
+    const asked = urlPath.split('?')[0] ?? '/';
+    let file = fs.existsSync(shown) ? resolveSitePath(shown, urlPath) : null;
+    // No file by that name in a built site: its page answers, unless the address names a file (it has an ending) or something hidden.
+    if (!file && built && path.extname(asked) === '' && !asked.split('/').some((part) => part.startsWith('.')) && fs.existsSync(shown)) file = resolveSitePath(shown, '/');
+    const starter = !file && (asked === '/' || asked === '') ? this.starter(slug) : null;
     if (starter) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', connection: 'close' }).end(req.method === 'HEAD' ? undefined : withReload(starter));
       return;
@@ -194,12 +211,25 @@ export class SiteServer {
       try {
         const created: Watch = {
           watcher: fs.watch(folder, { recursive: true }, (_event, name) => {
+            const top = typeof name === 'string' ? name.split(/[\\/]/)[0] : null;
             // Graft's own bookkeeping (the gallery picture) isn't a change to the site.
-            if (typeof name === 'string' && name.split(/[\\/]/)[0] === '.graft-site') return;
-            created.version++;
+            if (top === '.graft-site') return;
+            if (!this.built(slug)) {
+              created.version++;
+              return;
+            }
+            // A site that is built changes when its build does, not with its sources or its packages.
+            if (top !== null && top !== BUILD_DIR) return;
+            if (created.settle) clearTimeout(created.settle);
+            created.settle = setTimeout(() => {
+              created.settle = null;
+              created.version++;
+            }, BUILD_SETTLE_MS);
+            created.settle.unref();
           }),
           version: 0,
-          lastAsked: Date.now()
+          lastAsked: Date.now(),
+          settle: null
         };
         created.watcher.on('error', (error) => {
           this.log('warn', 'Site watcher stopped', { site: slug, message: error.message });
@@ -233,6 +263,7 @@ export class SiteServer {
     const watch = this.watches.get(slug);
     if (!watch) return;
     watch.watcher.close();
+    if (watch.settle) clearTimeout(watch.settle);
     this.watches.delete(slug);
   }
 

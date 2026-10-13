@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SiteStack } from '@shared/schemas/sites';
 import { makeDirSync } from '../files/makeDir';
+import { siteScaffold, writeScaffold } from './scaffold';
 
 /** What Graft keeps about a site, in its folder's .graft-site/site.json. */
 export interface SiteManifest {
@@ -11,6 +13,8 @@ export interface SiteManifest {
   updatedAt: number;
   /** The session building it; null once that session is gone. */
   sessionId: string | null;
+  /** What it is built with. A site from before there was a choice has none written down and is plain. */
+  stack: SiteStack;
 }
 
 export interface SiteRecord extends SiteManifest {
@@ -48,9 +52,16 @@ export function siteName(prompt: string): string {
   return short.length > 0 ? short.charAt(0).toUpperCase() + short.slice(1) : 'New site';
 }
 
-/** The page a site shows until the agent writes its index.html (served, never written into the folder). */
-export function starterPage(name: string): string {
+/**
+ * The page a site shows until it has one of its own (served, never written into the folder): until the
+ * agent writes index.html, or, for a site that is built, until its first build.
+ */
+export function starterPage(name: string, stack: SiteStack = 'plain'): string {
   const safe = name.replace(/[<>&"]/g, '');
+  const note =
+    stack === 'react-ts'
+      ? 'Graft is setting this site up: installing its packages and building it. It appears here after the first build.'
+      : 'Graft is building this site. It appears here as it takes shape.';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -71,7 +82,7 @@ export function starterPage(name: string): string {
 <body>
 <main>
   <h1>${safe}</h1>
-  <p><span class="dot"></span>Graft is building this site. It appears here as it takes shape.</p>
+  <p><span class="dot"></span>${note}</p>
 </main>
 </body>
 </html>
@@ -105,7 +116,8 @@ export class SitesStore {
         description: typeof manifest.description === 'string' ? manifest.description : '',
         createdAt: typeof manifest.createdAt === 'number' ? manifest.createdAt : 0,
         updatedAt: typeof manifest.updatedAt === 'number' ? manifest.updatedAt : 0,
-        sessionId: typeof manifest.sessionId === 'string' ? manifest.sessionId : null
+        sessionId: typeof manifest.sessionId === 'string' ? manifest.sessionId : null,
+        stack: manifest.stack === 'react-ts' ? 'react-ts' : 'plain'
       };
     } catch {
       return null;
@@ -113,9 +125,9 @@ export class SitesStore {
   }
 
   private write(site: SiteRecord): void {
-    const { name, description, createdAt, updatedAt, sessionId } = site;
+    const { name, description, createdAt, updatedAt, sessionId, stack } = site;
     makeDirSync(path.join(site.folder, META_DIR));
-    fs.writeFileSync(this.manifestPath(site.folder), `${JSON.stringify({ name, description, createdAt, updatedAt, sessionId }, null, 2)}\n`);
+    fs.writeFileSync(this.manifestPath(site.folder), `${JSON.stringify({ name, description, createdAt, updatedAt, sessionId, stack }, null, 2)}\n`);
   }
 
   list(): SiteRecord[] {
@@ -143,8 +155,11 @@ export class SitesStore {
     return this.get(rel.split(path.sep)[0] ?? '');
   }
 
-  /** A new site in a folder named after it; the server shows a starter page until it has an index.html. */
-  create(name: string, description: string): SiteRecord {
+  /**
+   * A new site in a folder named after it. A TypeScript site gets its starter project; a plain one
+   * starts empty. The server shows a starter page until the site has a page of its own.
+   */
+  create(name: string, description: string, stack: SiteStack = 'plain'): SiteRecord {
     makeDirSync(this.root);
     const base = siteSlug(name);
     let slug = base;
@@ -152,8 +167,9 @@ export class SitesStore {
     const folder = path.join(this.root, slug);
     makeDirSync(folder);
     const at = this.now();
-    const site: SiteRecord = { slug, folder, name: name.trim() || 'New site', description: description.trim(), createdAt: at, updatedAt: at, sessionId: null };
+    const site: SiteRecord = { slug, folder, name: name.trim() || 'New site', description: description.trim(), createdAt: at, updatedAt: at, sessionId: null, stack };
     this.write(site);
+    if (stack === 'react-ts') writeScaffold(folder, siteScaffold(site.name, slug));
     return site;
   }
 

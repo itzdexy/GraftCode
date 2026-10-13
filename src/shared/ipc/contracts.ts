@@ -16,7 +16,7 @@ import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, Prov
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
 import { ChecksConfigSchema, HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
 import { DiagramSourceSchema } from '../schemas/diagrams';
-import { SiteViewSchema } from '../schemas/sites';
+import { SiteStackSchema, SiteViewSchema } from '../schemas/sites';
 import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
 import {
   AgentFileSchema,
@@ -432,11 +432,16 @@ export const contracts = {
   'customize:hooks': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(ScopedHooksSchema)),
   'customize:saveHooks': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), hooks: HooksConfigSchema }), Ok),
   'sites:list': channel(Void, z.array(SiteViewSchema)),
-  /** Starts a site from a description: its folder, a starter page, and a session that builds it. */
+  /**
+   * Starts a site from a description: its folder, a starter page, and a session that builds it. `stack` says what it
+   * is built with: a React and TypeScript project (which gets its starter files), or plain files when it is left out.
+   */
   'sites:create': channel(
-    z.object({ prompt: z.string().trim().min(1).max(20_000), name: z.string().trim().max(80).optional() }),
+    z.object({ prompt: z.string().trim().min(1).max(20_000), name: z.string().trim().max(80).optional(), stack: SiteStackSchema.optional() }),
     z.object({ site: SiteViewSchema, sessionId: IdSchema })
   ),
+  /** What building a TypeScript site needs from this computer: whether npm (it comes with Node.js) is to be found. */
+  'sites:toolchain': channel(Void, z.object({ npm: z.boolean() })),
   /** The session working on a site, with a new one when the last was deleted. */
   'sites:session': channel(z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }), z.object({ sessionId: IdSchema })),
   /** Moves a site's folder to the trash (Recycle Bin), where it can be restored. */
