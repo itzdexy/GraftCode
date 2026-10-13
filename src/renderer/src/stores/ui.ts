@@ -35,8 +35,11 @@ interface UiState {
   hiddenStatusBars: Record<string, true>;
   /** Focus callback registered by the composer currently on screen (Ctrl+L). */
   focusComposer: (() => void) | null;
-  /** Attachments sent to a composer from elsewhere (the Browser panel), waiting for the composer with that draft key. */
-  inbox: { key: string; images: ImageBlock[]; files: FileAttachment[] } | null;
+  /**
+   * Attachments sent to a composer from elsewhere (the Browser panel), waiting for the composer with that draft key.
+   * `extras` are pictures that only come along with a file: taken when the model reads pictures, dropped quietly otherwise.
+   */
+  inbox: { key: string; images: ImageBlock[]; files: FileAttachment[]; extras: ImageBlock[] } | null;
   setSearchOpen: (open: boolean) => void;
   /** Opens or closes the palette. Left out, it opens for commands. */
   setPaletteOpen: (open: boolean, query?: string, mode?: PaletteMode) => void;
@@ -50,9 +53,9 @@ interface UiState {
   setDialog: (dialog: InfoDialog) => void;
   hideStatusBar: (sessionId: string) => void;
   registerComposer: (focus: (() => void) | null) => void;
-  sendToComposer: (key: string, add: { images?: ImageBlock[]; files?: FileAttachment[] }) => void;
+  sendToComposer: (key: string, add: { images?: ImageBlock[]; files?: FileAttachment[]; extras?: ImageBlock[] }) => void;
   /** Hands the waiting attachments to the composer with this key (once). */
-  takeInbox: (key: string) => { images: ImageBlock[]; files: FileAttachment[] } | null;
+  takeInbox: (key: string) => { images: ImageBlock[]; files: FileAttachment[]; extras: ImageBlock[] } | null;
 }
 
 const storedDrafts = loadDrafts();
@@ -119,13 +122,20 @@ export const useUi = create<UiState>((set, get) => ({
   registerComposer: (focusComposer) => set({ focusComposer }),
   sendToComposer: (key, add) => {
     const current = get().inbox?.key === key ? get().inbox : null;
-    set({ inbox: { key, images: [...(current?.images ?? []), ...(add.images ?? [])], files: [...(current?.files ?? []), ...(add.files ?? [])] } });
+    set({
+      inbox: {
+        key,
+        images: [...(current?.images ?? []), ...(add.images ?? [])],
+        files: [...(current?.files ?? []), ...(add.files ?? [])],
+        extras: [...(current?.extras ?? []), ...(add.extras ?? [])]
+      }
+    });
   },
   takeInbox: (key) => {
     const inbox = get().inbox;
     if (!inbox || inbox.key !== key) return null;
     set({ inbox: null });
-    return { images: inbox.images, files: inbox.files };
+    return { images: inbox.images, files: inbox.files, extras: inbox.extras };
   }
 }));
 

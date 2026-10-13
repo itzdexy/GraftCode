@@ -88,6 +88,7 @@ return new Promise((resolve) => {
       html: el.outerHTML.slice(0, 6000),
       text: (el.innerText || '').trim().slice(0, 1500),
       size: { width: Math.round(r.width), height: Math.round(r.height) },
+      rect: { x: r.left, y: r.top, width: r.width, height: r.height },
       styles: { color: style.color, background: style.backgroundColor, font: style.fontSize + ' ' + style.fontFamily.split(',')[0], margin: style.margin, padding: style.padding, display: style.display }
     });
   };

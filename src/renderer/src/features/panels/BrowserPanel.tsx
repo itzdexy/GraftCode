@@ -484,7 +484,8 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
     }
     invoke('browser:pick')
       .then((el) => {
-        if (el) send({ files: [{ name: 'picked-element.txt', content: elementText(el) }] }, 'The element');
+        // Its picture goes along for a model that can read one; the element itself is the text.
+        if (el) send({ files: [{ name: 'picked-element.txt', content: elementText(el) }], extras: el.image ? [el.image] : [] }, 'The element');
       })
       .catch((error: unknown) => reportError("Couldn't pick an element", error));
   };
