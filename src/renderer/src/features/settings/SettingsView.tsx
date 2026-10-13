@@ -115,7 +115,8 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
       event.preventDefault();
       take(hits[0]);
     } else if (event.key === 'Escape' && query.length > 0) {
-      // The first Escape empties the box; only the next one is the app's.
+      // The first Escape empties the box; only the next one is the window's. The window hears the key first and
+      // leaves it alone because the box is marked (data-own-escape) while it holds text.
       event.preventDefault();
       event.stopPropagation();
       setQuery('');
@@ -139,7 +140,7 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
   return (
     <nav aria-label="Settings" className="flex w-[204px] shrink-0 flex-col overflow-y-auto pt-16 pr-8 pb-24 pl-16">
       <h1 className="px-8 pb-10 text-xl font-medium text-fg-strong">Settings</h1>
-      <div className="relative mb-8">
+      <div className="relative mb-8" data-own-escape={query.length > 0 ? '' : undefined}>
         <Search className="pointer-events-none absolute top-1/2 left-8 size-13 -translate-y-1/2 text-icon-muted" aria-hidden="true" />
         <input
           ref={input}
@@ -160,7 +161,7 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
           <p role="status" className={hits.length > 0 ? 'sr-only' : 'px-8 py-4 text-sm text-fg-muted'}>
             {hits.length === 0 ? 'No setting matches.' : `${String(hits.length)} found`}
           </p>
-          <ul ref={list} aria-label="Settings found" className="flex flex-col gap-1">
+          <ul ref={list} aria-label="Settings found" data-own-escape="" className="flex flex-col gap-1">
             {hits.map((hit, index) => (
               <li key={`${hit.section}:${hit.setting ?? ''}`}>
                 <button type="button" onClick={() => take(hit)} onKeyDown={(event) => onHitKey(event, index)} className={cn(NAV_ITEM, 'flex-col items-start gap-0 text-fg-secondary hover:bg-hover hover:text-fg')}>

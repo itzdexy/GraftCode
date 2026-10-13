@@ -92,6 +92,18 @@ Different from what one might expect, and why:
 - The three sizes are the top of the page, not the whole length of it. A whole page at
   three widths is more than a message should carry.
 
+Found on the way, and fixed:
+
+- Escape in the Settings search closed Settings while it emptied the box, since Settings
+  became a window in 0.6.27. The window's own handler hears the key before anything
+  inside it (the dialog library listens while the event travels down), so the box could
+  not keep the key by stopping it. The box now marks itself while it holds text and the
+  window leaves the key to it. The desktop test had passed all along by looking at the
+  window during its closing animation; it now asks the window whether it is open.
+- The agent's screenshot of a page whose panel was shut never came back (see above): it
+  ended at the tool's 90 s limit. It is taken through the one-pixel view now, and any
+  picture that does not come within 8 s fails with a sentence instead.
+
 Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.30.
 
 ### 0.6.29 sites in TypeScript (2026-10-12)

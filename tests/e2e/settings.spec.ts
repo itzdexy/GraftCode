@@ -105,10 +105,23 @@ test('settings are found by searching: a setting opens its page and shows itself
   await search.fill('zebra crossing');
   await expect(nav.getByRole('status')).toHaveText('No setting matches.');
   await shot(w, 'settings-search-none');
-  // Escape empties the box and leaves Settings open.
+  // Escape empties the box and leaves Settings open. A window that is on its way out still shows its box
+  // for a moment, so the window is asked whether it is open, not only looked at.
   await search.press('Escape');
   await expect(search).toHaveValue('');
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveAttribute('data-state', 'open');
   await expect(nav.getByRole('button', { name: 'Shortcuts', exact: true })).toBeVisible();
+  // So does Escape on something that was found: the keyboard goes back to the box, emptied.
+  await search.fill('shortcuts');
+  await search.press('ArrowDown');
+  await expect(hits.getByRole('button').first()).toBeFocused();
+  await w.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(search).toBeFocused();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveAttribute('data-state', 'open');
+  // With the box empty, Escape is the window's: it closes.
+  await search.press('Escape');
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(0);
 });
 
 test('settings: appearance, rebinding a shortcut, a second provider and permission rules', async () => {
