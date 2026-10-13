@@ -29,7 +29,8 @@ export const SHORTCUT_IDS = [
   'commandPalette',
   'findInTranscript',
   'quickOpen',
-  'goToSymbol'
+  'goToSymbol',
+  'searchFiles'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -48,7 +49,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   commandPalette: 'Ctrl+Shift+P',
   findInTranscript: 'Ctrl+F',
   quickOpen: 'Ctrl+P',
-  goToSymbol: 'Ctrl+T'
+  goToSymbol: 'Ctrl+T',
+  searchFiles: 'Ctrl+Shift+H'
 };
 
 /** Settings → Appearance: colour palettes (generated in styles/palettes.css) and accent colours. */

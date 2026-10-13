@@ -25,7 +25,8 @@ export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
   commandPalette: 'Open the command palette',
   findInTranscript: 'Find in the conversation',
   quickOpen: 'Open a file by name',
-  goToSymbol: 'Go to a symbol by name'
+  goToSymbol: 'Go to a symbol by name',
+  searchFiles: 'Search in the files of the project'
 };
 
 /** Shortcuts that act inside the message box may use bare keys; the rest need Ctrl or Alt. */
