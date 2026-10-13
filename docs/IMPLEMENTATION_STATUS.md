@@ -319,6 +319,22 @@ changed. One new setting, `appearance.motionStyle`, which an older profile gets 
 No new package. Commands, commits, what the suite found on the way, skips and what was not
 verified: `UPGRADE_TEST_REPORT.md`, section 0.6.28.
 
+### Local 0.6.29 build
+
+On `feat/richer-graft` (local, not pushed), ending at `16ea25c`: sites in TypeScript. A site
+can be a React and TypeScript project, started from files Graft writes and served from its
+`dist` folder; plain sites are as they were. Typecheck, lint and the build pass on both
+systems. In a Linux container the unit suite (1375) and the desktop suite (71) pass. On
+Windows the unit suite passes (1383) in one of two full runs, the other showing the
+language-server fault of 0.6.28's report; the desktop suite passed whole (71) in the last
+of three runs, the two before it each failing one test that passed alone, with the
+computer busy. The starter was installed and built for real on Windows. The Windows package
+builds (`dist/Graft-Setup-0.6.29.exe`) and its three smoke tests pass; it was not
+installed. It carries 0.6.25 to 0.6.28 as well. The schema is 9: no new table; a site's
+record gains a `stack` and an older one reads as plain. No new package in Graft. Commands,
+commits, what was found on the way, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.29.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
