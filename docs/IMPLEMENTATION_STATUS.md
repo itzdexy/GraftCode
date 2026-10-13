@@ -335,6 +335,23 @@ record gains a `stack` and an older one reads as plain. No new package in Graft.
 commits, what was found on the way, skips and what was not verified:
 `UPGRADE_TEST_REPORT.md`, section 0.6.29.
 
+### Local 0.6.30 build
+
+On `feat/richer-graft` (local, not pushed), ending at `1fc322b`: text search across a
+session's folder (a Search tab, Ctrl+Shift+H), a check of the page in the Browser panel
+that the agent runs too (contrast, names, headings, crowded targets, a layout wider than
+its window), pictures and checks of a page at a width of its own, and a picked element's
+picture. Windows only, as asked: typecheck, lint and the build pass; the desktop suite
+passed whole (77) on the last commit and on the release commit; the unit suite passes
+(1471) in one of three full runs on the last commit, the other two each showing the
+language-server fault of 0.6.28's report. The second full desktop run showed a fault of
+0.6.27 (Escape in the Settings search closed Settings), which is fixed. The Windows
+package builds (`dist/Graft-Setup-0.6.30.exe`) and its three smoke tests pass; it was not
+installed. It carries 0.6.25 to 0.6.29 as well. The schema is 9: no new table, no new
+package, one new shortcut that an older profile gets by default. Nothing ran on Linux or
+macOS this round. Commands, commits, what was found on the way, skips and what was not
+verified: `UPGRADE_TEST_REPORT.md`, section 0.6.30.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof

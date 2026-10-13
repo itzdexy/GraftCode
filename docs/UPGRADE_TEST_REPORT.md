@@ -842,3 +842,147 @@ Not verified:
 - An edit to a site being checked by the language server after the install: the versions
   are the same by choice, and no test opens a site's file to see a problem reported.
 - The installer was built and its unpacked app tested; the installer itself was not run.
+
+## 0.6.30 round (2026-10-13)
+
+Branch `feat/richer-graft`, local only: nothing was pushed and no release was made. Eight
+commits: `8ea1df3` and `9a519fb` (text search), `ec5c2e9`, `344d2e8` and `67f11f4` (the page
+check, the three sizes, a picked element's picture), `a9912b9` (the version), `bca01b7` (three
+faults a review of the round found) and `1fc322b` (a fault of 0.6.27 that the second full run
+showed). One system: Windows 11 (Node 26.7.0, npm 11.19, Electron 44.5.1). The request said
+to run the build for Windows only, so nothing here ran in the Linux container, and no Linux
+package was built; nor did anything run on macOS, on GitHub's runners, or against a paid
+provider.
+
+The whole of it was run three times, with `npm run verify` (new this round: the five steps
+one after another, each into its own log under `out/verify`).
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npm run typecheck` | `a9912b9`, `bca01b7`, `1fc322b` | exit 0, each time |
+| `npm run lint` | the same three | exit 0, each time |
+| `npm run build` | the same three | exit 0, each time |
+| `npm test` | `a9912b9` | passed: 124 files passed, 3 skipped; 1468 tests passed, 30 skipped |
+| `npm test` | `bca01b7` | exit 0 |
+| `npm test` | `1fc322b`, three full runs | one passed (124 files; 1471 tests passed, 30 skipped); two had one failure each, both the `EPERM` in `languageServers.test.ts` that the 0.6.28 report describes, in two different tests of that file |
+| `npx vitest run tests/unit/languageServers.test.ts`, three times | `1fc322b` | 13 passed, each time |
+| `npx playwright test` | `a9912b9` | 77 passed, 6 skipped, 0 failed (17.9 min) |
+| `npx playwright test` | `bca01b7` | 75 passed, 6 skipped, 2 failed (15.7 min): `session.spec.ts:33`, `settings.spec.ts:67` |
+| `session.spec.ts:33` alone, `--repeat-each=3` | `bca01b7` | 3 passed |
+| `settings.spec.ts:67` alone | `bca01b7` | 3 failed of 3, then 1 of 2; on `a9912b9` in a separate checkout, 2 passed of 2 |
+| `settings.spec.ts:67` alone, `--repeat-each=4` | `1fc322b` | 4 passed |
+| `npx playwright test` | `1fc322b` | 77 passed, 6 skipped, 0 failed (8.9 min) |
+| `npm run dist:win` | `1fc322b` | exit 0, `dist/Graft-Setup-0.6.30.exe`, 128,735,786 bytes, SHA-256 `909aad2556bcf8c4ad880de10020f04eeafca88a1b4f417cbe09ad129b356084`; `Get-AuthenticodeSignature` says NotSigned |
+| `npx playwright test tests/e2e/packaged.spec.ts` with `GRAFT_PACKAGED_EXE` | the unpacked 0.6.30 build of `1fc322b` | 3 passed (22.4 s) |
+
+The computer was in use the whole time. A game and Blender were running: the processor
+stood at 69% when measured between the second and third runs, and the first two desktop
+runs took twice as long as the third (in the second, single tests took 15 to 30 s that
+take 5 to 7 s). That is what the two failures of the second run have to be read against,
+and they turned out to be two different things.
+
+`session.spec.ts:33` (the status bar's line counts after an edit, within 15 s) passed three
+times of three alone and in both other full runs. That is evidence of load, not proof that
+there is no fault in it.
+
+`settings.spec.ts:67` was a fault of the app, and the load only showed it. The test said
+"Escape empties the box and leaves Settings open". Probed in the app, 26 times of 26:
+Escape in the Settings search, with text in the box, emptied the box and closed Settings.
+It has done so since Settings became a window (0.6.27). The dialog layer listens for
+Escape while the event travels down, before anything inside the window hears it, so the
+box could not keep the key by stopping it. The test had passed since then by looking
+during the window's closing animation: right after the key the window was still in the
+page with its box emptied, and 600 ms later it was gone. A slow computer looked after it
+had gone. The test now asks the window whether it is open (it failed 2 of 2 that way
+before the fix), and covers Escape on something that was found and Escape with the box
+empty. That the test passed on `a9912b9` and failed on `bca01b7`, alone and three times,
+first read as "the last commit broke it"; the next two runs on `bca01b7` gave one pass
+and one failure, and nothing that commit touches is on that path.
+
+What the round found on the way:
+
+- A page view that is not in the window is not drawn (Electron 44.5.1, measured in a
+  script outside Graft): `capturePage` of one failed with `UnknownVizError` or did not come
+  back, and a capture through the DevTools protocol did not come back, seven attempts of
+  seven. A view in the window but placed outside its area (left of it, below it, right of
+  it) gave 7 pictures of 21, and a capture that did not come back seemed to disturb the
+  next ones. A view inside the window is drawn even at one pixel: 36 pictures of 36 came
+  back at 390, 768 and 1280 px. So the agent's screenshot of a page whose panel was shut,
+  or covered by a dialog, could not have worked before this round; that was not tried in
+  a 0.6.29 build.
+- ripgrep's JSON answer ignores `--max-columns` and counts in bytes: a line arrives whole,
+  whatever its length, and "héllo" in a line with an "ï" before it starts at byte 16 and
+  character 15.
+- A rule written as "smaller than 24 × 24 px" named every unstyled button (21 px tall).
+  The guideline's test is the room around a small target; the rule was rewritten to that
+  before it was first run on a page.
+- Three faults of the round's own code, found reading it over while the first full run
+  was going, each then written as a failing test: the Search tab took the keyboard
+  whenever it was shown again; the number on the check button outlived its page; a page
+  could make a selector of any length and it travelled into the agent's tool result.
+- Faults of the tests themselves, fixed before the runs above: a count guessed instead
+  of counted (4 problems and 5 warnings, not 7 and 4), selectors written without their
+  `body >`, a step looked for by its own words while the transcript folds a turn's browser
+  steps into one line, and the message box looked for by the name it has before a
+  session's first turn.
+
+Desktop tests that were changed, and why. `settings.spec.ts`: the end of the search test,
+as above. `browser.spec.ts`: one test is new; nothing else of it changed.
+
+The six skipped desktop tests are the three of the packaged app (run separately, above) and
+the three that take README screenshots. The unit suite skips what it skipped before.
+
+What the tests of this round show, and with what:
+
+- Unit, 88 new cases (1383 before, 1471 now). Text search: what ripgrep is asked for each
+  option, with the text never read as an option; a line shown without indentation and cut
+  around its first match; bytes counted as characters; a line and a path that are not
+  valid text; and against real files: lines by file in the order of their paths, `.git`
+  and what git ignores left out (also in a folder that is not a repository), case, whole
+  words, a pattern, globs, nothing found, the limit of 2,000 lines, a pattern that cannot
+  be read, and being stopped. The Search tab's words, its marks, the results as text with
+  a key covered, and its state: the answer of the search asked last is the one kept, an
+  emptied box drops a late answer, each session to itself, the keyboard handed over once.
+  The page check's rules, each from facts and without a page: contrast at the guideline's
+  line (#767676 passes on white, #777777 does not), see-through text and layered
+  backgrounds, one finding for a pair of colours, large and bold text, text over a picture
+  not judged, pictures, names, a placeholder as the only name, small targets with and
+  without room, headings, a page wider than its window, the order and the limit of the
+  list, a selector too long to be one, and the check as the agent reads it. The Browser
+  tool's `check` and `width` against a stand-in for the panel; Plan mode allows both. The
+  briefs. Which pictures a message box takes of those sent to it.
+- Desktop, 6 new tests and 1 changed. Search through the app: the key, typing, what git
+  ignores, the marks, case, globs, the arrow keys, Enter opening the editor with the
+  cursor at the match (typed text lands before the word), the tab as it was left, the
+  keyboard not taken on coming back to the session, the results as a file in the message
+  box; a pattern that cannot be read. The page check through the app, on a page served
+  for the test with one of each flaw: the scripted agent checks it at 1280 and at 390 and
+  is sent back exactly the planted findings (and the sideways scroll at 390 only), and the
+  page is in the panel at the panel's width afterwards; three pictures of 390 × 844,
+  768 × 1024 and 1280 × 800 from a panel under 400 px wide, and again with the page taken
+  out of the window; the drawer's headline, findings, count, the box drawn in the page, the
+  request written into the message box and not sent, the count gone after a reload. A
+  picked element: its picture is the size of the button with a few pixels around it, the
+  click picked and did not press, and a model that cannot read pictures is not told off.
+- The packaged app, looked at once with a test written for it and then removed: version
+  0.6.30, `app.isPackaged` true; the Search tab found "3 lines in 2 files"; the drawer
+  read "2 problems, 1 warning at 388 px wide"; the three pictures had their sizes.
+- Looked at, in screenshots of the app under test: the Search tab with results, and the
+  page check's drawer. The page itself is a native view and is not in those pictures.
+
+Not verified:
+
+- Linux and macOS, at all. The search runs ripgrep with paths in the other system's
+  form, and the page check attaches to a view through the DevTools protocol: both are
+  the kind of thing that differs by system.
+- No model used the check. In the desktop test the model is scripted. Whether a model
+  runs `check` when the brief asks, and what it does with the findings, was not watched.
+- The check on real sites. It was run on one page made for the test and one small page
+  in the packaged app. How often it leaves a text unjudged on a page with pictures, and
+  whether its targets and names agree with a full audit tool, was not measured.
+- The look of a page while it is laid out at another width (it shows in the panel for a
+  moment), and the three sizes on a display that is not at 100% scale.
+- The installer was built and its unpacked app tested; the installer itself was not run.
+- The installer was built from `1fc322b`. The commit after it holds this report, the
+  status entry, and one comment in `browserPanel.ts` made to say what was measured
+  (see the first point of what was found); nothing that runs changed.

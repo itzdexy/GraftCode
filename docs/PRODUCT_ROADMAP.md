@@ -82,10 +82,11 @@ Different from what one might expect, and why:
 - The findings are information, not a failed tool call. The model reads them and decides;
   an error result would read as "the check did not work".
 - A hidden page is drawn as one pixel inside the window, not off screen. Measured in
-  Electron 44: a view that is not in the window, or lies outside it, is not drawn at all
-  (a screenshot of one failed or never came back, which is also what the agent's
-  screenshot did before this round when the panel was shut). Thirty-six of thirty-six
-  pictures came back from a view of one pixel inside the window.
+  Electron 44: a view that is not in the window is not drawn at all (a screenshot of one
+  failed or never came back, which is also what the agent's screenshot did before this
+  round when the panel was shut), and one placed outside the window's area is drawn only
+  now and then (7 pictures of 21). Thirty-six of thirty-six pictures came back from a
+  view of one pixel inside the window.
 - The width goes through the DevTools protocol and not by resizing the view: the picture
   is then the size asked for whatever the panel's size, and the panel does not jump about
   on screen. While a page is laid out at another width the panel shows it so for a moment.
