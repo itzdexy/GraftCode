@@ -48,6 +48,7 @@ import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/per
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
 import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
+import { TextSearchQuerySchema, TextSearchResultSchema } from '../schemas/textSearch';
 import { UsageDaySchema } from '../usage';
 
 /**
@@ -337,6 +338,8 @@ export const contracts = {
   ),
 
   // Side panels
+  /** Text in the files of the session's folder (the Search tab). A new search for a session ends the one before it. */
+  'files:searchText': channel(z.object({ sessionId: IdSchema, search: TextSearchQuerySchema }), TextSearchResultSchema),
   'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
   'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
