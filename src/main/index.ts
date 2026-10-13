@@ -338,7 +338,7 @@ async function sessions(): Promise<SessionManager> {
       const site = s.sites.forFolder(root);
       if (!site) return null;
       await s.siteServer.start();
-      return { name: site.name, url: s.siteServer.url(site.slug) };
+      return { name: site.name, url: s.siteServer.url(site.slug), stack: site.stack };
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     problems: (root, file, signal) => editChecks.problemsIn(root, file, signal),

@@ -12,6 +12,7 @@ import { CODE_ONLY_COMMANDS, commandsFor } from '@shared/commands';
 import { currentPlan } from '@shared/plans';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { ContextReport, QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
+import type { SiteStack } from '@shared/schemas/sites';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
 import type { SearchEngineId, SearchResult } from '../tools/web/search';
@@ -142,8 +143,8 @@ export interface SessionDeps {
   sandbox?(projectRoot: string): SandboxSettings | null;
   /** The errors the local language server finds in a file of a project (see languages/problems.ts). Absent: edits are not checked. */
   problems?(projectRoot: string, file: string, signal: AbortSignal): Promise<FileProblems | null>;
-  /** The site from the Sites tab that this folder holds, with its live address; null for other folders. */
-  site?(projectRoot: string): Promise<{ name: string; url: string } | null>;
+  /** The site from the Sites tab that this folder holds, with its live address and what it is built with; null for other folders. */
+  site?(projectRoot: string): Promise<{ name: string; url: string; stack: SiteStack } | null>;
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;

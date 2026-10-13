@@ -51,7 +51,7 @@ import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
 import type { McpServerConfig, SettingsScope } from '@shared/schemas/config';
 import type { McpServerView } from '@shared/schemas/customize';
-import { integrationSetup, integrationStatus } from '../mcp/integrations';
+import { findCommand, integrationSetup, integrationStatus } from '../mcp/integrations';
 import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
@@ -214,6 +214,7 @@ function siteView(s: Services, site: SiteRecord): SiteView {
     folder: site.folder,
     updatedAt: site.updatedAt,
     sessionId: site.sessionId,
+    stack: site.stack,
     thumbnail: s.sites.thumbnail(site.slug)
   };
 }
@@ -885,10 +886,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       await s.siteServer.start();
       return s.sites.list().map((site) => siteView(s, site));
     },
-    'sites:create': async ({ prompt, name }) => {
+    'sites:toolchain': () => ({ npm: findCommand('npm', process.platform, process.env) !== null }),
+    'sites:create': async ({ prompt, name, stack }) => {
       const s = await ctx.services();
       await s.siteServer.start();
-      const site = s.sites.create(name?.trim() || siteName(prompt), prompt);
+      const site = s.sites.create(name?.trim() || siteName(prompt), prompt, stack ?? 'plain');
       // Graft made this folder, so it is trusted; edits in it go ahead without asking.
       const project = s.projects.findByPath(site.folder) ?? s.projects.upsert(site.folder);
       s.projects.update(project.id, { trusted: true });
