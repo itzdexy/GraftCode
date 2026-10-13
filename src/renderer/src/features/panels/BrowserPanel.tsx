@@ -12,8 +12,11 @@ import {
   Globe,
   Lock,
   Monitor,
+  MonitorSmartphone,
   MousePointerClick,
+  RefreshCw,
   RotateCw,
+  ScanSearch,
   Search,
   Send,
   Smartphone,
@@ -24,16 +27,19 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react';
-import type { BrowserCommand, ConsoleEntryView, PickedElementView } from '@shared/schemas/panels';
-import { IconButton } from '../../components/Button';
+import { lookedAt, notListed } from '@shared/pageCheck';
+import type { BrowserCommand, ConsoleEntryView, PageCheck, PickedElementView } from '@shared/schemas/panels';
+import { Button, IconButton } from '../../components/Button';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../../components/Menu';
 import { cn } from '../../lib/cn';
-import { invoke } from '../../lib/ipc';
+import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { usePanels } from '../../stores/panels';
 import { notify, reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
+import { checkHeadline, fixPageRequest, problemsFound } from './pageCheckModel';
 import { PanelFrame } from './PanelFrame';
+import { withRequest } from './problemsModel';
 
 const QUICK = ['localhost:3000', 'localhost:5173', 'localhost:8080'];
 
@@ -238,11 +244,102 @@ function ConsoleDrawer({ onClose, onSend }: { onClose: () => void; onSend: (entr
   );
 }
 
+type CheckLoad = { state: 'checking' } | { state: 'error'; message: string } | { state: 'done'; check: PageCheck };
+
+/**
+ * What the page check found, under the page: the problems first, each with
+ * where it is. Pressing a finding brings what it is about into view in the
+ * page and draws a box around it. The list is of the page as it was laid out
+ * when it was checked: the headline says how wide that was.
+ */
+function PageCheckDrawer({ load, onAgain, onAsk, onClose }: { load: CheckLoad; onAgain: () => void; onAsk: (check: PageCheck) => void; onClose: () => void }) {
+  const check = load.state === 'done' ? load.check : null;
+  const show = (selector: string): void => {
+    invoke('browser:highlight', { selector })
+      .then((found) => {
+        if (!found) notify('That is no longer in the page', 'Check again to see the page as it is now.');
+      })
+      .catch((error: unknown) => reportError("Couldn't show it in the page", error));
+  };
+  return (
+    <section aria-label="Page check" className="flex h-[38%] min-h-[120px] shrink-0 flex-col border-t border-border-panel">
+      <header className="flex h-28 shrink-0 items-center gap-6 border-b border-border-subtle pr-4 pl-10">
+        <ScanSearch className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
+        <span role="status" className="min-w-0 flex-1 truncate text-sm text-fg-secondary">
+          {load.state === 'checking' ? 'Checking the page…' : check ? checkHeadline(check) : 'The page could not be checked'}
+        </span>
+        <IconButton label="Check again" size="xs" disabled={load.state === 'checking'} onClick={onAgain}>
+          <RefreshCw className="size-12" />
+        </IconButton>
+        <IconButton label="Close page check" size="xs" onClick={onClose}>
+          <X className="size-14" />
+        </IconButton>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto py-2">
+        {load.state === 'error' ? (
+          <p role="alert" className="selectable px-10 py-6 text-sm text-danger">
+            {load.message}
+          </p>
+        ) : null}
+        {check ? (
+          <>
+            <ul>
+              {check.findings.map((finding, i) => {
+                const kind = finding.severity === 'error' ? 'Problem' : 'Warning';
+                const body = (
+                  <>
+                    <span role="img" aria-label={kind} className={cn('mt-[5px] size-6 shrink-0 rounded-full', finding.severity === 'error' ? 'bg-danger' : 'bg-amber')} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm break-words text-fg">{finding.message}</span>
+                      {finding.selector ? (
+                        <span className="block truncate font-mono text-2xs text-fg-faint">
+                          {finding.selector}
+                          {finding.label ? ` · ${finding.label}` : ''}
+                        </span>
+                      ) : null}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={i}>
+                    {finding.selector ? (
+                      <button
+                        type="button"
+                        aria-label={`${kind}: ${finding.message} At ${finding.selector}`}
+                        title="Show it in the page"
+                        onClick={() => show(finding.selector)}
+                        className="flex w-full items-start gap-8 px-10 py-4 text-left transition-ui hover:bg-hover focus-visible:bg-hover"
+                      >
+                        {body}
+                      </button>
+                    ) : (
+                      <div className="flex items-start gap-8 px-10 py-4">{body}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="selectable px-10 py-6 text-xs text-fg-faint">{[notListed(check), lookedAt(check)].filter((part) => part !== null).join(' ')}</p>
+          </>
+        ) : null}
+      </div>
+      {check && check.findings.length > 0 ? (
+        <div className="flex shrink-0 items-center justify-end border-t border-border-subtle p-6">
+          <Button size="sm" variant="secondary" onClick={() => onAsk(check)} title="Writes the request into the message box. Nothing is sent until you send it.">
+            Ask Graft to fix these
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 /**
  * Browser panel for local dev servers and docs. The page itself is a native
  * view main positions over the area below the toolbar; it is hidden while
  * menus or dialogs are open so they stay on top. Screenshots, picked elements
- * and console logs go to this session's message box.
+ * and console logs go to this session's message box, and so does the request
+ * to fix what the page check found.
  */
 export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const state = usePanels((s) => s.browser);
@@ -250,7 +347,12 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
   const [editing, setEditing] = useState(false);
   const [device, setDevice] = useState<Device>('desktop');
   const [finding, setFinding] = useState(false);
-  const [consoleOpen, setConsoleOpen] = useState(false);
+  /** The console and the page check share the space under the page: one at a time. */
+  const [drawer, setDrawer] = useState<'console' | 'check' | null>(null);
+  /** The last check, with the page it was of: a check of another page is not this page's. */
+  const [checked, setChecked] = useState<{ url: string; load: CheckLoad } | null>(null);
+  const checkAsked = useRef(0);
+  const [sizing, setSizing] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const hasPage = Boolean(state?.url);
@@ -336,6 +438,45 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
       .catch((error: unknown) => reportError("Couldn't take a screenshot", error));
   };
 
+  const pageUrl = state?.url ?? '';
+  const pageLoading = state?.loading ?? false;
+  const runCheck = useCallback((): void => {
+    const url = usePanels.getState().browser?.url ?? '';
+    const asked = ++checkAsked.current;
+    setChecked({ url, load: { state: 'checking' } });
+    invoke('browser:check').then(
+      (check) => {
+        if (asked === checkAsked.current) setChecked({ url, load: { state: 'done', check } });
+      },
+      (error: unknown) => {
+        if (asked === checkAsked.current) setChecked({ url, load: { state: 'error', message: errorText(error) } });
+      }
+    );
+  }, []);
+  // The drawer shows the page as it is: it checks when it opens, and again when the page or its width changes.
+  useEffect(() => {
+    if (drawer !== 'check' || pageUrl === '' || pageLoading) return;
+    // A moment for the page to take a new width before it is measured.
+    const timer = setTimeout(runCheck, 200);
+    return () => clearTimeout(timer);
+  }, [drawer, pageUrl, pageLoading, device, runCheck]);
+  const checkLoad: CheckLoad = checked && checked.url === pageUrl ? checked.load : { state: 'checking' };
+  const problems = problemsFound(checked && checked.url === pageUrl && checked.load.state === 'done' ? checked.load.check : null);
+
+  const askForFix = (check: PageCheck): void => {
+    const ui = useUi.getState();
+    ui.setDraft(sessionId, withRequest(ui.drafts[sessionId] ?? '', fixPageRequest(check)));
+    ui.focusComposer?.();
+  };
+
+  const screenshotSizes = (): void => {
+    setSizing(true);
+    invoke('browser:captureSizes')
+      .then((shots) => send({ images: shots.map((shot) => shot.image) }, 'Phone, tablet and desktop screenshots'))
+      .catch((error: unknown) => reportError("Couldn't take the screenshots", error))
+      .finally(() => setSizing(false));
+  };
+
   const pick = (): void => {
     if (state?.picking) {
       command('cancelPick');
@@ -416,7 +557,7 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
       </form>
       {state?.loading ? <div className="graft-loadbar h-2 shrink-0" role="progressbar" aria-label="Loading" /> : null}
       {hasPage ? (
-        <div className="flex h-28 shrink-0 items-center gap-2 border-b border-border-panel px-4" role="toolbar" aria-label="Page tools">
+        <div className="flex min-h-28 shrink-0 flex-wrap items-center gap-2 border-b border-border-panel px-4 py-3" role="toolbar" aria-label="Page tools">
           {DEVICES.map((d) => (
             <IconButton key={d.id} label={d.label} size="xs" aria-pressed={device === d.id} active={device === d.id} onClick={() => setDevice(d.id)}>
               <d.icon className="size-14" />
@@ -446,8 +587,21 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
           <IconButton label="Screenshot to chat" size="xs" onClick={screenshot}>
             <Camera className="size-14" />
           </IconButton>
+          <IconButton label="Screenshot at phone, tablet and desktop size" size="xs" disabled={sizing} aria-busy={sizing} onClick={screenshotSizes}>
+            <MonitorSmartphone className="size-14" />
+          </IconButton>
           <span className="relative">
-            <IconButton label="Console" size="xs" aria-pressed={consoleOpen} active={consoleOpen} onClick={() => setConsoleOpen(!consoleOpen)}>
+            <IconButton label="Check the page" size="xs" aria-pressed={drawer === 'check'} active={drawer === 'check'} onClick={() => setDrawer(drawer === 'check' ? null : 'check')}>
+              <ScanSearch className="size-14" />
+            </IconButton>
+            {problems > 0 ? (
+              <span className="pointer-events-none absolute -top-2 -right-2 min-w-[14px] rounded-full bg-danger px-3 text-center text-[10px] leading-[14px] font-medium text-white tabular-nums">
+                {Math.min(99, problems)}
+              </span>
+            ) : null}
+          </span>
+          <span className="relative">
+            <IconButton label="Console" size="xs" aria-pressed={drawer === 'console'} active={drawer === 'console'} onClick={() => setDrawer(drawer === 'console' ? null : 'console')}>
               <SquareTerminal className="size-14" />
             </IconButton>
             {(state?.problems ?? 0) > 0 ? (
@@ -534,9 +688,10 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
           </div>
         </div>
       )}
-      {consoleOpen && hasPage ? (
+      {drawer === 'check' && hasPage ? <PageCheckDrawer load={checkLoad} onAgain={runCheck} onAsk={askForFix} onClose={() => setDrawer(null)} /> : null}
+      {drawer === 'console' && hasPage ? (
         <ConsoleDrawer
-          onClose={() => setConsoleOpen(false)}
+          onClose={() => setDrawer(null)}
           onSend={(entries) => send({ files: [{ name: 'console.txt', content: `Console of ${state?.url ?? 'the page'}\n\n${consoleText(entries)}` }] }, 'The console')}
         />
       ) : null}
