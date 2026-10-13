@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.29",
+    "date": "2026-10-12",
+    "items": [
+      "Sites can be real projects. Choose React + TypeScript beside a new site's name and Graft starts it as one: components in .tsx files, strict types, styles in modules, built with Vite. It is what a new site starts on when Node.js is installed.",
+      "Graft asks before it installs a site's packages and before a build, as it does for any command. The preview shows what the build made, reloads after every build, and keeps the last good page when a build fails. The type check is the project's check.",
+      "Plain HTML is still there for a site with no build and nothing to install, and the sites you already have stay as they are. The gallery says which kind each site is."
+    ]
+  },
+  {
     "version": "0.6.28",
     "date": "2026-10-12",
     "items": [
