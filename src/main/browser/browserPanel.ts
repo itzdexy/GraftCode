@@ -50,6 +50,8 @@ export interface PickedElement {
   text: string;
   size: { width: number; height: number };
   styles: Record<string, string>;
+  /** The part of the page the element takes, as it looked when it was picked; null when it could not be drawn. */
+  image: PageShot | null;
 }
 
 export interface PageSnapshot {
@@ -516,8 +518,10 @@ export class BrowserPanel {
     this.picking = true;
     this.publish();
     try {
-      const picked = (await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: PICK_ELEMENT }], true)) as Omit<PickedElement, 'url'> | null;
-      return picked ? { ...picked, url: contents.getURL() } : null;
+      const picked = (await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: PICK_ELEMENT }], true)) as (Omit<PickedElement, 'url' | 'image'> & { rect: Bounds }) | null;
+      if (!picked) return null;
+      const { rect, ...element } = picked;
+      return { ...element, url: contents.getURL(), image: await this.pictureOf(rect) };
     } catch (error) {
       // The page navigated away or crashed mid-pick.
       log.info('browser', 'Element picking ended', { message: (error as Error).message });
@@ -525,6 +529,37 @@ export class BrowserPanel {
     } finally {
       this.picking = false;
       this.publish();
+    }
+  }
+
+  /**
+   * The part of the page a box takes (in the page's own pixels), with a few pixels around it. Null when it
+   * cannot be drawn: the page is not on screen, or the box lies outside what the panel shows.
+   */
+  private async pictureOf(box: Bounds): Promise<PageShot | null> {
+    const view = this.view;
+    const contents = this.contents();
+    if (!view || !contents || !this.visible) return null;
+    const zoom = contents.getZoomFactor();
+    const shown = view.getBounds();
+    const around = 4;
+    const left = Math.max(0, Math.floor((box.x - around) * zoom));
+    const top = Math.max(0, Math.floor((box.y - around) * zoom));
+    const right = Math.min(shown.width, Math.ceil((box.x + box.width + around) * zoom));
+    const bottom = Math.min(shown.height, Math.ceil((box.y + box.height + around) * zoom));
+    if (right - left < 2 || bottom - top < 2) return null;
+    try {
+      // Two frames, so the picker's own box is gone from the page before it is pictured.
+      await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))))' }], true);
+      let image = await within(contents.capturePage({ x: left, y: top, width: right - left, height: bottom - top }), DRAW_TIMEOUT_MS, 'The page did not draw in time.');
+      if (image.isEmpty()) return null;
+      if (image.getSize().width > 1600) image = image.resize({ width: 1600, quality: 'good' });
+      const { width, height } = image.getSize();
+      return { mediaType: 'image/png', data: image.toPNG().toString('base64'), width, height };
+    } catch (error) {
+      // The element is still what was asked for: it goes without its picture.
+      log.info('browser', 'Could not picture the picked element', { message: (error as Error).message });
+      return null;
     }
   }
 

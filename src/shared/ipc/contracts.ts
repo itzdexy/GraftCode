@@ -389,8 +389,8 @@ export const contracts = {
   'browser:check': channel(Void, PageCheckSchema),
   /** Brings what the selector finds into view and marks it for a moment; false when it finds nothing. */
   'browser:highlight': channel(z.object({ selector: z.string().min(1).max(500) }), z.boolean()),
-  /** Waits for the user to click an element in the page; null when they cancel. */
-  'browser:pick': channel(Void, PickedElementSchema.nullable()),
+  /** Waits for the user to click an element in the page; null when they cancel. `image` is that part of the page, when it could be pictured. */
+  'browser:pick': channel(Void, PickedElementSchema.extend({ image: ImageBlockSchema.nullable() }).nullable()),
   /** Dev servers answering on this computer's usual ports. */
   'browser:servers': channel(Void, z.array(z.object({ url: z.string(), port: z.number().int() }))),
 

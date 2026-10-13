@@ -11,7 +11,7 @@ import { matchesAccelerator } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, readAttachments } from './attachments';
+import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, picturesTaken, readAttachments } from './attachments';
 import { detectToken, useSuggestions, type Suggestion } from './suggestions';
 
 export interface ComposerProps {
@@ -127,10 +127,9 @@ export function Composer({
     const take = (): void => {
       const got = useUi.getState().takeInbox(draftKey);
       if (!got) return;
-      if (got.images.length > 0) {
-        if (supportsImages) setImages((current) => [...current, ...got.images].slice(0, MAX_IMAGES));
-        else useToasts.getState().push({ tone: 'error', title: 'This model can’t read images', description: 'Pick a model that can see images to send a screenshot.' });
-      }
+      const pictures = picturesTaken(got, supportsImages);
+      if (pictures.images.length > 0) setImages((current) => [...current, ...pictures.images].slice(0, MAX_IMAGES));
+      if (pictures.refused) useToasts.getState().push({ tone: 'error', title: 'This model can’t read images', description: 'Pick a model that can see images to send a screenshot.' });
       if (got.files.length > 0) setFiles((current) => [...current, ...got.files].slice(0, MAX_TEXT_FILES));
       focus();
     };
