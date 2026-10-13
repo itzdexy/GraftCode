@@ -130,6 +130,40 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Search in files and a page that is checked (0.6.30)
+
+The **Changes** panel has a **Search** tab, and `Ctrl+Shift+H` opens it with the keyboard in
+its box and the text you had selected as what to look for. It lists every line of the
+project that holds the text, under its file, with the matches marked. What git ignores is
+left out, and so is `.git`. Three buttons in the box match case, whole words or a regular
+expression, and a fourth opens a field for the files to look in or leave out
+(`src/**/*.ts, !**/*.test.ts`). The arrow keys walk from the box down the rows; a line
+opens its file in the editor at the match, and the list is as you left it when you come
+back. A search lists 2,000 lines at most and says so when there are more. **Send the
+results to chat** attaches them to your message, with lines that hold a key covered.
+
+The **Browser** panel checks a page. **Check the page** opens a list under it: text with
+too little contrast (the ratio, the two colours and how often the pair is used), pictures
+without alt text or that did not load, buttons, links and fields without a name, a field
+named only by its placeholder, headings that skip a level, small targets with another
+within 24 px, and a layout wider than its window with what sticks out. Press a finding and
+the page scrolls to it and draws a box around it. The list is of the page as it is laid
+out: choose the phone or tablet width and it checks again, and the headline says how wide
+the page was. **Ask Graft to fix these** writes the request into the message box and sends
+nothing. The lines are the ones the Web Content Accessibility Guidelines 2.2 draw at
+level AA. Where a line can't be drawn the check says so instead of guessing: text over a
+picture or a gradient is counted as not judged. It is a check of what can be measured, not
+an audit: it does not press keys, read the page aloud or look inside frames.
+
+**Screenshot at phone, tablet and desktop size** sends three pictures of the page to your
+message in one press (390, 768 and 1280 px wide), whatever size the panel is. An element
+you pick arrives with a picture of itself beside its HTML, for a model that can see.
+
+The agent has the same eyes. Its Browser tool has a `check` action, and `check` and
+`screenshot` take a `width`, so it sees a page as a phone lays it out while the panel
+stays as it is. The brief of a site and of the browser tester ask for the check at 390
+and at 1280 px before the work is called done.
+
 ### A side question and livelier motion (0.6.28)
 
 **`/btw`** asks something on the side. Type `/btw` and a question in a session, also
@@ -297,12 +331,12 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Edits that land:** an edit has to name one place in the file. When a model gets only the indentation wrong, Graft still finds the block by its text and fits the new lines to the file; with two candidates it asks for more context instead of guessing.
 - **Git:** an optional worktree per session, hidden checkpoints before every turn, and rewind for files, the conversation or both. A rewind to before a summary or a `/clear` brings the earlier conversation back for the model. Diff and commit from the app, and open a pull request.
 - **A transcript in the style of a terminal agent.** Each turn's work folds into one line, such as "Ran 3 commands, created a.ts, edited 2 files +75 −4 · 2m 50s". A card lists the files the turn changed, each opening to its diff. While a turn runs, a live status line shows elapsed time, context size and background tasks.
-- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, a browser for local apps, the agent graph, and background tasks.
+- **Panels:** an integrated terminal, a file browser with previews, changes and diffs, text search across the project, a browser for local apps, the agent graph, and background tasks.
 - **Files you can see and take:** the Files panel shows pictures (with their size in pixels), plays clips and sound, and highlights text. Each file and folder has a menu, from its … button or a right-click: copy its path or its path in the project, copy a picture itself, show it in its folder, open it with its own app or your editor, or add it to your message. A picture the agent reads shows in the conversation too. Scripts and programs are never opened by a click.
 - **A turn that is cut off:** every tool call is written down before it runs and again when it returns. If Graft crashes, is killed or loses power in the middle of a turn, the next start answers each open call with what is known: its recorded result, "outcome unknown, check before repeating", or "not run". A command the app had started is not found again and may still be running; the note says its outcome is unknown.
 - **Checks after changes:** in **Customize → Checks**, list the commands that tell whether the project still works; Graft suggests them from `package.json` scripts (with your package manager), Cargo, Go and Python config. They run after any turn that changed files, show live in the transcript, and a failure goes back to the agent with its output and a reminder to fix the cause rather than weaken the check. Checks only run in projects you trust.
-- **A browser for developers:** the Browser panel has a console with an error badge, find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Pick an element, take a screenshot or grab the console and it lands in your message. With no page open, it lists dev servers running on your computer and in the session's sandbox.
-- **The agent tests in the browser:** the Browser tool opens a page, reads it as text plus numbered links, buttons and fields, clicks with real mouse events, types the way frameworks expect, waits for text, reads the console and takes screenshots. Opening a local dev server needs no approval in Auto-edit; other sites ask.
+- **A browser for developers:** the Browser panel has a console with an error badge, a check of the page (contrast, names, headings, crowded targets, a layout wider than its window), find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Pick an element (it comes with its picture), take a screenshot of the page as it is or at three sizes at once, or grab the console, and it lands in your message. With no page open, it lists dev servers running on your computer and in the session's sandbox.
+- **The agent tests in the browser:** the Browser tool opens a page, reads it as text plus numbered links, buttons and fields, clicks with real mouse events, types the way frameworks expect, waits for text, reads the console, checks the page for what is hard to read, unnamed or too wide, and takes screenshots, both at any width it asks for. Opening a local dev server needs no approval in Auto-edit; other sites ask.
 - **Computer use (Windows, opt-in):** with a model that can see images, the agent can take screenshots, use the mouse and keyboard, zoom in to read small text and open apps by name. Each action asks first unless you allow it for the session. A banner says what it is doing, a ring marks each click, each step shows its screenshot in the chat, and `Ctrl+Alt+Esc` stops it.
 - **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
@@ -417,7 +451,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 - Destructive commands, such as force pushes, hard resets and recursive deletes, always ask first. The one exception is Bypass mode, which you have to switch on yourself and which can keep these checks ("Keep safety checks in Bypass").
 - **The sandbox** (optional, per project) runs commands in a container that sees only the project folder, with `.git` and `.graft` read-only. See [Sandbox](#sandbox).
 - **File previews** are served one file at a time through a private address that can't reach the files beside it, under a policy that blocks network access.
-- **The Browser panel** runs pages in their own in-memory session with no preload script, every permission denied, downloads blocked and only `http` and `https` allowed. Graft's own page scripts run in an isolated world the page can't see.
+- **The Browser panel** runs pages in their own in-memory session with no preload script, every permission denied, downloads blocked and only `http` and `https` allowed. Graft's own page scripts run in an isolated world the page can't see. To lay a page out at another width for a check or a picture, Graft attaches to that one page over the DevTools protocol for the moment it takes and detaches again.
 
 ## Keyboard shortcuts
 
@@ -429,6 +463,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Toggle terminal | ``Ctrl+` `` |
 | Toggle changes | `Ctrl+Shift+D` |
 | Toggle files | `Ctrl+Shift+F` |
+| Search in files | `Ctrl+Shift+H` |
 | Focus the message box | `Ctrl+L` |
 | Find in the conversation | `Ctrl+F` |
 | Open a file by name | `Ctrl+P` |

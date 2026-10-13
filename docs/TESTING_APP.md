@@ -1,6 +1,6 @@
-# Try Graft 0.6.29
+# Try Graft 0.6.30
 
-1. Open **Settings → About** and confirm version **0.6.29**. In
+1. Open **Settings → About** and confirm version **0.6.30**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -144,6 +144,27 @@
 34. In **Sites**, choose **Plain HTML** and build another: no command is asked for, the
     folder holds `index.html` and what it links, and its card says **HTML**. The choice is
     still Plain HTML when you come back to the page.
+35. In a code session, select a word in a reply and press **Ctrl+Shift+H**: the **Search**
+    tab of the Changes panel opens with the word in its box and lists every line that
+    holds it, under its file, the word marked. Press **Match case**, then open **Files to
+    look in or leave out** and type `*.md`: the list narrows each time. Press the down
+    arrow from the box and walk the rows; **Enter** on a line opens its file in the editor
+    with the cursor at the match. Go back to **Search**: the box and the list are as you
+    left them. Switch on **Use a regular expression** and type `(`: the tab says what is
+    wrong with the pattern. **Send the results to chat** attaches them to your message.
+36. Open the **Browser** panel on a page of your own (a site from **Sites** will do) and
+    press **Check the page**. A list opens under the page with a headline such as
+    "2 problems, 1 warning at 388 px wide". Press a finding: the page scrolls to it and a
+    box is drawn around it. Choose the phone width above the page: the list is made again
+    for that width. **Ask Graft to fix these** writes the request into the message box
+    and sends nothing. Open the console: it takes the list's place.
+37. In the same panel, press **Screenshot at phone, tablet and desktop size**: three
+    pictures are added to your message (with a model that can read pictures; another
+    says so). Press **Pick an element for the chat** and click something in the page: the
+    element is added to your message, with a picture of itself for a model that can see.
+38. Ask Graft, in a session with a page open in the Browser panel, to "check the page at
+    phone width". Its steps should read "Checked the page", and its answer should name
+    what the check found. The panel is the size it was afterwards.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:
@@ -155,8 +176,10 @@ npm test
 npm run test:e2e
 ```
 
-`npm run verify:docker` runs the same four and the build in a clean Linux container
-(needs Docker). Some faults show on one system only, so a change is checked on both.
+`npm run verify` runs the same four and the build one after another on this computer,
+whatever the one before did, and keeps each step's output and exit code in
+`out/verify`. `npm run verify:docker` does it in a clean Linux container (needs Docker).
+Some faults show on one system only, so a change is usually checked on both.
 
 Windows packaging: `npm run dist:win`. The packaged smoke tests also check SQLite,
 bundled search, the editor, TypeScript language server and a real terminal:
