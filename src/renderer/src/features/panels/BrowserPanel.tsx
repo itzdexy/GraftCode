@@ -460,6 +460,19 @@ export function BrowserPanelView({ sessionId, onClose }: { sessionId: string; on
     const timer = setTimeout(runCheck, 200);
     return () => clearTimeout(timer);
   }, [drawer, pageUrl, pageLoading, device, runCheck]);
+  // A check is of the page as it was loaded. When the page loads again with the drawer shut, the number on the
+  // button would count a page that is gone, so the check is dropped; with the drawer open it is made again.
+  const drawerNow = useRef(drawer);
+  useEffect(() => {
+    drawerNow.current = drawer;
+  }, [drawer]);
+  useEffect(
+    () =>
+      usePanels.subscribe((s, prev) => {
+        if (s.browser?.loading && !prev.browser?.loading && drawerNow.current !== 'check') setChecked(null);
+      }),
+    []
+  );
   const checkLoad: CheckLoad = checked && checked.url === pageUrl ? checked.load : { state: 'checking' };
   const problems = problemsFound(checked && checked.url === pageUrl && checked.load.state === 'done' ? checked.load.check : null);
 

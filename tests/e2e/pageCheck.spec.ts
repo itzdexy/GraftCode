@@ -236,6 +236,12 @@ test('the panel lists what is wrong with the page, shows a finding in it and wri
   await panel.getByRole('button', { name: 'Console' }).click();
   await expect(panel.getByRole('region', { name: 'Console' })).toBeVisible();
   await expect(drawer).toHaveCount(0);
+  // The number on the check button stays while the page does, and goes when the page is loaded again:
+  // it would be a count of a page that is gone.
+  const count = panel.getByRole('button', { name: 'Check the page' }).locator('..').getByText('6', { exact: true });
+  await expect(count).toBeVisible();
+  await panel.getByRole('button', { name: 'Reload' }).click();
+  await expect(count).toHaveCount(0);
 
   // Three sizes go to the message box in one press (the scripted model can't read pictures, and the box says so).
   await panel.getByRole('button', { name: 'Screenshot at phone, tablet and desktop size' }).click();

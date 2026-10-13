@@ -114,11 +114,18 @@ describe('the search of a session', () => {
   it('asks for the keyboard, with the text that was selected when there was some', () => {
     useTextSearch.getState().change('s', { text: 'kept' });
     useTextSearch.getState().open('s', null);
-    expect(useTextSearch.getState().focus).toMatchObject({ sessionId: 's' });
     expect(state().query.text).toBe('kept');
-    const before = useTextSearch.getState().focus!.seq;
     useTextSearch.getState().open('s', 'parseAccelerator');
     expect(state().query.text).toBe('parseAccelerator');
-    expect(useTextSearch.getState().focus!.seq).toBeGreaterThan(before);
+  });
+
+  it('hands the request for the keyboard to its own session, once', () => {
+    useTextSearch.getState().open('s', null);
+    expect(useTextSearch.getState().takeFocus('other')).toBe(false);
+    expect(useTextSearch.getState().takeFocus('s')).toBe(true);
+    // Taken: a tab that is shown again later does not take the keyboard by itself.
+    expect(useTextSearch.getState().takeFocus('s')).toBe(false);
+    useTextSearch.getState().open('s', null);
+    expect(useTextSearch.getState().takeFocus('s')).toBe(true);
   });
 });
