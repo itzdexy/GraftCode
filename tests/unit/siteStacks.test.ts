@@ -276,6 +276,13 @@ describe('the brief for a site', () => {
     expect(prompt).not.toContain('No build step');
   });
 
+  it('has the page checked as a phone and as a desktop lay it out, whichever kind of site it is', () => {
+    for (const stack of ['react-ts', 'plain'] as const) {
+      const prompt = buildCodeSystemPrompt({ ...ctx, site: { ...site, stack } });
+      expect(prompt).toContain('run action check at 390 and at 1280 wide and fix what it lists');
+    }
+  });
+
   it('asks for plain files and no build when the site is a plain one', () => {
     const prompt = buildCodeSystemPrompt({ ...ctx, site: { ...site, stack: 'plain' } });
     expect(prompt).toContain('# Website');

@@ -37,6 +37,8 @@ import {
   BROWSER_COMMANDS,
   ConsoleEntrySchema,
   FilePreviewSchema,
+  PAGE_SIZES,
+  PageCheckSchema,
   PickedElementSchema,
   TerminalInfoSchema,
   TreeEntrySchema
@@ -381,6 +383,12 @@ export const contracts = {
   'browser:console': channel(Void, z.array(ConsoleEntrySchema)),
   /** The page as an image, for a message. */
   'browser:capture': channel(Void, ImageBlockSchema),
+  /** The page as a phone, a tablet and a desktop lay it out, for a message. */
+  'browser:captureSizes': channel(Void, z.array(z.object({ id: z.enum(PAGE_SIZES.map((size) => size.id)), label: z.string(), image: ImageBlockSchema }))),
+  /** What is wrong with the page as the panel lays it out now: contrast, names, headings, a layout wider than its window. */
+  'browser:check': channel(Void, PageCheckSchema),
+  /** Brings what the selector finds into view and marks it for a moment; false when it finds nothing. */
+  'browser:highlight': channel(z.object({ selector: z.string().min(1).max(500) }), z.boolean()),
   /** Waits for the user to click an element in the page; null when they cancel. */
   'browser:pick': channel(Void, PickedElementSchema.nullable()),
   /** Dev servers answering on this computer's usual ports. */

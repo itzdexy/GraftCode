@@ -10,7 +10,8 @@ import type { ComputerControl } from '../computer/desktop';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
 import type { DocumentKind } from '../chat/documents';
-import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
+import type { ConsoleEntry, PageShot, PageSnapshot } from '../browser/browserPanel';
+import type { PageCheck } from '../browser/pageCheck';
 import type { MediaAccess } from '../media/mediaService';
 import type { AgentGroupInput } from '../agent/agentGroup';
 import type { MissionUpdateInput } from '../agent/mission';
@@ -118,7 +119,10 @@ export interface AgentBrowser {
   /** Opens a page (showing the panel) and waits for it to load; returns the address it opened. */
   open(url: string): Promise<string>;
   snapshot(): Promise<PageSnapshot>;
-  capture(): Promise<{ mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }>;
+  /** The page as an image: as the panel shows it, or laid out `width` px wide. */
+  capture(width?: number): Promise<PageShot>;
+  /** What is wrong with the page as it is laid out now, or `width` px wide. */
+  check(width?: number): Promise<PageCheck>;
   click(target: PageTarget): Promise<string>;
   type(target: PageTarget, text: string, submit: boolean): Promise<string>;
   press(key: string): Promise<void>;

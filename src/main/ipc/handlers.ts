@@ -1232,6 +1232,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const shot = await ctx.browser().capture();
       return { type: 'image' as const, mediaType: shot.mediaType, data: shot.data };
     },
+    'browser:captureSizes': async () =>
+      (await ctx.browser().captureSizes()).map(({ id, label, shot }) => ({ id, label, image: { type: 'image' as const, mediaType: shot.mediaType, data: shot.data } })),
+    'browser:check': () => ctx.browser().check(),
+    'browser:highlight': ({ selector }) => ctx.browser().highlight(selector),
     'browser:pick': () => ctx.browser().pickElement(),
     'browser:servers': () => localServers()
   };
