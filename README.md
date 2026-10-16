@@ -130,6 +130,24 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Limits that hold, and a replace request (0.6.31)
+
+**Settings → Permissions → Limits for a session, a project or a day** pauses a turn once
+the work reaches one of six values you set: the tokens spent in this session, what its
+project's sessions have used together, or everything used on this computer today, each in
+tokens and in US dollars. Tokens are the ones that cost money, with tokens read from a
+provider's cache at a tenth, as they are billed; costs come from published prices and can
+differ from your bill. A model with no published price is named once and counted in
+tokens. A pause says what was reached and offers to continue, as the limits for one turn
+do, and these totals go on counting across turns. A chat belongs to no folder, so it is
+never counted against a project.
+
+The **Search** tab of the Changes panel can compose a replace. **Ask Graft to replace the
+matches** opens a box; type what the matches should become and press it again: the request
+is written into your message box, saying how the search ran and what it found. Nothing is
+sent and nothing is replaced by the tab — the change is made as a turn, with its checkpoint
+and its diff, so you review it like any other edit.
+
 ### Search in files and a page that is checked (0.6.30)
 
 The **Changes** panel has a **Search** tab, and `Ctrl+Shift+H` opens it with the keyboard in

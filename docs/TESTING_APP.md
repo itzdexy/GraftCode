@@ -1,6 +1,6 @@
-# Try Graft 0.6.30
+# Try Graft 0.6.31
 
-1. Open **Settings → About** and confirm version **0.6.30**. In
+1. Open **Settings → About** and confirm version **0.6.31**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -41,7 +41,11 @@
 9. In **Settings → Permissions**, set **Tokens per turn** to its smallest choice and
    give a code session a task that reads several files. The turn should pause with
    the number it reached and a **Continue** button, and go on when you press it. Set
-   it back to **No limit** afterwards.
+   it back to **No limit** afterwards. Under **Limits for a session, a project or a
+   day**, set **Tokens in a session** to its smallest choice and send another message:
+   the turn pauses with the session's total "for one session" and the same button
+   continues it; the project and day rows count the same way. Set those back to
+   **No limit** too.
 10. Open **Settings → Usage** after a few requests: today's bar, and a row for each
    model with its requests, tokens and cost.
 11. In a chat, type `/`: the commands a chat can use are listed, and `/model` opens the
@@ -152,6 +156,8 @@
     with the cursor at the match. Go back to **Search**: the box and the list are as you
     left them. Switch on **Use a regular expression** and type `(`: the tab says what is
     wrong with the pattern. **Send the results to chat** attaches them to your message.
+    Press **Ask Graft to replace the matches**, type what they should become, and press
+    it again: the request is written into the message box and nothing is sent or changed.
 36. Open the **Browser** panel on a page of your own (a site from **Sites** will do) and
     press **Check the page**. A list opens under the page with a headline such as
     "2 problems, 1 warning at 388 px wide". Press a finding: the page scrolls to it and a

@@ -19,6 +19,73 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.31 limits that hold and a replace request (2026-10-15)
+
+Asked for as "what do big AI apps like Claude, Codex, Cursor and OpenCode have that people
+like them for?" — answered with the parts Graft lacked. No new package, no new table, no
+new shortcut, no new channel. Three pieces: the limits for a session, a project and a day;
+a replace request composed from the Search tab; and the first seam named by the Next list,
+what a model is offered as its own class.
+
+- **Limits that hold across turns** (`agent/turnBudget.ts` `SpendBudget`,
+  `agent/sessionHost.ts`, Settings → Permissions). Six values: tokens and cost for one
+  session, for one project (its sessions together) and for one day (everything used on this
+  computer). Tokens are the ones that cost money, with cache reads at a tenth — the
+  `spentTokens` the per-turn limit already used. The limits are checked before each model
+  request, as the per-turn ones are; reaching one pauses the turn with the number reached,
+  the limit and where to change it ("Paused after about 2,100 tokens in this session, past
+  the limit of 2,000 for one session set in Settings → Permissions."), and the pause offers
+  to continue. The totals are read when the turn starts and grow with its requests.
+- **How the three totals are read.** The session's from its saved usage; the project's by
+  summing the saved totals of every session of that folder (`SessionStore.projectUsage`:
+  one join for SQLite, the in-memory map for incognito and tests). A worktree session
+  counts toward the project it was started from. The day's from the usage rows, as before.
+  A chat has no folder, so the project limits are left out of its budget, and a store that
+  cannot be read is a warning in the log rather than a failed turn.
+- **The notice names what was set.** A request whose model has no published price is said
+  once a turn, and the sentence lists the cost limits it is outside of: "the cost limit for
+  a project", "the cost limits for a session and a day" — composed from the limits actually
+  set, where earlier rounds said a fixed pair. Only the singular sentence changed; the
+  session-and-day case, which the earlier tests wrote down, reads the same.
+- **A replace request from the Search tab** (`panels/searchModel.ts`, `SearchView.tsx`,
+  `stores/textSearch.ts`). Ask Graft to replace the matches opens a second box under the
+  first; pressing again writes a message into the message box: how the search ran (the
+  pattern, case, whole words, the file filter) and what it found, with the replacement
+  quoted. Nothing is sent and nothing is changed by the tab: a change to many files belongs
+  in a turn, with its checkpoint and its diff — the same decision as 0.6.30, now with the
+  request written for the user.
+- **The offering is its own class** (`agent/offering.ts`, `session.ts`). What a model is
+  offered — its tools, its web access, what a chat may make, generated media, computer use,
+  the MCP tools waiting for ToolSearch — is decided in one place instead of across
+  `session.ts`: the seam the Next list named. Behavior is unchanged, and the tests that
+  said it before say it still.
+
+Different from what one might expect, and why:
+
+- A session's or a project's cost follows published prices only, as the day's does. A model
+  with no published price is named once and counted in tokens; a guessed price would pause
+  on a number nobody billed.
+- A project's total is the sum of its sessions' saved totals, so deleting a session lowers
+  it, and usage from before the day rows existed (0.6.16) is not in it. A hidden per-project
+  ledger would be another table and another way to disagree with Settings → Usage.
+- The limits are checked between requests, not inside one: a single large request can pass a
+  limit by its own size. Stopping mid-request would throw away what was paid for.
+- An incognito chat is in no saved usage rows and belongs to no project, so other sessions'
+  limits never see its requests; its own limits count only what it uses itself.
+- The tab still does not replace. The request carries how the search ran so the agent
+  repeats it exactly, and the turn's diff is what the change is checked against.
+
+Found on the way, and fixed:
+
+- The desktop test for the replace request looked for the home screen's composer ("Describe
+  a task or ask a question") while inside a session, where the box names itself "Ask
+  anything · / commands · @ files · ! shell". It now matches the session's box.
+- The install-from-an-older-version test in `db.test.ts` failed on the six new settings
+  until it knew them: an old profile loads with all six at "no limit", which is what the
+  test now says.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.31.
+
 ### 0.6.30 search in files and a page that is checked (2026-10-13)
 
 Asked for as "improve this for devs, coders and UI makers". Two things a person at the
@@ -1010,8 +1077,10 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   emulated: the width is a narrow window's, so a page without a viewport tag is laid out
   that narrow, where a phone would show it zoomed out (the check names the missing tag).
 - Text search lists lines, not files' contents: a line of a file over 4 MB long in one
-  line (a minified bundle) is passed over, a search is cut at 2,000 lines or 30 seconds,
-  and there is no replace. It needs a code session; a chat has no folder to search.
+  line (a minified bundle) is passed over, and a search is cut at 2,000 lines or 30
+  seconds. A replacement is composed for the agent from the tab (the request says how the
+  search looked and what it found); the change itself is a turn, not the panel's, and the
+  panel never edits a file. It needs a code session; a chat has no folder to search.
 
 - A TypeScript site needs Node.js with npm on the computer and the network for its first
   install; its packages take 67 MB in every site's folder. The starter's versions are those
@@ -1128,12 +1197,19 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   record can't be exported or cleared from the app, and "Clear session history" leaves it.
 - The limits for one turn are checked before each model request, so a turn can pass one by
   the requests already under way when it is reached: one for the turn itself, one for each
-  agent of a group working at that moment. The summaries and titles Graft asks for itself
-  are not counted. Cost follows only models with a published price. A reply that asks for
-  several tool calls at once runs them all before the limit on tool calls can pause the
-  turn. There is no limit for a whole session, a day or a project, and a mission's turns
-  each get the allowance again. The choices are fixed lists; another value has to be put in
-  the settings by hand.
+  agent of a group working at that moment. The limits for a session, for a project and for
+  a day are checked the same way and count from what the session's usage, the project's
+  sessions' totals and the day's rows hold when the turn starts, then grow with its
+  requests; an incognito chat's requests never reach the saved day's rows and belong to no
+  project, so the limits of other sessions never see them, and the chat's own limits count
+  only what it uses itself. A session deleted takes its own usage with it, so a project's
+  total can drop. The summaries and titles Graft asks for itself are not counted. Cost
+  follows only models with a published price: a model with none is said once, naming the
+  cost limits it is outside of, and its requests are counted in tokens only. A reply that
+  asks for several tool calls at once runs them all before the limit on tool calls can
+  pause the turn. A mission's turns each get the per-turn allowance again, while the
+  session, the project and the day go on counting across them. The choices are fixed
+  lists; another value has to be put in the settings by hand.
 - The tool journal answers what was open when the app stopped; it does not find a command
   again. A command the app had started keeps running after a crash and nothing ends it at
   the next start: its call is answered "outcome unknown". A result above 200,000 characters
@@ -1168,10 +1244,11 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
   slide runs off its edge. Sheets have no dates, number formats or charts. There is no
   table of contents, cover page or page-break control, and equations are plain text. The
   PDF uses the computer's own fonts.
-- `src/main/agent/session.ts` is 1,482 lines after the split: turns, the queue, slash
-  commands, the prompt, what a model is offered, compaction. `SessionHost` takes 22 things
-  from the session (`HostPorts`), which is wide. The next seam is what a model is offered
-  (tools, web access, the MCP tools that wait), about 140 lines with state of their own.
+- `src/main/agent/session.ts` is 1,471 lines: turns, the queue, slash commands, the
+  prompt, compaction. What a model is offered (tools, web access, the MCP tools that wait)
+  is its own class (`agent/offering.ts`, 221 lines), so the turn loop asks for it and no
+  longer decides it. `SessionHost` still takes 22 things from the session (`HostPorts`),
+  which is wide.
 - Removing old tool output changes the start of the history
   once, so a provider's prompt cache is rebuilt from that point (the cutoff itself is
   stored since 0.6.14). The estimate of what
@@ -1320,8 +1397,9 @@ The five rounds designed and planned in October 2026 are done: chat documents (0
 research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention and context
 (0.6.13). What comes next:
 
-1. Done in 0.6.16: the loop host and the mission controller are out of `session.ts`. Next
-   seam: what a model is offered (tools, web access, waiting MCP tools).
+1. Done in 0.6.16: the loop host and the mission controller are out of `session.ts`. Done
+   (2026-10-15): what a model is offered is its own class, `agent/offering.ts`. Next seam:
+   the width of `HostPorts`.
 2. Expand recovery and cleanup controls for the writing-agent worktrees introduced
    in 0.6.14; then best-of-N. Done in 0.6.22: a journal of tool calls, so a turn the app
    stops in the middle of is answered truthfully. Still open there: finding a command again
@@ -1331,7 +1409,8 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    are implemented in 0.6.15.
 4. Done in 0.6.16: a backup model for agents of a group, spend by day, limits for one
    turn. Done in 0.6.22: limits on tool calls and retries, a permission for each MCP tool,
-   and a choice of what a local server inherits. Next: a limit for a session or a day.
+   and a choice of what a local server inherits. Done (2026-10-15): limits for a whole
+   session, a whole project and a day.
 5. Done in 0.6.16: Gemini `thinkingLevel`. Still open: measure the `ToolSearch` threshold on
    real setups; MCP elicitation and @-mentioning resources.
 6. Done in 0.6.23: diagrams, drawn with the bundled skill and shown when the turn ends.
@@ -1344,6 +1423,8 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    server, a VS Code extension, moving a session between computers; and for the side
    question, an answer that streams the reply being written and one that can use tools.
 8. Done in 0.6.30: text search for the person, a check of the page for the person and
-   the agent, pictures of a page at a width. Next there: the check pressing keys (focus
-   order, a focus that shows), the whole length of a page as one picture, a picture
-   compared with the one before a change, and replace across files as a turn.
+   the agent, pictures of a page at a width. Done (2026-10-15): a replacement composed for
+   the agent from the Search tab — the change is made as a turn, with its checkpoint and
+   its diff. Next there: the check pressing keys (focus order, a focus that shows), the
+   whole length of a page as one picture, and a picture compared with the one before a
+   change.

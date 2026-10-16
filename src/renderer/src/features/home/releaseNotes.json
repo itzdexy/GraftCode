@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.31",
+    "date": "2026-10-15",
+    "items": [
+      "Settings → Permissions gains limits that hold across turns: tokens and cost for a whole session, for a whole project (every session in its folder) and for a day (everything used on this computer today). Reaching one pauses the turn with the number it reached and a Continue button, like the limits for one turn.",
+      "The Changes panel's Search tab can compose a replace: press Ask Graft to replace the matches, type what they should become, and press it again. The request is written into your message box with the search as it ran and what it found. Nothing is sent and nothing is replaced by the tab: the turn that follows makes the change, with its checkpoint and its diff.",
+      "Tokens read from a provider's cache count at a tenth, as they are billed, and a model with no published price is named once and counted in tokens only. A chat belongs to no folder, so it is not counted against a project."
+    ]
+  },
+  {
     "version": "0.6.30",
     "date": "2026-10-13",
     "items": [
