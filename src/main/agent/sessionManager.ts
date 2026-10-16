@@ -208,6 +208,7 @@ export class SessionManager {
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
           turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes, toolCalls: s.behavior.turnToolCalls, retries: s.behavior.turnRetries },
+          spendBudget: { sessionTokens: s.behavior.sessionTokens, sessionCostUsd: s.behavior.sessionCostUsd, projectTokens: s.behavior.projectTokens, projectCostUsd: s.behavior.projectCostUsd, dayTokens: s.behavior.dayTokens, dayCostUsd: s.behavior.dayCostUsd },
           agents: s.agents,
           checkEdits: s.behavior.checkEdits
         };

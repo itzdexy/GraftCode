@@ -28,6 +28,8 @@ export interface Harness {
   projectDir: string;
   home: string;
   waitFor(predicate: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>;
+  /** Sends a message and waits for the turn it starts (and any turn it hands off to). */
+  turn(text: string): Promise<void>;
   /** A new runtime over what is stored, as after Graft restarts. It becomes `session`; dispose the old one first. */
   reopen(): AgentSession;
 }
@@ -80,6 +82,8 @@ export interface HarnessOptions {
   maxSteps?: number | null;
   /** Settings → Permissions → limits for one turn (default: none). */
   turnBudget?: Partial<SessionPreferences['turnBudget']>;
+  /** Settings → Permissions → limits for a whole session, a project or a day (default: none). */
+  spendBudget?: Partial<SessionPreferences['spendBudget']>;
   /** The project's sandbox settings (default: no sandbox). */
   sandbox?: SessionDeps['sandbox'];
   /** The language server's errors for an edited file (default: none, so edits are not checked). */
@@ -190,6 +194,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
       turnBudget: { tokens: null, costUsd: null, minutes: null, toolCalls: null, retries: null, ...options.turnBudget },
+      spendBudget: { sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, ...options.spendBudget },
       agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents },
       checkEdits: options.checkEdits ?? true
     }),
@@ -222,16 +227,23 @@ export function makeHarness(options: HarnessOptions): Harness {
       const existing = events.find(predicate);
       if (existing) return Promise.resolve(existing);
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('waitFor timed out')), timeoutMs);
         const listener = (e: AgentEvent): void => {
-          if (predicate(e)) {
-            clearTimeout(timer);
-            listeners.splice(listeners.indexOf(listener), 1);
-            resolve(e);
-          }
+          if (!predicate(e)) return;
+          clearTimeout(timer);
+          listeners.splice(listeners.indexOf(listener), 1);
+          resolve(e);
         };
+        // The listener comes off on timeout too: a wait that ran out must not answer a later event.
+        const timer = setTimeout(() => {
+          listeners.splice(listeners.indexOf(listener), 1);
+          reject(new Error('waitFor timed out'));
+        }, timeoutMs);
         listeners.push(listener);
       });
+    },
+    async turn(text) {
+      this.session.send(text);
+      await this.session.idle();
     }
   };
 }
