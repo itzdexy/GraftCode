@@ -2397,6 +2397,111 @@ describe('limits for one turn', () => {
   });
 });
 
+describe('limits for a session, a project and a day', () => {
+  const pauses = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Paused') ? [e.text] : []));
+
+  it('pauses when the session has used its tokens, and the limit holds across turns', async () => {
+    const h = harness({
+      spendBudget: { sessionTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 1500, outputTokens: 100 } },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], usage: { inputTokens: 500, outputTokens: 0 } },
+        { text: 'never asked for' }
+      ]
+    });
+    await h.turn('work');
+    expect(pauses(h)).toEqual(['Paused after about 2,100 tokens in this session, past the limit of 2,000 for one session set in Settings → Permissions.']);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Paused'))).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.provider.requests).toHaveLength(2);
+    expect(h.session.summary.status).toBe('idle');
+
+    h.session.retry();
+    await h.session.idle();
+    // Continuing is a new turn, but the session's total is still past the limit: it pauses again without asking the model anything.
+    expect(pauses(h)).toHaveLength(2);
+    expect(h.provider.requests).toHaveLength(2);
+  });
+
+  it("pauses past the day's token limit, counting what the day had already used", async () => {
+    const now = new Date('2026-09-30T12:00:00Z');
+    const h = harness({
+      now: () => now,
+      spendBudget: { dayTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 140, outputTokens: 10 } },
+        { text: 'never asked for' }
+      ]
+    });
+    // Another ask on this computer already used most of the day's allowance.
+    h.store.recordUsage({
+      day: usageDay(now),
+      providerId: 'fake',
+      modelId: 'fake-model',
+      usage: { inputTokens: 1800, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: null
+    });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(1);
+    expect(pauses(h)).toEqual(['Paused after about 2,050 tokens today, past the limit of 2,000 for one day set in Settings → Permissions.']);
+  });
+
+  it("pauses past the project's token limit, counting every session in the folder", async () => {
+    const h = harness({
+      spendBudget: { projectTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 1400, outputTokens: 100 } },
+        { text: 'never asked for' }
+      ]
+    });
+    // Another session of the same project has used most of what the project may.
+    const other = h.store.getSummary('session-1');
+    h.store.add({ ...other, id: 'session-2', title: 'Other work', usage: { ...other.usage, totals: { inputTokens: 1800, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } } });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(1);
+    expect(pauses(h)).toEqual(['Paused after about 3,400 tokens in this project, past the limit of 2,000 for one project set in Settings → Permissions.']);
+  });
+
+  it('pauses at what the session has cost, from what the provider reports it charged', async () => {
+    const h = harness({
+      spendBudget: { sessionCostUsd: 0.5 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], costUsd: 0.3 },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], costUsd: 0.3 },
+        { text: 'never asked for' }
+      ]
+    });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual([
+      'Paused at about $0.60 for this session, past the limit of $0.50 for one session set in Settings → Permissions. The amount comes from published prices and can differ from your bill.'
+    ]);
+  });
+
+  it('says once that a model with no published price is outside the cost limits, and lets it work', async () => {
+    const h = harness({
+      spendBudget: { sessionCostUsd: 0.5 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Done.' }
+      ]
+    });
+    await h.turn('work');
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+    const said = h.events.filter((e) => e.type === 'notice' && /cost limit for a session can't follow/.test(e.text));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ text: "The cost limit for a session can't follow Fake Model: it has no published price. Its requests are counted in tokens only." });
+  });
+
+  it('sets no limit unless Settings does', async () => {
+    const h = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 60_000, outputTokens: 50 }, costUsd: 9 }, { text: 'Done.' }] });
+    await h.turn('work');
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+  });
+});
+
 describe('sending a queued message now', () => {
   it('hands the message to the running turn after its next tool step, without stopping it', async () => {
     const h = harness({

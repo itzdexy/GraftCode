@@ -197,6 +197,34 @@
   },
   {
     "section": "permissions",
+    "label": "Limits for a session, a project or a day"
+  },
+  {
+    "section": "permissions",
+    "label": "Tokens in a session"
+  },
+  {
+    "section": "permissions",
+    "label": "Cost of a session"
+  },
+  {
+    "section": "permissions",
+    "label": "Tokens in a project"
+  },
+  {
+    "section": "permissions",
+    "label": "Cost of a project"
+  },
+  {
+    "section": "permissions",
+    "label": "Tokens in a day"
+  },
+  {
+    "section": "permissions",
+    "label": "Cost of a day"
+  },
+  {
+    "section": "permissions",
     "label": "Computer use"
   },
   {
