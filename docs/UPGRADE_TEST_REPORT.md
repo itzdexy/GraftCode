@@ -986,3 +986,81 @@ Not verified:
 - The installer was built from `1fc322b`. The commit after it holds this report, the
   status entry, and one comment in `browserPanel.ts` made to say what was measured
   (see the first point of what was found); nothing that runs changed.
+
+## 0.6.31 round (2026-10-15)
+
+Branch `feat/richer-graft`, local at the time of writing: nothing had been pushed and no
+release was made. Three commits: `8d32a6d` (limits for a session, a project and a day,
+and what a model is offered as its own class), `6782a33` (the replace request from the
+Search tab) and `af87761` (the version, what's new, the README, the roadmap and the guide
+to trying it). One system: Windows 11 (Node 26.7.0, npm 11.19.0, Electron 44.5.1).
+Nothing ran in the Linux container, on macOS, on GitHub's runners, or against a paid
+provider. No package was built and nothing was installed.
+
+The whole of it was run twice with `npm run verify` (typecheck, lint, the unit suite, the
+build, the desktop suite one after another, each into its own log under `out/verify`):
+once on the working tree before the release commits, once at `af87761`.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npm run verify` | working tree before `8d32a6d` | exit 0; typecheck 4 s, lint 24 s, unit 16 s, build 10 s, e2e 451 s |
+| `npm run verify` | `af87761` | exit 0; typecheck 5 s, lint 36 s, unit 17 s, build 12 s, e2e 458 s; unit 125 files passed, 3 skipped (1503 tests passed, 30 skipped); desktop 77 passed, 6 skipped |
+
+What the tests of this round show, and with what:
+
+- Unit, 32 new cases (1471 before, 1503 now). The limits that hold
+  (`turnBudget.test.ts`, `agent.test.ts`): each scope's tokens and cost, the totals a
+  turn starts from, a tool's own spending, the order the limits are checked in (the
+  session's, then the project's, then the day's), the unpriced-model notice said once and
+  naming only the limits that are set, and no limit unless Settings sets one. Through the
+  session: a pause that holds across turns (continuing is a new turn, and it pauses again
+  without asking the model anything), the project's total read from another session's
+  saved usage, the day's from its rows. The store (`db.test.ts`): a project's total sums
+  its sessions' saved totals and only those, counts a null price as nothing and an
+  unknown folder as zero; an install from before the six settings loads with all six at
+  "no limit". The offering (`offering.test.ts`, 9 cases): each gated tool offered exactly
+  when its condition holds, web access from the session, the setting and the engine, a
+  chat's tools and what it may make, media never in incognito, a big MCP setup waiting for
+  ToolSearch and a small one not, each session's MCP tools keyed by its project root. The
+  replace request (`searchModel.test.ts`, `textSearchStore.test.ts`): the message names
+  the search, the replacement and what was found; how the search looked travels with it; a
+  replacement with quotes stays as typed; a stopped search is never written as complete;
+  the replacement is kept per session and is not part of the query.
+- Desktop: the search test, extended. The replace request is composed in the app: the
+  first press opens the replacement box and focuses it, the second writes into the message
+  box — `Replace every match of "total" (case matched, in *.md) with "grand total". The
+  search found 1 line in 1 file.` — and nothing is sent.
+
+Desktop tests that were changed, and why. `search.spec.ts`: the block above. Its first
+draft looked for the composer by the home screen's words ("Describe a task or ask a
+question") while inside a session, where the box names itself "Ask anything · / commands ·
+@ files · ! shell"; the fault was in the test, and it now matches the session's box.
+
+The six skipped desktop tests are the three of the packaged app and the three that take
+README screenshots. The first three were not run this round: no package was built.
+
+Found on the way, and fixed: the install-from-an-older-version test failed on the six new
+settings until it knew them (an old profile loads with all six at "no limit"); the
+settings index was regenerated for the new rows; four call sites in `turnBudget.test.ts`
+needed the new `project` field of a spend start, which typecheck caught before any suite
+ran.
+
+What the pauses say, for whoever tests them by hand: `Paused after about 2,100 tokens in
+this session, past the limit of 2,000 for one session set in Settings → Permissions.` —
+with `this project` or `today` in the same place for the other two scopes, and
+`Paused at about $0.60 for this session, … The amount comes from published prices and can
+differ from your bill.` for cost. The model with no published price is named once:
+`The cost limit for a session can't follow Fake Model: it has no published price. Its
+requests are counted in tokens only.` (the sentence names whichever cost limits are set).
+
+Not verified:
+
+- Linux and macOS, at all. The project's total is a SQL join over the sessions table and
+  the settings go through the same schema on every system; neither was run elsewhere.
+- A real model against a limit. Every pause and notice here is scripted; whether a person
+  finds the numbers believable at a real provider's cache pricing was not watched.
+- The project's total against a long-lived database with many sessions, worktrees and
+  deleted sessions.
+- The six new rows walked in the Settings UI beyond the smallest token choice; the
+  desktop suite does not visit them.
+- The push to GitHub and the pull request: this report was written before them.
