@@ -5,26 +5,8 @@ import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
 import { CallRow, DiffCount } from './ToolGroup';
 import { SearchStep } from '../web/SearchResults';
-import { activityTitle, describeCall, diffTotals, durationText, searchOfCall, type ActivityItem, type ActivityStep } from './transcriptModel';
-
-/** What a running block is doing now: the running tool, else its newest step. */
-function currentLabel(item: ActivityItem): string {
-  for (let i = item.steps.length - 1; i >= 0; i--) {
-    const step = item.steps[i];
-    if (step?.kind === 'tool' && step.call.running) return step.call.running.summary || describeCall(step.call);
-  }
-  const last = item.steps.at(-1);
-  if (!last) return 'Working';
-  if (last.kind === 'text') return firstLine(last.text);
-  if (last.kind === 'tool') return describeCall(last.call);
-  if (last.kind === 'provider') return last.summary;
-  if (last.kind === 'search') return `Searched the web for “${last.search.query}”`;
-  return thoughtLabel(last.text, last.live);
-}
-
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0]?.replace(/^#+\s*/, '').replace(/\*\*/g, '') ?? '';
-}
+import { GeneratingImage } from './GeneratingImage';
+import { activityTitle, diffTotals, durationText, firstLine, generatingImage, liveLabel, searchOfCall, thoughtLabel, type ActivityItem, type ActivityStep } from './transcriptModel';
 
 /** One line of narration with its `code` spans set like Markdown's inline code. */
 function InlineCode({ text }: { text: string }) {
@@ -73,13 +55,6 @@ function NarrationStep({ text }: { text: string }) {
   );
 }
 
-/** A summarized thought usually opens with a short heading; that names the step. */
-function thoughtLabel(text: string, live: boolean): string {
-  const line = firstLine(text).replace(/[.:]$/, '');
-  if (line.length > 0 && line.length <= 90) return line;
-  return live ? 'Thinking' : 'Thought it through';
-}
-
 function ThoughtStep({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -109,6 +84,8 @@ function Step({ step, live }: { step: ActivityStep; live: boolean }) {
       return <ThoughtStep text={step.text} live={step.live} />;
     case 'tool': {
       const call = step.call;
+      const making = generatingImage(call);
+      if (making) return <GeneratingImage label={making.label} note={making.note} />;
       if (call.name !== 'WebSearch') return <CallRow call={call} />;
       const failed = call.result?.isError ? call.result.content.map((c) => (c.type === 'text' ? c.text : '')).join(' ') : null;
       return <SearchStep search={searchOfCall(call)} live={call.running !== null || (call.result === null && live)} error={failed} />;
@@ -157,7 +134,7 @@ export function ActivityGroup({ item }: { item: ActivityItem }) {
         className="group flex min-h-26 items-center gap-8 self-start rounded-sm text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
       >
         {item.live ? (
-          <span className="graft-shimmer min-w-0 truncate">{currentLabel(item)}</span>
+          <span className="graft-shimmer min-w-0 truncate">{liveLabel(item)}</span>
         ) : (
           <>
             <span className="min-w-0 truncate">{title}</span>

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { GraftError } from '@shared/errors';
-import type { EffortLevel, ModelRef, PermissionMode } from '@shared/schemas/common';
-import { EMPTY_USAGE } from '@shared/schemas/common';
+import type { EffortLevel, ModelRef, PermissionMode, Usage } from '@shared/schemas/common';
+import { addUsage, EMPTY_USAGE } from '@shared/schemas/common';
 import {
   type ContentBlock,
   type MessageMeta,
@@ -100,6 +100,8 @@ export interface SessionStore {
   recordUsage(entry: UsageEntry): void;
   /** What was used on `fromDay` and after, by day and model, oldest day first. */
   usageSince(fromDay: string): UsageDay[];
+  /** What the sessions of one project have used, summed from their saved totals. */
+  projectUsage(projectPath: string): { totals: Usage; costUsd: number };
   /** Writes down that a tool call is about to run. Called before it starts, so it is on record if the app stops while it runs. */
   journalStart(entry: JournalStart): void;
   /** Writes down what a started call returned. */
@@ -500,6 +502,20 @@ export class SessionsRepo implements SessionStore {
       costUsd: row.cost_usd,
       unpriced: row.unpriced
     }));
+  }
+
+  projectUsage(projectPath: string): { totals: Usage; costUsd: number } {
+    const rows = this.db
+      .prepare('SELECT s.usage AS usage FROM sessions s JOIN projects p ON p.id = s.project_id WHERE p.path = ?')
+      .all(projectPath) as Array<{ usage: string }>;
+    let totals = EMPTY_USAGE;
+    let costUsd = 0;
+    for (const row of rows) {
+      const usage = parseJson<SessionUsage>(row.usage, 'session usage');
+      totals = addUsage(totals, usage.totals);
+      costUsd += usage.costUsd ?? 0;
+    }
+    return { totals, costUsd };
   }
 
   /** Missions left going when the app last quit: they wait, paused, for the user to resume them. Returns how many. */

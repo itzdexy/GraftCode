@@ -97,7 +97,7 @@ export const ROLES: Record<string, RoleDefinition> = {
   browser: {
     label: 'Browser tester',
     summary: 'opens the app in the browser and checks that it works',
-    brief: `You test the running app in the browser. Open it, walk through the flows that matter like a user would, read the console after each step, and take screenshots when you can see images. Report what works, what is broken (with the exact steps and console errors) and what you could not reach. Change nothing in the code. ${REPORT}`,
+    brief: `You test the running app in the browser. Open it, walk through the flows that matter like a user would, read the console after each step, run action check at 390 and at 1280 wide for what is hard to read, unnamed or wider than its window, and take screenshots when you can see images. Report what works, what is broken (with the exact steps and console errors) and what you could not reach. Change nothing in the code. ${REPORT}`,
     reach: 'browse',
     modelRole: 'browser',
     needsVision: false,

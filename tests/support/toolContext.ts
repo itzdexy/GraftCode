@@ -42,6 +42,7 @@ export function makeToolContext(dir: string, overrides: Partial<ToolContext> = {
     search: () => Promise.reject(new Error('No web search engine in this test.')),
     computer: null,
     chatFiles: null,
+    builtinSkills: null,
     runCode: null,
     makeDocument: null,
     publicWebOnly: false,

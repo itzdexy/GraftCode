@@ -187,6 +187,46 @@ async function fetchIcon(host: string): Promise<string | null> {
   return null;
 }
 
+/** A page's picture is fetched up to this size; larger ones are passed over. */
+const MAX_PICTURE_BYTES = 6 * 1024 * 1024;
+const PICTURE_WIDTH = 360;
+const PICTURE_CACHE_LIMIT = 120;
+
+const pictures = new Map<string, string | null>();
+const pendingPictures = new Map<string, Promise<string | null>>();
+
+/**
+ * The picture a page that was read offers for links to it, as a small JPEG
+ * data URL for the sources of a reply. Fetched as site icons are: public
+ * https hosts only, no cookies, briefly, and decoded and re-encoded here, so
+ * the renderer never loads anything from the web itself. Null when it cannot
+ * be fetched or is not a bitmap this build decodes.
+ */
+export function pagePicture(url: string): Promise<string | null> {
+  if (!publicHttps(url)) return Promise.resolve(null);
+  if (pictures.has(url)) return Promise.resolve(pictures.get(url) ?? null);
+  const inFlight = pendingPictures.get(url);
+  if (inFlight) return inFlight;
+  const job = get(url, 'image/jpeg,image/png,image/*;q=0.8', MAX_PICTURE_BYTES)
+    .then((file) => {
+      if (!file) return null;
+      // rocky: nativeImage decodes PNG and JPEG only, so a WebP or AVIF picture shows no thumbnail.
+      const image = nativeImage.createFromBuffer(file.buffer);
+      if (image.isEmpty()) return null;
+      const small = image.getSize().width > PICTURE_WIDTH ? image.resize({ width: PICTURE_WIDTH, quality: 'good' }) : image;
+      return `data:image/jpeg;base64,${small.toJPEG(80).toString('base64')}`;
+    })
+    .catch(() => null)
+    .then((picture) => {
+      if (pictures.size >= PICTURE_CACHE_LIMIT) pictures.delete(pictures.keys().next().value as string);
+      pictures.set(url, picture);
+      pendingPictures.delete(url);
+      return picture;
+    });
+  pendingPictures.set(url, job);
+  return job;
+}
+
 export function favicon(host: string): Promise<string | null> {
   const key = host.toLowerCase();
   if (!isPublicHost(key)) return Promise.resolve(null);

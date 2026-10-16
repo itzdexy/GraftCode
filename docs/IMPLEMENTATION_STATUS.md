@@ -248,6 +248,125 @@ recovery/cleanup controls" this round has the MCP permissions and the journal wi
 answers after a crash; a command that outlives the app is still not found again.
 Commands, commits and skips: `UPGRADE_TEST_REPORT.md`, section 0.6.22.
 
+### Local 0.6.17 round
+
+On `feat/claude-like-session-view` (local, not pushed), which contains the 0.6.16 branch.
+Typecheck, lint, 1123 unit tests and 52 desktop tests pass on Windows; 1115 unit tests
+and the 52 desktop tests pass in a Linux container (`npm run verify:docker`, new in this
+round, runs all of it there). No package was built and nothing was
+installed. The schema is unchanged from 0.6.16 (8). Settings gain two fields with
+defaults (`appearance.transcriptView`, `behavior.checkEdits`), so older settings load
+as they are. Commands, commits and what failed on the way: `UPGRADE_TEST_REPORT.md`,
+section 0.6.17.
+
+### Local 0.6.23 build
+
+On `feat/richer-graft` (local, not pushed): the 0.6.17 branch, the diagrams round and
+`origin/main` at 0.6.22 in one tree, merged at `aeb7155`. Typecheck, lint, 1234 unit tests
+and 57 desktop tests pass on Windows; 1226 unit tests and the 57 desktop tests pass in a
+Linux container. The Windows package builds (`dist/Graft-Setup-0.6.23.exe`) and its three
+smoke tests pass, one of them a diagram drawn from the skill and the fonts in the package;
+it is unsigned and was not installed. The schema is 9, as in 0.6.22: this round adds no
+table. Tool results gain one optional field (`diagram`), so older conversations load as
+they are, and diagrams made before this build have no card. Commands, commits, skips and
+what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.23.
+
+### Local 0.6.25 build
+
+On `feat/richer-graft` (local, not pushed), six commits on the 0.6.24 build, ending at
+`b7dbb41`: code in the conversation. Typecheck, lint, 1286 unit tests and 60 desktop tests
+pass on Windows; 1278 unit tests and the 60 desktop tests pass in a Linux container. The
+Windows package builds (`dist/Graft-Setup-0.6.25.exe`) and its three smoke tests pass, one
+of them now with a formula and a file link; it is unsigned and was not installed. The
+schema is 9, as in 0.6.22: this round adds no table and changes no stored message. Settings
+gain one shortcut with a default (`findInTranscript`, Ctrl+F), so older settings load as
+they are. Three packages are new, all for equations: `katex` 0.16.47, `remark-math` 6.0.0
+and `rehype-katex` 7.0.1. Commands, commits, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.25.
+
+### Local 0.6.26 round
+
+On `feat/richer-graft` (local, not pushed), seven commits on the 0.6.25 build, ending at
+`7523d86`: review and navigation. Typecheck, lint, 1319 unit tests and 64 desktop tests pass
+on Windows; 1311 unit tests and the 64 desktop tests pass in a Linux container. No installer
+was built for it alone. The schema is 9: no new table, no stored message changed. Settings
+gain two shortcuts with defaults (`quickOpen`, Ctrl+P; `goToSymbol`, Ctrl+T), and the
+window's storage gains `graft.review.v1` for comments that wait. No new package. Commands,
+commits, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.26.
+
+### Local 0.6.27 build
+
+On `feat/richer-graft` (local, not pushed), ending at `3c63364`: windows and motion.
+Typecheck, lint, 1340 unit tests and 68 desktop tests pass on Windows; 1332 unit tests and
+the 68 desktop tests pass in a Linux container. The Windows package builds
+(`dist/Graft-Setup-0.6.27.exe`) and its three smoke tests pass; it is unsigned and was not
+installed. It carries 0.6.25 and 0.6.26 as well. The schema is 9: no new table, no stored
+message changed, no new setting. No new package. Commands, commits, what the suite found on
+the way, skips and what was not verified: `UPGRADE_TEST_REPORT.md`, section 0.6.27.
+
+### Local 0.6.28 build
+
+On `feat/richer-graft` (local, not pushed), ending at `3c56f6a`: a side question (`/btw`) and
+the lively motion style. Typecheck, lint and the build pass on both systems. The desktop
+suite: 70 pass in a Linux container at `3c56f6a`; on Windows 69 of 70 passed at `fbf2a59` and
+the one that failed, a test that had to learn of the new setting, passes at `3c56f6a`. The
+unit suite: 1359 pass in the container; on Windows 1367 pass in six of nine full runs, and
+three runs had one failure each in the language-server tests, a fault in removing a temporary
+folder that the 0.6.27 commit shows as well. The Windows package builds
+(`dist/Graft-Setup-0.6.28.exe`) and its three smoke tests pass; it was not installed. It
+carries 0.6.25 to 0.6.27 as well. The schema is 9: no new table and no stored message
+changed. One new setting, `appearance.motionStyle`, which an older profile gets as "lively".
+No new package. Commands, commits, what the suite found on the way, skips and what was not
+verified: `UPGRADE_TEST_REPORT.md`, section 0.6.28.
+
+### Local 0.6.29 build
+
+On `feat/richer-graft` (local, not pushed), ending at `16ea25c`: sites in TypeScript. A site
+can be a React and TypeScript project, started from files Graft writes and served from its
+`dist` folder; plain sites are as they were. Typecheck, lint and the build pass on both
+systems. In a Linux container the unit suite (1375) and the desktop suite (71) pass. On
+Windows the unit suite passes (1383) in one of two full runs, the other showing the
+language-server fault of 0.6.28's report; the desktop suite passed whole (71) in the last
+of three runs, the two before it each failing one test that passed alone, with the
+computer busy. The starter was installed and built for real on Windows. The Windows package
+builds (`dist/Graft-Setup-0.6.29.exe`) and its three smoke tests pass; it was not
+installed. It carries 0.6.25 to 0.6.28 as well. The schema is 9: no new table; a site's
+record gains a `stack` and an older one reads as plain. No new package in Graft. Commands,
+commits, what was found on the way, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.29.
+
+### Local 0.6.30 build
+
+On `feat/richer-graft` (local, not pushed), ending at `1fc322b`: text search across a
+session's folder (a Search tab, Ctrl+Shift+H), a check of the page in the Browser panel
+that the agent runs too (contrast, names, headings, crowded targets, a layout wider than
+its window), pictures and checks of a page at a width of its own, and a picked element's
+picture. Windows only, as asked: typecheck, lint and the build pass; the desktop suite
+passed whole (77) on the last commit and on the release commit; the unit suite passes
+(1471) in one of three full runs on the last commit, the other two each showing the
+language-server fault of 0.6.28's report. The second full desktop run showed a fault of
+0.6.27 (Escape in the Settings search closed Settings), which is fixed. The Windows
+package builds (`dist/Graft-Setup-0.6.30.exe`) and its three smoke tests pass; it was not
+installed. It carries 0.6.25 to 0.6.29 as well. The schema is 9: no new table, no new
+package, one new shortcut that an older profile gets by default. Nothing ran on Linux or
+macOS this round. Commands, commits, what was found on the way, skips and what was not
+verified: `UPGRADE_TEST_REPORT.md`, section 0.6.30.
+
+### Local 0.6.31 round
+
+On `feat/richer-graft`, ending at `af87761`: limits that hold across turns (a session, a
+project, a day) and a replace request composed from the Search tab. Typecheck, lint, the
+unit suite and the desktop suite pass on Windows with `npm run verify`, each step's log
+and exit code in `out/verify`: 1503 unit tests passed of 1533 (30 skipped, 125 files
+passed of 128), and 77 desktop tests passed of 83 (6 skipped). No package was built and
+nothing was installed; nothing ran on Linux or macOS. The schema is 9, as in 0.6.22: no
+new table and no stored message changed. Settings gain six fields with defaults
+(`behavior.sessionTokens`, `sessionCostUsd`, `projectTokens`, `projectCostUsd`,
+`dayTokens`, `dayCostUsd`), so an older profile loads as it is. The agent's offering is
+its own class (`agent/offering.ts`), the first seam the roadmap's Next list named.
+Commands, commits, what the suite found on the way, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.31.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof

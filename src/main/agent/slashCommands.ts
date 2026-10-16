@@ -17,8 +17,9 @@ export interface CustomCommand extends SlashCommandInfo {
 /**
  * Built-in commands. Some act inside the session (clear, compact, cost,
  * context, help, model, effort, permissions, plan), some send a prepared prompt (init,
- * review, security-review, explain, research, test, decompile, commit, pr), and the rest open UI
- * in the renderer (mcp, resume, rewind, config, export, system, new, mission).
+ * review, security-review, explain, research, diagram, test, decompile, commit, pr), and the rest open UI
+ * in the renderer (mcp, resume, rewind, config, export, system, new, mission). The renderer also asks a
+ * side question (btw) itself, beside the session: it must never wait in the queue or enter the conversation.
  */
 export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'clear', description: 'Start over with an empty context (the transcript stays visible)', argumentHint: null },
@@ -33,6 +34,7 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'security-review', description: 'Check the current changes for security problems', argumentHint: '[focus]' },
   { name: 'explain', description: 'Explain how part of the project works', argumentHint: '[file, folder or feature]' },
   { name: 'research', description: 'Research a question on the web and write a report with its sources', argumentHint: '[question]' },
+  { name: 'diagram', description: 'Draw a diagram of something, shown in the conversation', argumentHint: '[what to draw]' },
   { name: 'test', description: 'Run the tests and fix what fails, or add tests for something', argumentHint: '[what to test]' },
   { name: 'decompile', description: 'Turn compiled code back into source, one function at a time, checked against the original', argumentHint: '[function, file or binary]' },
   { name: 'commit', description: 'Commit the current changes with a well-written message', argumentHint: '[hint]' },
@@ -42,6 +44,7 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'new', description: 'Start a new session', argumentHint: null },
   { name: 'cost', description: 'Show token usage for this session', argumentHint: null },
   { name: 'context', description: 'Show what fills the context window', argumentHint: null },
+  { name: 'btw', description: 'Ask a side question: answered from this conversation and kept out of it', argumentHint: '[question]' },
   { name: 'rewind', description: 'Restore files and/or conversation to an earlier message', argumentHint: null },
   { name: 'export', description: 'Save this session as Markdown', argumentHint: null },
   { name: 'system', description: 'Show the system prompt and tools this session sends', argumentHint: null },
@@ -52,7 +55,7 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
 export const BUILTIN_NAMES = new Set(BUILTIN_COMMANDS.map((c) => c.name));
 
 /** Built-ins that only send a prepared prompt: a user or project command with the same name replaces them. */
-export const PROMPT_COMMANDS: ReadonlySet<string> = new Set(['init', 'review', 'security-review', 'explain', 'research', 'test', 'decompile', 'commit', 'pr']);
+export const PROMPT_COMMANDS: ReadonlySet<string> = new Set(['init', 'review', 'security-review', 'explain', 'research', 'diagram', 'test', 'decompile', 'commit', 'pr']);
 
 /** Built-ins that open app UI; the renderer handles them, so the session only explains when one arrives. */
 export const UI_COMMANDS: ReadonlySet<string> = new Set(['model', 'mcp', 'resume', 'rewind', 'config', 'export', 'system', 'new', 'mission']);
@@ -174,6 +177,19 @@ export function explainPrompt(target: string): string {
 /** What /plan sends once Plan mode is on. The mode is what keeps the agent from changing anything; this only says what to plan. */
 export function planPrompt(task: string): string {
   return `Plan this before changing anything: ${task}`;
+}
+
+/**
+ * The brief behind /diagram: draw it with the diagram-design skill Graft ships, from what is
+ * true of the subject, as one page. Graft shows that page in the conversation when the turn ends.
+ */
+export function diagramPrompt(what: string): string {
+  if (what.length === 0) return 'Ask me what I want drawn, then draw it as a diagram.';
+  return [
+    `Draw a diagram: ${what}`,
+    '',
+    'Use the diagram-design skill: read its SKILL.md first and follow it, including the reference it names for the kind of diagram you choose. Read the code or the material the diagram is about before you draw, so that every box and arrow is true. Save the diagram as one .html file and tell me where it is.'
+  ].join('\n');
 }
 
 /**

@@ -49,6 +49,8 @@ function ShortcutRow({ id, current }: { id: ShortcutId; current: Record<Shortcut
           }}
           onKeyDown={onKeyDown}
           onBlur={() => setRecording(false)}
+          // Read by the Settings window: Escape pressed while this is recording is the recorder's.
+          data-recording={recording}
           className={cn('w-[96px]', recording && 'border-focus text-fg-strong')}
         >
           {recording ? 'Press keys…' : 'Change'}

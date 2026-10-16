@@ -314,6 +314,38 @@ describe('a chat reading the web', () => {
   });
 });
 
+describe('skill folders', () => {
+  // Under the test's home folder, so a rule can name it as ~/skills: a rule written with an absolute
+  // path is matched as a pattern whole, and a temp folder's name has brackets in it.
+  const skills = (): string => path.join(root, '..', 'home-for-tests', 'skills');
+  const withRoots = (mode: PermissionMode, rule: Partial<PermissionEnv['rules']> = {}): PermissionEnv => ({ ...env(mode, rule), readRoots: [skills()] });
+  afterEach(() => {
+    removeDir(skills());
+    removeDir(path.join(root, '..', `elsewhere ${path.basename(root)}`));
+  });
+
+  it('are read without asking, and only read', () => {
+    const file = writeFile(skills(), 'diagram-design/SKILL.md', 'x');
+    expect(decide(read(file), withRoots('ask'))).toMatchObject({ behavior: 'allow', reason: "Reads a skill's own files.", outsideProject: false });
+    expect(decide(read(file), withRoots('plan')).behavior).toBe('allow');
+    expect(decide(read(file), env('ask')).behavior).toBe('ask');
+    expect(decide(edit(file), withRoots('auto')).behavior).toBe('ask');
+    expect(decide(shell(`python3 "${path.join(skills(), 'diagram-design', 'scripts', 'self_check.py')}" x.html`), withRoots('auto')).behavior).toBe('ask');
+    expect(decide(read(file), withRoots('ask', { deny: rules('Read(~/skills/**)') })).behavior).toBe('deny');
+  });
+
+  it('do not reach through a link that leads out of them', () => {
+    const outside = writeFile(path.join(root, '..', `elsewhere ${path.basename(root)}`), 'secret.txt', 's');
+    fs.mkdirSync(path.join(skills(), 'x'), { recursive: true });
+    try {
+      fs.symlinkSync(path.dirname(outside), path.join(skills(), 'x', 'out'), 'junction');
+    } catch {
+      return; // rocky: a system that refuses to make links has no such link to follow.
+    }
+    expect(decide(read(path.join(skills(), 'x', 'out', 'secret.txt')), withRoots('ask')).behavior).toBe('ask');
+  });
+});
+
 describe('answering a plan', () => {
   it('takes an edited plan with an approval, up to 50,000 characters', () => {
     const answer = { requestId: 'r', decision: 'allow-once' as const };

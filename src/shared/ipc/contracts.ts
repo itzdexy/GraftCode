@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
-import { SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
+import { ChangedProblemsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
 import { EditorDraftSchema, StoredEditorDraftSchema } from '../schemas/editorDrafts';
 import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema, SEARCH_ENGINE_IDS } from '../schemas/appSettings';
 import {
@@ -15,7 +15,8 @@ import {
 import { EffortLevelSchema, IdSchema, ModelRefSchema, PermissionModeSchema, ProviderKindSchema } from '../schemas/common';
 import { FileDiffSchema, GitStatusSchema, PullRequestResultSchema } from '../schemas/git';
 import { ChecksConfigSchema, HooksConfigSchema, SettingsScopeSchema } from '../schemas/config';
-import { SiteViewSchema } from '../schemas/sites';
+import { DiagramSourceSchema } from '../schemas/diagrams';
+import { SiteStackSchema, SiteViewSchema } from '../schemas/sites';
 import { ArtifactSchema, ArtifactTextSchema, ScheduleInputSchema, ScheduleRunSchema, ScheduleSchema } from '../schemas/workspace';
 import {
   AgentFileSchema,
@@ -36,6 +37,8 @@ import {
   BROWSER_COMMANDS,
   ConsoleEntrySchema,
   FilePreviewSchema,
+  PAGE_SIZES,
+  PageCheckSchema,
   PickedElementSchema,
   TerminalInfoSchema,
   TreeEntrySchema
@@ -47,6 +50,7 @@ import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/per
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
 import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
+import { TextSearchQuerySchema, TextSearchResultSchema } from '../schemas/textSearch';
 import { UsageDaySchema } from '../usage';
 
 /**
@@ -170,6 +174,8 @@ export const contracts = {
     z.object({ audio: z.string(), mime: z.string() })
   ),
   'web:favicon': channel(z.object({ host: z.string().min(3).max(253) }), z.string().nullable()),
+  /** The picture of a page a reply read, as a small data: URL; null when there is none to show. */
+  'web:pagePicture': channel(z.object({ url: z.string().min(12).max(2000) }), z.string().nullable()),
   'power:keepAwake': channel(z.object({ sessionId: IdSchema, on: z.boolean() }), z.object({ on: z.boolean() })),
   'power:keepAwakeList': channel(Void, z.array(z.string())),
   /** Colours are the palette's --g-bg and --g-icon; without them the theme's default colours apply. */
@@ -313,6 +319,12 @@ export const contracts = {
   'sessions:removeQueued': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
   /** "Send now": a queued message reaches the agent after its next tool step instead of after the turn. */
   'sessions:steer': channel(z.object({ id: IdSchema, queueId: IdSchema }), Ok),
+  /**
+   * A side question about a session's conversation. It is answered beside whatever the session is doing and is
+   * never stored or sent with a later request; the answer also arrives piece by piece as `aside` events.
+   */
+  'sessions:aside': channel(z.object({ id: IdSchema, askId: IdSchema, question: z.string().max(8_000) }), z.object({ text: z.string() })),
+  'sessions:cancelAside': channel(z.object({ id: IdSchema, askId: IdSchema }), Ok),
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),
   'sessions:feedback': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, value: z.union([z.literal(-1), z.literal(0), z.literal(1)]) }), Ok),
@@ -321,13 +333,23 @@ export const contracts = {
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
   'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
+  /** Which of these written paths name a file of the session's folder: its path from that folder, or null. */
+  'files:resolve': channel(
+    z.object({ sessionId: IdSchema, paths: z.array(z.string().min(1).max(300)).max(200), fresh: z.boolean().optional() }),
+    z.array(z.string().nullable())
+  ),
 
   // Side panels
+  /** Text in the files of the session's folder (the Search tab). A new search for a session ends the one before it. */
+  'files:searchText': channel(z.object({ sessionId: IdSchema, search: TextSearchQuerySchema }), TextSearchResultSchema),
   'files:list': channel(z.object({ sessionId: IdSchema, dir: z.string().max(4096) }), z.array(TreeEntrySchema)),
   'files:read': channel(z.object({ sessionId: IdSchema, path: PathSchema }), FilePreviewSchema),
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
   'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
-  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024) }), SemanticResultSchema),
+  // `content` is the editor's unsaved text for the file asked about; left out, the server reads the file from disk.
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional() }), SemanticResultSchema),
+  /** The language server's errors and warnings for the files the session has changed. It starts no server in a project that is not trusted. */
+  'problems:changed': channel(z.object({ sessionId: IdSchema }), ChangedProblemsSchema),
   'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),
   /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
@@ -335,6 +357,12 @@ export const contracts = {
   'files:open': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
   /** Puts a picture from the session's folder on the clipboard, as a picture. */
   'files:copyImage': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
+  /** An address that shows one diagram of the session (a page the tools marked as one, and nothing beside it) and lets it tell its frame how large it is. */
+  'diagrams:previewUrl': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema }), z.object({ url: z.string() })),
+  /** Puts a picture of the diagram alone, without its page, on the clipboard. */
+  'diagrams:copyImage': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema }), Void),
+  /** Saves the diagram alone as a PNG or an SVG where the user says; `path` is null when they closed the dialog. */
+  'diagrams:save': channel(z.object({ sessionId: IdSchema, source: DiagramSourceSchema, format: z.enum(['png', 'svg']) }), z.object({ path: z.string().nullable() })),
   'pty:create': channel(
     z.object({ sessionId: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }),
     TerminalInfoSchema
@@ -355,8 +383,14 @@ export const contracts = {
   'browser:console': channel(Void, z.array(ConsoleEntrySchema)),
   /** The page as an image, for a message. */
   'browser:capture': channel(Void, ImageBlockSchema),
-  /** Waits for the user to click an element in the page; null when they cancel. */
-  'browser:pick': channel(Void, PickedElementSchema.nullable()),
+  /** The page as a phone, a tablet and a desktop lay it out, for a message. */
+  'browser:captureSizes': channel(Void, z.array(z.object({ id: z.enum(PAGE_SIZES.map((size) => size.id)), label: z.string(), image: ImageBlockSchema }))),
+  /** What is wrong with the page as the panel lays it out now: contrast, names, headings, a layout wider than its window. */
+  'browser:check': channel(Void, PageCheckSchema),
+  /** Brings what the selector finds into view and marks it for a moment; false when it finds nothing. */
+  'browser:highlight': channel(z.object({ selector: z.string().min(1).max(500) }), z.boolean()),
+  /** Waits for the user to click an element in the page; null when they cancel. `image` is that part of the page, when it could be pictured. */
+  'browser:pick': channel(Void, PickedElementSchema.extend({ image: ImageBlockSchema.nullable() }).nullable()),
   /** Dev servers answering on this computer's usual ports. */
   'browser:servers': channel(Void, z.array(z.object({ url: z.string(), port: z.number().int() }))),
 
@@ -409,11 +443,16 @@ export const contracts = {
   'customize:hooks': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(ScopedHooksSchema)),
   'customize:saveHooks': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), hooks: HooksConfigSchema }), Ok),
   'sites:list': channel(Void, z.array(SiteViewSchema)),
-  /** Starts a site from a description: its folder, a starter page, and a session that builds it. */
+  /**
+   * Starts a site from a description: its folder, a starter page, and a session that builds it. `stack` says what it
+   * is built with: a React and TypeScript project (which gets its starter files), or plain files when it is left out.
+   */
   'sites:create': channel(
-    z.object({ prompt: z.string().trim().min(1).max(20_000), name: z.string().trim().max(80).optional() }),
+    z.object({ prompt: z.string().trim().min(1).max(20_000), name: z.string().trim().max(80).optional(), stack: SiteStackSchema.optional() }),
     z.object({ site: SiteViewSchema, sessionId: IdSchema })
   ),
+  /** What building a TypeScript site needs from this computer: whether npm (it comes with Node.js) is to be found. */
+  'sites:toolchain': channel(Void, z.object({ npm: z.boolean() })),
   /** The session working on a site, with a new one when the last was deleted. */
   'sites:session': channel(z.object({ slug: z.string().regex(/^[a-z0-9-]+$/) }), z.object({ sessionId: IdSchema })),
   /** Moves a site's folder to the trash (Recycle Bin), where it can be restored. */

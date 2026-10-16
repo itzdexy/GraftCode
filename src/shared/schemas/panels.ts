@@ -79,6 +79,55 @@ export const PickedElementSchema = z.object({
 });
 export type PickedElementView = z.infer<typeof PickedElementSchema>;
 
+/** What is wrong in a page, as the page check found it (main: browser/pageCheck.ts). */
+export const PAGE_RULES = ['overflow', 'contrast', 'name', 'image', 'heading', 'target', 'document'] as const;
+export const PageFindingSchema = z.object({
+  rule: z.enum(PAGE_RULES),
+  severity: z.enum(['error', 'warning']),
+  /** One sentence, with the numbers. */
+  message: z.string(),
+  /** A selector that finds it in the page; empty for the page as a whole. */
+  selector: z.string(),
+  /** What it shows or is called, so a person knows it again. */
+  label: z.string()
+});
+export type PageFinding = z.infer<typeof PageFindingSchema>;
+
+export const PageCheckSchema = z.object({
+  url: z.string(),
+  title: z.string(),
+  /** The width the page was laid out at when it was looked at. */
+  width: z.number(),
+  findings: z.array(PageFindingSchema),
+  /** Findings beyond the ones listed. */
+  more: z.number().int().nonnegative(),
+  /** What was looked at, so "nothing found" has a size. */
+  looked: z.object({ texts: z.number().int(), images: z.number().int(), controls: z.number().int(), headings: z.number().int() }),
+  /** Texts whose contrast could not be judged (a picture or a gradient is behind them). */
+  unjudged: z.number().int().nonnegative(),
+  /** A list was cut at its limit: the page has more than was looked at. */
+  partial: z.boolean()
+});
+export type PageCheck = z.infer<typeof PageCheckSchema>;
+
+/** The sizes a page is looked at beside the panel's own: a phone, a tablet and a desktop. */
+export const PAGE_SIZES = [
+  { id: 'phone', label: 'Phone', width: 390, height: 844 },
+  { id: 'tablet', label: 'Tablet', width: 768, height: 1024 },
+  { id: 'desktop', label: 'Desktop', width: 1280, height: 800 }
+] as const;
+/** The size a page is laid out at for a picture or a check; the panel's own size is something else. */
+export interface PageSize {
+  width: number;
+  height: number;
+}
+/** The size to look at a page that is asked for at a width: as tall as the device that is about as wide. */
+export function sizeForWidth(width: number): PageSize {
+  return { width, height: width <= 480 ? 844 : width <= 1024 ? 1024 : width <= 1440 ? 800 : 1080 };
+}
+/** The widths a page can be asked to lay itself out at. */
+export const PageWidthSchema = z.number().int().min(320).max(1920);
+
 export const BROWSER_COMMANDS = [
   'back',
   'forward',

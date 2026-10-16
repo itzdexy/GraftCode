@@ -11,6 +11,7 @@ import { invoke } from '../../lib/ipc';
 import { useShortcut, useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { panelBus, panelsOf, usePanels } from '../../stores/panels';
+import { commentsOf, useReview } from '../../stores/review';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
 import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
@@ -19,10 +20,14 @@ import { contextLimit, ContextUsage } from '../composer/ContextUsage';
 import { EffortPopover } from '../composer/EffortPopover';
 import { ModelQuickMenu } from '../composer/ModelQuickMenu';
 import { PermissionModeMenu } from '../composer/PermissionModeMenu';
+import { TranscriptViewMenu } from '../composer/TranscriptViewMenu';
 import { effortFor, resolveModel, sameModel } from '../models/modelChoice';
 import { PanelColumn } from '../panels/PanelColumn';
+import { ReviewBar } from '../review/ReviewBar';
+import { withComments } from '../review/reviewModel';
 import { ViewHeader } from '../shell/ViewHeader';
 import { AskUserCard } from './AskUserCard';
+import { AsideCards } from './AsideCards';
 import { MissionBar } from './MissionBar';
 import { PermissionCard } from './PermissionCard';
 import { PlanBar } from './PlanBar';
@@ -124,8 +129,13 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
   useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null);
 
-  const send = (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> =>
-    sendMessage(text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
+  // The comments that wait on lines of code go with an ordinary message, and are gone once it has. A command leaves them waiting.
+  const send = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
+    const message = withComments(text, commentsOf(useReview.getState(), summary.id));
+    const sent = await sendMessage(message.text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
+    if (sent && message.attached) useReview.getState().clear(summary.id);
+    return sent;
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -147,13 +157,16 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             onEdit={null}
             onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
             onRegenerate={null}
+            onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
           />
           <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
+            <AsideCards sessionId={summary.id} />
             <QueueBar sessionId={summary.id} queue={view.queue} />
             <MissionBar sessionId={summary.id} mission={view.mission} checking={view.checking !== null} />
             <PlanBar plan={plan} todos={view.todos} />
+            <ReviewBar sessionId={summary.id} onSend={() => void send('', [], []).catch((e: unknown) => reportError("Couldn't send the comments", e))} />
             <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
             {missing ? (
               <p role="alert" className="text-sm text-amber-fg">
@@ -174,7 +187,12 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
               mentionRoot={folder}
               shell={folder !== null}
               autoFocus
-              leftControls={<PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />}
+              leftControls={
+                <>
+                  <PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />
+                  <TranscriptViewMenu />
+                </>
+              }
               rightControls={
                 <>
                   <ModelQuickMenu
@@ -228,6 +246,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           onEdit={busy ? null : (message) => useRewind.getState().open({ sessionId: summary.id, messageId: message.id, chat: true })}
           onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
           onRegenerate={() => invoke('sessions:regenerate', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
+          onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
         />
         <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
           {missing ? (
@@ -237,6 +256,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           ) : null}
           {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
           {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
+          <AsideCards sessionId={summary.id} />
           <QueueBar sessionId={summary.id} queue={view.queue} />
           <Composer
             draftKey={summary.id}

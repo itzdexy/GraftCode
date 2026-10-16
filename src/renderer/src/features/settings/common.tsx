@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useId, useState, type ReactNode } from 'react';
 import { Button } from '../../components/Button';
 import { Dialog, DialogContent } from '../../components/Dialog';
 import { Switch } from '../../components/Field';
@@ -8,12 +8,31 @@ import { useApp } from '../../stores/app';
 import { reportError } from '../../stores/toasts';
 import type { AppSettingsPatch } from '@shared/schemas/appSettings';
 
+/** The label of the setting a search in Settings landed on (see settingsSearch.ts); null when none was searched for. */
+export const FoundSetting = createContext<string | null>(null);
+
+/** Whether this row or group is the one that was searched for, and a ref that brings it into view when it is. */
+function useFound(name: ReactNode): { found: boolean; show: (el: HTMLElement | null) => void } {
+  const found = useContext(FoundSetting) === name && typeof name === 'string';
+  const show = useCallback(
+    (el: HTMLElement | null) => {
+      if (el && found) el.scrollIntoView({ block: 'center' });
+    },
+    [found]
+  );
+  return { found, show };
+}
+
+/** How a row or group that was searched for stands out until the mark is taken away. */
+const FOUND = 'rounded-md bg-selected';
+
 /** A titled group of settings rows. */
 export function Group({ title, description, actions, children, className }: { title?: string; description?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+  const { found, show } = useFound(title);
   return (
     <section aria-label={title} className={cn('flex flex-col gap-8', className)}>
       {title || description || actions ? (
-        <header className="flex items-end gap-12">
+        <header ref={show} className={cn('flex items-end gap-12 transition-ui', found && FOUND)}>
           <div className="min-w-0 flex-1">
             {title ? <h3 className="text-md font-medium text-fg-strong">{title}</h3> : null}
             {description ? <p className="mt-2 text-sm text-fg-muted">{description}</p> : null}
@@ -28,8 +47,9 @@ export function Group({ title, description, actions, children, className }: { ti
 
 /** One setting: label and help on the left, its control on the right. */
 export function SettingRow({ label, description, control, children, labelFor }: { label: ReactNode; description?: ReactNode; control?: ReactNode; children?: ReactNode; labelFor?: string }) {
+  const { found, show } = useFound(label);
   return (
-    <div className="flex flex-col gap-8 px-14 py-10">
+    <div ref={show} className={cn('flex flex-col gap-8 px-14 py-10 transition-ui', found && FOUND)}>
       <div className="flex min-h-[28px] items-center gap-16">
         <div className="min-w-0 flex-1">
           {labelFor ? (
@@ -126,8 +146,9 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
 /** Labelled native select styled like the text fields. */
 export function SelectField({ label, value, onChange, options, className }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; className?: string }) {
   const id = useId();
+  const { found, show } = useFound(label);
   return (
-    <div className={cn('flex flex-col gap-6', className)}>
+    <div ref={show} className={cn('flex flex-col gap-6 transition-ui', found && FOUND, className)}>
       <label htmlFor={id} className="text-base font-medium text-fg-secondary">
         {label}
       </label>

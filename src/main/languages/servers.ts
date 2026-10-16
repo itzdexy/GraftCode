@@ -30,6 +30,20 @@ function validatedFile(root: string, name: string): string {
   return file;
 }
 
+/** Where `name` stands as a whole word in `text` at or after `from`; -1 when it does not. */
+function wordAt(text: string, name: string, from: number): number {
+  for (let at = text.indexOf(name, from); at !== -1; at = text.indexOf(name, at + 1)) {
+    if (!/[\w$]/.test(text[at - 1] ?? ' ') && !/[\w$]/.test(text[at + name.length] ?? ' ')) return at;
+  }
+  return -1;
+}
+
+/** A file's state on disk, to tell whether it changed since the server was given its text; null when it is not there. */
+function diskStamp(file: string): string | null {
+  try { const stat = fs.statSync(file); return `${String(stat.mtimeMs)}:${String(stat.size)}`; }
+  catch { return null; }
+}
+
 async function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   let abort: (() => void) | undefined;
@@ -61,7 +75,8 @@ class TypeScriptClient {
   private readonly connection: MessageConnection;
   private readonly ready: Promise<void>;
   private readonly exited: Promise<void>;
-  private readonly documents = new Map<string, number>();
+  /** The documents the server holds open, by URI: the version it was last given, and the file's state on disk then (null for an unsaved buffer). */
+  private readonly documents = new Map<string, { version: number; file: string; stamp: string | null }>();
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
   private disposing: Promise<void> | undefined;
@@ -141,18 +156,62 @@ class TypeScriptClient {
     } catch { return null; }
   }
 
+  /**
+   * Where a declaration's name is. The server says where the declaration starts ("export" in `export function
+   * twice`); the next question, who uses it, is asked on the name. The start itself when the name is not found.
+   */
+  private nameStart(texts: Map<string, string[]>, declared: z.infer<typeof Location>, name: string): z.infer<typeof Position> {
+    const { start, end } = declared.range;
+    try {
+      let lines = texts.get(declared.uri);
+      if (!lines) { lines = fs.readFileSync(validatedFile(this.root, fileURLToPath(declared.uri)), 'utf8').split(/\r\n|\n|\r/); texts.set(declared.uri, lines); }
+      // A name stands near the start of its declaration; a long body is not searched for it.
+      for (let line = start.line; line <= Math.min(end.line, start.line + 20); line++) {
+        const at = wordAt(lines[line] ?? '', name, line === start.line ? start.character : 0);
+        if (at !== -1) return { line, character: at };
+      }
+    } catch { /* not a file this client reads: the declaration's start has to do */ }
+    return start;
+  }
+
+  /**
+   * The server answers from the documents it holds, not from the disk. One whose file changed since it was given
+   * (a command, the user's editor, a rewind) is given again, and one whose file is gone or no longer fit to hold
+   * is closed, so no file is checked against an old copy of what it imports.
+   */
+  private async refresh(queried: string): Promise<void> {
+    for (const [uri, held] of this.documents) {
+      if (uri === queried) continue;
+      const stamp = diskStamp(held.file);
+      if (stamp === held.stamp) continue;
+      let text: string | null = null;
+      try { if (validatedFile(this.root, held.file) === held.file) text = fs.readFileSync(held.file, 'utf8'); }
+      catch { /* closed below: the server then reads whatever is on disk itself */ }
+      if (text === null) {
+        this.documents.delete(uri);
+        await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri } });
+      } else {
+        this.documents.set(uri, { version: held.version + 1, file: held.file, stamp });
+        await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version: held.version + 1 }, contentChanges: [{ text }] });
+      }
+    }
+  }
+
   private async query(input: SemanticQuery, signal: AbortSignal, buffer?: string): Promise<SemanticResult> {
     const file = validatedFile(this.root, input.file);
+    // Taken before the text is read: a write in between shows as a change at the next query instead of being missed.
+    const stamp = buffer === undefined ? diskStamp(file) : null;
     const text = buffer ?? fs.readFileSync(file, 'utf8');
     const uri = pathToFileURL(file).href;
     if (!this.documents.has(uri) && this.documents.size >= 64) {
       const oldest = this.documents.keys().next().value;
       if (oldest) { await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri: oldest } }); this.documents.delete(oldest); }
     }
-    const version = (this.documents.get(uri) ?? 0) + 1;
-    this.documents.set(uri, version);
+    const version = (this.documents.get(uri)?.version ?? 0) + 1;
+    this.documents.set(uri, { version, file, stamp });
     if (version === 1) await this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri, languageId: /\.tsx$/i.test(file) ? 'typescriptreact' : /\.[cm]?ts$/i.test(file) ? 'typescript' : /\.jsx$/i.test(file) ? 'javascriptreact' : 'javascript', version, text } });
     else await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+    await this.refresh(uri);
     const base: SemanticResult = { engine: 'typescript-language-server', action: input.action, file: path.relative(this.root, file).replaceAll(path.sep, '/'), truncated: false };
     if (input.action === 'diagnostics') {
       // This pinned server does not version publishDiagnostics. Its documented LSP
@@ -192,7 +251,27 @@ class TypeScriptClient {
       if (Array.isArray(raw)) walk(raw);
       return { ...base, symbols };
     }
-    if (!input.line || !input.column) throw new GraftError('language_position', 'Give a 1-based line and column for definition, references or hover.');
+    if (input.action === 'symbol') {
+      if (!input.name) throw new GraftError('language_name', 'Give the name to find.');
+      // The server searches the project of the document it was given last, which is the one just opened.
+      const raw = await this.request('workspace/symbol', { query: input.name }, signal);
+      const found: NonNullable<SemanticResult['symbols']> = [];
+      const texts = new Map<string, string[]>();
+      for (const item of Array.isArray(raw) ? raw : []) {
+        const parsed = z.object({ name: z.string(), kind: z.number(), containerName: z.string().optional(), location: Location }).safeParse(item);
+        if (!parsed.success) continue;
+        const symbol = parsed.data;
+        const loc = this.location(symbol.location.uri, this.nameStart(texts, symbol.location, symbol.name));
+        // The project's own declarations: what its packages declare is not where the work is.
+        if (!loc || /(?:^|\/)node_modules\//.test(loc.file)) continue;
+        found.push({ ...loc, name: symbol.name.slice(0, 300), kind: symbol.kind, ...(symbol.containerName ? { container: symbol.containerName.slice(0, 300) } : {}) });
+      }
+      // The name as asked comes before the names that only begin with it or contain it.
+      const exact = (symbol: { name: string }): number => (symbol.name === input.name ? 0 : 1);
+      found.sort((a, b) => exact(a) - exact(b));
+      return { ...base, symbols: found.slice(0, 200), truncated: found.length > 200 };
+    }
+    if (!input.line || !input.column) throw new GraftError('language_position', 'Give a 1-based line and column for definition, references, implementation, typeDefinition or hover.');
     const lines = text.split(/\r\n|\n|\r/);
     if (input.line > lines.length || input.column > (lines[input.line - 1]?.length ?? 0) + 1) throw new GraftError('language_position', 'The line or column is outside the current file. Read the current file and retry.');
     const raw = await this.request(`textDocument/${input.action}`, { textDocument: { uri }, position: { line: input.line - 1, character: input.column - 1 }, ...(input.action === 'references' ? { context: { includeDeclaration: true } } : {}) }, signal);
