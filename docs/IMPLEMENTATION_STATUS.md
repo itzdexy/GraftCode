@@ -352,6 +352,21 @@ package, one new shortcut that an older profile gets by default. Nothing ran on 
 macOS this round. Commands, commits, what was found on the way, skips and what was not
 verified: `UPGRADE_TEST_REPORT.md`, section 0.6.30.
 
+### Local 0.6.31 round
+
+On `feat/richer-graft`, ending at `af87761`: limits that hold across turns (a session, a
+project, a day) and a replace request composed from the Search tab. Typecheck, lint, the
+unit suite and the desktop suite pass on Windows with `npm run verify`, each step's log
+and exit code in `out/verify`: 1503 unit tests passed of 1533 (30 skipped, 125 files
+passed of 128), and 77 desktop tests passed of 83 (6 skipped). No package was built and
+nothing was installed; nothing ran on Linux or macOS. The schema is 9, as in 0.6.22: no
+new table and no stored message changed. Settings gain six fields with defaults
+(`behavior.sessionTokens`, `sessionCostUsd`, `projectTokens`, `projectCostUsd`,
+`dayTokens`, `dayCostUsd`), so an older profile loads as it is. The agent's offering is
+its own class (`agent/offering.ts`), the first seam the roadmap's Next list named.
+Commands, commits, what the suite found on the way, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.31.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
