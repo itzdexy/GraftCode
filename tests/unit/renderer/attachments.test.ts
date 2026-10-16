@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeText, MAX_TEXT_FILE_BYTES, readAttachments } from '../../../src/renderer/src/features/composer/attachments';
+import { looksLikeText, MAX_TEXT_FILE_BYTES, picturesTaken, readAttachments } from '../../../src/renderer/src/features/composer/attachments';
 
 const ROOM = { images: 20, files: 10, allowImages: true };
 const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -39,5 +39,22 @@ describe('composer attachments', () => {
     expect(looksLikeText('')).toBe(true);
     expect(looksLikeText('has a \u0000 byte')).toBe(false);
     expect(looksLikeText('\uFFFD\uFFFD\uFFFD\uFFFD')).toBe(false);
+  });
+});
+
+describe('pictures sent to the message box from elsewhere in the window', () => {
+  const shot = { type: 'image' as const, mediaType: 'image/png' as const, data: 'c2hvdA==' };
+  const beside = { type: 'image' as const, mediaType: 'image/png' as const, data: 'YmVzaWRl' };
+
+  it('are all taken by a model that reads pictures', () => {
+    expect(picturesTaken({ images: [shot], extras: [beside] }, true)).toEqual({ images: [shot, beside], refused: false });
+  });
+
+  it('are refused aloud when they were asked for and the model cannot read them', () => {
+    expect(picturesTaken({ images: [shot], extras: [] }, false)).toEqual({ images: [], refused: true });
+  });
+
+  it('are left out without a word when they only came along with something else', () => {
+    expect(picturesTaken({ images: [], extras: [beside] }, false)).toEqual({ images: [], refused: false });
   });
 });

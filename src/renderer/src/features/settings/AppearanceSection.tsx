@@ -1,9 +1,10 @@
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import { DEFAULT_APP_SETTINGS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
+import { DEFAULT_APP_SETTINGS, TRANSCRIPT_VIEWS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
 import { Button } from '../../components/Button';
 import { Slider } from '../../components/Slider';
 import { cn } from '../../lib/cn';
-import { useSystemReducedMotion } from '../../lib/motion';
+import { TRANSCRIPT_VIEW_INFO } from '../../lib/format';
+import { motionReduced, useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { Group, saveSettings, SettingRow } from './common';
 import { ACCENTS, PALETTES } from './sections';
@@ -18,6 +19,11 @@ const MOTIONS = [
   { value: 'system', label: 'System' },
   { value: 'on', label: 'On' },
   { value: 'reduced', label: 'Reduced' }
+] as const;
+
+const MOTION_STYLE_CHOICES = [
+  { value: 'lively', label: 'Lively' },
+  { value: 'calm', label: 'Calm' }
 ] as const;
 
 const THEMES = [
@@ -194,6 +200,29 @@ export function AppearanceSection() {
             </div>
           }
         />
+        <SettingRow
+          label="Transcript view"
+          description={`${TRANSCRIPT_VIEW_INFO[appearance.transcriptView].description}. Code sessions only; the eye under the message box changes it too.`}
+          control={
+            <div role="radiogroup" aria-label="Transcript view" className="flex rounded-md border border-border p-2">
+              {TRANSCRIPT_VIEWS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={appearance.transcriptView === value}
+                  onClick={() => saveSettings({ appearance: { transcriptView: value } })}
+                  className={cn(
+                    'h-24 rounded-sm px-10 text-sm transition-ui',
+                    appearance.transcriptView === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary'
+                  )}
+                >
+                  {TRANSCRIPT_VIEW_INFO[value].label}
+                </button>
+              ))}
+            </div>
+          }
+        />
         <SizeRow
           label="Interface text size"
           description="Menus, the sidebar and messages."
@@ -229,6 +258,32 @@ export function AppearanceSection() {
                   aria-checked={appearance.motion === value}
                   onClick={() => saveSettings({ appearance: { motion: value } })}
                   className={cn('h-24 rounded-sm px-10 text-sm transition-ui', appearance.motion === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+        <SettingRow
+          label="Motion style"
+          description={
+            motionReduced(appearance.motion, systemStill)
+              ? 'Nothing moves while motion is reduced.'
+              : appearance.motionStyle === 'lively'
+                ? 'Pages rise into place, windows spring open and a sent message travels up from the message box.'
+                : 'Short fades and a few pixels of travel.'
+          }
+          control={
+            <div role="radiogroup" aria-label="Motion style" className="flex rounded-md border border-border p-2">
+              {MOTION_STYLE_CHOICES.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={appearance.motionStyle === value}
+                  onClick={() => saveSettings({ appearance: { motionStyle: value } })}
+                  className={cn('h-24 rounded-sm px-10 text-sm transition-ui', appearance.motionStyle === value ? 'bg-hover text-fg-strong' : 'text-fg-muted hover:text-fg-secondary')}
                 >
                   {label}
                 </button>

@@ -19,14 +19,24 @@ test.afterEach(async () => {
   await provider.close();
 });
 
+/** The Settings window, found whether or not another dialog lies over it (one that does hides it from a search by role). */
+const SETTINGS_WINDOW = '[role="dialog"][aria-label="Settings"]';
+
+/** Shows a page of Settings. Settings is a window over the page: it is opened from the account menu unless it is open already. */
 async function openSettings(w: Page, section: string): Promise<void> {
   const nav = w.getByRole('navigation', { name: 'Settings' });
-  if (!(await nav.isVisible())) {
+  if ((await w.locator(SETTINGS_WINDOW).count()) === 0) {
     await w.getByRole('button', { name: /^Account menu for/ }).click();
     await w.getByRole('menuitem', { name: 'Settings' }).click();
   }
   await nav.getByRole('button', { name: section, exact: true }).click();
   await expect(w.getByRole('heading', { level: 2, name: section })).toBeVisible();
+}
+
+/** Closes the Settings window, so the page underneath takes clicks again. */
+async function closeSettings(w: Page): Promise<void> {
+  await w.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(0);
 }
 
 test('web search is free by default; picking an engine updates what Graft searches with', async () => {
@@ -52,6 +62,66 @@ test('web search is free by default; picking an engine updates what Graft search
 
   await engines.getByRole('radio', { name: /^Off/ }).check();
   await expect(w.getByText('Search is off.')).toBeVisible();
+});
+
+test('settings are found by searching: a setting opens its page and shows itself, a page opens by its name', async () => {
+  provider = await MockProvider.start();
+  graft = await launchGraft();
+  const w = graft.window;
+  await completeOnboarding(graft, provider);
+  await openSettings(w, 'Profile');
+  const nav = w.getByRole('navigation', { name: 'Settings' });
+  // The pages stand under headings.
+  await expect(nav.getByRole('group', { name: 'Agent' }).getByRole('button', { name: 'Permissions', exact: true })).toBeVisible();
+
+  const search = nav.getByRole('searchbox', { name: 'Search settings' });
+  await search.fill('motion');
+  const hits = nav.getByRole('list', { name: 'Settings found' });
+  // The setting comes with the page it is on, before the page that only mentions it.
+  await expect(hits.getByRole('button').first()).toHaveText(/Motion\s*Appearance/);
+  // Two settings carry the word: whether anything moves, and how much. Both are found, the one that is the word first.
+  await expect(hits.getByRole('button', { name: /^Motion style/ })).toBeVisible();
+  await hits.getByRole('button', { name: /^Motion\s*Appearance/ }).click();
+  await expect(w.getByRole('heading', { level: 2, name: 'Appearance' })).toBeVisible();
+  await expect(w.getByText('Motion', { exact: true })).toBeInViewport();
+  // The search is over once something is taken: the list of pages is back.
+  await expect(search).toHaveValue('');
+  await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'page');
+  await shot(w, 'settings-search-found');
+
+  // Enter takes the first thing found.
+  await search.fill('check edits');
+  await search.press('Enter');
+  await expect(w.getByRole('heading', { level: 2, name: 'Models' })).toBeVisible();
+  await expect(w.getByRole('switch', { name: 'Check edits for errors' })).toBeInViewport();
+
+  // A page by its name; the arrow keys reach what was found.
+  await search.fill('shortcuts');
+  await search.press('ArrowDown');
+  await expect(hits.getByRole('button').first()).toBeFocused();
+  await w.keyboard.press('Enter');
+  await expect(w.getByRole('heading', { level: 2, name: 'Shortcuts' })).toBeVisible();
+
+  await search.fill('zebra crossing');
+  await expect(nav.getByRole('status')).toHaveText('No setting matches.');
+  await shot(w, 'settings-search-none');
+  // Escape empties the box and leaves Settings open. A window that is on its way out still shows its box
+  // for a moment, so the window is asked whether it is open, not only looked at.
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveAttribute('data-state', 'open');
+  await expect(nav.getByRole('button', { name: 'Shortcuts', exact: true })).toBeVisible();
+  // So does Escape on something that was found: the keyboard goes back to the box, emptied.
+  await search.fill('shortcuts');
+  await search.press('ArrowDown');
+  await expect(hits.getByRole('button').first()).toBeFocused();
+  await w.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(search).toBeFocused();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveAttribute('data-state', 'open');
+  // With the box empty, Escape is the window's: it closes.
+  await search.press('Escape');
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(0);
 });
 
 test('settings: appearance, rebinding a shortcut, a second provider and permission rules', async () => {
@@ -91,8 +161,15 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await shot(w, 'settings-shortcuts');
   await w.locator('body').click({ position: { x: 600, y: 700 } });
   await w.keyboard.press('Control+Shift+O');
-  await expect(w.getByRole('dialog', { name: /Search/ })).toBeVisible();
-  await w.keyboard.press('Escape');
+  const searchDialog = w.getByRole('dialog', { name: /Search/ });
+  await expect(searchDialog).toBeVisible();
+  // Escape closes the search and leaves Settings, which it lies over, open. Pressed the instant the search appears the
+  // key can go unheard (the search is not yet the layer that listens), so it is pressed until the search is gone.
+  await expect(async () => {
+    await w.keyboard.press('Escape');
+    await expect(searchDialog).toBeHidden({ timeout: 1000 });
+  }).toPass();
+  await expect(w.locator(SETTINGS_WINDOW)).toHaveCount(1);
 
   // A second provider, verified before it is saved, then tested from its menu.
   await openSettings(w, 'Providers');
@@ -242,6 +319,7 @@ test('Settings → Usage counts a request on the day it was made, and a chat lis
   await expect(w.getByText('Nothing used in the last 30 days')).toBeVisible();
 
   // One reply in a chat: one request, with the tokens the provider reported.
+  await closeSettings(w);
   await w.getByRole('radio', { name: 'Chat' }).click();
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   provider.script({ text: 'Counted.' });
@@ -325,6 +403,7 @@ test('a turn pauses at the limit set in Settings → Permissions, and goes on wh
   await expect(tokens).toHaveValue('250000');
   await shot(w, 'settings-turn-limits');
 
+  await closeSettings(w);
   await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New', exact: true }).click();
   provider.script(
     { toolCalls: [{ name: 'Glob', input: { pattern: '*.txt' } }], usage: { prompt_tokens: 300_000, completion_tokens: 30 } },

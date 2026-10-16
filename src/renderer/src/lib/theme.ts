@@ -1,7 +1,7 @@
 import type { ResolvedTheme, ThemePreference } from '@shared/ipc/contracts';
 import type { AppSettings } from '@shared/schemas/appSettings';
 import { invoke } from './ipc';
-import { motionAttribute, rememberMotion } from './motion';
+import { motionAttribute, rememberMotion, withViewTransition } from './motion';
 
 const media = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -32,8 +32,15 @@ function syncTitlebar(onError: (error: unknown) => void): void {
  */
 export function applyTheme(preference: ThemePreference, onError: (error: unknown) => void): () => void {
   const apply = (): void => {
-    document.documentElement.dataset.theme = resolveTheme(preference);
-    syncTitlebar(onError);
+    const root = document.documentElement;
+    const next = resolveTheme(preference);
+    const paint = (): void => {
+      root.dataset.theme = next;
+      syncTitlebar(onError);
+    };
+    // From one theme to another the window cross-fades. The first one, at start-up, is just there.
+    if (root.dataset.theme !== undefined && root.dataset.theme !== next) withViewTransition(paint);
+    else paint();
   };
   apply();
   if (preference !== 'system') return () => undefined;
@@ -48,14 +55,20 @@ const TRANSCRIPT_WIDTHS: Record<AppSettings['appearance']['transcriptWidth'], st
 export function applyAppearance(appearance: AppSettings['appearance'], onError: (error: unknown) => void): void {
   const root = document.documentElement;
   const repaint = root.dataset.palette !== appearance.palette;
-  root.dataset.palette = appearance.palette;
-  root.dataset.accent = appearance.accent;
-  if (repaint) syncTitlebar(onError);
+  const paint = (): void => {
+    root.dataset.palette = appearance.palette;
+    root.dataset.accent = appearance.accent;
+    if (repaint) syncTitlebar(onError);
+  };
+  // A new palette or accent cross-fades in, as a new theme does; the first one at start-up is just there.
+  if (root.dataset.palette !== undefined && (repaint || root.dataset.accent !== appearance.accent)) withViewTransition(paint);
+  else paint();
   root.style.setProperty('--g-content-width', TRANSCRIPT_WIDTHS[appearance.transcriptWidth]);
   const motion = motionAttribute(appearance.motion);
   if (motion === null) delete root.dataset.motion;
   else root.dataset.motion = motion;
   rememberMotion(motion);
+  root.dataset.motionStyle = appearance.motionStyle;
   root.style.setProperty('--g-font-scale', String(appearance.uiFontSize / BASE_UI_FONT_SIZE));
   root.style.setProperty('--g-code-font-size', `${appearance.codeFontSize}px`);
 }

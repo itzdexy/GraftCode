@@ -1,11 +1,13 @@
 import type { ComponentType } from 'react';
 import {
   Archive,
+  AtSign,
   Calendar,
   Code,
   Copy,
   EyeOff,
   FileDown,
+  FileSearch,
   FileText,
   FolderOpen,
   Globe,
@@ -27,6 +29,7 @@ import {
   Sun,
   Target,
   Terminal,
+  TextSearch,
   Workflow,
   Files,
   FlaskConical,
@@ -43,6 +46,7 @@ import { setProjectSandbox } from '../../lib/sandbox';
 import { useApp } from '../../stores/app';
 import { useNav, type Route } from '../../stores/nav';
 import { usePanels } from '../../stores/panels';
+import { openSearch } from '../../stores/textSearch';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { useRewind } from '../session/RewindDialog';
@@ -131,6 +135,9 @@ function sessionCommands(session: SessionSummary, ctx: PaletteContext): PaletteC
       { id: 'panel.terminal', title: 'Toggle terminal', group, icon: Terminal, shortcut: 'toggleTerminal', run: () => panels.toggle(session.id, 'terminal') },
       { id: 'panel.changes', title: 'Toggle changes', group, keywords: 'diff git', icon: GitCompare, shortcut: 'toggleChanges', run: () => panels.toggle(session.id, 'changes') },
       { id: 'panel.files', title: 'Toggle files', group, keywords: 'explorer tree', icon: Files, shortcut: 'toggleFiles', run: () => panels.toggleFiles(session.id) },
+      { id: 'go.file', title: 'Open a file by name…', group, keywords: 'quick open find go to file', icon: FileSearch, shortcut: 'quickOpen', run: () => useUi.getState().setPaletteOpen(true, '', 'files') },
+      { id: 'go.symbol', title: 'Go to a symbol by name…', group, keywords: 'function class type definition find', icon: AtSign, shortcut: 'goToSymbol', run: () => useUi.getState().setPaletteOpen(true, '', 'symbols') },
+      { id: 'go.search', title: 'Search in files…', group, keywords: 'find text grep everywhere project', icon: TextSearch, shortcut: 'searchFiles', run: () => openSearch(session.id) },
       { id: 'panel.browser', title: 'Toggle browser', group, keywords: 'preview localhost web', icon: Globe, run: () => panels.toggle(session.id, 'browser') },
       ...sandboxCommand(session, group),
       { id: 'panel.tasks', title: 'Background tasks', group, keywords: 'shells processes', icon: ListChecks, run: () => panels.toggle(session.id, 'tasks') },

@@ -68,6 +68,8 @@ export interface SessionManagerDeps {
   /** Sites from the Sites tab, for the prompt of a session that builds one. */
   site?: SessionDeps['site'];
   revealBrowser?: SessionDeps['revealBrowser'];
+  /** The local language server's errors for an edited file; absent where there is no server. */
+  problems?: SessionDeps['problems'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -163,6 +165,7 @@ export class SessionManager {
       ...(d.browser ? { browser: d.browser } : {}),
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
+      ...(d.problems ? { problems: d.problems } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -180,6 +183,7 @@ export class SessionManager {
       hooks: (root, trusted) => new HookRunner(() => d.settingsFiles.hooks(root, trusted), d.shell, () => root ?? process.cwd()),
       rgPath: d.rgPath,
       graftHome: d.paths.graftHome,
+      builtinSkills: d.paths.builtinSkills,
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),
@@ -204,7 +208,9 @@ export class SessionManager {
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
           turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes, toolCalls: s.behavior.turnToolCalls, retries: s.behavior.turnRetries },
-          agents: s.agents
+          spendBudget: { sessionTokens: s.behavior.sessionTokens, sessionCostUsd: s.behavior.sessionCostUsd, projectTokens: s.behavior.projectTokens, projectCostUsd: s.behavior.projectCostUsd, dayTokens: s.behavior.dayTokens, dayCostUsd: s.behavior.dayCostUsd },
+          agents: s.agents,
+          checkEdits: s.behavior.checkEdits
         };
       },
       gitInfo: async (cwd) => {
@@ -609,6 +615,14 @@ export class SessionManager {
 
   steer(id: string, queueId: string): void {
     this.get(id).steer(queueId);
+  }
+
+  aside(id: string, askId: string, question: string): Promise<string> {
+    return this.get(id).aside(askId, question);
+  }
+
+  cancelAside(id: string, askId: string): void {
+    this.live.get(id)?.cancelAside(askId);
   }
 
   feedback(sessionId: string, messageId: string, value: -1 | 0 | 1): void {

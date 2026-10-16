@@ -4,6 +4,7 @@ import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } f
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import { MISSION_LIMITS, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
+import type { FileProblems } from '../languages/problems';
 import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
@@ -11,6 +12,7 @@ import { CODE_ONLY_COMMANDS, commandsFor } from '@shared/commands';
 import { currentPlan } from '@shared/plans';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { ContextReport, QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
+import type { SiteStack } from '@shared/schemas/sites';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
 import type { SearchEngineId, SearchResult } from '../tools/web/search';
@@ -23,12 +25,11 @@ import { FileStateTracker } from '../tools/fileState';
 import type { ToolRegistry } from '../tools/registry';
 import type { ShellManager } from '../tools/shell/shellManager';
 import type { ToolContext } from '../tools/types';
-import { CHAT_ONLY_TOOLS } from '../tools/builtin';
-import { RUN_AGENTS_IN_CHAT } from '../tools/agentTools';
 import type { ChatFile } from '../chat/chatFiles';
 import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
+import { answerAside } from './aside';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
 import { runChecks, suggestChecks } from './checks';
@@ -45,9 +46,10 @@ import { loadAgents } from './agents';
 import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
+import { ModelOffering } from './offering';
 import { reconcileInterrupted, type Cut } from './journal';
 import { SessionHost, type TurnScope } from './sessionHost';
-import type { TurnLimits } from './turnBudget';
+import type { TurnLimits, SpendLimits } from './turnBudget';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import {
@@ -62,6 +64,7 @@ import {
   planPrompt,
   prPrompt,
   PROMPT_COMMANDS,
+  diagramPrompt,
   researchPrompt,
   reviewPrompt,
   securityReviewPrompt,
@@ -70,8 +73,8 @@ import {
 } from './slashCommands';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
-import { estimateMessagesTokens, estimateTextTokens } from './tokens';
-import { searchTools, type SearchableTool } from '../tools/toolSearch';
+import { estimateMessagesTokens } from './tokens';
+import { searchTools } from '../tools/toolSearch';
 
 export interface ModelResolver {
   resolve(ref: ModelRef, signal?: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo }>;
@@ -103,8 +106,12 @@ export interface SessionPreferences {
   maxSteps: number | null;
   /** Settings → Permissions → limits for one turn: tokens, estimated cost, minutes of work. */
   turnBudget: TurnLimits;
+  /** Settings → Permissions → limits for a session and for a day: everything the session has used, and everything used today on this computer. */
+  spendBudget: SpendLimits;
   /** Settings → Models → Agents: how groups of agents are routed and limited. */
   agents: AgentGroupSettings;
+  /** Settings → Models → Sessions: after an edit, the language server says what is wrong with the file. */
+  checkEdits: boolean;
 }
 
 export interface SessionDeps {
@@ -128,13 +135,17 @@ export interface SessionDeps {
   hooks(projectRoot: string | null, trusted: boolean): HookRunner | null;
   rgPath: string;
   graftHome: string;
+  /** The skills that ship with Graft; null when there are none. */
+  builtinSkills: string | null;
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   trust(projectRoot: string): void;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
   sandbox?(projectRoot: string): SandboxSettings | null;
-  /** The site from the Sites tab that this folder holds, with its live address; null for other folders. */
-  site?(projectRoot: string): Promise<{ name: string; url: string } | null>;
+  /** The errors the local language server finds in a file of a project (see languages/problems.ts). Absent: edits are not checked. */
+  problems?(projectRoot: string, file: string, signal: AbortSignal): Promise<FileProblems | null>;
+  /** The site from the Sites tab that this folder holds, with its live address and what it is built with; null for other folders. */
+  site?(projectRoot: string): Promise<{ name: string; url: string; stack: SiteStack } | null>;
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;
@@ -179,8 +190,6 @@ interface InternalQueued {
   mission?: { kind: 'start'; input: MissionStart } | { kind: 'step'; text: string; turn: number; of: number } | { kind: 'verify' };
 }
 
-/** MCP tool definitions weighing more than this (or a tenth of the model's window) wait to be loaded with ToolSearch. */
-const DEFER_MCP_TOKENS = 10_000;
 const DELTA_FLUSH_MS = 40;
 /** "!" commands from the message box: how long they may run, and how much of their output the transcript keeps. */
 const USER_SHELL_TIMEOUT_MS = 300_000;
@@ -204,6 +213,8 @@ export class AgentSession {
   private queue: InternalQueued[] = [];
   /** Queued messages sent with "Send now": they join the running turn after its next tool step. */
   private steering: InternalQueued[] = [];
+  /** Side questions being answered, by the id their asker gave them. */
+  private readonly asides = new Map<string, AbortController>();
   readonly files: FileStateTracker;
   private readonly missions: MissionController;
   /** What this session's agent loops get from it: the user's answers, tool context, usage, sub-agents and groups. */
@@ -211,9 +222,8 @@ export class AgentSession {
   private memory: MemoryLoader | null = null;
   private system: string | null = null;
   private toolNames: string[] | null = null;
-  /** The MCP tools of a setup too big to send with every request wait to be loaded; once they do, they do for the session. */
-  private mcpDeferred = false;
-  private readonly loadedMcp = new Set<string>();
+  /** What a model is offered here: its tools, web access, media, and the MCP tools waiting for ToolSearch. */
+  private readonly offering: ModelOffering;
   private promptKey: string | null = null;
   private modelKey: string | null = null;
   /** Thinking in messages before this seq is never replayed (model switch, tool set change). */
@@ -249,6 +259,23 @@ export class AgentSession {
       workingDir: () => this.workingDir(),
       syncSandbox: () => this.syncSandbox()
     });
+    this.offering = new ModelOffering(() => ({
+      kind: this.summary.kind,
+      incognito: this.summary.incognito,
+      webSearch: this.deps.preferences().webSearch,
+      computerUse: this.deps.preferences().computerUse,
+      searchEngine: this.deps.search.active(),
+      registry: this.deps.tools,
+      mcpToolNames: (root) => this.deps.mcpToolNames(root),
+      settingsRoot: this.settingsRoot(),
+      hasBrowser: this.deps.browser !== undefined,
+      hasComputer: this.deps.computer !== null,
+      hasChatFiles: this.deps.chatFiles !== null,
+      hasRunCode: this.deps.runCode !== null,
+      hasBuiltinSkills: this.deps.builtinSkills !== null,
+      media: this.deps.media,
+      missionOpen: this.missions.isOpen()
+    }));
     this.host = new SessionHost({
       id: this.id,
       deps,
@@ -261,7 +288,7 @@ export class AgentSession {
       projectRoot: () => this.projectRoot(),
       settingsRoot: () => this.settingsRoot(),
       workingDir: () => this.workingDir(),
-      chatWork: (model) => this.chatWork(model),
+      chatWork: (model) => this.offering.chatWork(model),
       effortFor: (model) => this.effortFor(model),
       privacy: () => this.privacy(),
       system: () => this.system,
@@ -396,6 +423,44 @@ export class AgentSession {
     }
     this.steering.push(item);
     this.emit({ type: 'queue', queue: this.publicQueue() });
+  }
+
+  /**
+   * Answers a side question from the conversation as it stands. It is one request beside whatever the session is
+   * doing: no turn starts or is disturbed and nothing is stored. The answer goes to the asker alone; `aside` events
+   * carry it while it arrives. It reads the steps that are finished, not the reply being written at that moment.
+   */
+  async aside(askId: string, question: string): Promise<string> {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    const asked = question.trim();
+    if (asked.length === 0) throw new GraftError('empty_question', 'Type a question after /btw.');
+    const controller = new AbortController();
+    this.asides.set(askId, controller);
+    try {
+      const { provider, model } = await this.resolveModel(controller.signal);
+      return await answerAside({
+        provider,
+        model,
+        history: this.history(),
+        question: asked,
+        cacheKey: this.id,
+        privacy: this.privacy(),
+        signal: controller.signal,
+        // Not through emit: that would end the batch of the reply a running turn is streaming with every piece.
+        onText: (text) => {
+          if (!this.disposed) this.deps.emit(this.id, { type: 'aside', askId, text });
+        }
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new GraftError('aside_cancelled', 'The side question was cancelled.');
+      throw error;
+    } finally {
+      this.asides.delete(askId);
+    }
+  }
+
+  cancelAside(askId: string): void {
+    this.asides.get(askId)?.abort();
   }
 
   /**
@@ -577,6 +642,7 @@ export class AgentSession {
     // keep writing to a session that is being removed.
     this.disposed = true;
     this.interrupt();
+    for (const aside of this.asides.values()) aside.abort();
     await this.idle();
     this.flushDeltas();
     await this.deps.shells.disposeSession(this.id);
@@ -815,6 +881,11 @@ export class AgentSession {
       this.commandOutput(`/${slash.name} opens in the app: type it on its own, or use the command palette (Ctrl+Shift+P).`);
       return null;
     }
+    if (slash.name === 'btw') {
+      // A side question is asked beside the conversation (see aside). As a message of its own it would become part of it.
+      this.commandOutput('A side question is asked on its own: type /btw and the question in the message box, with nothing attached.');
+      return null;
+    }
     if (slash.name.startsWith('mcp__')) return this.runMcpPrompt(slash.name, slash.args, item.text);
     switch (slash.name) {
       case 'clear': {
@@ -869,6 +940,8 @@ export class AgentSession {
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'research':
         return { text: researchPrompt(slash.args), typed: item.text };
+      case 'diagram':
+        return { text: diagramPrompt(slash.args), typed: item.text };
       case 'test':
         return { text: testPrompt(slash.args), typed: item.text };
       case 'decompile':
@@ -929,42 +1002,6 @@ export class AgentSession {
     return { provider, model, ref };
   }
 
-  /**
-   * Web access for this session and model. The search engine setting decides
-   * where searches go: the WebSearch tool runs them, except that a model's
-   * built-in search (Claude on Anthropic, the only adapter with one) runs when
-   * Anthropic is the engine. WebFetch reads pages. Incognito chats get none,
-   * so nothing goes to a search engine.
-   */
-  private webTools(model: ModelInfo): { native: boolean; clientSearch: boolean; fetch: boolean } {
-    const summary = this.summary;
-    const allowed = this.deps.preferences().webSearch && !summary.incognito && model.supportsTools;
-    const engine = allowed ? this.deps.search.active() : null;
-    const native = engine === 'anthropic' && model.supportsWebSearch;
-    const clientSearch = engine !== null && !native;
-    // Code sessions always had WebFetch (it asks first in Ask mode); chats get it with web access on.
-    return { native, clientSearch, fetch: summary.kind === 'code' || allowed };
-  }
-
-  /** CreateFile and RunCode, for chats with a model that uses tools. Incognito chats get neither: they never write to disk. */
-  private chatWork(model: ModelInfo): { files: boolean; code: boolean } {
-    const summary = this.summary;
-    const files = summary.kind === 'chat' && !summary.incognito && model.supportsTools && this.deps.chatFiles !== null;
-    return { files, code: files && this.deps.runCode !== null };
-  }
-
-  /**
-   * Generated media for this session and model: the image engine behind
-   * GenerateImage, and whether ComfyUI is connected. Incognito chats get
-   * neither, so nothing they write goes to an image provider.
-   */
-  private mediaFor(model: ModelInfo): { image: string | null; comfy: boolean } {
-    const media = this.deps.media;
-    if (!media || !model.supportsTools || this.summary.incognito) return { image: null, comfy: false };
-    const engine = media.imageEngine();
-    return { image: engine ? (engine.engine === 'comfyui' ? 'ComfyUI on this computer' : engine.model) : null, comfy: media.comfy() !== null };
-  }
-
   /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
   private privacy(): RequestPrivacy {
     const incognito = this.summary.incognito;
@@ -979,106 +1016,11 @@ export class AgentSession {
     return model.effort.levels.includes(wanted) ? wanted : model.effort.default;
   }
 
-  /** Computer use: code sessions with it switched on, on a model that can see screenshots. */
-  private computerFor(model: ModelInfo): boolean {
-    return this.summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
-  }
-
-  /** Tools a turn on this model offers: built-ins for the session kind, plus MCP tools in code sessions. */
-  private toolsFor(model: ModelInfo): string[] {
-    const summary = this.summary;
-    const web = this.webTools(model);
-    const work = this.chatWork(model);
-    const computer = this.computerFor(model);
-    const media = this.mediaFor(model);
-    // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
-    const mcpTools = this.mcpToolsFor(model);
-    const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
-    const onMission = summary.kind === 'code' && this.missions.isOpen();
-    const builtins =
-      summary.kind === 'code'
-        ? this.deps.tools
-            .names()
-            .filter(
-              (n) =>
-                !n.startsWith('mcp__') &&
-                !chatOnly.has(n) &&
-                (n !== 'WebSearch' || web.clientSearch) &&
-                n !== 'ToolSearch' &&
-                (n !== 'Computer' || computer) &&
-                (n !== 'Browser' || this.deps.browser !== undefined) &&
-                (n !== 'GenerateImage' || media.image !== null) &&
-                (n !== 'ComfyUI' || media.comfy) &&
-                (n !== 'MissionUpdate' || onMission)
-            )
-        : [
-            ...(web.fetch ? ['WebFetch'] : []),
-            ...(web.clientSearch ? ['WebSearch'] : []),
-            // Researchers, for a question with several parts: they get the web tools above and nothing else.
-            ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
-            ...(work.files ? ['CreateFile'] : []),
-            ...(work.code ? ['RunCode'] : []),
-            // A chat keeps what it makes in its own files, so pictures need those.
-            ...(work.files && media.image !== null ? ['GenerateImage'] : [])
-          ];
-    const { offered } = this.splitMcp(mcpTools, model);
-    return [...builtins, ...(this.mcpDeferred ? ['ToolSearch'] : []), ...offered];
-  }
-
-  /** What a tool is in this session, where its own description is about another kind: in a chat a group of agents only researches. */
-  private toolDescriptions(): Partial<Record<string, string>> {
-    return this.summary.kind === 'chat' ? { RunAgents: RUN_AGENTS_IN_CHAT } : {};
-  }
-
-  /** The MCP tools this session can use: a code session's own and the user's, a chat's user-level ones, none in incognito. */
-  private mcpToolsFor(model: ModelInfo): string[] {
-    const summary = this.summary;
-    return summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : summary.incognito || !model.supportsTools ? [] : this.deps.mcpToolNames(null);
-  }
-
-  /**
-   * MCP tools whose definitions would weigh on every request (a big setup: GitHub's
-   * has dozens) are not sent until the agent searches for them with ToolSearch.
-   * The choice is made once, so the tools and the prompt stay the same between turns.
-   */
-  private splitMcp(mcpTools: string[], model: ModelInfo): { offered: string[]; deferred: string[] } {
-    if (mcpTools.length === 0) return { offered: [], deferred: [] };
-    if (!this.mcpDeferred) {
-      const weight = estimateTextTokens(JSON.stringify(this.deps.tools.specs(mcpTools)));
-      if (weight > Math.min(DEFER_MCP_TOKENS, Math.floor(model.contextWindow * 0.1))) this.mcpDeferred = true;
-    }
-    if (!this.mcpDeferred) return { offered: mcpTools, deferred: [] };
-    return { offered: mcpTools.filter((n) => this.loadedMcp.has(n)), deferred: mcpTools.filter((n) => !this.loadedMcp.has(n)) };
-  }
-
-  /** How many tools of each server are waiting, for the prompt. */
-  private deferredByServer(model: ModelInfo): Array<{ server: string; count: number }> {
-    const { deferred } = this.splitMcp(this.mcpToolsFor(model), model);
-    const counts = new Map<string, number>();
-    for (const name of deferred) {
-      const server = this.deps.tools.get(name)?.mcp?.server ?? 'other';
-      counts.set(server, (counts.get(server) ?? 0) + 1);
-    }
-    return [...counts].map(([server, count]) => ({ server, count }));
-  }
-
-  /** The tools waiting to be loaded, as ToolSearch searches them. */
-  private deferredEntries(): SearchableTool[] {
-    const summary = this.summary;
-    const names = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : this.deps.mcpToolNames(null);
-    return names
-      .filter((n) => !this.loadedMcp.has(n))
-      .flatMap((name) => {
-        const tool = this.deps.tools.get(name);
-        return tool ? [{ name, server: tool.mcp?.server ?? '', description: tool.description }] : [];
-      });
-  }
-
   /** Builds the system prompt for this model; code sessions read project notes through the given loader. */
   private async composePrompt(model: ModelInfo, memory: MemoryLoader | null): Promise<string> {
     const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
     const summary = this.summary;
-    const web = this.webTools(model);
+    const web = this.offering.web(model);
     const prefs = this.deps.preferences();
     const root = this.projectRoot();
     if (summary.kind === 'code' && root && memory) {
@@ -1092,17 +1034,17 @@ export class AgentSession {
         date: this.deps.now().toISOString().slice(0, 10),
         mode: summary.permissionMode,
         memory: memory.initial(this.workingDir()),
-        skills: loadSkills(this.deps.graftHome, root),
+        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills),
         webSearch: web.native || web.clientSearch,
-        computer: this.computerFor(model),
+        computer: this.offering.computer(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         mcpNotes: this.deps.mcpInstructions(this.settingsRoot()),
-        deferredTools: this.deferredByServer(model),
+        deferredTools: this.offering.deferredByServer(model),
         agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,
-        media: this.mediaFor(model)
+        media: this.offering.media(model)
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -1112,12 +1054,12 @@ export class AgentSession {
       model: identity,
       web: { search: web.native || web.clientSearch, fetch: web.fetch },
       researchers: web.fetch || web.clientSearch,
-      workspace: this.chatWork(model),
+      workspace: this.offering.chatWork(model),
       personalization: summary.incognito ? null : prefs.personalization,
       mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
       mcpNotes: summary.incognito ? [] : this.deps.mcpInstructions(null),
-      deferredTools: this.deferredByServer(model),
-      images: this.chatWork(model).files ? this.mediaFor(model).image : null
+      deferredTools: this.offering.deferredByServer(model),
+      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null
     });
   }
 
@@ -1134,7 +1076,7 @@ export class AgentSession {
    */
   async promptPreview(): Promise<{ system: string; tools: string[]; model: string }> {
     const { model, ref } = await this.resolveModel(new AbortController().signal);
-    const tools = this.toolsFor(model);
+    const tools = this.offering.tools(model);
     const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
     if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
     return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
@@ -1149,7 +1091,7 @@ export class AgentSession {
     const { model } = await this.resolveModel(new AbortController().signal);
     const measured = this.summary.usage.contextTokens;
     return {
-      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.toolDescriptions()), messages: this.history() }),
+      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions()), messages: this.history() }),
       measured: measured > 0 ? measured : null,
       limit: model.contextWindow
     };
@@ -1161,7 +1103,7 @@ export class AgentSession {
    * prompt always names the model that is answering.
    */
   private async ensurePrompt(model: ModelInfo): Promise<{ system: string; toolNames: string[] }> {
-    const toolNames = this.toolsFor(model);
+    const toolNames = this.offering.tools(model);
     if (!this.system) {
       this.memory = this.memoryLoader();
       this.system = await this.composePrompt(model, this.memory);
@@ -1305,10 +1247,10 @@ export class AgentSession {
           model,
           registry: this.deps.tools,
           toolNames,
-          toolDescriptions: this.toolDescriptions(),
+          toolDescriptions: this.offering.toolDescriptions(),
           system,
           effort,
-          webSearch: this.webTools(model).native,
+          webSearch: this.offering.web(model).native,
           cacheKey: this.id,
           privacy: this.privacy(),
           turnId,
@@ -1504,18 +1446,18 @@ export class AgentSession {
 
   /** ToolSearch's view of the MCP tools still waiting; null when the session sends them all. */
   private deferredTools(model: ModelInfo): ToolContext['deferredTools'] {
-    if (!this.mcpDeferred) return null;
+    if (!this.offering.deferring) return null;
     return {
-      find: (query, limit) => searchTools(this.deferredEntries(), query, limit),
+      find: (query, limit) => searchTools(this.offering.deferredEntries(), query, limit),
       load: (names) => {
+        this.offering.load(names);
         for (const name of names) {
-          this.loadedMcp.add(name);
           // The running turn offers them from its next request on.
           if (this.toolNames && !this.toolNames.includes(name)) this.toolNames.push(name);
         }
       },
       summary: () => {
-        const waiting = this.deferredByServer(model);
+        const waiting = this.offering.deferredByServer(model);
         return waiting.length > 0 ? `Waiting to be loaded: ${waiting.map((w) => `${w.server} (${String(w.count)})`).join(', ')}.` : 'Nothing is waiting to be loaded.';
       }
     };

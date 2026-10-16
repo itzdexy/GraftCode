@@ -5,7 +5,7 @@ import type { SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
-import { addUsage, EMPTY_USAGE } from '@shared/schemas/common';
+import { addUsage, EMPTY_USAGE, type Usage } from '@shared/schemas/common';
 import type { UsageDay, UsageEntry } from '@shared/usage';
 import { keepable, type JournalEntry, type JournalStart } from '../agent/journal';
 import type { SessionPatch, SessionStore } from './sessionsRepo';
@@ -199,6 +199,17 @@ export class MemorySessionStore implements SessionStore {
       .filter((u) => u.day >= fromDay)
       .sort((a, b) => a.day.localeCompare(b.day))
       .map((u) => ({ ...u }));
+  }
+
+  projectUsage(projectPath: string): { totals: Usage; costUsd: number } {
+    let totals = EMPTY_USAGE;
+    let costUsd = 0;
+    for (const session of this.sessions.values()) {
+      if (session.projectPath !== projectPath) continue;
+      totals = addUsage(totals, session.usage.totals);
+      costUsd += session.usage.costUsd ?? 0;
+    }
+    return { totals, costUsd };
   }
 
   private list_(sessionId: string): StoredMessage[] {

@@ -111,6 +111,29 @@ describe('CreateFile and RunCode', () => {
     }
   });
 
+  it('marks a diagram it saved, and no other page', async () => {
+    const template = fs.readFileSync(path.resolve(__dirname, '../../resources/skills/diagram-design/assets/template.html'), 'utf8');
+    const page = template.replaceAll('[diagram-slug]', 'orders').replaceAll('[Diagram title]', 'Orders');
+    const ctx = context({});
+    const drawn = await createFileTool.execute({ name: 'orders.html', content: page }, ctx);
+    expect(drawn.display).toMatchObject({ kind: 'file', name: 'orders.html', diagram: { title: 'Orders', width: 960, height: 600 } });
+    expect(textOf(drawn.content)).toMatch(/^Created orders\.html \(.+\)\. The user sees the diagram in the chat, with buttons to copy or save it\.$/);
+    // The same page sent as bytes is the same diagram.
+    const bytes = await createFileTool.execute({ name: 'bytes.html', content: Buffer.from(page).toString('base64'), encoding: 'base64' }, ctx);
+    expect(bytes.display).toMatchObject({ diagram: { title: 'Orders' } });
+
+    // A page with a picture in it is a page; a diagram's text under another kind of name is that kind of file.
+    for (const input of [
+      { name: 'page.html', content: '<html><body><svg role="img" viewBox="0 0 10 10"></svg><p>Hello</p></body></html>' },
+      { name: 'orders.txt', content: page },
+      { name: 'orders.md', content: page }
+    ]) {
+      const plain = await createFileTool.execute(input, ctx);
+      expect(plain.display, input.name).not.toHaveProperty('diagram');
+      expect(textOf(plain.content), input.name).toContain('The user sees it in the chat with buttons to save or open it.');
+    }
+  });
+
   it('never saves an office document it did not build: bytes from a model can carry what runs or calls out when opened', async () => {
     const before = saved.length;
     const ctx = context({

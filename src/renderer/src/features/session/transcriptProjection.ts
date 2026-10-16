@@ -1,3 +1,4 @@
+import type { TranscriptView } from '@shared/schemas/appSettings';
 import type { StoredMessage } from '@shared/schemas/messages';
 import { buildTranscript, groupActivity, type LiveState, type TranscriptItem } from './transcriptModel';
 
@@ -11,18 +12,20 @@ function startsSegment(message: StoredMessage): boolean {
   return text.trim().length > 0 || message.content.some(b => b.type === 'image') || (message.meta.attachments?.length ?? 0) > 0;
 }
 
-/** A component-local cache of completed turns; live text only rebuilds the current turn. */
+/** A component-local cache of completed turns; live text only rebuilds the current turn. `view` is how a turn's work is grouped (see groupActivity). */
 export function createTranscriptProjection() {
   let previousMessages: StoredMessage[] | null = null;
   let previousRunning: LiveState['running'] | null = null;
+  let previousView: TranscriptView | null = null;
   let boundary = 0;
   let prefix: TranscriptItem[] = [];
   let tail: StoredMessage[] = [];
   let turnOffset = 0;
-  return (messages: StoredMessage[], live: LiveState, turnActive: boolean): TranscriptItem[] => {
-    if (messages !== previousMessages || live.running !== previousRunning) {
+  return (messages: StoredMessage[], live: LiveState, turnActive: boolean, view: TranscriptView = 'summary'): TranscriptItem[] => {
+    if (messages !== previousMessages || live.running !== previousRunning || view !== previousView) {
       previousMessages = messages;
       previousRunning = live.running;
+      previousView = view;
       const ordered = [...messages].sort((a, b) => a.seq - b.seq);
       boundary = ordered.findLastIndex(startsSegment);
       // A mixed user/tool-result record can resolve a call in an earlier segment.
@@ -30,11 +33,11 @@ export function createTranscriptProjection() {
       if (boundary < 0 || ordered[boundary]?.content.some(b => b.type === 'tool_result')) boundary = 0;
       const before = buildTranscript(ordered.slice(0, boundary), { streaming: null, running: live.running });
       turnOffset = before.filter(item => item.kind === 'user').length;
-      prefix = groupActivity(before, false);
+      prefix = groupActivity(before, false, view);
       tail = ordered.slice(boundary);
     }
     const current = buildTranscript(tail, live);
     for (const item of current) if (item.kind === 'user') item.turn += turnOffset;
-    return [...prefix, ...groupActivity(current, turnActive)];
+    return [...prefix, ...groupActivity(current, turnActive, view)];
   };
 }

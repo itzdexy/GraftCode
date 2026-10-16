@@ -1,15 +1,21 @@
 import type { ElementContent, Root, RootContent } from 'hast';
-import { createContext, memo, useContext, type ReactNode } from 'react';
+import { createContext, memo, useContext, useMemo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SourceIndex } from '@shared/sources';
 import { cn } from '../../lib/cn';
 import { invoke } from '../../lib/ipc';
+import { useResolvedPath } from '../../stores/fileRefs';
+import { usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
+import { ConversationContext } from './conversation';
+import { parseFileRef, refTooltip } from './fileRefs';
+import { mathToDollars } from './mathModel';
 import { citationNote, citationState } from './sourcesModel';
 import { healMarkdown, splitBlocks } from './streaming';
+import { useMath } from './useMath';
 
 export function openLink(href: string): void {
   invoke('app:openExternal', { url: href }).catch((error: unknown) => reportError("Couldn't open the link", error));
@@ -59,6 +65,31 @@ function childText(children: ReactNode): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
   if (Array.isArray(children)) return children.map((c) => childText(c as ReactNode)).join('');
   return '';
+}
+
+const INLINE_CODE = 'rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em]';
+
+/**
+ * Inline code. In a code session, a span that is the name of one file of the
+ * project (`src/app.ts:42`) opens that file in the Files panel, at the line
+ * when one is given. Anything else is drawn as code.
+ */
+function InlineCode({ children }: { children: ReactNode }): ReactNode {
+  const conversation = useContext(ConversationContext);
+  const sessionId = conversation?.kind === 'code' ? conversation.sessionId : null;
+  const ref = sessionId === null ? null : parseFileRef(childText(children));
+  const file = useResolvedPath(ref === null ? null : sessionId, ref?.path ?? null);
+  if (sessionId === null || ref === null || !file) return <code className={`${INLINE_CODE} text-code-fg`}>{children}</code>;
+  return (
+    <button
+      type="button"
+      title={refTooltip(file, ref.line)}
+      onClick={() => usePanels.getState().openFile(sessionId, file, ref.line === null ? null : { line: ref.line, column: ref.column })}
+      className={`${INLINE_CODE} selectable text-link underline-offset-2 hover:underline`}
+    >
+      {children}
+    </button>
+  );
 }
 
 /** A link written as a citation: its text names the site it points to, e.g. [rolimons.com](https://www.rolimons.com/…). */
@@ -149,10 +180,13 @@ function buildComponents(live: boolean): Components {
       const className =
         code && code.type === 'element' && Array.isArray(code.properties.className) ? code.properties.className.map(String) : [];
       const language = className.find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? null;
-      return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} live={live} />;
+      // What follows the language on the fence line (a file name, a title) is kept on the code element.
+      const meta = code && code.type === 'element' && typeof code.data?.meta === 'string' ? code.data.meta : null;
+      return <CodeBlock code={textContent(code).replace(/\n$/, '')} language={language} meta={meta} live={live} />;
     },
     code({ children }) {
-      return <code className={`${arriving}rounded-xs border border-code-border bg-code-bg px-4 py-px font-mono text-[0.9em] text-code-fg`}>{children}</code>;
+      // A file name becomes a link once its message is finished: while it streams, the name may still be growing.
+      return live ? <code className={`${arriving}${INLINE_CODE} text-code-fg`}>{children}</code> : <InlineCode>{children}</InlineCode>;
     },
     a({ href, children }) {
       if (!href) return <span>{children}</span>;
@@ -212,11 +246,21 @@ const DONE_COMPONENTS = buildComponents(false);
 const REMARK = [remarkGfm];
 const LIVE_REHYPE = [fadeWords];
 
-/** One run of top-level blocks. Rendering is skipped while its text is unchanged, which is what keeps a long streaming reply cheap. */
+/**
+ * One run of top-level blocks. Rendering is skipped while its text is unchanged, which is what keeps a long
+ * streaming reply cheap. A text with math in it has the math renderer fetched, and is drawn as written until
+ * that is in; a text without math never asks for it and is parsed exactly as before.
+ */
 const Blocks = memo(function Blocks({ text, live }: { text: string; live: boolean }): ReactNode {
+  const tidy = tidyMarkdown(text);
+  const formulas = useMemo(() => mathToDollars(tidy), [tidy]);
+  const math = useMath(formulas.math);
+  // The words of a streaming reply are wrapped first and the formulas set after, so the fade never reaches inside one.
+  const remark = useMemo(() => (math ? [...REMARK, ...math.remark] : REMARK), [math]);
+  const rehype = useMemo(() => (math ? [...(live ? LIVE_REHYPE : []), ...math.rehype] : live ? LIVE_REHYPE : undefined), [math, live]);
   return (
-    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={live ? LIVE_REHYPE : undefined} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
-      {tidyMarkdown(text)}
+    <ReactMarkdown remarkPlugins={remark} rehypePlugins={rehype} components={live ? LIVE_COMPONENTS : DONE_COMPONENTS}>
+      {math ? formulas.text : tidy}
     </ReactMarkdown>
   );
 });

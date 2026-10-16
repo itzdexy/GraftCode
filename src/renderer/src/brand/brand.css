@@ -325,6 +325,77 @@
   animation: graft-fade 220ms var(--g-ease);
 }
 
+/* A picture that has just been made, or loaded: it comes into focus. */
+.graft-reveal {
+  animation: graft-reveal 720ms var(--g-ease-out) both;
+}
+
+@keyframes graft-reveal {
+  from {
+    opacity: 0;
+    filter: blur(14px) saturate(0.6);
+    transform: scale(1.03);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+/* The grid a picture is made on: a leaf-green glow drifts under the dots, and the dot being walked to breathes. */
+.graft-dotgrid::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--g-accent) 16%, transparent), transparent 70%);
+  opacity: 0;
+  animation: graft-drift 7s ease-in-out infinite;
+}
+
+@keyframes graft-drift {
+  0% {
+    opacity: 0;
+    transform: translate(-28%, -18%);
+  }
+  20% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+    transform: translate(26%, 14%);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-28%, -18%);
+  }
+}
+
+.graft-dotgrid__food {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: graft-breathe 1100ms ease-in-out infinite;
+}
+
+@keyframes graft-breathe {
+  50% {
+    transform: scale(1.35);
+    opacity: 0.75;
+  }
+}
+
+/* Where a page's picture will be, until it loads: a tile the highlight sweeps across. */
+.graft-thumb-wait {
+  background: linear-gradient(100deg, var(--g-surface-inset) 30%, var(--g-surface-strong) 50%, var(--g-surface-inset) 70%) 0 0 / 300% 100%;
+  animation: graft-shimmer 1800ms linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) .graft-mark--draw .graft-mark__pot,
   :root:not([data-motion='full']) .graft-mark--draw .graft-mark__stem,

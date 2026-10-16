@@ -17,7 +17,7 @@ const LIST_ITEM = /^(?:[-*+]|\d{1,9}[.)])(?:\s|$)/;
  * Fenced code blocks in a text: whether each line is inside one (the fence
  * lines themselves count as inside), and whether one is still open at the end.
  */
-function scanFences(lines: string[]): { inside: boolean[]; open: boolean } {
+export function scanFences(lines: string[]): { inside: boolean[]; open: boolean } {
   let fence: { mark: string; length: number } | null = null;
   const inside = lines.map((line) => {
     const found = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);

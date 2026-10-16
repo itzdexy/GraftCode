@@ -96,14 +96,24 @@ test('main views fit from the minimum window size up to 1920×1080', async () =>
       ['Providers', 'settings-providers'],
       ['Permissions', 'settings-permissions']
     ] as const) {
-      await w.getByRole('button', { name: /^Account menu for/ }).click();
-      await w.getByRole('menuitem', { name: 'Settings' }).click();
+      // Settings is a window over the page: it is opened once, and its pages are changed inside it.
+      if ((await w.locator('[role="dialog"][aria-label="Settings"]').count()) === 0) {
+        await w.getByRole('button', { name: /^Account menu for/ }).click();
+        await w.getByRole('menuitem', { name: 'Settings' }).click();
+      }
       await w.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: section, exact: true }).click();
       await expect(w.getByRole('heading', { level: 2, name: section })).toBeVisible();
       expect(await horizontalOverflow(w), `${nav} ${tag}`).toEqual([]);
       expect(await unnamedControls(w), `${nav} controls ${tag}`).toEqual([]);
+      // The window keeps 32 px clear of the app window's edge at every size, and never passes 1,000 by 720.
+      const frame = (await w.getByRole('dialog', { name: 'Settings' }).boundingBox())!;
+      expect(Math.min(frame.x, frame.y, size.width - frame.x - frame.width, size.height - frame.y - frame.height), `${nav} margin ${tag}`).toBeGreaterThanOrEqual(32);
+      expect([frame.width <= 1000, frame.height <= 720], `${nav} size ${tag}`).toEqual([true, true]);
       await w.screenshot({ path: path.join(SHOTS, `${nav}-${tag}.png`) });
     }
+    // It is closed before the page underneath is used again.
+    await w.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(w.locator('[role="dialog"][aria-label="Settings"]')).toHaveCount(0);
 
     await w.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Customize' }).click();
     await expect(w.getByRole('heading', { level: 1, name: 'Customize' })).toBeVisible();

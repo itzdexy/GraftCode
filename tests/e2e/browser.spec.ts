@@ -125,3 +125,47 @@ test('the panel shows console problems and sends a screenshot to the message box
   await expect(w.getByText('This model can’t read images')).toBeVisible();
   await expect(w.getByText("Couldn't take a screenshot")).toHaveCount(0);
 });
+
+test('an element picked in the page comes with its picture', async () => {
+  const w = graft.window;
+  provider.script({ text: 'Ready.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('Hello');
+  await composer.press('Enter');
+  await expect(w.getByText('Ready.')).toBeVisible();
+
+  await w.getByRole('button', { name: 'Browser', exact: true }).click();
+  const panel = w.getByRole('region', { name: 'Browser' });
+  const address = panel.getByRole('textbox', { name: 'Address' });
+  await address.fill(siteUrl);
+  await address.press('Enter');
+  await expect(address).toHaveValue(siteUrl);
+  const page = graft.app.windows().find((candidate) => candidate.url() === siteUrl)!;
+  expect(page).toBeDefined();
+
+  // Asked as the panel asks: the answer has the element, and a picture of the part of the page it takes.
+  const asked = w.evaluate(() => (window as unknown as { graft: { invoke(channel: string): Promise<unknown> } }).graft.invoke('browser:pick'));
+  await expect(panel.getByText('Click an element in the page to add it to your message. Esc cancels.')).toBeVisible();
+  const button = (await page.locator('#go').boundingBox())!;
+  await page.locator('#go').click();
+  const answer = (await asked) as { ok: true; value: { selector: string; text: string; image: { mediaType: string; data: string } | null } };
+  expect(answer.value).toMatchObject({ selector: '#go', text: 'Count' });
+  expect(answer.value.image?.mediaType).toBe('image/png');
+  const png = Buffer.from(answer.value.image!.data, 'base64');
+  const [width, height] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+  // The button with a few pixels around it, not the page.
+  expect(width).toBeGreaterThanOrEqual(Math.floor(button.width));
+  expect(width).toBeLessThanOrEqual(Math.ceil(button.width) + 16);
+  expect(height).toBeGreaterThanOrEqual(Math.floor(button.height));
+  expect(height).toBeLessThanOrEqual(Math.ceil(button.height) + 16);
+  // The click picked the button; it did not press it.
+  await expect(page.locator('#count')).toHaveText('Count: 0');
+
+  // From the panel's own button, the element goes to the message box. The scripted model can't read pictures:
+  // the picture is left out without a word, since what was asked for is the element.
+  await panel.getByRole('button', { name: 'Pick an element for the chat' }).click();
+  await page.locator('h1').click();
+  await expect(w.getByText('The element added to your message')).toBeVisible();
+  await expect(w.getByText('picked-element.txt')).toBeVisible();
+  await expect(w.getByText('This model can’t read images')).toHaveCount(0);
+});

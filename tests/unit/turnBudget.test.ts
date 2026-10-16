@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { spentTokens, TurnBudget } from '../../src/main/agent/turnBudget';
+import { spentTokens, SpendBudget, TurnBudget } from '../../src/main/agent/turnBudget';
 
 const used = (inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0) => ({ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
 const NONE = { tokens: null, costUsd: null, minutes: null, toolCalls: null, retries: null };
@@ -132,5 +132,111 @@ describe('the limits of one turn', () => {
     budget.add(used(1000, 0), 1, 'Priced Model');
     time.pass(5 * 60_000);
     expect(budget.exceeded()).toMatch(/^Paused after about 1,000 tokens/);
+  });
+});
+
+const NO_SPEND_LIMITS = { sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null };
+const START = { session: { tokens: 0, costUsd: 0 }, project: { tokens: 0, costUsd: 0 }, day: { tokens: 0, costUsd: 0, unpriced: 0 } };
+
+describe('the limits for a session, a project and a day', () => {
+  it('never pauses when no limit is set', () => {
+    const budget = new SpendBudget(NO_SPEND_LIMITS, START);
+    budget.add(used(50_000_000, 1_000_000), 9999, 'Big Model');
+    budget.spend(9999);
+    expect(budget.exceeded()).toBeNull();
+  });
+
+  it('counts what the session had used before the turn, and pauses past the limit for one session', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, sessionTokens: 2000 }, { ...START, session: { tokens: 1200, costUsd: 0 } });
+    budget.add(used(700, 50), null, 'Main Model');
+    expect(budget.exceeded()).toBeNull();
+    // A sub-agent's request counts toward the same session total.
+    budget.add(used(30, 30), null, 'Small Model');
+    expect(budget.exceeded()).toBe('Paused after about 2,010 tokens in this session, past the limit of 2,000 for one session set in Settings → Permissions.');
+  });
+
+  it("counts what the project's sessions had used before the turn, and pauses past the limit for one project", () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, projectTokens: 2000 }, { ...START, project: { tokens: 1200, costUsd: 0 } });
+    budget.add(used(700, 50), null, 'Main Model');
+    expect(budget.exceeded()).toBeNull();
+    budget.add(used(60, 50), null, 'Small Model');
+    expect(budget.exceeded()).toBe('Paused after about 2,060 tokens in this project, past the limit of 2,000 for one project set in Settings → Permissions.');
+  });
+
+  it("pauses past the day's token limit, counting the day as it was when the turn started", () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, dayTokens: 5000 }, { ...START, day: { tokens: 4000, costUsd: 0, unpriced: 0 } });
+    budget.add(used(1000, 50), null, 'Main Model');
+    expect(budget.exceeded()).toBe('Paused after about 5,050 tokens today, past the limit of 5,000 for one day set in Settings → Permissions.');
+  });
+
+  it('pauses at what a session has cost, and counts what a tool paid for', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, sessionCostUsd: 1 }, START);
+    expect(budget.add(used(100, 10), 0.6, 'Priced Model')).toBeNull();
+    expect(budget.exceeded()).toBeNull();
+    // A generated picture goes on the user's key and counts too.
+    budget.spend(0.25);
+    expect(budget.exceeded()).toBeNull();
+    budget.add(used(100, 10), 0.2, 'Priced Model');
+    expect(budget.exceeded()).toBe(
+      'Paused at about $1.05 for this session, past the limit of $1.00 for one session set in Settings → Permissions. The amount comes from published prices and can differ from your bill.'
+    );
+  });
+
+  it('pauses at what a project has cost, counting what a tool paid for', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, projectCostUsd: 2 }, { ...START, project: { tokens: 0, costUsd: 1.5 } });
+    budget.add(used(100, 10), 0.4, 'Priced Model');
+    expect(budget.exceeded()).toBeNull();
+    budget.spend(0.2);
+    expect(budget.exceeded()).toBe(
+      'Paused at about $2.10 for this project, past the limit of $2.00 for one project set in Settings → Permissions. The amount comes from published prices and can differ from your bill.'
+    );
+  });
+
+  it('pauses at what the day has cost, and says what requests had no published price', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, dayCostUsd: 0.5 }, { ...START, day: { tokens: 0, costUsd: 0.4, unpriced: 1 } });
+    budget.add(used(100, 10), 0.2, 'Priced Model');
+    expect(budget.exceeded()).toBe(
+      'Paused at about $0.60 today, past the limit of $0.50 for one day set in Settings → Permissions. The amount comes from published prices and can differ from your bill; 1 request had no published price and is not in it.'
+    );
+    const more = new SpendBudget({ ...NO_SPEND_LIMITS, dayCostUsd: 0.5 }, { ...START, day: { tokens: 0, costUsd: 0.4, unpriced: 2 } });
+    more.add(used(100, 10), 0.2, 'Priced Model');
+    expect(more.exceeded()).toMatch(/; 2 requests had no published price and are not in it\.$/);
+  });
+
+  it('says once that a model with no published price is outside the cost limits, and counts its requests', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, sessionCostUsd: 1, dayCostUsd: 5 }, START);
+    expect(budget.add(used(100, 10), null, 'Local Model')).toBe(
+      "The cost limits for a session and a day can't follow Local Model: it has no published price. Its requests are counted in tokens only."
+    );
+    // Said once a turn, not with every request.
+    expect(budget.add(used(100, 10), null, 'Local Model')).toBeNull();
+  });
+
+  it('names each cost limit the request is outside of: a session, a project, a day', () => {
+    const one = new SpendBudget({ ...NO_SPEND_LIMITS, projectCostUsd: 1 }, START);
+    expect(one.add(used(100, 10), null, 'Local Model')).toBe(
+      "The cost limit for a project can't follow Local Model: it has no published price. Its requests are counted in tokens only."
+    );
+    const all = new SpendBudget({ ...NO_SPEND_LIMITS, sessionCostUsd: 1, projectCostUsd: 1, dayCostUsd: 5 }, START);
+    expect(all.add(used(100, 10), null, 'Local Model')).toBe(
+      "The cost limits for a session, a project and a day can't follow Local Model: it has no published price. Its requests are counted in tokens only."
+    );
+  });
+
+  it('says nothing about prices when no cost limit is set', () => {
+    const budget = new SpendBudget({ ...NO_SPEND_LIMITS, sessionTokens: 1_000_000 }, START);
+    expect(budget.add(used(1000, 50), null, 'Local Model')).toBeNull();
+  });
+
+  it("names the first limit that was passed: the session's tokens, then the project's, then the day's", () => {
+    const budget = new SpendBudget({ sessionTokens: 100, sessionCostUsd: 0.01, projectTokens: 100, projectCostUsd: 0.01, dayTokens: 100, dayCostUsd: 0.01 }, START);
+    budget.add(used(1000, 0), 1, 'Priced Model');
+    expect(budget.exceeded()).toMatch(/^Paused after about 1,000 tokens in this session/);
+    const project = new SpendBudget({ ...NO_SPEND_LIMITS, projectTokens: 100, projectCostUsd: 0.01 }, START);
+    project.add(used(1000, 0), 1, 'Priced Model');
+    expect(project.exceeded()).toMatch(/^Paused after about 1,000 tokens in this project/);
+    const day = new SpendBudget({ ...NO_SPEND_LIMITS, dayTokens: 100, dayCostUsd: 0.01 }, START);
+    day.add(used(1000, 0), 1, 'Priced Model');
+    expect(day.exceeded()).toMatch(/^Paused after about 1,000 tokens today/);
   });
 });

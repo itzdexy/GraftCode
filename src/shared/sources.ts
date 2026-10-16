@@ -14,6 +14,8 @@ export interface Source {
   state: 'read' | 'found';
   /** Other addresses that led to this page: the one that was asked for, when the page answered from another. */
   aliases?: string[];
+  /** The picture the page offers for links to it, when it was read and names one. */
+  image?: string;
 }
 
 /** How a link stands to what the conversation saw. */
@@ -53,7 +55,7 @@ export function normalizeUrl(url: string): string | null {
  */
 export function sourcesOf(messages: Array<{ content: ContentBlock[] }>): Source[] {
   const pages = new Map<string, Source>();
-  const see = (url: string, title: string | null, state: Source['state'], asked?: string): void => {
+  const see = (url: string, title: string | null, state: Source['state'], asked?: string, image?: string): void => {
     const key = normalizeUrl(url);
     if (key === null) return;
     let known = pages.get(key);
@@ -65,6 +67,7 @@ export function sourcesOf(messages: Array<{ content: ContentBlock[] }>): Source[
       if (known.state === 'found' || known.title === null) known.title = title ?? known.title;
       known.state = 'read';
     }
+    if (image !== undefined && known.image === undefined) known.image = image;
     // A link to the address that was asked for is a link to this page too.
     const alias = asked === undefined ? null : normalizeUrl(asked);
     if (asked !== undefined && alias !== null && alias !== key && !(known.aliases ?? []).some((a) => normalizeUrl(a) === alias)) known.aliases = [...(known.aliases ?? []), asked];
@@ -73,7 +76,7 @@ export function sourcesOf(messages: Array<{ content: ContentBlock[] }>): Source[
     for (const block of message.content) {
       if (block.type === 'tool_result') {
         const display = block.display;
-        if (display?.kind === 'fetch' && display.status < 400 && !block.isError) see(display.url, display.title, 'read', display.requested);
+        if (display?.kind === 'fetch' && display.status < 400 && !block.isError) see(display.url, display.title, 'read', display.requested, display.image);
         if (display?.kind === 'web-search') for (const result of display.results) see(result.url, result.title, 'found');
         // What the agents of a group read and found counts as the conversation's own.
         if (display?.kind === 'agents') for (const source of display.sources ?? []) see(source.url, source.title, source.state);

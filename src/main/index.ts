@@ -6,6 +6,7 @@ import type { AppSettings } from '@shared/schemas/appSettings';
 import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
+import { EditChecks } from './languages/problems';
 import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
@@ -39,7 +40,7 @@ if (process.env.GRAFT_USER_DATA_DIR) {
 // Artifact previews are served from their own privileged, sandboxed scheme.
 protocol.registerSchemesAsPrivileged([{ scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
-const paths = buildPaths(app.getPath('userData'), undefined, app.getPath('documents'));
+const paths = buildPaths(app.getPath('userData'), undefined, app.getPath('documents'), resourcePath());
 configureLogFile(paths.logs);
 const isFirstLaunch = !fs.existsSync(paths.database);
 
@@ -49,7 +50,7 @@ let sessionManager: SessionManager | null = null;
 let ptyManager: PtyManager | null = null;
 let mcpManager: McpManager | null = null;
 let scheduler: Scheduler | null = null;
-const artifactServer = new ArtifactServer();
+const artifactServer = new ArtifactServer({ fontsDir: resourcePath('fonts') });
 let browserPanel: BrowserPanel | null = null;
 let quitting = false;
 let settingsSnapshot: AppSettings | null = null;
@@ -316,6 +317,7 @@ async function sessions(): Promise<SessionManager> {
   if (sessionManager) return sessionManager;
   const s = await services();
   const m = await mcp();
+  const editChecks = new EditChecks(s.languages);
   sessionManager ??= new SessionManager({
     repo: s.sessionsRepo,
     projects: s.projects,
@@ -336,9 +338,10 @@ async function sessions(): Promise<SessionManager> {
       const site = s.sites.forFolder(root);
       if (!site) return null;
       await s.siteServer.start();
-      return { name: site.name, url: s.siteServer.url(site.slug) };
+      return { name: site.name, url: s.siteServer.url(site.slug), stack: site.stack };
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
+    problems: (root, file, signal) => editChecks.problemsIn(root, file, signal),
     chatFiles: s.chatFiles,
     documents: new DocumentMaker({ printPdf: printHtmlToPdf }),
     runCode: runInSandbox,

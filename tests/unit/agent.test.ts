@@ -1144,6 +1144,35 @@ describe('agent tools that involve the user', () => {
     expect(JSON.stringify(code.provider.requests[0]!.messages[0])).not.toContain('[Sent ');
   });
 
+  it('lets a chat read the skills Graft ships, with the files it saves and never without them', async () => {
+    const builtinSkills = path.resolve(__dirname, '../../resources/skills');
+    const chatFiles = { save: (_id: string, name: string, data: Buffer) => ({ name, path: `/files/${name}`, size: data.length, mime: 'text/html' }) };
+    const chat = harness({
+      kind: 'chat',
+      chatFiles,
+      builtinSkills,
+      script: [{ toolCalls: [{ name: 'Skill', input: { name: 'diagram-design' } }] }, { text: 'Read it.' }]
+    });
+    chat.session.send('draw how an order is paid');
+    await chat.session.idle();
+    const first = chat.provider.requests[0]!;
+    expect(first.tools.map((t) => t.name).sort()).toEqual(['CreateFile', 'Skill']);
+    expect(first.system).toContain('For a diagram, read the diagram-design skill with Skill (name "diagram-design") and follow it, then save the result with CreateFile as one .html file');
+    // The skill came back as its own text, and nobody was asked.
+    expect(JSON.stringify(chat.provider.requests[1]!.messages.at(-1))).toContain('name: diagram-design');
+    expect(chat.events.some((e) => e.type === 'permission')).toBe(false);
+
+    // No files to save a diagram in, an incognito chat, a code session: none of them has the tool or is told about it.
+    for (const options of [{ kind: 'chat' as const, builtinSkills }, { kind: 'chat' as const, incognito: true, chatFiles, builtinSkills }, { chatFiles, builtinSkills }]) {
+      const other = harness({ ...options, script: [{ text: 'ok' }] });
+      other.session.send('hi');
+      await other.session.idle();
+      const request = other.provider.requests[0]!;
+      expect(request.tools.map((t) => t.name)).not.toContain('Skill');
+      expect(request.system).not.toContain('with Skill');
+    }
+  });
+
   it('runs a model’s built-in search only when its provider is the chosen engine; free search goes through WebSearch', async () => {
     const run = async (active: 'exa' | 'anthropic' | null): Promise<{ native: boolean; tools: string[] }> => {
       const h = harness({
@@ -1304,6 +1333,73 @@ describe('agent tools that involve the user', () => {
 
     expect(h.store.listMessages('session-1').some((m) => m.meta.kind === 'check')).toBe(false);
     expect(h.provider.requests).toHaveLength(2);
+  });
+
+  describe('an edit checked by the language server', () => {
+    const write = { toolCalls: [{ name: 'Write', input: { file_path: 'feature.ts', content: 'export const on: number = "yes";\n' } }] };
+    const wrong = { source: 'TypeScript', total: 1, problems: [{ line: 1, column: 14, code: 2322, text: "Type 'string' is not assignable to type 'number'." }] };
+    /** A language server that gives this answer for every file, and remembers what it was asked. */
+    const server = (answer: () => Promise<typeof wrong> = () => Promise.resolve(wrong)) => {
+      const asked: Array<{ root: string; file: string }> = [];
+      return { asked, problems: (root: string, file: string) => (asked.push({ root, file }), answer()) };
+    };
+    const result = (h: Harness) => {
+      const block = h.store.listMessages('session-1').flatMap((m) => m.content).find((b) => b.type === 'tool_result');
+      return block?.type === 'tool_result' ? { text: block.content.map((c) => (c.type === 'text' ? c.text : '')).join(''), display: block.display } : null;
+    };
+
+    it('tells the model what is wrong with the file it just changed, and keeps it for the transcript', async () => {
+      const lsp = server();
+      const h = harness({ mode: 'auto-edit', problems: lsp.problems, script: [write, { text: 'Done.' }] });
+      h.session.send('build it');
+      await h.session.idle();
+
+      expect(lsp.asked).toEqual([{ root: h.projectDir, file: path.join(h.projectDir, 'feature.ts') }]);
+      const told = result(h);
+      expect(told?.text).toContain('Created feature.ts (2 lines).');
+      expect(told?.text).toContain('TypeScript reports 1 problem in feature.ts as it is now. Fix what this change caused');
+      expect(told?.text).toContain("> 1:14  TS2322  Type 'string' is not assignable to type 'number'.");
+      expect(told?.display).toMatchObject({ kind: 'edit', problems: { source: 'TypeScript', total: 1, items: [{ line: 1, column: 14, code: 2322 }] } });
+      // The model's next request carries the note, so it can fix the error in its next step.
+      expect(JSON.stringify(lastRequest(h).messages)).toContain('TS2322');
+    });
+
+    it('says nothing when the file is clean, and never fails an edit because the server did', async () => {
+      const clean = harness({ mode: 'auto-edit', problems: server(() => Promise.resolve({ source: 'TypeScript', total: 0, problems: [] })).problems, script: [write, { text: 'Done.' }] });
+      clean.session.send('build it');
+      await clean.session.idle();
+      expect(result(clean)).toMatchObject({ text: 'Created feature.ts (2 lines).' });
+      expect(result(clean)?.display).not.toHaveProperty('problems');
+
+      const broken = harness({ mode: 'auto-edit', problems: server(() => Promise.reject(new Error('server crashed'))).problems, script: [write, { text: 'Done.' }] });
+      broken.session.send('build it');
+      await broken.session.idle();
+      expect(result(broken)).toMatchObject({ text: 'Created feature.ts (2 lines).' });
+      expect(fs.readFileSync(path.join(broken.projectDir, 'feature.ts'), 'utf8')).toContain('export const on');
+    });
+
+    it('is not asked in a project that is not trusted, nor with the setting off', async () => {
+      const untrusted = server();
+      const h = harness({ mode: 'auto-edit', trusted: () => false, problems: untrusted.problems, script: [write, { text: 'Done.' }] });
+      h.session.send('build it');
+      await h.session.idle();
+      expect(untrusted.asked).toEqual([]);
+      expect(result(h)?.text).toBe('Created feature.ts (2 lines).');
+
+      const off = server();
+      const switchedOff = harness({ mode: 'auto-edit', checkEdits: false, problems: off.problems, script: [write, { text: 'Done.' }] });
+      switchedOff.session.send('build it');
+      await switchedOff.session.idle();
+      expect(off.asked).toEqual([]);
+    });
+
+    it('is not asked in a chat', async () => {
+      const lsp = server();
+      const h = harness({ kind: 'chat', problems: lsp.problems, script: [{ text: 'Hello.' }] });
+      h.session.send('hi');
+      await h.session.idle();
+      expect(lsp.asked).toEqual([]);
+    });
   });
 
   it('adds a verification pass in Taproot mode once the turn changed something', async () => {
@@ -1717,6 +1813,35 @@ describe('prompt commands', () => {
     code.session.send('/research what changed in HTTP/3');
     await code.session.idle();
     expect(JSON.stringify(code.provider.requests[0]!.messages.at(-1))).toContain('Research this and write a report: what changed in HTTP/3');
+  });
+
+  it('expands /diagram into the brief for a drawn diagram, in a chat as in a code session, and asks when nothing is named', async () => {
+    const code = harness({ script: [{ text: 'a' }, { text: 'b' }] });
+    code.session.send('/diagram how a request reaches the database');
+    await code.session.idle();
+    code.session.send('/diagram');
+    await code.session.idle();
+    const sent = code.provider.requests.map((r) => JSON.stringify(r.messages.at(-1)));
+    expect(sent[0]).toContain('Draw a diagram: how a request reaches the database');
+    expect(sent[0]).toContain('Use the diagram-design skill: read its SKILL.md first and follow it');
+    expect(sent[1]).toContain('Ask me what I want drawn, then draw it as a diagram.');
+    expect(sent[1]).not.toContain('Use the diagram-design skill');
+    expect(code.store.listMessages('session-1').filter((m) => m.role === 'user').map((m) => m.meta.typed)).toEqual(['/diagram how a request reaches the database', '/diagram']);
+
+    const { BUILTIN_COMMANDS, PROMPT_COMMANDS, diagramPrompt } = await import('../../src/main/agent/slashCommands');
+    expect(diagramPrompt('')).toBe('Ask me what I want drawn, then draw it as a diagram.');
+    expect(diagramPrompt('how a request reaches the database')).toBe(
+      'Draw a diagram: how a request reaches the database\n\nUse the diagram-design skill: read its SKILL.md first and follow it, including the reference it names for the kind of diagram you choose. Read the code or the material the diagram is about before you draw, so that every box and arrow is true. Save the diagram as one .html file and tell me where it is.'
+    );
+    expect(BUILTIN_COMMANDS.find((c) => c.name === 'diagram')).toMatchObject({ description: 'Draw a diagram of something, shown in the conversation', argumentHint: '[what to draw]' });
+    expect(BUILTIN_COMMANDS.findIndex((c) => c.name === 'diagram')).toBe(BUILTIN_COMMANDS.findIndex((c) => c.name === 'research') + 1);
+    expect(PROMPT_COMMANDS.has('diagram')).toBe(true);
+    expect(CODE_ONLY_COMMANDS.has('diagram')).toBe(false);
+
+    const chat = harness({ kind: 'chat', script: [{ text: 'a' }] });
+    chat.session.send('/diagram the water cycle');
+    await chat.session.idle();
+    expect(JSON.stringify(chat.provider.requests[0]!.messages.at(-1))).toContain('Draw a diagram: the water cycle');
   });
 
   it('/plan turns Plan mode on and asks for a plan of what was typed', async () => {
@@ -2267,6 +2392,111 @@ describe('limits for one turn', () => {
     const h = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 60_000, outputTokens: 50 } }, { text: 'Done.' }] });
     h.session.send('work');
     await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+  });
+});
+
+describe('limits for a session, a project and a day', () => {
+  const pauses = (h: Harness): string[] => h.events.flatMap((e) => (e.type === 'notice' && e.text.startsWith('Paused') ? [e.text] : []));
+
+  it('pauses when the session has used its tokens, and the limit holds across turns', async () => {
+    const h = harness({
+      spendBudget: { sessionTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 1500, outputTokens: 100 } },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], usage: { inputTokens: 500, outputTokens: 0 } },
+        { text: 'never asked for' }
+      ]
+    });
+    await h.turn('work');
+    expect(pauses(h)).toEqual(['Paused after about 2,100 tokens in this session, past the limit of 2,000 for one session set in Settings → Permissions.']);
+    expect(h.events.find((e) => e.type === 'notice' && e.text.startsWith('Paused'))).toMatchObject({ action: 'continue', level: 'warning' });
+    expect(h.provider.requests).toHaveLength(2);
+    expect(h.session.summary.status).toBe('idle');
+
+    h.session.retry();
+    await h.session.idle();
+    // Continuing is a new turn, but the session's total is still past the limit: it pauses again without asking the model anything.
+    expect(pauses(h)).toHaveLength(2);
+    expect(h.provider.requests).toHaveLength(2);
+  });
+
+  it("pauses past the day's token limit, counting what the day had already used", async () => {
+    const now = new Date('2026-09-30T12:00:00Z');
+    const h = harness({
+      now: () => now,
+      spendBudget: { dayTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 140, outputTokens: 10 } },
+        { text: 'never asked for' }
+      ]
+    });
+    // Another ask on this computer already used most of the day's allowance.
+    h.store.recordUsage({
+      day: usageDay(now),
+      providerId: 'fake',
+      modelId: 'fake-model',
+      usage: { inputTokens: 1800, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: null
+    });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(1);
+    expect(pauses(h)).toEqual(['Paused after about 2,050 tokens today, past the limit of 2,000 for one day set in Settings → Permissions.']);
+  });
+
+  it("pauses past the project's token limit, counting every session in the folder", async () => {
+    const h = harness({
+      spendBudget: { projectTokens: 2000 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 1400, outputTokens: 100 } },
+        { text: 'never asked for' }
+      ]
+    });
+    // Another session of the same project has used most of what the project may.
+    const other = h.store.getSummary('session-1');
+    h.store.add({ ...other, id: 'session-2', title: 'Other work', usage: { ...other.usage, totals: { inputTokens: 1800, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } } });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(1);
+    expect(pauses(h)).toEqual(['Paused after about 3,400 tokens in this project, past the limit of 2,000 for one project set in Settings → Permissions.']);
+  });
+
+  it('pauses at what the session has cost, from what the provider reports it charged', async () => {
+    const h = harness({
+      spendBudget: { sessionCostUsd: 0.5 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], costUsd: 0.3 },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }], costUsd: 0.3 },
+        { text: 'never asked for' }
+      ]
+    });
+    await h.turn('work');
+    expect(h.provider.requests).toHaveLength(2);
+    expect(pauses(h)).toEqual([
+      'Paused at about $0.60 for this session, past the limit of $0.50 for one session set in Settings → Permissions. The amount comes from published prices and can differ from your bill.'
+    ]);
+  });
+
+  it('says once that a model with no published price is outside the cost limits, and lets it work', async () => {
+    const h = harness({
+      spendBudget: { sessionCostUsd: 0.5 },
+      script: [
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] },
+        { toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Done.' }
+      ]
+    });
+    await h.turn('work');
+    expect(texts(h).at(-1)).toBe('assistant:Done.');
+    expect(pauses(h)).toEqual([]);
+    const said = h.events.filter((e) => e.type === 'notice' && /cost limit for a session can't follow/.test(e.text));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ text: "The cost limit for a session can't follow Fake Model: it has no published price. Its requests are counted in tokens only." });
+  });
+
+  it('sets no limit unless Settings does', async () => {
+    const h = harness({ script: [{ toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }], usage: { inputTokens: 60_000, outputTokens: 50 }, costUsd: 9 }, { text: 'Done.' }] });
+    await h.turn('work');
     expect(texts(h).at(-1)).toBe('assistant:Done.');
     expect(pauses(h)).toEqual([]);
   });

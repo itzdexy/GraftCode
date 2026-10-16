@@ -1,5 +1,7 @@
 /** Unified-diff parsing and side-by-side pairing for the diff renderer (pure; unit-tested). */
 
+import { coveredLines } from '@shared/secrets';
+
 export interface DiffRow {
   type: 'hunk' | 'add' | 'del' | 'ctx' | 'note';
   text: string;
@@ -39,6 +41,42 @@ export function parsePatch(patch: string): DiffRow[] {
     else rows.push({ type: 'ctx', text: line.startsWith(' ') ? line.slice(1) : line, oldNo: oldNo++, newNo: newNo++, hunk });
   }
   return rows;
+}
+
+/**
+ * The line of the file as it is now where a patch's first change is: its
+ * first added line, or the line that took the place of what it removed.
+ */
+export function firstChangedLine(patch: string): number {
+  const rows = parsePatch(patch);
+  let last = 0;
+  for (const [index, row] of rows.entries()) {
+    if (row.type === 'hunk') last = Number(HUNK.exec(row.text)?.[2] ?? 1) - 1;
+    else if (row.type === 'add') return Math.max(1, row.newNo ?? 1);
+    else if (row.type === 'del') {
+      const next = rows.slice(index + 1).find((r) => r.hunk === row.hunk && r.newNo !== null);
+      return Math.max(1, next?.newNo ?? last + 1);
+    } else if (row.newNo !== null) last = row.newNo;
+  }
+  return 1;
+}
+
+/** A line a comment can be on: of the file as it was (`old`, for a removed line) or as it is now. */
+export interface CommentAnchor {
+  line: number;
+  side: 'old' | 'new';
+}
+
+/** Where a comment on this row sits: the old line of a removed row, the new line of every other; nothing for headers and notes. */
+export function commentAnchor(row: DiffRow): CommentAnchor | null {
+  if (row.type === 'del') return row.oldNo === null ? null : { line: row.oldNo, side: 'old' };
+  if (row.type === 'add' || row.type === 'ctx') return row.newNo === null ? null : { line: row.newNo, side: 'new' };
+  return null;
+}
+
+/** The comments shown under a line: those that end on it, on its side. */
+export function commentsAt<T extends { endLine: number; side: 'old' | 'new' }>(list: readonly T[], anchor: CommentAnchor): T[] {
+  return list.filter((comment) => comment.endLine === anchor.line && comment.side === anchor.side);
 }
 
 /** Rows for hunks already split out by the git layer (header + body lines each). */
@@ -88,4 +126,223 @@ export function countChanges(rows: DiffRow[]): { added: number; removed: number 
     else if (r.type === 'del') removed++;
   }
   return { added, removed };
+}
+
+// ---- changes inside a line ---------------------------------------------------
+
+/** A run of characters in a line, from `start` up to but not including `end`. */
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/** Words, runs of blank space, and every other character on its own (a whole one: an emoji is not cut in two). */
+const TOKEN = /[A-Za-z0-9_$]+|\s+|[^\sA-Za-z0-9_$]/gu;
+const IS_WORD = /^[A-Za-z0-9_$]/;
+/** Pairs of lines with more tokens than this (multiplied) are left unmarked: the table would be too large. */
+const MAX_TABLE = 250_000;
+/** All the pairs of one diff share this many table cells. Once they are spent the rest of its lines go unmarked rather than hold up the window. */
+const MAX_DIFF_CELLS = 2_000_000;
+/** Lines that share fewer of their words than this are different lines, not one line that changed. */
+const MIN_SHARED = 0.3;
+
+const tokensOf = (line: string): string[] => line.match(TOKEN) ?? [];
+
+/** One table for every pair, grown to the largest one asked for: a diff of a thousand lines would otherwise allocate a thousand. */
+let table = new Uint32Array(0);
+
+/** Which tokens of each line belong to their longest common subsequence. */
+function kept(a: string[], b: string[]): { a: boolean[]; b: boolean[] } {
+  const width = b.length + 1;
+  const size = (a.length + 1) * width;
+  if (table.length < size) table = new Uint32Array(size);
+  else table.fill(0, 0, size);
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      table[i * width + j] = a[i] === b[j] ? (table[(i + 1) * width + j + 1] ?? 0) + 1 : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0);
+    }
+  }
+  const keepA = a.map(() => false);
+  const keepB = b.map(() => false);
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      keepA[i++] = true;
+      keepB[j++] = true;
+    } else if ((table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)) i++;
+    else j++;
+  }
+  return { a: keepA, b: keepB };
+}
+
+/** The tokens that were not kept, as spans; marks with only blank space between them join into one. */
+function spansOf(tokens: string[], keep: boolean[]): Span[] {
+  const spans: Span[] = [];
+  let at = 0;
+  // Where kept blank space began right after a mark: it may yet turn out to sit between two marks.
+  let blankAfterMark: number | null = null;
+  tokens.forEach((token, index) => {
+    const start = at;
+    at += token.length;
+    if (keep[index]) {
+      blankAfterMark = /^\s+$/.test(token) && spans.at(-1)?.end === start ? start : null;
+      return;
+    }
+    const last = spans.at(-1);
+    if (last && (last.end === start || blankAfterMark === last.end)) last.end = at;
+    else spans.push({ start, end: at });
+    blankAfterMark = null;
+  });
+  return spans;
+}
+
+/**
+ * What changed between a removed line and the line that replaced it, as
+ * spans in each. Null when nothing can usefully be marked: the lines are
+ * the same, one is empty, or they share too little to be one line edited.
+ */
+export function changedSpans(before: string, after: string): { before: Span[]; after: Span[] } | null {
+  if (before === after || before.length === 0 || after.length === 0) return null;
+  const a = tokensOf(before);
+  const b = tokensOf(after);
+  return a.length * b.length > MAX_TABLE ? null : spansBetween(a, b);
+}
+
+/** changedSpans for two lines already cut into tokens. */
+function spansBetween(a: string[], b: string[]): { before: Span[]; after: Span[] } | null {
+  const keep = kept(a, b);
+  const words = (tokens: string[], mask?: boolean[]): number => tokens.reduce((n, token, i) => (IS_WORD.test(token) && (mask === undefined || mask[i]) ? n + token.length : n), 0);
+  const fewest = Math.min(words(a), words(b));
+  const shared = fewest === 0 ? a.some((token, i) => keep.a[i] && !/^\s+$/.test(token)) : words(a, keep.a) / fewest >= MIN_SHARED;
+  if (!shared) return null;
+  return { before: spansOf(a, keep.a), after: spansOf(b, keep.b) };
+}
+
+/**
+ * The changed words of every line that has a partner: within a change, the
+ * first removed line pairs with the first added one, the second with the
+ * second, and so on. Keyed by the row's index in `rows`. The whole diff has
+ * `cells` table cells to spend; pairs that no longer fit are left unmarked.
+ */
+export function inlineSpans(rows: DiffRow[], cells = MAX_DIFF_CELLS): Map<number, Span[]> {
+  const out = new Map<number, Span[]>();
+  let left = cells;
+  let dels: number[] = [];
+  let adds: number[] = [];
+  const flush = (): void => {
+    for (let i = 0; i < Math.min(dels.length, adds.length) && left > 0; i++) {
+      const del = dels[i];
+      const add = adds[i];
+      if (del === undefined || add === undefined) continue;
+      const before = rows[del]?.text ?? '';
+      const after = rows[add]?.text ?? '';
+      if (before === after || before.length === 0 || after.length === 0) continue;
+      const a = tokensOf(before);
+      const b = tokensOf(after);
+      const cost = a.length * b.length;
+      if (cost > MAX_TABLE || cost > left) continue;
+      left -= cost;
+      const spans = spansBetween(a, b);
+      if (!spans) continue;
+      if (spans.before.length > 0) out.set(del, spans.before);
+      if (spans.after.length > 0) out.set(add, spans.after);
+    }
+    dels = [];
+    adds = [];
+  };
+  rows.forEach((row, index) => {
+    if (row.type === 'del') {
+      if (adds.length > 0) flush();
+      dels.push(index);
+    } else if (row.type === 'add') adds.push(index);
+    else flush();
+  });
+  flush();
+  return out;
+}
+
+// ---- a hunk's two texts ------------------------------------------------------
+
+/** Where a row's line is in the two texts of its hunk. */
+export interface RowPlace {
+  hunk: number;
+  side: 'before' | 'after';
+  line: number;
+}
+
+/**
+ * A hunk holds two texts: its lines before the change and its lines after.
+ * Syntax colours and secrets are found in whole texts, not in single lines,
+ * so both are put together here, with the place of every row in them. A
+ * context line is in both and is placed in the one after. Hunks stay apart:
+ * a comment left open at the end of one says nothing about the next.
+ */
+export function hunkTexts(rows: DiffRow[]): { texts: Array<{ before: string; after: string }>; placeOf: Array<RowPlace | null> } {
+  const lines: Array<{ before: string[]; after: string[] }> = [];
+  const placeOf = rows.map((row): RowPlace | null => {
+    if (row.type === 'hunk' || row.type === 'note') return null;
+    // Both parsers number hunks from 0 without gaps, in the order of the rows.
+    while (lines.length <= row.hunk) lines.push({ before: [], after: [] });
+    const sides = lines[row.hunk];
+    if (!sides) return null;
+    if (row.type === 'del') return { hunk: row.hunk, side: 'before', line: sides.before.push(row.text) - 1 };
+    if (row.type === 'ctx') sides.before.push(row.text);
+    return { hunk: row.hunk, side: 'after', line: sides.after.push(row.text) - 1 };
+  });
+  return { texts: lines.map((sides) => ({ before: sides.before.join('\n'), after: sides.after.join('\n') })), placeOf };
+}
+
+/**
+ * The rows that hold a key, a token or a password, by index, with what each
+ * shows while it is covered. Empty for a diff without secrets.
+ */
+export function coveredRows(rows: DiffRow[]): Map<number, string> {
+  const { texts, placeOf } = hunkTexts(rows);
+  const sides = texts.map((text) => ({ before: coveredLines(text.before), after: coveredLines(text.after) }));
+  const covers = new Map<number, string>();
+  placeOf.forEach((at, index) => {
+    const side = at === null ? undefined : sides[at.hunk]?.[at.side];
+    if (at !== null && side?.covered[at.line]) covers.set(index, side.lines[at.line] ?? '');
+  });
+  return covers;
+}
+
+/** A piece of a line: its text, the syntax token it belongs to (-1 without highlighting) and whether it changed. */
+export interface Piece {
+  text: string;
+  token: number;
+  changed: boolean;
+}
+
+/**
+ * Cuts a line where its syntax tokens and its changed spans begin and end,
+ * so each piece has one colour and one background. `tokenLengths` are the
+ * lengths of the line's tokens in order; they are ignored when they do not
+ * add up to the line.
+ */
+export function pieces(text: string, tokenLengths: number[] | null, spans: Span[]): Piece[] {
+  if (text.length === 0) return [];
+  const starts: number[] = [];
+  let total = 0;
+  for (const length of tokenLengths ?? []) {
+    starts.push(total);
+    total += length;
+  }
+  const tokens = tokenLengths !== null && total === text.length ? starts : [];
+  const cuts = new Set<number>([0, text.length, ...tokens]);
+  for (const span of spans) {
+    cuts.add(Math.max(0, Math.min(text.length, span.start)));
+    cuts.add(Math.max(0, Math.min(text.length, span.end)));
+  }
+  const sorted = [...cuts].sort((x, y) => x - y);
+  const out: Piece[] = [];
+  let token = 0;
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    const start = sorted[i] ?? 0;
+    const end = sorted[i + 1] ?? 0;
+    while (token + 1 < tokens.length && (tokens[token + 1] ?? 0) <= start) token++;
+    out.push({ text: text.slice(start, end), token: tokens.length > 0 ? token : -1, changed: spans.some((span) => start >= span.start && end <= span.end) });
+  }
+  return out;
 }

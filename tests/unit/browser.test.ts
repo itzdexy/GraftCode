@@ -3,8 +3,9 @@ import vm from 'node:vm';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nextZoom, type PageSnapshot } from '../../src/main/browser/browserPanel';
+import { sizeForWidth, type PageCheck } from '../../src/shared/schemas/panels';
 import { localServers, portOpen } from '../../src/main/browser/servers';
-import { hasText, locate, SNAPSHOT } from '../../src/main/browser/pageScripts';
+import { hasText, highlight, locate, PAGE_FACTS, SNAPSHOT } from '../../src/main/browser/pageScripts';
 import { decide, isLocalUrl, type PermissionEnv } from '../../src/main/permissions/engine';
 import { sandboxUrl } from '../../src/main/sandbox/sandbox';
 import { browserTool, formatSnapshot } from '../../src/main/tools/browserTool';
@@ -24,7 +25,25 @@ const page: PageSnapshot = {
   ]
 };
 
+const checked: PageCheck = {
+  url: 'http://localhost:5173/',
+  title: 'Sign up',
+  width: 390,
+  findings: [{ rule: 'image', severity: 'error', message: 'A picture with no alt text.', selector: 'img.hero', label: 'hero.jpg' }],
+  more: 0,
+  looked: { texts: 12, images: 1, controls: 3, headings: 2 },
+  unjudged: 0,
+  partial: false
+};
+
 describe('browser panel helpers', () => {
+  it('looks at a page as tall as the device that is about as wide', () => {
+    expect(sizeForWidth(390)).toEqual({ width: 390, height: 844 });
+    expect(sizeForWidth(768)).toEqual({ width: 768, height: 1024 });
+    expect(sizeForWidth(1280)).toEqual({ width: 1280, height: 800 });
+    expect(sizeForWidth(1920)).toEqual({ width: 1920, height: 1080 });
+  });
+
   it('zooms in steps and resets to 100%', () => {
     expect(nextZoom(1, 'in')).toBe(1.1);
     expect(nextZoom(1, 'out')).toBe(0.9);
@@ -68,6 +87,25 @@ describe('browser panel helpers', () => {
       expect(vm.runInContext(locate({ ref: 1 }), context)).toMatchObject({ ok: false });
       expect(vm.runInContext(hasText('hello'), context)).toBe(true);
     }
+  });
+
+  it('gathers the facts of a page that is still blank, as often as it is asked', () => {
+    const context: Record<string, unknown> = {
+      document: { title: 'Blank', documentElement: { getAttribute: () => 'en', clientWidth: 800, scrollWidth: 800 }, body: null, querySelector: () => null },
+      location: { href: 'http://localhost:5173/' }
+    };
+    context.window = context;
+    vm.createContext(context);
+    for (let i = 0; i < 2; i++) {
+      expect(vm.runInContext(PAGE_FACTS, context)).toEqual({
+        url: 'http://localhost:5173/', title: 'Blank', lang: 'en', viewportMeta: false, width: 800, scrollWidth: 800,
+        texts: [], images: [], controls: [], headings: [], wide: [], partial: false
+      });
+    }
+  });
+
+  it('embeds the selector to point at as data, never as code', () => {
+    expect(highlight('"); alert(1); ("')).toContain(JSON.stringify('"); alert(1); ("'));
   });
 
   it('embeds what the agent typed as data, never as code', () => {
@@ -115,7 +153,14 @@ describe('Browser tool', () => {
       return Promise.resolve(url);
     },
     snapshot: () => Promise.resolve(page),
-    capture: () => Promise.resolve({ mediaType: 'image/png', data: 'iVBORw0KGgo=', width: 800, height: 600 }),
+    capture: (width) => {
+      calls.push(`capture ${String(width)}`);
+      return Promise.resolve({ mediaType: 'image/png', data: 'iVBORw0KGgo=', width: width ?? 800, height: 600 });
+    },
+    check: (width) => {
+      calls.push(`check ${String(width)}`);
+      return Promise.resolve({ ...checked, width: width ?? 1280 });
+    },
     click: (target) => {
       calls.push(`click ${JSON.stringify(target)}`);
       return Promise.resolve('Create account');
@@ -141,10 +186,29 @@ describe('Browser tool', () => {
     await browserTool.execute({ action: 'click', ref: 3 }, ctx);
     await browserTool.execute({ action: 'type', ref: 1, text: 'Ada', submit: true }, ctx);
     expect(calls).toEqual(['open http://localhost:5173', 'click {"ref":3}', 'type {"ref":1} Ada true']);
+    calls.length = 0;
     const shot = await browserTool.execute({ action: 'screenshot' }, ctx);
     expect(shot.content.some((b) => b.type === 'image')).toBe(true);
     const log = await browserTool.execute({ action: 'console' }, ctx);
     expect(JSON.stringify(log.content)).toContain('[error] Uncaught TypeError: x is undefined (http://localhost:5173/app.js:12)');
+  });
+
+  it('checks the page as it is, or laid out at a width', async () => {
+    calls.length = 0;
+    const asShown = await browserTool.execute({ action: 'check' }, ctx);
+    expect(asShown.isError).toBe(false);
+    expect(JSON.stringify(asShown.content)).toContain('Checked Sign up (http://localhost:5173/) at 1280 px wide: 1 problem.');
+    const phone = await browserTool.execute({ action: 'check', width: 390 }, ctx);
+    expect(JSON.stringify(phone.content)).toContain('- A picture with no alt text. At img.hero');
+    expect(phone.display).toEqual({ kind: 'browser', action: 'check', url: 'http://localhost:5173/', title: 'Sign up', detail: 'Checked at 390 px wide: 1 problem' });
+    expect(calls).toEqual(['check undefined', 'check 390']);
+  });
+
+  it('takes a screenshot at a width when one is asked for', async () => {
+    calls.length = 0;
+    const shot = await browserTool.execute({ action: 'screenshot', width: 390 }, ctx);
+    expect(calls).toEqual(['capture 390']);
+    expect(JSON.stringify(shot.content)).toContain('(390×600)');
   });
 
   it('explains what is missing instead of guessing', async () => {
@@ -180,6 +244,7 @@ describe('Browser permissions', () => {
     expect(decide(await call({ action: 'read' }), env('ask')).behavior).toBe('allow');
     expect(decide(await call({ action: 'click', ref: 2 }), env('ask')).behavior).toBe('allow');
     expect(decide(await call({ action: 'read' }), env('plan')).behavior).toBe('allow');
+    expect(decide(await call({ action: 'check', width: 390 }), env('plan')).behavior).toBe('allow');
     expect(decide(await call({ action: 'click', ref: 2 }), env('plan')).behavior).toBe('deny');
     expect(decide(await call({ action: 'type', ref: 1, text: 'x' }), env('plan')).behavior).toBe('deny');
   });

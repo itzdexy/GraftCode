@@ -3,6 +3,7 @@ import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { addUsage, EMPTY_USAGE, type EffortLevel, type Usage } from '@shared/schemas/common';
 import type { LlmMessage, StoredMessage } from '@shared/schemas/messages';
 import type { ModelInfo } from '@shared/schemas/models';
+import { sizeForWidth } from '@shared/schemas/panels';
 import type { Source } from '@shared/sources';
 import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
 import type { SessionStatus, SessionSummary } from '@shared/schemas/sessions';
@@ -24,9 +25,10 @@ import type { MissionController } from './missionController';
 import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
+import { skillReadRoots } from './skills';
 import type { LoopJournal } from './journal';
 import { shouldCompact } from './tokens';
-import { TurnBudget } from './turnBudget';
+import { spentTokens, SpendBudget, TurnBudget, type SpendStart } from './turnBudget';
 
 /** A sub-agent's steps when Settings sets no limit: it reports back on one delegated task, so it stays bounded. */
 const SUBAGENT_ITERATIONS = 200;
@@ -67,8 +69,8 @@ export interface HostPorts {
   projectRoot(): string | null;
   settingsRoot(): string | null;
   workingDir(): string;
-  /** CreateFile and RunCode, for chats with a model that uses tools. */
-  chatWork(model: ModelInfo): { files: boolean; code: boolean };
+  /** CreateFile, RunCode and Skill, for chats with a model that uses tools. */
+  chatWork(model: ModelInfo): { files: boolean; code: boolean; skills: boolean };
   effortFor(model: ModelInfo): EffortLevel | null;
   privacy(): RequestPrivacy;
   /** The prompt and the tools of the running turn; null before the session's first. */
@@ -101,6 +103,8 @@ export class SessionHost {
   private promptChain: Promise<unknown> = Promise.resolve();
   /** What the running turn has used against the limits from Settings; null when none is set. */
   private turn: TurnBudget | null = null;
+  /** What this session and today have used across turns, against their limits; null when none is set. */
+  private spend: SpendBudget | null = null;
 
   constructor(private readonly ports: HostPorts) {}
 
@@ -127,6 +131,39 @@ export class SessionHost {
   beginTurn(): void {
     const limits = this.deps.preferences().turnBudget;
     this.turn = Object.values(limits).some((limit) => limit !== null) ? new TurnBudget(limits, () => this.deps.now().getTime()) : null;
+    // A chat has no folder, so no project has anything to count against: the project limits are left out of its budget.
+    const forSpend = this.deps.preferences().spendBudget;
+    const spend = this.summary.projectPath === null ? { ...forSpend, projectTokens: null, projectCostUsd: null } : forSpend;
+    this.spend = Object.values(spend).some((limit) => limit !== null) ? new SpendBudget(spend, this.usedSoFar()) : null;
+  }
+
+  /** What this session, its project and today had already used when the turn started, for the limits that span turns. */
+  private usedSoFar(): SpendStart {
+    const usage = this.summary.usage;
+    const project = { tokens: 0, costUsd: 0 };
+    const path = this.summary.projectPath;
+    if (path !== null) {
+      try {
+        const used = this.deps.store.projectUsage(path);
+        project.tokens = spentTokens(used.totals);
+        project.costUsd = used.costUsd;
+      } catch (error) {
+        // As with the day's totals: a record of the work, never a reason to fail it.
+        this.deps.log('warn', "Couldn't read the project's usage", { session: this.id, message: (error as Error).message });
+      }
+    }
+    const day = { tokens: 0, costUsd: 0, unpriced: 0 };
+    try {
+      for (const row of this.deps.store.usageSince(usageDay(this.deps.now()))) {
+        day.tokens += spentTokens(row.usage);
+        day.costUsd += row.costUsd;
+        day.unpriced += row.unpriced;
+      }
+    } catch (error) {
+      // The day's totals are a record of the work, never a reason to fail it: without them the day limits start from what this turn uses.
+      this.deps.log('warn', "Couldn't read the day's usage", { session: this.id, message: (error as Error).message });
+    }
+    return { session: { tokens: spentTokens(usage.totals), costUsd: usage.costUsd ?? 0 }, project, day };
   }
 
   // ---- what the user is being asked ----------------------------------------
@@ -206,7 +243,8 @@ export class SessionHost {
       rules,
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
       allowNetwork: this.summary.kind === 'chat',
-      sandboxed: this.deps.shells.sandboxFor(this.id) !== null
+      sandboxed: this.deps.shells.sandboxFor(this.id) !== null,
+      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills)
     };
   }
 
@@ -352,10 +390,13 @@ export class SessionHost {
         this.deps.store.updateSession(this.id, { usage: next });
         this.emit({ type: 'usage', usage: next });
         this.countForToday(answering.model.ref, usage, costUsd);
-        const unfollowed = this.turn?.add(usage, costUsd, answering.model.label) ?? null;
+        // The turn's own limits first; the limits that span turns follow the same requests.
+        const turnNote = this.turn?.add(usage, costUsd, answering.model.label) ?? null;
+        const spendNote = this.spend?.add(usage, costUsd, answering.model.label) ?? null;
+        const unfollowed = turnNote ?? spendNote;
         if (unfollowed) this.ports.notice('warning', unfollowed);
       },
-      overBudget: () => this.turn?.exceeded() ?? null,
+      overBudget: () => this.turn?.exceeded() ?? this.spend?.exceeded() ?? null,
       onRetry: () => this.turn?.retry(),
       fallback: async (_error, signal) => {
         const backup = await this.backupFor(answering.model, needs, signal);
@@ -388,7 +429,8 @@ export class SessionHost {
         return opened;
       },
       snapshot: () => panel().snapshot(),
-      capture: () => panel().capture(),
+      capture: (width) => panel().capture(width === undefined ? undefined : sizeForWidth(width)),
+      check: (width) => panel().check(width === undefined ? undefined : sizeForWidth(width)),
       click: (target) => panel().click(target),
       type: (target, text, submit) => panel().type(target, text, submit),
       press: (key) => panel().press(key),
@@ -418,6 +460,11 @@ export class SessionHost {
       toolUseId,
       mcpRoot: this.summary.kind === 'code' ? this.ports.settingsRoot() : null,
       trustedProject: scope.trusted && this.summary.kind === 'code',
+      // The same gate as the SemanticCode tool: a code session in a project the user trusts. Settings can switch it off.
+      checkFile: (checkRoot, file) =>
+        scope.root !== null && scope.trusted && this.summary.kind === 'code' && this.deps.problems && this.deps.preferences().checkEdits
+          ? this.deps.problems(checkRoot, file, signal)
+          : Promise.resolve(null),
       cwd,
       projectRoot: scope.root ?? cwd,
       platform: this.deps.platform,
@@ -479,6 +526,7 @@ export class SessionHost {
       computer: this.deps.computer,
       publicWebOnly: this.summary.kind === 'chat',
       chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
+      builtinSkills: work.skills ? this.deps.builtinSkills : null,
       makeDocument:
         work.files && this.deps.documents
           ? (kind, name, source, s) =>
@@ -501,6 +549,7 @@ export class SessionHost {
         this.emit({ type: 'usage', usage: next });
         this.countForToday(MEDIA_USAGE, EMPTY_USAGE, costUsd);
         this.turn?.spend(costUsd);
+        this.spend?.spend(costUsd);
       },
       deferredTools: this.ports.deferredTools(model)
     };

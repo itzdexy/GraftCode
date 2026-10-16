@@ -274,6 +274,54 @@ export function PermissionsSection() {
         />
       </Group>
 
+      <Group
+        title="Limits for a session, a project or a day"
+        description="Like the limits above, reaching one pauses and offers to continue; unlike them, a session, a project or a day keeps counting across turns. A session's total is everything it has used, a project's is everything its sessions have used, the day's is everything used on this computer today. None is set until you set one."
+      >
+        <SettingRow
+          label="Tokens in a session"
+          description="Pause once this session has used about this many tokens across its turns, with the agents and groups they started. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens in a session" value={settings.behavior.sessionTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(sessionTokens) => saveSettings({ behavior: { sessionTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a session"
+          description="Pause once this session has cost about this much across its turns. Worked out from published prices, so your bill can differ; a model with no published price can't be followed."
+          control={
+            <LimitSelect label="Cost of a session" value={settings.behavior.sessionCostUsd} choices={COST_LIMITS} format={dollars} onChange={(sessionCostUsd) => saveSettings({ behavior: { sessionCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens in a project"
+          description="Pause once this project's sessions have used about this many tokens together, this one and every other session in the folder. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens in a project" value={settings.behavior.projectTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(projectTokens) => saveSettings({ behavior: { projectTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a project"
+          description="Pause once this project's sessions have cost about this much together, this one and every other session in the folder. Worked out from published prices, so your bill can differ; a model with no published price can't be followed."
+          control={
+            <LimitSelect label="Cost of a project" value={settings.behavior.projectCostUsd} choices={COST_LIMITS} format={dollars} onChange={(projectCostUsd) => saveSettings({ behavior: { projectCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens in a day"
+          description="Pause once everything used on this computer today adds up to about this many tokens, this session and every other. Yesterday's use is not counted."
+          control={
+            <LimitSelect label="Tokens in a day" value={settings.behavior.dayTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(dayTokens) => saveSettings({ behavior: { dayTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a day"
+          description="Pause once everything used on this computer today has cost about this much. Worked out from published prices, so your bill can differ; requests with no published price are counted and named."
+          control={
+            <LimitSelect label="Cost of a day" value={settings.behavior.dayCostUsd} choices={COST_LIMITS} format={dollars} onChange={(dayCostUsd) => saveSettings({ behavior: { dayCostUsd } })} />
+          }
+        />
+      </Group>
+
       <Group title="Computer use">
         <SettingRow
           label="Let the agent use this computer"
