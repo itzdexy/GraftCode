@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pieces, resultsText, searchSummary, seedFromSelection } from '../../../src/renderer/src/features/panels/searchModel';
+import { pieces, replaceRequest, resultsText, searchSummary, seedFromSelection } from '../../../src/renderer/src/features/panels/searchModel';
 import type { TextSearchQuery, TextSearchResult } from '../../../src/shared/schemas/textSearch';
 
 const query = (text: string, more: Partial<TextSearchQuery> = {}): TextSearchQuery => ({ text, regex: false, caseSensitive: false, wholeWord: false, files: '', ...more });
@@ -78,6 +78,31 @@ describe('the results as text for the agent', () => {
     const text = resultsText(query('API_KEY'), secret);
     expect(text).toContain('.env');
     expect(text).not.toContain('abcdefghijklmnopqrstuvwxyz');
+  });
+});
+
+describe('the message that asks for the matches to be replaced', () => {
+  it('names the search, the replacement and what was found, in that order', () => {
+    expect(replaceRequest(query('total'), 'subtotal', found)).toBe('Replace every match of "total" with "subtotal". The search found 3 lines in 2 files.');
+  });
+
+  it('says how the search looked, so the agent looks the same way', () => {
+    expect(replaceRequest(query('to+tal', { regex: true, caseSensitive: true, wholeWord: true, files: 'src/**' }), 'subtotal', found)).toBe(
+      'Replace every match of the pattern "to+tal" (case matched, whole words, in src/**) with "subtotal". The search found 3 lines in 2 files.'
+    );
+  });
+
+  it('keeps a replacement with quotes in it exactly as typed', () => {
+    expect(replaceRequest(query('total'), 'say "hi"', found)).toContain('with "say \\"hi\\"".');
+  });
+
+  it('never reads as complete when the search was stopped', () => {
+    expect(replaceRequest(query('total'), 'subtotal', { ...found, lines: 2000, truncated: true })).toBe(
+      'Replace every match of "total" with "subtotal". The search found the first 2,000 lines, in 2 files. There are more: narrow the search.'
+    );
+    expect(replaceRequest(query('total'), 'subtotal', { files: [], lines: 0, truncated: true })).toBe(
+      'Replace every match of "total" with "subtotal". The search was stopped before it found anything.'
+    );
   });
 });
 

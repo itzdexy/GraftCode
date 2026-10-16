@@ -6,6 +6,9 @@ import { completeOnboarding, makeGitProject } from './support/onboard';
 let provider: MockProvider;
 let graft: LaunchedApp;
 
+/** The composer once a session is open, where the placeholder is not the home screen's. */
+const SESSION_BOX = /^Ask anything/;
+
 test.beforeEach(async () => {
   provider = await MockProvider.start();
   graft = await launchGraft();
@@ -74,6 +77,19 @@ test('text is found across the project, and a line opens its file at the match',
   // Choosing the tab is asking to search: the keyboard is in the box.
   await expect(box).toBeFocused();
   await expect(panel.getByText('1 line in 1 file', { exact: true })).toBeVisible();
+
+  // A replacement is composed for the agent, not made here: the first press opens where
+  // the replacement is typed, the second writes the request into the message box and
+  // changes nothing. The request says how the search looked and what it found.
+  await panel.getByRole('button', { name: 'Ask Graft to replace the matches' }).click();
+  const replacement = panel.getByRole('textbox', { name: 'Replace with' });
+  await expect(replacement).toBeFocused();
+  await replacement.fill('grand total');
+  await panel.getByRole('button', { name: 'Ask Graft to replace the matches' }).click();
+  await expect(w.getByText('The replace request added to your message')).toBeVisible();
+  await expect(w.getByRole('textbox', { name: SESSION_BOX })).toHaveValue(
+    'Replace every match of "total" (case matched, in *.md) with "grand total". The search found 1 line in 1 file.'
+  );
 
   // The results go to the message box as a file.
   await panel.getByRole('button', { name: 'Send the results to chat' }).click();

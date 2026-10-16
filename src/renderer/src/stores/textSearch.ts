@@ -21,6 +21,8 @@ export interface SessionSearch {
   error: string | null;
   /** The files whose lines are folded away. */
   folded: Record<string, true>;
+  /** What the matches should become; the replace request is composed from this. Nothing is replaced here. */
+  replace: string;
 }
 
 const EMPTY: SessionSearch = {
@@ -30,7 +32,8 @@ const EMPTY: SessionSearch = {
   result: null,
   at: null,
   error: null,
-  folded: {}
+  folded: {},
+  replace: ''
 };
 
 interface TextSearchState {
@@ -42,6 +45,8 @@ interface TextSearchState {
   /** Searches for what is in the box; `at` is the state of the files now. An empty box clears the list. */
   run: (sessionId: string, at: unknown) => Promise<void>;
   toggleFold: (sessionId: string, path: string) => void;
+  /** Sets what the matches should become, as the user typed it. */
+  setReplace: (sessionId: string, text: string) => void;
   /** Asks for the keyboard in the box, with `seed` as the text to look for when there is one. */
   open: (sessionId: string, seed: string | null) => void;
   /**
@@ -84,6 +89,7 @@ export const useTextSearch = create<TextSearchState>((set, get) => {
       const { [path]: was, ...rest } = searchOf(get(), sessionId).folded;
       patch(sessionId, { folded: was ? rest : { ...rest, [path]: true } });
     },
+    setReplace: (sessionId, text) => patch(sessionId, { replace: text }),
     open: (sessionId, seed) => {
       if (seed !== null) patch(sessionId, { query: { ...searchOf(get(), sessionId).query, text: seed } });
       set({ focus: { sessionId, seq: ++focused } });

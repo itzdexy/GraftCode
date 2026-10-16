@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CaseSensitive, ChevronRight, ListFilter, RefreshCw, Regex, Search, Send, WholeWord } from 'lucide-react';
+import { CaseSensitive, ChevronRight, ListFilter, RefreshCw, Regex, Replace, Search, Send, WholeWord } from 'lucide-react';
 import type { TextSearchQuery } from '@shared/schemas/textSearch';
 import { IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
@@ -8,7 +8,8 @@ import { usePanels } from '../../stores/panels';
 import { searchOf, useTextSearch } from '../../stores/textSearch';
 import { notify } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-import { pieces, resultsText, searchSummary } from './searchModel';
+import { withRequest } from './problemsModel';
+import { pieces, replaceRequest, resultsText, searchSummary } from './searchModel';
 
 /** The box searches this long after the last change to it; Enter searches at once. */
 const TYPING_PAUSE_MS = 250;
@@ -20,21 +21,34 @@ function sameQuery(a: TextSearchQuery, b: TextSearchQuery | null): boolean {
 /**
  * Text search over the session's folder: every line that holds what is in
  * the box, under its file. A line opens its file in the editor at the match.
- * What is in the box and what was found live in the window's state, since
- * this view is taken down while the Files tab shows a file, and reads the
- * same when the user comes back to it.
+ * There is no replace here: the replacement is typed and composed into a
+ * request for the agent, which changes the files in a turn with a checkpoint
+ * and a diff. What is in the box and what was found live in the window's
+ * state, since this view is taken down while the Files tab shows a file, and
+ * reads the same when the user comes back to it.
  */
 export function SearchView({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
   const search = useTextSearch((s) => searchOf(s, sessionId));
   const focus = useTextSearch((s) => s.focus);
   const [narrowing, setNarrowing] = useState(() => search.query.files.length > 0);
+  // Open from the start when a replacement is already typed; the tab is taken down while a file shows, and comes back to it.
+  const [replacing, setReplacing] = useState(() => search.replace.length > 0);
   const boxRef = useRef<HTMLInputElement>(null);
+  const replaceRef = useRef<HTMLInputElement>(null);
+  /** Set by the press that opens the replacement box, so it takes the keyboard then and not when the tab is shown again. */
+  const focusReplace = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const filesNow = useRef(refreshKey);
   useEffect(() => {
     filesNow.current = refreshKey;
   }, [refreshKey]);
   const { query, result } = search;
+
+  useEffect(() => {
+    if (!replacing || !focusReplace.current) return;
+    focusReplace.current = false;
+    replaceRef.current?.focus();
+  }, [replacing]);
 
   // The keyboard goes to the box when it was asked for: by the key, or by choosing the tab. A tab that is only
   // shown again, because its session came back on screen, leaves the keyboard to the message box.
@@ -72,6 +86,24 @@ export function SearchView({ sessionId, refreshKey }: { sessionId: string; refre
     if (!result || !searched) return;
     useUi.getState().sendToComposer(sessionId, { files: [{ name: 'search-results.txt', content: resultsText(searched, result) }] });
     notify('The results added to your message');
+  };
+
+  /**
+   * The first press opens where the replacement is typed; the next ones put the
+   * request in the message box. Nothing is replaced and nothing is sent here:
+   * a change to many files belongs in a turn, with its checkpoint and its diff.
+   */
+  const askReplace = (): void => {
+    if (!replacing) {
+      focusReplace.current = true;
+      setReplacing(true);
+      return;
+    }
+    if (!result || !searched || search.replace.trim().length === 0) return;
+    const ui = useUi.getState();
+    ui.setDraft(sessionId, withRequest(ui.drafts[sessionId] ?? '', replaceRequest(searched, search.replace, result)));
+    ui.focusComposer?.();
+    notify('The replace request added to your message');
   };
 
   const toggles: Array<{ key: 'caseSensitive' | 'wholeWord' | 'regex'; label: string; icon: typeof Regex }> = [
@@ -123,6 +155,17 @@ export function SearchView({ sessionId, refreshKey }: { sessionId: string; refre
             className="h-24 min-w-0 rounded-sm border border-input-border bg-input px-8 font-mono text-xs text-fg outline-none placeholder:text-fg-faint focus:border-border-strong"
           />
         ) : null}
+        {replacing ? (
+          <input
+            ref={replaceRef}
+            value={search.replace}
+            onChange={(event) => useTextSearch.getState().setReplace(sessionId, event.target.value)}
+            aria-label="Replace with"
+            placeholder="Replace with"
+            spellCheck={false}
+            className="h-24 min-w-0 rounded-sm border border-input-border bg-input px-8 font-mono text-xs text-fg outline-none placeholder:text-fg-faint focus:border-border-strong"
+          />
+        ) : null}
       </form>
       <div className="flex h-28 shrink-0 items-center gap-4 border-b border-border-panel pr-4 pl-10 text-sm text-fg-muted">
         <span role="status" className="flex min-w-0 flex-1 items-center gap-6 truncate">
@@ -139,6 +182,9 @@ export function SearchView({ sessionId, refreshKey }: { sessionId: string; refre
         </span>
         <IconButton label="Search again" size="xs" disabled={query.text.trim().length === 0 || search.status === 'searching'} onClick={searchNow}>
           <RefreshCw className="size-12" />
+        </IconButton>
+        <IconButton label="Ask Graft to replace the matches" size="xs" disabled={!result || result.lines === 0 || (replacing && search.replace.trim().length === 0)} onClick={askReplace}>
+          <Replace className="size-13" />
         </IconButton>
         <IconButton label="Send the results to chat" size="xs" disabled={!result || result.lines === 0} onClick={send}>
           <Send className="size-13" />
