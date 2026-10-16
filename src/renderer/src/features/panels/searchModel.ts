@@ -38,10 +38,15 @@ export function pieces(text: string, ranges: Array<[number, number]>): Array<{ t
   return out;
 }
 
+/** How a search looked, in words: the query and the toggles it ran with. */
+function describeQuery(query: TextSearchQuery): string {
+  const how = [query.caseSensitive ? 'case matched' : null, query.wholeWord ? 'whole words' : null, query.files.trim() ? `in ${query.files.trim()}` : null].filter((part): part is string => part !== null);
+  return `${query.regex ? 'the pattern ' : ''}${JSON.stringify(query.text)}${how.length > 0 ? ` (${how.join(', ')})` : ''}`;
+}
+
 /** How a search looked, for whoever reads its results without the tab in front of them. */
 function described(query: TextSearchQuery): string {
-  const how = [query.caseSensitive ? 'case matched' : null, query.wholeWord ? 'whole words' : null, query.files.trim() ? `in ${query.files.trim()}` : null].filter((part): part is string => part !== null);
-  return `Search in the project for ${query.regex ? 'the pattern ' : ''}${JSON.stringify(query.text)}${how.length > 0 ? ` (${how.join(', ')})` : ''}`;
+  return `Search in the project for ${describeQuery(query)}`;
 }
 
 /**
@@ -67,4 +72,17 @@ export function resultsText(query: TextSearchQuery, result: TextSearchResult, li
 export function seedFromSelection(selected: string): string | null {
   const text = selected.trim();
   return text.length === 0 || text.length > MAX_SEED || /[\r\n]/.test(text) ? null : text;
+}
+
+/**
+ * The message that asks for the search's matches to be replaced. It is put in
+ * the message box; the user sends it. There is no replace here: a change to
+ * many files belongs in a turn, with its checkpoint and its diff. The message
+ * says how the search looked, so the agent searches the same way, and what was
+ * found, so the user can check the turn against it.
+ */
+export function replaceRequest(query: TextSearchQuery, replacement: string, result: TextSearchResult): string {
+  const found = searchSummary(result);
+  const sentence = result.lines === 0 ? found : `The search found ${found.charAt(0).toLowerCase()}${found.slice(1)}`;
+  return `Replace every match of ${describeQuery(query)} with ${JSON.stringify(replacement)}. ${sentence}${sentence.endsWith('.') ? '' : '.'}`;
 }

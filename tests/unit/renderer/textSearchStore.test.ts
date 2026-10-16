@@ -24,12 +24,21 @@ beforeEach(() => {
 
 describe('the search of a session', () => {
   it('starts empty, looking for text as written and ignoring case', () => {
-    expect(state()).toMatchObject({ query: { text: '', regex: false, caseSensitive: false, wholeWord: false, files: '' }, status: 'idle', result: null });
+    expect(state()).toMatchObject({ query: { text: '', regex: false, caseSensitive: false, wholeWord: false, files: '' }, status: 'idle', result: null, replace: '' });
   });
 
   it('changes what is looked for without searching', () => {
     useTextSearch.getState().change('s', { text: 'total', wholeWord: true });
     expect(state().query).toMatchObject({ text: 'total', wholeWord: true, regex: false });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps what the matches should become, each session to itself', () => {
+    useTextSearch.getState().setReplace('s', 'subtotal');
+    useTextSearch.getState().setReplace('other', 'elsewhere');
+    expect(state().replace).toBe('subtotal');
+    expect(state('other').replace).toBe('elsewhere');
+    // It is not part of the query: nothing is searched again.
     expect(invoke).not.toHaveBeenCalled();
   });
 
