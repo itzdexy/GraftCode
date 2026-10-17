@@ -1,6 +1,6 @@
-# Try Graft 0.6.32
+# Try Graft 0.6.33
 
-1. Open **Settings → About** and confirm version **0.6.32**. In
+1. Open **Settings → About** and confirm version **0.6.33**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -195,6 +195,21 @@
 44. In the Terminal panel's **⋮** menu, try **Cursor style**, **Copy on select** (select
     text, paste it elsewhere) and **Clear terminal**. In the Changes panel's **⋮** menu, try
     **Word wrap** and **Hide whitespace changes** on a file whose indentation changed.
+45. Start a code session on a very large folder (your Downloads folder will do) and send a
+    message: it shows at once. When the folder takes longer than 20 seconds to snapshot, a
+    note says the turn has no checkpoint, and the turn goes on. Press **Stop** right after
+    sending: the turn ends and **Stopped.** appears under the message. Delete a session while
+    it replies: it goes at once.
+46. Add an MCP server for an app Graft knows (Blender, Roblox Studio, Figma, GitHub, Linear,
+    …). Customize → Integrations, the **Connectors** card of the details column and the steps
+    of a turn that used it show the app's icon. Open its row in the card: where it runs, its
+    version, its tools, **Reconnect** and **Open in Customize**.
+47. Right-click the details column: uncheck a card and it leaves, check it and it comes back.
+    With every card taken out, the column says how to bring them back.
+48. Scroll a long conversation or a Settings page: the scrollbar brightens while it moves and
+    fades after. Point at it and drag it.
+49. In a code session press **Ctrl+P**, type part of a file's name and press Enter at once:
+    the file that opens matches what you typed.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

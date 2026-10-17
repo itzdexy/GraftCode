@@ -130,6 +130,30 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Large folders, connectors with their own icons (0.6.33)
+
+**Sending in a large folder.** A code session snapshots its folder before each turn, so
+**Rewind** can put the files back. In a very large folder (a whole Downloads folder) that
+snapshot used to keep your message from showing, and Stop and Delete from working, for as long
+as it took. Now the message shows the moment you send it; the snapshot follows, and after 20
+seconds it is given up with a note ("No checkpoint for this turn: … took longer than 20 seconds
+to snapshot"), and Graft doesn't try that folder again until it restarts. Stop and Delete end
+the turn wherever it has got to, the snapshot included. A turn stopped before the model said a
+word says **Stopped.** under the message.
+
+**Connectors you recognize.** An MCP server is shown with the icon of the app it reaches, found
+by its name, its address or the command that starts it (Roblox Studio, Blender, Unity, Unreal,
+Godot, Figma, GitHub, GitLab, Linear, Notion, Jira, Sentry and others, 57 in all, from the
+Simple Icons set), and a server that gives itself a title and an icon over MCP is shown by
+those. The details column's **Connectors** card shows the icons of the first four; each row
+opens to where the server runs, its version, its tools, **Reconnect** and **Open in Customize**.
+Customize, the Integrations gallery and the steps of a turn use the same icons. A
+**right-click on the details column** chooses which cards it shows.
+
+The scrollbars are slim and rounded, faint until pointed at or scrolled, and tinted while
+dragged. **Open a file** (Ctrl+P) lists only files that match what is typed, so Enter at once
+opens the one you meant.
+
 ### A details column, 3D models and code colors (0.6.32)
 
 A code session has a **details column** at its right, as the Claude desktop app has one:

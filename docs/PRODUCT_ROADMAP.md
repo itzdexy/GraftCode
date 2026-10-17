@@ -19,6 +19,66 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.33 large folders, connectors with their own icons, a tour of the app (2026-10-17)
+
+Asked for as: "fix make it show their real icons and like make this better check twitter and
+the claude new videos to improve graft same check codex,cursor and etc", then "fix. it doesnt
+delete or sent a message also add a custom better looking scroll thing. and go into a full
+test. testing everything like absolute everything. settings,searching,coding and etc". One new
+package (`simple-icons` 16.33.0, CC0, a development dependency bundled into the renderer), no
+new table, setting, channel or shortcut.
+
+- **Sending and deleting in a large folder** (`agent/session.ts`, `git/checkpoints.ts`). The
+  user's screenshots showed a session stuck at "1m 22s · Pruning…" that could not be deleted,
+  and a new one at "1s · Thinking…" with no message: the turn snapshotted the folder (`git add
+  -A` into a private index) before storing the message, with nothing to stop it and a timeout
+  of ten minutes, and closing a session waited for the turn for ever. Now the message is stored
+  and shown first; the snapshot has a budget (`CHECKPOINT_BUDGET_MS`, 20 s) and the turn's
+  signal, so Stop ends it; a folder that runs past the budget gets a notice and no more
+  attempts until restart; and `dispose()` waits at most `DISPOSE_WAIT_MS` (8 s) for a turn
+  that doesn't hear the stop. A turn stopped before the model wrote anything stores a
+  "Stopped." notice (`kind: 'notice'`, never sent to the model), as a reply cut short shows one.
+- **Connectors with their own icons** (`lib/brands.ts`, `components/ConnectorIcon.tsx`,
+  `mcp/mcpManager.ts` `serverInfoOf`). 57 marks from Simple Icons, matched on the server's name,
+  then its host, then its command and arguments; white or black ink by luminance, as app icons
+  draw it. A server's own `title`, `version` and `icons` from its MCP `initialize` answer are
+  kept (icons only as `data:` images of at most 96 KB, SVG preferred) and passed in `mcp:list`.
+  The details column's Connectors card has the icons in its header and rows that open; Customize,
+  the Integrations gallery and a turn's steps (`mcp__server__tool`) show the same marks.
+- **The card chooser** (`components/Menu.tsx` context menu, `stores/details.ts` `hidden`). A
+  right-click on the details column, or the menu key, opens "Cards in this column".
+- **Scrollbars** (`styles/globals.css`, `lib/scrollbars.ts`). 10 px, a thumb inset 3 px and
+  rounded, 40% until the pointer is over its area or it scrolls (`graft-scrolling` for 0.9 s
+  after the last scroll event), tinted with the accent while dragged.
+- **Open a file** (`paletteModel.ts` `filesShown`). The palette listed the previous query's
+  files until the new answer came, and Enter opened the first of them; it now lists the last
+  answer narrowed to what is typed, with the search's own matcher.
+- **A tour of the app** (`tests/e2e/tour.spec.ts`). Every Settings page and its search, every
+  Customize tab, every view in both modes, the palettes, the scrollbars, a session that writes
+  code, every panel and composer menu, find, open a file, a symbol, Stop the moment a message is
+  sent, the card chooser, and Delete while a reply streams; it fails on any page error or console
+  error and on any part that fails to display. It found the "Stopped." gap and the palette bug.
+
+What the research found (October 2026), and what Graft does with it:
+
+- Claude desktop (changelog, 2026-10-15): a session rail of cards, servers and background tasks
+  among them, chosen with a right-click on a card's header; a recap card with buttons for what to
+  do next; nested sessions; environments; compaction while idle. Graft has the column (0.6.32),
+  now with connector rows and the chooser; the recap card and idle compaction are open.
+- Claude Code 2.1.299–2.1.302: mods, idle compaction, Ctrl+F in the transcript (Graft has it).
+- Cursor: canvases for cloud agents (Oct 16), a marketplace (Oct 13), remote control (Oct 6).
+- Codex 0.162–0.163: searchable settings and steering (Graft has both), a daemon, parallel
+  read-only tools, managed worktrees, pinned tasks, clickable links, composer predictions.
+
+Different from what was asked, and why:
+
+- No icon is fetched from the internet: an app's mark comes from the bundled set, and a
+  server's own icon is used only when it arrives inline as a `data:` image, so a server can't
+  make Graft load a remote picture or track when its list is opened.
+- The marks are of apps a server reaches; a server Graft doesn't know keeps its letter.
+- macOS packages were not built: they need a Mac or GitHub Actions, and Actions is blocked by
+  the account's billing lock.
+
 ### 0.6.32 what two recordings of the Claude desktop app show (2026-10-17)
 
 Asked for as: "CHECK BOTH OF THE RECORDINGS IN C:\Recordings AND LIKE COPY THE STUFF SHOWN
@@ -1508,3 +1568,7 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    screen when the model can't see them, Draco and meshopt models (they need WebAssembly in
    the window, a CSP decision), a model's .mtl and textures beside an .obj, and a turntable
    picture of a model for the agent to look at.
+10. Done in 0.6.33: messages that show at once and turns that stop in any folder, connectors
+    with their apps' icons, the card chooser, slim scrollbars, a tour of the whole app. Next
+    there, from the October research: a recap card with what to do next, compaction while a
+    session is idle, and nested sessions.
