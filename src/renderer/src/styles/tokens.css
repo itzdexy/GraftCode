@@ -81,7 +81,7 @@
   --g-timeline-tick-height: 2px;
   --g-timeline-tick-gap: 5px; /* tick pitch ~7.4px */
   --g-panel-width: 263px; /* backgroundPanel.x 808..1070 */
-  --g-scrollbar-size: 6px; /* scrollbarThumbX.length */
+  --g-scrollbar-size: 10px; /* the lane; the thumb in it is 4px, 6px under the pointer (globals.css) */
   --g-icon-size: 16px;
   --g-icon-size-sm: 14px;
   --g-icon-size-xs: 12px; /* messageActionIcons are 12px wide */
