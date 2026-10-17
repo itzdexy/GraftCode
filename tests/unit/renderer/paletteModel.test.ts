@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { anchorFile, fileQuery, fileRow, latestOnly, paletteInput, symbolMessage } from '../../../src/renderer/src/features/shell/paletteModel';
+import { anchorFile, fileQuery, fileRow, filesShown, latestOnly, paletteInput, symbolMessage } from '../../../src/renderer/src/features/shell/paletteModel';
 import { symbolKind } from '../../../src/shared/symbolKinds';
 
 describe('what the palette is looking for', () => {
@@ -23,6 +23,17 @@ describe('what the palette is looking for', () => {
   it('shows a file by its name, with its folder beside it', () => {
     expect(fileRow('src/features/app.ts')).toEqual({ name: 'app.ts', folder: 'src/features' });
     expect(fileRow('README.md')).toEqual({ name: 'README.md', folder: '' });
+  });
+
+  it('lists files for what is typed now, never an older query’s as they were', () => {
+    const everything = { text: '', paths: ['notes.txt', 'src/app.ts', 'src/greet.ts'] };
+    // "greet" is typed and its answer is still on its way: the last answer, narrowed, so Enter opens greet.ts.
+    expect(filesShown('greet', everything, [])).toEqual({ paths: ['src/greet.ts'], fresh: false });
+    expect(filesShown('greet', { text: 'greet', paths: ['src/greet.ts'] }, [])).toEqual({ paths: ['src/greet.ts'], fresh: true });
+    expect(filesShown('zzz', everything, [])).toEqual({ paths: [], fresh: false });
+    expect(filesShown('anything', null, [])).toEqual({ paths: [], fresh: false });
+    // With nothing typed, the files open in the Files panel come first, once each.
+    expect(filesShown('', everything, ['src/greet.ts']).paths).toEqual(['src/greet.ts', 'notes.txt', 'src/app.ts']);
   });
 
   it('names a project for a symbol search by a file of it', () => {
