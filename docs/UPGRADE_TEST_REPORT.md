@@ -1217,3 +1217,54 @@ Not verified:
   own Downloads folder was not opened.
 - Icons sent by a real third-party MCP server; the fixture sends one SVG. The Roblox Studio and
   Blender marks were checked in the renderer preview.
+
+## 0.6.34 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, on top of 0.6.33, local: nothing was pushed and no release was
+made. Commits `1a72ff5` (git stopped with what it started), `f3fd4f6` (a delete that never fails on
+the index folder), `a0e2cdc` (the snapshot beside the reply), `d9efa2d` (media models and video),
+`59b48a3` (54 integrations), `0b2fd87` (What's new without another app's name), `7dc622d` (the
+version and the documents), `30c3d75` (the live catalogue check). Windows 11 (Node 26.7.0,
+Electron 44.5.1) and a Linux container (`node:24-bookworm`). Not macOS.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npx vitest run tests/unit/git.test.ts -t "ends at once when stopped"` with the git runner of `83e8414` | `1a72ff5` test, old runner | 1 failed: the stop took 3064 ms, the length of the alias it stopped |
+| `npx playwright test` of `session`, `tour`, `recordings`, `review`, `recovery` | `a0e2cdc` | 18 passed |
+| `npx playwright test` of `tour`, `mcp`, `models` | `59b48a3` before commit | 6 passed |
+| `npm run verify` | `7dc622d` | every step exit 0; unit 136 files passed, 3 skipped, 1585 passed, 72 skipped; e2e 83 passed, 6 skipped, 478 s |
+| `GRAFT_LIVE_MCP=1 npx vitest run tests/unit/mcp.live.test.ts -t "catalogue against the real world"` | `30c3d75` | 53 passed: every package exists, every remote server answers or asks for credentials |
+| `npm run verify:docker` | `30c3d75` | every step exit 0; unit 1577 passed, 80 skipped; e2e 83 passed, 6 skipped (8.0 min) |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `30c3d75` | installer built; the archive holds `out/main`, `out/preload`, `out/renderer` and `package.json` 0.6.34; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `30c3d75` | AppImage and .deb built; 3 passed |
+
+The 72 skipped unit tests are 30 as before plus the live tests that now cover 42 more
+integrations; they run only with `GRAFT_LIVE_MCP=1`.
+
+What the tests of this round show, and with what:
+
+- Unit: a stopped git ends at once and, on Windows, the real git and its shell with it (`git.test.ts`,
+  an alias that sleeps); a held index folder never fails a delete and goes at the next start's sweep;
+  the snapshot beside the reply (`checkpointBudget.test.ts`: the model is asked at once, a Write waits
+  for the snapshot, a reply in words doesn't, Stop ends the snapshot, a session closes whatever it
+  does); media models by kind from OpenRouter, OpenAI and Google wire formats, names on other servers
+  (`mediaModels.test.ts`); the video job submitted with a length and a shape the model makes, polled,
+  downloaded from the provider's own address only, and a failed job's reason; the GenerateVideo tool
+  (saving, first frame inside the project only, overwrite, no key, Ask and Plan modes); the offering
+  of GenerateVideo; the media sections' model (`renderer/mediaModels.test.ts`); the catalogue (54, every
+  kind used, https, a fixed environment for Zotero, keys as bearer headers).
+- Desktop: `models.spec.ts` (a server listing FLUX, Wan, Kokoro and Whisper beside its chat models:
+  four sections, the note instead of Use, the search, a chat list without them); `tour.spec.ts`
+  (the integrations search).
+
+Not verified:
+
+- A real video: no clip was made with a real key (it costs money on the user's account). The job
+  flow is tested against a local server that speaks OpenRouter's documented format, and the format
+  was read from OpenRouter's docs and its public model list on 2026-10-17.
+- Signing in to the OAuth integrations (Supabase, Neon, Cloudflare, Atlassian, Asana, Semgrep,
+  Webflow) with real accounts. Their servers advertise dynamic client registration, which is what
+  Graft's sign-in uses.
+- Starting the 23 new local servers: their packages were checked in npm and PyPI, not run on this
+  computer (some are community packages, and running them is the user's call).
+- macOS.
