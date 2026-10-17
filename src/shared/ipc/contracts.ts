@@ -355,6 +355,8 @@ export const contracts = {
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
   /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */
   'files:open': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
+  /** A 3D model from the session's folder (or a buffer or texture a .gltf loads beside it), as bytes for the viewer. */
+  'files:modelBytes': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.instanceof(Uint8Array)),
   /** Puts a picture from the session's folder on the clipboard, as a picture. */
   'files:copyImage': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
   /** An address that shows one diagram of the session (a page the tools marked as one, and nothing beside it) and lets it tell its frame how large it is. */

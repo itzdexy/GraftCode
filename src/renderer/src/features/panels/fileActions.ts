@@ -45,6 +45,6 @@ export function actionsFor(entry: { path: string; type: 'file' | 'dir' }): FileA
 }
 
 /** The line beside a previewed file's path: a picture's size in pixels once it has loaded, and its size on disk. */
-export function previewNote(preview: { size: number; media: 'image' | 'video' | 'audio' | null }, pixels: { width: number; height: number } | null): string {
+export function previewNote(preview: { size: number; media: 'image' | 'video' | 'audio' | 'model' | null }, pixels: { width: number; height: number } | null): string {
   return pixels && preview.media === 'image' ? `${String(pixels.width)} × ${String(pixels.height)} · ${fileSize(preview.size)}` : fileSize(preview.size);
 }

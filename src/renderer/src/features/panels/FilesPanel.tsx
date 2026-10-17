@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, MessageSquarePlus, Minimize, Pencil, Save, X } from 'lucide-react';
+import { Box, ChevronRight, Code, Copy, File, FileImage, Folder, FolderOpen, Image, Maximize, MessageSquarePlus, Minimize, Pencil, Save, X } from 'lucide-react';
 import type { TreeEntryView, FilePreviewView } from '@shared/schemas/panels';
 import type { CodeLocation } from '@shared/schemas/semantic';
 import { coveredLines } from '@shared/secrets';
@@ -16,6 +16,7 @@ import { useReview } from '../../stores/review';
 import { CommentBox } from '../review/CommentBox';
 import { commentPlace } from '../review/reviewModel';
 import { HighlightedLines, useHighlight } from '../session/CodeBlock';
+import { LazyModelViewer } from '../models/LazyModelViewer';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
 import { draftSaves, type SaveTarget } from './draftSaves';
@@ -28,6 +29,7 @@ const TextEditor = lazy(() => import('./TextEditor'));
 
 /** Files the tree marks as pictures or clips, by name (the preview itself asks the main process). */
 const LOOKS_LIKE_MEDIA = /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg|mp4|webm)$/i;
+const LOOKS_LIKE_MODEL = /\.(glb|gltf|obj|stl|fbx|ply)$/i;
 
 type DirState = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; entries: TreeEntryView[] };
 
@@ -153,7 +155,13 @@ function TreeLevel({
                 ) : (
                   <>
                     <span className="size-12 shrink-0" aria-hidden="true" />
-                    {LOOKS_LIKE_MEDIA.test(entry.name) ? <FileImage className="size-14 shrink-0 text-icon-muted" aria-hidden="true" /> : <File className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />}
+                    {LOOKS_LIKE_MODEL.test(entry.name) ? (
+                      <Box className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
+                    ) : LOOKS_LIKE_MEDIA.test(entry.name) ? (
+                      <FileImage className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
+                    ) : (
+                      <File className="size-14 shrink-0 text-icon-muted" aria-hidden="true" />
+                    )}
                   </>
                 )}
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
@@ -230,6 +238,8 @@ function PreviewPane({ sessionId, preview, opened, fit, source, onPixels }: { se
   const language = useMemo(() => languageForPath(preview.path), [preview.path]);
   const lines = useHighlight(preview.content ?? '', language, preview.content !== null);
   if (preview.tooLarge) return <p className="px-10 py-8 text-base text-fg-muted">Too large to preview ({Math.round(preview.size / 1024)} KB). Show it in its folder to open it.</p>;
+  // `opened` counts the clicks on the file, so opening it again reads it again (it may have been exported anew).
+  if (preview.media === 'model') return <LazyModelViewer key={`${preview.path}:${String(preview.size)}:${String(opened)}`} sessionId={sessionId} path={preview.path} />;
   if (preview.media && !(source && preview.content !== null)) return <MediaPreview sessionId={sessionId} preview={preview} opened={opened} fit={fit} onPixels={onPixels} />;
   if (preview.binary) return <p className="px-10 py-8 text-base text-fg-muted">Binary file ({Math.round(preview.size / 1024)} KB).</p>;
   return (

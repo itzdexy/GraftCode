@@ -35,7 +35,7 @@ import { localServers } from '../browser/servers';
 import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
-import { diagramFile, listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { diagramFile, listDirectory, mediaFile, modelBytes, openableFile, readPreview, savePreview } from '../files/fileTree';
 import { searchText } from '../files/textSearch';
 import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
@@ -787,6 +787,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return saved;
     },
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
+    'files:modelBytes': async ({ sessionId, path }) => modelBytes(await workDirFor(sessionId), path),
     'diagrams:previewUrl': async ({ sessionId, source }) => ({ url: `${ctx.artifacts.urlForFile((await diagramOf(sessionId, source)).file)}?report=size` }),
     'diagrams:copyImage': async ({ sessionId, source }) => {
       const { file, info } = await diagramOf(sessionId, source);

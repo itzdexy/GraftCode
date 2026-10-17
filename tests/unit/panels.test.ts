@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isAllowedUrl, normalizeUrl } from '../../src/main/browser/browserPanel';
 import { ArtifactServer } from '../../src/main/artifacts/artifacts';
-import { canOpenFile, listDirectory, MAX_MEDIA_BYTES, mediaFile, mediaKindOf, openableFile, readPreview } from '../../src/main/files/fileTree';
+import { canOpenFile, listDirectory, MAX_MEDIA_BYTES, mediaFile, mediaKindOf, modelBytes, openableFile, readPreview } from '../../src/main/files/fileTree';
 import { interactiveArgs, PtyManager } from '../../src/main/pty/ptyManager';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
@@ -100,6 +100,37 @@ describe('file tree', () => {
     fs.truncateSync(big, MAX_MEDIA_BYTES + 1);
     await expect(mediaFile(root, 'big.png')).rejects.toMatchObject({ code: 'too_large' });
     expect(await readPreview(root, 'big.png')).toMatchObject({ media: 'image', tooLarge: true });
+    removeDir(root);
+  });
+
+  it('offers a 3D model as one, text or binary, instead of as its text', async () => {
+    const root = makeTempDir();
+    writeFile(root, 'models/ring.obj', 'o ring\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
+    writeFile(root, 'exports/gun.FBX', Buffer.alloc(4096, 3));
+    expect(['a.glb', 'a.gltf', 'a.obj', 'a.stl', 'a.fbx', 'a.ply'].map(mediaKindOf)).toEqual(['model', 'model', 'model', 'model', 'model', 'model']);
+    expect(await readPreview(root, 'models/ring.obj')).toMatchObject({ media: 'model', content: null, binary: true, tooLarge: false });
+    expect(await readPreview(root, 'exports/gun.FBX')).toMatchObject({ media: 'model', size: 4096 });
+    removeDir(root);
+  });
+
+  it('hands a model and the files a .gltf loads beside it to the viewer, and nothing else', async () => {
+    const root = makeTempDir();
+    writeFile(root, 'ship/ship.gltf', '{"asset":{"version":"2.0"}}');
+    writeFile(root, 'ship/ship.bin', Buffer.from([1, 2, 3, 4]));
+    writeFile(root, 'ship/hull.png', Buffer.from([5, 6]));
+    writeFile(root, 'notes.txt', 'hello');
+    writeFile(root, '.env', 'KEY=secret');
+    expect([...(await modelBytes(root, 'ship/ship.bin'))]).toEqual([1, 2, 3, 4]);
+    expect(new TextDecoder().decode(await modelBytes(root, 'ship/ship.gltf'))).toBe('{"asset":{"version":"2.0"}}');
+    expect((await modelBytes(root, 'ship/hull.png')).length).toBe(2);
+    await expect(modelBytes(root, 'notes.txt')).rejects.toMatchObject({ code: 'not_a_model' });
+    await expect(modelBytes(root, '.env')).rejects.toMatchObject({ code: 'not_a_model' });
+    await expect(modelBytes(root, '../outside.glb')).rejects.toMatchObject({ code: 'outside_folder' });
+    await expect(modelBytes(root, 'ship/missing.glb')).rejects.toMatchObject({ code: 'not_found' });
+    const big = path.join(root, 'big.glb');
+    fs.writeFileSync(big, '');
+    fs.truncateSync(big, MAX_MEDIA_BYTES + 1);
+    await expect(modelBytes(root, 'big.glb')).rejects.toMatchObject({ code: 'too_large' });
     removeDir(root);
   });
 });
