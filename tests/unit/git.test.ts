@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase, type Db } from '../../src/main/db/database';
 import { CheckpointService } from '../../src/main/git/checkpoints';
 import { computeDiffStats, DiffStatsCache } from '../../src/main/git/diffStats';
@@ -433,6 +433,23 @@ describe('rewind (files, conversation, both)', () => {
 describe('finding and running git', () => {
   it('says a folder is gone instead of claiming git is missing', async () => {
     await expect(runGit(['status'], { cwd: path.join(makeTempDir(), 'deleted-project') })).rejects.toMatchObject({ code: 'folder_missing' });
+  });
+
+  it('ends at once when stopped, and on Windows the real git and what it started end too', async () => {
+    const dir = track(makeTempDir());
+    const marker = path.join(dir, 'still running.txt').replace(/\\/g, '/');
+    const controller = new AbortController();
+    const started = Date.now();
+    // A git that runs for three seconds and then leaves a mark: an alias that sleeps in git's own shell. On Windows
+    // the git.exe on PATH is a launcher, and the real git and the shell are its children.
+    const run = runGit(['-c', `alias.slow=!sleep 3 && echo late > '${marker}'`, 'slow'], { cwd: dir, signal: controller.signal });
+    setTimeout(() => controller.abort(new Error('stopped')), 300);
+    await expect(run).rejects.toThrow('stopped');
+    expect(Date.now() - started).toBeLessThan(2500);
+    if (process.platform === 'win32') {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      expect(fs.existsSync(marker)).toBe(false);
+    }
   });
 
   it('finds git where its installer puts it when PATH has no git', () => {
