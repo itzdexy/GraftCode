@@ -6,7 +6,7 @@ import { openDatabase, type Db } from '../../src/main/db/database';
 import { mcpNotesSection } from '../../src/main/agent/systemPrompt';
 import { maskConfig, mergeMcpConfig } from '../../src/main/mcp/mcpConfig';
 import { mcpPromptCommand, promptArguments } from '../../src/main/mcp/names';
-import { clientCapabilities, convertContent, McpManager, mcpToolName, progressLine, stdioEnv, troubleshootFor } from '../../src/main/mcp/mcpManager';
+import { clientCapabilities, convertContent, MAX_ICON_CHARS, McpManager, mcpToolName, progressLine, serverInfoOf, stdioEnv, troubleshootFor } from '../../src/main/mcp/mcpManager';
 import { McpServerConfigSchema } from '../../src/shared/schemas/config';
 import { McpServerInputSchema } from '../../src/shared/schemas/customize';
 import { SettingsStore } from '../../src/main/permissions/settingsStore';
@@ -190,6 +190,14 @@ describe('MCP servers that change after connecting', () => {
 describe('MCP servers beyond tools', () => {
   const rich = { rich: { type: 'stdio', command: process.execPath, args: [RICH] } };
   const text = (result: { content: unknown }): string => (result.content as Array<{ type: string; text?: string }>).map((c) => c.text ?? '').join('\n');
+
+  it('keeps what a server says about itself: its name for people, its version and its icon', async () => {
+    const { manager } = setup(rich);
+    await manager.sync();
+    const [status] = manager.status();
+    expect(status?.info).toMatchObject({ title: 'Graft Rich Notes', version: '1.0.0' });
+    expect(status?.info.icon).toMatch(/^data:image\/svg\+xml;base64,/);
+  });
 
   it('passes on what a server says about using itself, only to sessions that can use the server', async () => {
     const { manager } = setup({ ...rich, test: { type: 'stdio', command: process.execPath, args: [FIXTURE] } });
@@ -408,5 +416,28 @@ describe('MCP helpers', () => {
     const old = McpServerConfigSchema.parse({ type: 'stdio', command: 'npx' });
     expect(old).toEqual({ type: 'stdio', command: 'npx', args: [], env: {}, enabled: true });
     expect(() => McpServerConfigSchema.parse({ type: 'stdio', command: 'npx', inherit: 'some' })).toThrow();
+  });
+});
+
+describe('what a server says about itself', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const svg = 'data:image/svg+xml;base64,PHN2Zy8+';
+
+  it('takes its title and version, trimmed and bounded', () => {
+    expect(serverInfoOf({ name: 'roblox_studio', title: '  Roblox Studio ', version: '1.2.0' })).toEqual({ title: 'Roblox Studio', version: '1.2.0', icon: null });
+    expect(serverInfoOf({ name: 'x', title: 'y'.repeat(200) }).title).toHaveLength(80);
+    expect(serverInfoOf(undefined)).toEqual({ title: null, version: null, icon: null });
+    expect(serverInfoOf({ title: 4, version: '' })).toEqual({ title: null, version: null, icon: null });
+  });
+
+  it('keeps an icon only when it comes as a picture in the handshake, a drawing first, then the largest', () => {
+    expect(serverInfoOf({ icons: [{ src: 'https://example.com/icon.png' }] }).icon).toBeNull();
+    expect(serverInfoOf({ icons: [{ src: 'data:text/html;base64,PHNjcmlwdD4=' }] }).icon).toBeNull();
+    expect(serverInfoOf({ icons: [{ src: `data:image/png;base64,${'A'.repeat(MAX_ICON_CHARS)}` }] }).icon).toBeNull();
+    const small = `${png}small`;
+    const large = `${png}large`;
+    expect(serverInfoOf({ icons: [{ src: small, sizes: ['16x16'] }, { src: large, sizes: ['128x128'] }] }).icon).toBe(large);
+    expect(serverInfoOf({ icons: [{ src: large, sizes: ['128x128'] }, { src: svg }] }).icon).toBe(svg);
+    expect(serverInfoOf({ icons: 'nope' }).icon).toBeNull();
   });
 });

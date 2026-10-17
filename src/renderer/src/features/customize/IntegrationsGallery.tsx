@@ -3,10 +3,12 @@ import { BookOpen, Box, Bug, Gamepad2, ExternalLink, GitPullRequest, Joystick, L
 import { INTEGRATION_CATEGORIES, INTEGRATIONS, RUNTIME_HELP, type Integration } from '@shared/integrations';
 import type { ChannelOutput } from '@shared/ipc/contracts';
 import { Badge } from '../../components/Badge';
+import { ConnectorIcon } from '../../components/ConnectorIcon';
 import { Button } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
 import { Dialog, DialogContent } from '../../components/Dialog';
 import { TextField } from '../../components/Field';
+import { brandOf } from '../../lib/brands';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
@@ -187,6 +189,8 @@ export function IntegrationsGallery({ installed, onAdded }: { installed: Readonl
           <ul className="grid grid-cols-3 gap-8">
             {INTEGRATIONS.filter((i) => i.category === category).map((integration) => {
               const Icon = ICONS[integration.id] ?? Box;
+              // The app's own mark where there is one; a drawing of what it does otherwise.
+              const branded = brandOf({ name: integration.serverName }) !== null;
               const blocker = blockers.get(integration.id) ?? null;
               const unavailable = blocker?.kind === 'platform';
               const added = installed.has(integration.serverName);
@@ -203,7 +207,11 @@ export function IntegrationsGallery({ installed, onAdded }: { installed: Readonl
                     )}
                   >
                     <span className="flex items-center gap-8">
-                      <Icon className="size-16 shrink-0 text-accent transition-ui group-hover:scale-110" />
+                      {branded ? (
+                        <ConnectorIcon server={{ name: integration.serverName }} size={20} className="transition-ui group-hover:scale-110" />
+                      ) : (
+                        <Icon className="size-16 shrink-0 text-accent transition-ui group-hover:scale-110" />
+                      )}
                       <span className="min-w-0 flex-1 truncate text-base font-medium text-fg">{integration.name}</span>
                       {added ? <Badge tone="accent">Added</Badge> : unavailable ? <Badge>Not on {platform}</Badge> : null}
                     </span>

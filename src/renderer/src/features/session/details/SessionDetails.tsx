@@ -16,17 +16,21 @@ import {
   Laptop,
   PanelRight,
   Plug,
+  RotateCw,
+  Settings2,
   Shrink
 } from 'lucide-react';
 import type { DiffStatsView } from '@shared/schemas/app';
 import type { AgentRun } from '@shared/schemas/agentRuns';
+import type { McpServerView } from '@shared/schemas/customize';
 import type { BackgroundShellView } from '@shared/schemas/panels';
 import type { SessionSummary } from '@shared/schemas/sessions';
-import { Avatar } from '../../../components/Avatar';
+import { ConnectorIcon } from '../../../components/ConnectorIcon';
 import { Button, IconButton } from '../../../components/Button';
 import { Collapse } from '../../../components/Collapse';
 import { Spinner } from '../../../components/ContextRing';
 import { onChanged } from '../../../lib/bus';
+import { connectorName } from '../../../lib/brands';
 import { cn } from '../../../lib/cn';
 import { formatTokenCount } from '../../../lib/format';
 import { invoke } from '../../../lib/ipc';
@@ -373,17 +377,117 @@ function ConnectorAction({ row }: { row: ConnectorRow }) {
   );
 }
 
+/** Where a server runs, in a few words: the address of a remote one, the command of one on this computer. */
+function whereItRuns(server: McpServerView): string {
+  if (server.config.type === 'http') {
+    try {
+      return `Remote · ${new URL(server.config.url).host}`;
+    } catch {
+      return 'Remote';
+    }
+  }
+  const command = [server.config.command, ...server.config.args].join(' ');
+  return `On this computer · ${command.length > 60 ? `${command.slice(0, 59)}…` : command}`;
+}
+
+const SHOWN_TOOLS = 10;
+
+/** One connector: its app's mark with a dot for its state, its name, what it offers; it opens to the rest. */
+function ConnectorItem({ server, row }: { server: McpServerView; row: ConnectorRow }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const name = connectorName(server);
+  const reconnect = (): void => {
+    setBusy(true);
+    invoke('mcp:reconnect', { name: server.name })
+      .catch((error: unknown) => reportError(`Couldn't reconnect ${name}`, error))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <li className="motion-rise rounded-md transition-ui hover:bg-hover/60">
+      <div className="flex min-h-34 items-center gap-8 px-4">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${name}: ${row.status}`}
+          title={server.name === name ? undefined : server.name}
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-8 py-4 text-left"
+        >
+          <ConnectorIcon server={server} size={22} state={server.state} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-md text-fg">{name}</span>
+            <span className={cn('block truncate text-xs', row.action ? 'text-amber-fg' : 'text-fg-muted')}>{row.status}</span>
+          </span>
+          <ChevronRight className={cn('size-12 shrink-0 text-icon transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
+        </button>
+        <ConnectorAction row={row} />
+      </div>
+      <Collapse open={open} className="px-4 pb-8 pl-34">
+        <p className="truncate font-mono text-2xs text-fg-faint" title={whereItRuns(server)}>
+          {whereItRuns(server)}
+          {server.version ? ` · v${server.version}` : ''}
+        </p>
+        {server.error && server.state !== 'connected' ? <p className="mt-4 text-xs text-amber-fg">{server.error}</p> : null}
+        {server.hint ? <p className="mt-4 text-xs text-fg-muted">{server.hint}</p> : null}
+        {server.tools.length > 0 ? (
+          <ul aria-label={`Tools of ${name}`} className="mt-6 flex flex-wrap gap-4">
+            {server.tools.slice(0, SHOWN_TOOLS).map((tool) => (
+              <li key={tool.name} title={tool.description || tool.name} className="max-w-full truncate rounded-xs bg-control px-6 py-1 font-mono text-2xs text-fg-secondary">
+                {tool.name}
+              </li>
+            ))}
+            {server.tools.length > SHOWN_TOOLS ? <li className="px-2 py-1 text-2xs text-fg-muted">+{String(server.tools.length - SHOWN_TOOLS)} more</li> : null}
+          </ul>
+        ) : null}
+        <div className="mt-6 flex flex-wrap items-center gap-6">
+          {/* A server that needs a hand has its button on its line already. */}
+          {row.action === null && server.state !== 'disabled' ? (
+            <Button size="sm" variant="ghost" disabled={busy} leading={busy ? <Spinner size={10} label="Reconnecting" /> : <RotateCw className="size-12" />} onClick={reconnect}>
+              Reconnect
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" leading={<Settings2 className="size-12" />} onClick={() => useNav.getState().go({ name: 'customize', tab: 'mcp' })}>
+            Open in Customize
+          </Button>
+        </div>
+      </Collapse>
+    </li>
+  );
+}
+
 function ConnectorsCard({ projectPath, index }: { projectPath: string | null; index: number }) {
   const { load, reload } = useLoad(() => invoke('mcp:list', { projectPath }), projectPath ?? '');
   useEffect(() => onChanged('mcp', reload), [reload]);
   const [all, setAll] = useState(false);
-  const rows = load.status === 'ready' ? load.data.map(connectorRow) : [];
-  // What needs a hand comes first.
-  const ordered = [...rows].sort((a, b) => Number(b.action !== null) - Number(a.action !== null));
+  const servers = load.status === 'ready' ? load.data : [];
+  const items = servers.map((server) => ({ server, row: connectorRow(server) }));
+  // What needs a hand comes first, then what is connected.
+  const ordered = [...items].sort(
+    (a, b) => Number(b.row.action !== null) - Number(a.row.action !== null) || Number(b.server.state === 'connected') - Number(a.server.state === 'connected')
+  );
   const shown = all ? ordered : ordered.slice(0, SHOWN_CONNECTORS);
   const manage = (): void => useNav.getState().go({ name: 'customize', tab: 'mcp' });
   return (
-    <DetailsCard id="connectors" title="Connectors" index={index} summary={load.status === 'ready' ? connectorsSummary(rows) : null}>
+    <DetailsCard
+      id="connectors"
+      title="Connectors"
+      index={index}
+      summary={
+        load.status === 'ready' ? (
+          <>
+            {servers.length > 0 ? (
+              <span aria-hidden="true" className="flex shrink-0 -space-x-4">
+                {ordered.slice(0, 4).map(({ server }) => (
+                  <ConnectorIcon key={server.name} server={server} size={16} className="rounded-[5px] ring-2 ring-[var(--g-surface-raised)]" />
+                ))}
+              </span>
+            ) : null}
+            <span className="truncate">{connectorsSummary(items.map((item) => item.row))}</span>
+          </>
+        ) : null
+      }
+    >
       {load.status === 'loading' ? (
         <p role="status" className="text-sm text-fg-muted">
           Loading…
@@ -392,7 +496,7 @@ function ConnectorsCard({ projectPath, index }: { projectPath: string | null; in
         <p role="alert" className="text-sm text-fg-muted">
           Couldn't list the connectors.
         </p>
-      ) : rows.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="flex flex-col items-start gap-6">
           <p className="text-sm text-fg-muted">No connectors yet. Blender, Roblox Studio, Figma and other tools join through MCP.</p>
           <Button size="sm" variant="secondary" leading={<Plug className="size-12" />} onClick={manage}>
@@ -401,16 +505,9 @@ function ConnectorsCard({ projectPath, index }: { projectPath: string | null; in
         </div>
       ) : (
         <>
-          <ul className="flex flex-col gap-2">
-            {shown.map((row) => (
-              <li key={row.name} className="flex min-h-30 items-center gap-8">
-                <Avatar name={row.name} size={20} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-md text-fg">{row.name}</span>
-                  <span className={cn('block truncate text-xs', row.action ? 'text-amber-fg' : 'text-fg-muted')}>{row.status}</span>
-                </span>
-                <ConnectorAction row={row} />
-              </li>
+          <ul className="-mx-4 flex flex-col gap-1">
+            {shown.map(({ server, row }) => (
+              <ConnectorItem key={server.name} server={server} row={row} />
             ))}
           </ul>
           <div className="mt-4 flex items-center gap-8">

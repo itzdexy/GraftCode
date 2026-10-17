@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Collapse } from '../../components/Collapse';
+import { ConnectorIcon } from '../../components/ConnectorIcon';
 import { Ring } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { ToolCallBody } from './ToolDetail';
@@ -46,6 +47,7 @@ export function CallRow({ call, variant = 'indented', defaultOpen = false }: { c
   const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
   const parts = callParts(call);
   const pictures = resultPictures(call.result);
+  const mcpServer = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__resources__') ? (call.name.split('__')[1] ?? null) : null;
   return (
     <div className="flex flex-col">
       <button
@@ -56,6 +58,8 @@ export function CallRow({ call, variant = 'indented', defaultOpen = false }: { c
         className={cn('group/row flex items-center gap-6 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary', ROW[variant])}
       >
         {call.running ? <Ring value={0} size={10} spinning label="Running" /> : null}
+        {/* A connector's tool shows the mark of the app it reaches (Blender, Roblox Studio…). */}
+        {mcpServer ? <ConnectorIcon server={{ name: mcpServer }} size={14} /> : null}
         <span className="min-w-0 truncate">
           {parts.verb}
           {parts.verb && parts.target ? ' ' : ''}
