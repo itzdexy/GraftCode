@@ -278,6 +278,21 @@ describe('cancellation, retries and errors', () => {
     expect(texts(h).at(-1)).toBe('assistant:Fresh answer.');
   });
 
+  it('says "Stopped." under a message stopped before the model said a word, and the model never hears it', async () => {
+    const h = harness({ script: [{ text: 'Too late.', chunkDelayMs: 5000 }, { text: 'Fresh answer.' }] });
+    h.session.send('think hard');
+    await h.waitFor((e) => e.type === 'assistant-start');
+    h.session.interrupt();
+    await h.session.idle();
+    expect(h.events.find((e) => e.type === 'turn-end')).toMatchObject({ reason: 'interrupted' });
+    expect(texts(h)).toEqual(['user:think hard', 'assistant:Stopped.']);
+    expect(h.store.listMessages('session-1').at(-1)?.meta.kind).toBe('notice');
+    h.session.send('continue');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Fresh answer.');
+    expect(JSON.stringify(lastRequest(h).messages)).not.toContain('Stopped.');
+  });
+
   it('interrupts a running tool and records the call as interrupted', async () => {
     const h = harness({
       mode: 'bypass',

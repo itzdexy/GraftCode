@@ -79,6 +79,8 @@ describe('the snapshot a turn starts from', () => {
     expect(end.type === 'turn-end' && end.reason).toBe('interrupted');
     expect(seen.signal?.aborted).toBe(true);
     expect(h.provider.requests).toHaveLength(0);
+    // The message says it was stopped, rather than sitting there unanswered.
+    expect(h.store.listMessages(h.session.id).map((m) => `${m.role}:${m.meta.kind ?? 'normal'}`)).toEqual(['user:normal', 'assistant:notice']);
   });
 
   it('never keeps a session from closing, even when the snapshot does not hear the stop', async () => {

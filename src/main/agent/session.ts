@@ -1354,9 +1354,27 @@ export class AgentSession {
     } finally {
       // A turn that failed between a tool and its answer: what the tool returned is put into the conversation now.
       this.reconcile('failed');
+      if (endReason === 'interrupted') this.sayStopped(turnId);
       this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
+    }
+  }
+
+  /**
+   * A turn stopped before the model said a word says so under the message, as a reply cut short does: otherwise
+   * the message sits there unanswered, with nothing to tell what happened to it. The model never sees the note.
+   */
+  private sayStopped(turnId: string): void {
+    // A session being closed or deleted has no one to tell.
+    if (this.disposed) return;
+    try {
+      const last = this.deps.store.listMessages(this.id).at(-1);
+      if (last?.role !== 'user' || last.content.some((b) => b.type === 'tool_result')) return;
+      const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text: 'Stopped.' }], { kind: 'notice', turnId });
+      this.emit({ type: 'message', message: stored });
+    } catch (error) {
+      this.deps.log('error', 'Could not note a stopped turn', { session: this.id, message: (error as Error).message });
     }
   }
 
