@@ -485,7 +485,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if (!info.isRepo) return { isRepo: false, workDir: dir, branch: null, files: [] };
       return { isRepo: true, workDir: dir, branch: info.branch, files: await listChanges(dir) };
     },
-    'git:fileDiff': async ({ sessionId, path, staged }) => fileDiff(await workDirFor(sessionId), path, staged),
+    'git:fileDiff': async ({ sessionId, path, staged, ignoreWhitespace }) => fileDiff(await workDirFor(sessionId), path, staged, ignoreWhitespace ?? false),
     'git:stage': async ({ sessionId, paths }) => {
       const dir = await workDirFor(sessionId);
       await stageFiles(dir, paths);

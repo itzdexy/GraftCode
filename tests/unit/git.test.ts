@@ -281,6 +281,21 @@ describe('changes: stage, unstage, revert, commit', () => {
     expect((await listChanges(repo))[0]).toMatchObject({ path: 'f.txt', staged: null, unstaged: 'M' });
   });
 
+  it('leaves out changes of whitespace alone when asked, and only then', async () => {
+    const repo = track(makeRepo());
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    writeFile(repo, 'w.txt', `${lines.join('\n')}\n`);
+    gitSync(repo, 'add', 'w.txt');
+    gitSync(repo, 'commit', '-q', '-m', 'add w');
+    lines[1] = '    line 2';
+    lines[27] = 'line 28 CHANGED';
+    writeFile(repo, 'w.txt', `${lines.join('\n')}\n`);
+    expect((await fileDiff(repo, 'w.txt', false)).hunks).toHaveLength(2);
+    const quiet = await fileDiff(repo, 'w.txt', false, true);
+    expect(quiet.hunks).toHaveLength(1);
+    expect(quiet.hunks[0]!.lines.join('\n')).toContain('+line 28 CHANGED');
+  });
+
   it('reverts one hunk or whole files, deleting untracked files', async () => {
     const repo = track(makeRepo());
     twoHunks(repo);

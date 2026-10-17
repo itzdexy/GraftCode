@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EFFORT_NOTICE_KEY, EFFORT_NOTICES, readPutAway } from '../../../src/renderer/src/features/composer/effortNoticeModel';
+import { DEFAULT_DIFF_PREFS, readDiffPrefs } from '../../../src/renderer/src/features/panels/diffPrefs';
+import { DEFAULT_TERMINAL_PREFS, readTerminalPrefs } from '../../../src/renderer/src/features/panels/terminalPrefs';
 import { readDetails } from '../../../src/renderer/src/stores/details';
 
 const storage = (values: Record<string, string>): Pick<Storage, 'getItem'> => ({ getItem: (key) => values[key] ?? null });
@@ -31,5 +33,26 @@ describe('the notice at the deepest efforts', () => {
     expect(readPutAway(null)).toEqual([]);
     expect(readPutAway(storage({ [EFFORT_NOTICE_KEY]: JSON.stringify(['max', 'medium', 7]) }))).toEqual(['max']);
     expect(readPutAway(storage({ [EFFORT_NOTICE_KEY]: 'nope' }))).toEqual([]);
+  });
+});
+
+describe('the terminal as it was set up', () => {
+  it('starts with a blinking block and 5,000 lines kept', () => {
+    expect(readTerminalPrefs(null)).toEqual(DEFAULT_TERMINAL_PREFS);
+    expect(DEFAULT_TERMINAL_PREFS).toEqual({ cursorStyle: 'block', cursorBlink: true, copyOnSelect: false, scrollback: 5000 });
+  });
+
+  it('keeps each choice it can read, and the default for the rest', () => {
+    const kept = (value: unknown) => readTerminalPrefs(storage({ 'graft.terminal.v1': JSON.stringify(value) }));
+    expect(kept({ cursorStyle: 'bar', cursorBlink: false, copyOnSelect: true, scrollback: 50000 })).toEqual({ cursorStyle: 'bar', cursorBlink: false, copyOnSelect: true, scrollback: 50000 });
+    expect(kept({ cursorStyle: 'beam', scrollback: 123, copyOnSelect: 'yes' })).toEqual(DEFAULT_TERMINAL_PREFS);
+    expect(readTerminalPrefs(storage({ 'graft.terminal.v1': '[' }))).toEqual(DEFAULT_TERMINAL_PREFS);
+  });
+});
+
+describe('the diff as it was set up', () => {
+  it('is unified, unwrapped and with its whitespace until changed', () => {
+    expect(readDiffPrefs(null)).toEqual(DEFAULT_DIFF_PREFS);
+    expect(readDiffPrefs(storage({ 'graft.diff.v1': JSON.stringify({ split: true, wrap: 'no', ignoreWhitespace: true }) }))).toEqual({ split: true, wrap: false, ignoreWhitespace: true });
   });
 });

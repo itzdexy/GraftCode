@@ -256,7 +256,7 @@ export const contracts = {
   'git:branches': channel(z.object({ path: PathSchema }), BranchListSchema),
   'git:diffStats': channel(z.object({ sessionId: IdSchema }), DiffStatsSchema),
   'git:status': channel(z.object({ sessionId: IdSchema }), GitStatusSchema),
-  'git:fileDiff': channel(z.object({ sessionId: IdSchema, path: PathSchema, staged: z.boolean() }), FileDiffSchema),
+  'git:fileDiff': channel(z.object({ sessionId: IdSchema, path: PathSchema, staged: z.boolean(), ignoreWhitespace: z.boolean().optional() }), FileDiffSchema),
   'git:stage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
   'git:unstage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
   /** Discards working-tree changes. Destructive: the renderer confirms with the user first. */

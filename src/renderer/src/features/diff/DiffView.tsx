@@ -31,6 +31,8 @@ interface DiffViewProps {
   hunkActions?: (hunk: number) => ReactNode;
   /** With these, every line can be commented on and shows the comments that wait on it. Left out or null: a diff to read. */
   comments?: DiffComments | null;
+  /** Long lines wrap inside the panel instead of scrolling sideways. */
+  wrap?: boolean;
   className?: string;
 }
 
@@ -147,7 +149,7 @@ function LineText({ text, ink, tone }: { text: string; ink: LineInk; tone: DiffR
 }
 
 /** Unified or side-by-side diff; rows come from parsePatch / rowsFromHunks. */
-export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, covers = null, hunkActions, comments = null, className }: DiffViewProps) {
+export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHeaders = true, covers = null, hunkActions, comments = null, wrap = false, className }: DiffViewProps) {
   /** The line a comment is being written on. */
   const [writing, setWriting] = useState<CommentAnchor | null>(null);
   const isWriting = (anchor: CommentAnchor): boolean => writing?.line === anchor.line && writing.side === anchor.side;
@@ -176,7 +178,7 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
   return (
     // With comments the diff is a size container: a comment under a line is as wide as the part in view, however long the lines are.
     <div className={cn('selectable overflow-x-auto font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.55]', comments && '[container-type:inline-size]', className)}>
-      <div className="min-w-max">
+      <div className={wrap ? 'min-w-0' : 'min-w-max'}>
         {mode === 'unified'
           ? rows.map((row, i) => {
               if (row.type === 'hunk' || row.type === 'note') return header(row, i);
@@ -196,7 +198,7 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
                     <span className={cn('w-14 shrink-0 select-none', row.type === 'add' ? 'text-diff-add' : row.type === 'del' ? 'text-diff-del' : '')}>
                       {SIGN[row.type]}
                     </span>
-                    <span className="pr-12 whitespace-pre">
+                    <span className={cn('pr-12', wrap ? 'min-w-0 break-all whitespace-pre-wrap' : 'whitespace-pre')}>
                       <LineText text={row.text} ink={inkOf(row)} tone={row.type} />
                     </span>
                   </div>
@@ -215,7 +217,7 @@ export function DiffView({ rows, mode, language = null, gutter = 'both', hunkHea
                       <div key={j} data-find-block className={cn('flex min-w-0', anchor && 'group/line relative', side ? LINE_BG[side.type] : 'bg-sunken', j === 0 && 'border-r border-border-subtle')}>
                         {side && anchor ? <CommentButton anchor={anchor} changed={side.type !== 'ctx'} onClick={() => setWriting(anchor)} /> : null}
                         <Gutter value={side ? (j === 0 ? side.oldNo : side.newNo) : null} />
-                        <span className="pr-12 whitespace-pre">{side ? <LineText text={side.text} ink={inkOf(side)} tone={side.type} /> : ' '}</span>
+                        <span className={cn('pr-12', wrap ? 'min-w-0 break-all whitespace-pre-wrap' : 'whitespace-pre')}>{side ? <LineText text={side.text} ink={inkOf(side)} tone={side.type} /> : ' '}</span>
                       </div>
                     ))}
                   </div>

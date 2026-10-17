@@ -123,7 +123,8 @@ function counts(hunks: Hunk[]): { added: number; removed: number } {
   return { added, removed };
 }
 
-export async function fileDiff(workDir: string, file: string, staged: boolean): Promise<FileDiff> {
+/** `ignoreWhitespace` leaves out changes of whitespace alone (git diff -w): a diff to read, whose hunks are not the ones staged or discarded. */
+export async function fileDiff(workDir: string, file: string, staged: boolean, ignoreWhitespace = false): Promise<FileDiff> {
   const status = (await listChanges(workDir)).find((f) => f.path === file);
   if (status?.untracked && !staged) {
     const abs = path.join(workDir, file);
@@ -135,7 +136,7 @@ export async function fileDiff(workDir: string, file: string, staged: boolean): 
     const parsed = parseDiff(patch.replace(/^Index:.*\n=+\n/, ''));
     return { path: file, staged, binary: false, header: `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}`, hunks: parsed.hunks, ...counts(parsed.hunks) };
   }
-  const out = await git(['diff', ...(staged ? ['--cached'] : []), '--no-color', '--no-ext-diff', '-U3', '--', file], { cwd: workDir });
+  const out = await git(['diff', ...(staged ? ['--cached'] : []), ...(ignoreWhitespace ? ['-w'] : []), '--no-color', '--no-ext-diff', '-U3', '--', file], { cwd: workDir });
   const parsed = parseDiff(out);
   return { path: file, staged, binary: parsed.binary, header: parsed.header, hunks: parsed.hunks, ...counts(parsed.hunks) };
 }
