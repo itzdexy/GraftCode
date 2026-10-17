@@ -8,6 +8,7 @@ import {
   contextBreakdown,
   detailsShown,
   elapsedText,
+  nearPath,
   percentText,
   sessionOutputs,
   taskRows,
@@ -166,5 +167,20 @@ describe('the background tasks', () => {
     expect(elapsedText(45_000)).toBe('45s');
     expect(elapsedText(192_000)).toBe('3m 12s');
     expect(elapsedText(3_840_000)).toBe('1h 4m');
+  });
+});
+
+describe('where a folder is', () => {
+  it('is the folder it is in, never the folder again', () => {
+    expect(nearPath('/tmp/graft-e2e-project-x')).toBe('/tmp');
+    expect(nearPath('/home/me/demo')).toBe('/home/me');
+    expect(nearPath('/srv')).toBe('/');
+    expect(nearPath('C:\\demo')).toBe('C:\\');
+    expect(nearPath('C:\\Users\\demo\\')).toBe('C:\\Users');
+  });
+
+  it('is the last two names of a long path', () => {
+    expect(nearPath('/home/me/code/demo')).toBe('…/me/code');
+    expect(nearPath('C:\\Users\\ddexy\\AppData\\Local\\Temp\\graft-e2e-project-x')).toBe('…\\Local\\Temp');
   });
 });

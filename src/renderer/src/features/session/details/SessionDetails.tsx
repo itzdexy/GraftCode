@@ -53,6 +53,7 @@ import {
   DETAILS_WIDTH,
   detailsShown,
   elapsedText,
+  nearPath,
   percentText,
   sessionOutputs,
   taskRows,
@@ -181,10 +182,6 @@ function Line({ icon, label, detail, title, mono = false, onClick }: { icon: Rea
 const baseName = (p: string): string => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p;
 
 /** The last two folders of a path, so the line says where without the whole of it. */
-function nearPath(p: string): string {
-  const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
-  return parts.length <= 3 ? p : `…${p.includes('\\') ? '\\' : '/'}${parts.slice(-3, -1).join(p.includes('\\') ? '\\' : '/')}`;
-}
 
 function reveal(path: string): void {
   invoke('app:revealPath', { path }).catch((error: unknown) => reportError("Couldn't show the folder", error));

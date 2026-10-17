@@ -33,6 +33,19 @@ export const FOLDED_AT_FIRST: readonly DetailCard[] = ['context', 'connectors'];
 export const DETAILS_WIDTH = 288;
 export const TRANSCRIPT_MIN = 420;
 
+/**
+ * Where a folder is, for the line beside its name: the folder it is in, or the last two names of that path when it
+ * is longer (`…\Local\Temp`). Never the folder itself, whose name is beside it already.
+ */
+export function nearPath(p: string): string {
+  const sep = p.includes('\\') ? '\\' : '/';
+  const parent = p.replace(/[\\/]+$/, '').split(/[\\/]/).slice(0, -1);
+  if (parent.filter((name) => name.length > 0).length > 2) return `…${sep}${parent.slice(-2).join(sep)}`;
+  const shown = parent.join(sep);
+  // A root is written with its separator: "/" and "C:\", not "" and "C:".
+  return shown.length === 0 || shown.endsWith(':') ? `${shown}${sep}` : shown;
+}
+
 /** Whether the column is drawn: asked for, no panel in its place, and room for the conversation beside it. */
 export function detailsShown(wanted: boolean, panelsOpen: number, viewport: number, sidebar: number): boolean {
   return wanted && panelsOpen === 0 && viewport - sidebar - DETAILS_WIDTH >= TRANSCRIPT_MIN;
