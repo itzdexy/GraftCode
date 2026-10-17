@@ -117,6 +117,11 @@ test('every page of Settings, every tab of Customize and every view opens, in bo
     await expect(tabs.getByRole('tab', { name: tab, exact: true })).toHaveAttribute('aria-selected', 'true');
     await nothingBroken(w);
   }
+  // Integrations: dozens of apps and services, found by name or by what they do.
+  await tabs.getByRole('tab', { name: 'Integrations', exact: true }).click();
+  await w.getByRole('searchbox', { name: 'Find an integration' }).fill('papers');
+  await expect(w.getByRole('button', { name: /^arXiv:/ })).toBeVisible();
+  await expect(w.getByRole('button', { name: /^Blender:/ })).toHaveCount(0);
 
   // The command palette lists commands for what is typed; search opens over any page.
   await w.keyboard.press('ControlOrMeta+Shift+P');

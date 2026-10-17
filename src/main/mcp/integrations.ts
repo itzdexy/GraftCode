@@ -137,7 +137,8 @@ export function integrationSetup(
   if (!launch) throw new GraftError('integration_unavailable', `${integration.name} isn’t available on this system.`);
   const key = serverKey('user', null, integration.serverName);
   const secrets: Record<string, string> = {};
-  const entries: Record<string, string> = {};
+  // A local server's fixed environment first; what is typed for it comes after.
+  const entries: Record<string, string> = launch.type === 'stdio' ? { ...(integration.env ?? {}) } : {};
   for (const field of integration.fields ?? []) {
     const value = (values[field.key] ?? '').trim();
     if (value.length === 0) {

@@ -1,5 +1,29 @@
 import { useState, type ComponentType } from 'react';
-import { BookOpen, Box, Bug, Gamepad2, ExternalLink, GitPullRequest, Joystick, ListTodo, MonitorPlay, NotebookText, PenTool, Shapes, TriangleAlert } from 'lucide-react';
+import {
+  BookMarked,
+  BookOpen,
+  Box,
+  Brain,
+  Bug,
+  Cloud,
+  ExternalLink,
+  FileSearch,
+  Flame,
+  Gamepad2,
+  GitPullRequest,
+  Globe,
+  GraduationCap,
+  Joystick,
+  ListOrdered,
+  ListTodo,
+  MonitorPlay,
+  NotebookText,
+  PenTool,
+  Search,
+  Shapes,
+  ShieldCheck,
+  TriangleAlert
+} from 'lucide-react';
 import { INTEGRATION_CATEGORIES, INTEGRATIONS, RUNTIME_HELP, type Integration } from '@shared/integrations';
 import type { ChannelOutput } from '@shared/ipc/contracts';
 import { Badge } from '../../components/Badge';
@@ -28,7 +52,17 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
   context7: BookOpen,
   sentry: Bug,
   linear: ListTodo,
-  notion: NotebookText
+  notion: NotebookText,
+  deepwiki: BookMarked,
+  'microsoft-learn': GraduationCap,
+  'aws-knowledge': Cloud,
+  semgrep: ShieldCheck,
+  exa: Search,
+  firecrawl: Flame,
+  tavily: Globe,
+  'paper-search': FileSearch,
+  memory: Brain,
+  'sequential-thinking': ListOrdered
 };
 
 const PLATFORM_NAME: Record<string, string> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
@@ -170,24 +204,50 @@ function IntegrationDialog({ integration, blocker, added, onDone }: { integratio
   );
 }
 
-/** One-step integrations above the MCP server list: game engines, design tools, browsers and developer services. */
+/** Whether an integration answers what is typed: its name, what it does or its kind. */
+function matches(integration: Integration, typed: string): boolean {
+  const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+  const text = `${integration.name} ${integration.description} ${integration.category}`.toLowerCase();
+  return words.every((word) => text.includes(word));
+}
+
+/** One-step integrations above the MCP server list: game engines, design tools, docs, cloud services, databases, research and more. */
 export function IntegrationsGallery({ installed, onAdded }: { installed: ReadonlySet<string>; onAdded: () => void }) {
   const { load, reload } = useLoad(() => invoke('integrations:status'), 'integrations');
   const [adding, setAdding] = useState<Integration | null>(null);
+  const [query, setQuery] = useState('');
+  const shown = INTEGRATIONS.filter((i) => matches(i, query));
   const blockers = new Map<string, Blocker>(load.status === 'ready' ? load.data.map((s) => [s.id, s.blocker]) : []);
   const platform = PLATFORM_NAME[window.graft.platform] ?? window.graft.platform;
 
   return (
     <section aria-label="Integrations" className="flex flex-col gap-12">
-      <header>
-        <h2 className="text-md font-medium text-fg-strong">Integrations</h2>
-        <p className="mt-2 text-sm text-fg-muted">Connect Graft to the apps you build with. Each one runs as an MCP server that code sessions can use.</p>
+      <header className="flex flex-wrap items-end gap-12">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-md font-medium text-fg-strong">Integrations</h2>
+          <p className="mt-2 text-sm text-fg-muted">
+            Connect Graft to the apps you build with, the docs you read and the services you run. Each one runs as an MCP server that sessions can use. {String(INTEGRATIONS.length)} to choose from.
+          </p>
+        </div>
+        <label className="relative w-[240px] max-w-full">
+          <Search className="pointer-events-none absolute top-1/2 left-10 size-13 -translate-y-1/2 text-icon-muted" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Find an integration"
+            placeholder="Find an app or service"
+            spellCheck={false}
+            className="h-30 w-full rounded-md border border-input-border bg-input pr-8 pl-28 text-base text-fg transition-ui placeholder:text-fg-placeholder focus:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-0"
+          />
+        </label>
       </header>
-      {INTEGRATION_CATEGORIES.map((category) => (
+      {shown.length === 0 ? <p className="text-sm text-fg-muted">No integration matches “{query.trim()}”. Any MCP server can still be added below.</p> : null}
+      {INTEGRATION_CATEGORIES.filter((category) => shown.some((i) => i.category === category)).map((category) => (
         <div key={category} className="flex flex-col gap-6">
           <h3 className="text-xs font-medium tracking-wide text-fg-faint uppercase">{category}</h3>
           <ul className="grid grid-cols-3 gap-8">
-            {INTEGRATIONS.filter((i) => i.category === category).map((integration) => {
+            {shown.filter((i) => i.category === category).map((integration) => {
               const Icon = ICONS[integration.id] ?? Box;
               // The app's own mark where there is one; a drawing of what it does otherwise.
               const branded = brandOf({ name: integration.serverName }) !== null;
