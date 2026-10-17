@@ -47,7 +47,12 @@ module.exports = {
   // GRAFT_DIST_DIR builds elsewhere, e.g. while a copy from dist/ is still open.
   directories: { output: process.env.GRAFT_DIST_DIR?.trim() || 'dist', buildResources: 'build' },
   files: [
-    'out/**',
+    // The three folders electron-vite builds, and nothing else of out/: logs and harnesses kept there
+    // (out/verify, a build's own log) would be packed too, and a log still being written while it is
+    // packed corrupts the archive.
+    'out/main/**',
+    'out/preload/**',
+    'out/renderer/**',
     'package.json',
     '!**/*.map',
     // Build-time sources of the SQLite binding; the prebuilt binary is all that loads.
