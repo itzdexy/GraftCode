@@ -97,6 +97,11 @@ export interface LoopHost {
    */
   takeSteering?(signal: AbortSignal): Promise<ContentBlock[][]>;
   /**
+   * What has to be done before anything changes: the snapshot Rewind goes back to, which is taken while the model
+   * starts answering. Awaited before each call that may change something; a call that only looks doesn't wait.
+   */
+  beforeChange?(): Promise<void>;
+  /**
    * Another model to finish the turn with, after `error` ended a request before any
    * output and after its retries; null when there is none. Asked at most once a turn.
    */
@@ -287,6 +292,11 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
       const feedback = answer.feedback?.trim();
       return errorBlock(call.id, `The user denied this action.${feedback ? ` Their feedback: ${feedback}` : ' Choose a different approach or ask what they want.'}`, true);
     }
+  }
+
+  if (host.beforeChange && changesSomething(call)) {
+    await host.beforeChange();
+    if (signal.aborted) return errorBlock(call.id, NOT_RUN);
   }
 
   // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.

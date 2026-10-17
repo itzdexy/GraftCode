@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 
@@ -6,6 +8,8 @@ import { makeHarness, type Harness } from '../support/sessionHarness';
  * A turn of a code session starts from a snapshot of its folder, for Rewind.
  * A folder too large to snapshot quickly (a whole Downloads folder) used to
  * keep the message unseen, the turn unstoppable and the session undeletable.
+ * The snapshot is taken while the model starts answering; what changes a file
+ * waits for it.
  */
 
 let open: Harness[] = [];
@@ -14,7 +18,6 @@ afterEach(async () => {
   open = [];
 });
 
-const userMessages = (events: AgentEvent[]) => events.filter((e): e is Extract<AgentEvent, { type: 'message' }> => e.type === 'message' && e.message.role === 'user');
 const notices = (events: AgentEvent[]) => events.filter((e): e is Extract<AgentEvent, { type: 'notice' }> => e.type === 'notice').map((e) => e.text);
 
 /** A snapshot that takes as long as it is let: it ends only when its signal says so. */
@@ -27,21 +30,39 @@ function endless(seen: { signal: AbortSignal | null }) {
 }
 
 describe('the snapshot a turn starts from', () => {
-  it('is taken after the message is shown, and is named on it once taken', async () => {
+  it('is taken while the model starts answering: what changes a file waits for it, and it is named on the message', async () => {
     let release: (id: string) => void = () => undefined;
-    const h = makeHarness({ script: [{ text: 'Done.' }], checkpoint: () => new Promise((resolve) => (release = resolve)) });
+    const h = makeHarness({
+      mode: 'bypass',
+      script: [{ toolCalls: [{ name: 'Write', input: { file_path: 'plan.md', content: '# Plan\n' } }] }, { text: 'Done.' }],
+      checkpoint: () => new Promise((resolve) => (release = resolve))
+    });
     open.push(h);
-    h.session.send('Rename the helper');
+    h.session.send('Write the plan');
     const shown = await h.waitFor((e) => e.type === 'message' && e.message.role === 'user');
-    expect(shown.type === 'message' && shown.message.meta.typed).toBe('Rename the helper');
-    // Nothing has been asked of the model while the snapshot runs.
-    expect(h.provider.requests).toHaveLength(0);
+    if (shown.type !== 'message') throw new Error('unreachable');
+    expect(shown.message.meta.typed).toBe('Write the plan');
+    // The model is asked at once; the Write it asks for waits for the snapshot.
+    await vi.waitFor(() => expect(h.provider.requests).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fs.existsSync(path.join(h.projectDir, 'plan.md'))).toBe(false);
     release('checkpoint-1');
     await h.session.idle();
-    const versions = userMessages(h.events);
-    expect(versions.at(-1)?.message.meta.checkpointId).toBe('checkpoint-1');
-    expect(versions.every((e) => e.message.id === versions[0]?.message.id)).toBe(true);
-    expect(h.provider.requests).toHaveLength(1);
+    expect(fs.readFileSync(path.join(h.projectDir, 'plan.md'), 'utf8')).toBe('# Plan\n');
+    expect(h.store.listMessages(h.session.id).find((m) => m.id === shown.message.id)?.meta.checkpointId).toBe('checkpoint-1');
+  });
+
+  it('lets a reply in words go out without waiting for it', async () => {
+    let release: (id: string) => void = () => undefined;
+    const h = makeHarness({ script: [{ text: 'Here is the answer.' }], checkpoint: () => new Promise((resolve) => (release = resolve)) });
+    open.push(h);
+    h.session.send('What does this project do?');
+    const end = await h.waitFor((e) => e.type === 'turn-end');
+    expect(end.type === 'turn-end' && end.reason).toBe('completed');
+    expect(h.store.listMessages(h.session.id).at(-1)?.content).toEqual([{ type: 'text', text: 'Here is the answer.' }]);
+    release('checkpoint-1');
+    await h.session.idle();
+    expect(h.store.listMessages(h.session.id)[0]?.meta.checkpointId).toBe('checkpoint-1');
   });
 
   it('is given up when it runs past its time, with a notice, and not tried again in that folder', async () => {
@@ -70,21 +91,21 @@ describe('the snapshot a turn starts from', () => {
 
   it('ends at once when the turn is stopped, and the turn ends with it', async () => {
     const seen = { signal: null as AbortSignal | null };
-    const h = makeHarness({ script: [{ text: 'Never asked.' }], checkpoint: endless(seen) });
+    const h = makeHarness({ script: [{ text: 'Too late.', chunkDelayMs: 5000 }], checkpoint: endless(seen) });
     open.push(h);
     h.session.send('Start something');
     await h.waitFor((e) => e.type === 'message' && e.message.role === 'user');
     h.session.interrupt();
     const end = await h.waitFor((e) => e.type === 'turn-end');
     expect(end.type === 'turn-end' && end.reason).toBe('interrupted');
+    await h.session.idle();
     expect(seen.signal?.aborted).toBe(true);
-    expect(h.provider.requests).toHaveLength(0);
     // The message says it was stopped, rather than sitting there unanswered.
     expect(h.store.listMessages(h.session.id).map((m) => `${m.role}:${m.meta.kind ?? 'normal'}`)).toEqual(['user:normal', 'assistant:notice']);
   });
 
   it('never keeps a session from closing, even when the snapshot does not hear the stop', async () => {
-    const h = makeHarness({ script: [{ text: 'Never asked.' }], checkpoint: () => new Promise(() => undefined), timings: { disposeMs: 80 } });
+    const h = makeHarness({ script: [{ text: 'An answer.' }], checkpoint: () => new Promise(() => undefined), timings: { disposeMs: 80 } });
     h.session.send('Start something');
     await h.waitFor((e) => e.type === 'message' && e.message.role === 'user');
     const started = Date.now();

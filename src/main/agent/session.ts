@@ -251,6 +251,10 @@ export class AgentSession {
   private saidUnchecked = false;
   /** Whether this runtime has said that its folder gets no checkpoints (see takeCheckpoint). */
   private checkpointSkipSaid = false;
+  /** Snapshots still being taken: one can outlast the reply it was taken for. */
+  private readonly snapshots = new Set<Promise<void>>();
+  /** Aborted when the session closes, which ends a snapshot that outlasted its turn. */
+  private readonly closing = new AbortController();
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
 
@@ -655,6 +659,7 @@ export class AgentSession {
     // keep writing to a session that is being removed.
     this.disposed = true;
     this.interrupt();
+    this.closing.abort();
     for (const aside of this.asides.values()) aside.abort();
     // A turn caught in something that doesn't hear the stop must not keep its session from being deleted, or the
     // app from closing: after DISPOSE_WAIT_MS the session is let go and the turn is left to end on its own.
@@ -755,9 +760,30 @@ export class AgentSession {
     }
   }
 
-  /** Waits for the current turn, and for any turn it hands off to (tests and shutdown). */
+  /** Waits for the current turn, for any turn it hands off to, and for a snapshot that outlasted its turn (tests and shutdown). */
   async idle(): Promise<void> {
-    while (this.running) await this.running.catch(() => undefined);
+    while (this.running || this.snapshots.size > 0) {
+      if (this.running) await this.running.catch(() => undefined);
+      else await Promise.all(this.snapshots);
+    }
+  }
+
+  /**
+   * Starts the snapshot of a user turn and names it on the message once taken. It ends with the turn's Stop and when
+   * the session closes; otherwise it may go on after a reply in words, and the next snapshot waits for it.
+   */
+  private startSnapshot(messageId: string, signal: AbortSignal): Promise<void> {
+    const taking = this.takeCheckpoint(messageId, AbortSignal.any([signal, this.closing.signal])).then((checkpointId) => {
+      if (!checkpointId || this.disposed) return;
+      try {
+        this.emit({ type: 'message', message: this.deps.store.updateMessageMeta(messageId, { checkpointId }) });
+      } catch (error) {
+        this.deps.log('warn', 'Could not name a checkpoint on its message', { session: this.id, message: (error as Error).message });
+      }
+    });
+    this.snapshots.add(taking);
+    void taking.finally(() => this.snapshots.delete(taking));
+    return taking;
   }
 
   /**
@@ -1233,6 +1259,7 @@ export class AgentSession {
 
       let userText: string | null = null;
       let starting: Mission | null = null;
+      let snapshot: Promise<void> | null = null;
       const missionTurn = item?.mission;
       if (missionTurn && missionTurn.kind !== 'start') {
         // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
@@ -1269,11 +1296,9 @@ export class AgentSession {
         this.emit({ type: 'message', message: stored });
         // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
         if (starting) this.missions.save({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
-        if (summary.kind === 'code') {
-          const checkpointId = await this.takeCheckpoint(userMessageId, signal);
-          signal.throwIfAborted();
-          if (checkpointId) this.emit({ type: 'message', message: this.deps.store.updateMessageMeta(userMessageId, { checkpointId }) });
-        }
+        // The snapshot Rewind goes back to is taken while the model starts answering: a reply in words never waits
+        // for it, and nothing that changes a file runs before it is taken (the loop's beforeChange).
+        if (summary.kind === 'code') snapshot = this.startSnapshot(userMessageId, signal);
       }
 
       const { provider, model, ref } = await this.resolveModel(signal);
@@ -1294,10 +1319,12 @@ export class AgentSession {
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
       const scope: TurnScope = { hooks, root, trusted };
+      const taken = snapshot;
       const host: LoopHost = {
         ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),
         takeSteering: (s) => this.deliverSteering(turnId, hooks, s),
-        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined
+        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined,
+        ...(taken ? { beforeChange: () => taken } : {})
       };
       const result = await runAgentLoop(
         this.history(),
