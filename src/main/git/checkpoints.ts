@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GraftError } from '@shared/errors';
+import { log } from '../app/log';
 import type { Db } from '../db/database';
 import { fromGitPath, git, runGit } from './git';
 
@@ -383,6 +384,35 @@ export class CheckpointService {
       }
     }
     this.db.prepare('DELETE FROM checkpoints WHERE session_id = ?').run(sessionId);
-    fs.rmSync(path.join(this.indexRoot, safeRefPart(sessionId)), { recursive: true, force: true });
+    await this.removeIndexes(safeRefPart(sessionId));
+  }
+
+  /**
+   * Removes the private index folders of sessions that no longer exist: ones a
+   * delete couldn't remove because a git still held them, and incognito ones.
+   */
+  async sweepIndexes(sessionIds: ReadonlySet<string>): Promise<void> {
+    const keep = new Set([...sessionIds].map(safeRefPart));
+    let names: string[];
+    try {
+      names = await fs.promises.readdir(this.indexRoot);
+    } catch {
+      return;
+    }
+    for (const name of names) if (!keep.has(name)) await this.removeIndexes(name);
+  }
+
+  /**
+   * A session's private index folder goes, tried again for a few seconds while
+   * something still holds a file of it (a git that is ending, a virus scanner).
+   * What is still held stays for the next start's sweep: a session is deleted
+   * whatever becomes of its index, which only made snapshots faster.
+   */
+  private async removeIndexes(name: string): Promise<void> {
+    try {
+      await fs.promises.rm(path.join(this.indexRoot, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      log.warn('checkpoints', 'A private index folder is still in use; it goes at the next start', { folder: name, message: (error as Error).message });
+    }
   }
 }

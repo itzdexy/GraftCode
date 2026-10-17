@@ -461,3 +461,28 @@ describe('finding and running git', () => {
     resetGitBinary();
   });
 });
+
+describe('the private index folders of snapshots', () => {
+  it('never keep a session from being deleted: one still held is left, and the next start sweeps it', async () => {
+    const shadow = track(makeTempDir('graft shadow (tmp) '));
+    const indexRoot = track(makeTempDir('graft index (tmp) '));
+    const db = openDatabase(':memory:');
+    try {
+      const service = new CheckpointService(db, shadow, indexRoot);
+      writeFile(indexRoot, 's1/abc.index', 'x');
+      writeFile(indexRoot, 's2/abc.index', 'x');
+      // What Windows says while a git that is ending still has the index open.
+      const held = Object.assign(new Error('EPERM, Permission denied'), { code: 'EPERM' });
+      const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(held);
+      await expect(service.deleteForSession('s1')).resolves.toBeUndefined();
+      rm.mockRestore();
+      expect(fs.existsSync(path.join(indexRoot, 's1'))).toBe(true);
+
+      await service.sweepIndexes(new Set(['s2']));
+      expect(fs.existsSync(path.join(indexRoot, 's1'))).toBe(false);
+      expect(fs.existsSync(path.join(indexRoot, 's2', 'abc.index'))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+});

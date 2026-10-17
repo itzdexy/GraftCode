@@ -97,9 +97,12 @@ export class SessionManager {
 
   /** Sessions left running or waiting when the app last quit are idle now. */
   recoverStaleStatuses(): void {
-    for (const s of this.deps.repo.list({ includeArchived: true })) {
+    const sessions = this.deps.repo.list({ includeArchived: true });
+    for (const s of sessions) {
       if (s.status === 'running' || s.status === 'needs-input') this.deps.repo.updateSession(s.id, { status: 'idle' });
     }
+    // Index folders a delete couldn't remove, and those of incognito sessions, go now.
+    void this.deps.checkpoints.sweepIndexes(new Set(sessions.map((s) => s.id)));
     this.deps.repo.recoverAgentRuns();
     this.deps.repo.recoverMissions();
     // Tool calls that were running when the app stopped get a truthful answer now, so the note is there when the session is opened.
