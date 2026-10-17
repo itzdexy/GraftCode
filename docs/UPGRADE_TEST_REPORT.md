@@ -1153,3 +1153,67 @@ Not verified:
 - Real exports: Blender's and Roblox Studio's own .glb and .fbx files, Draco-compressed models,
   a .gltf with its textures beside it. The tests draw a twelve-triangle .stl.
 - WebGL in the Linux container: the packaged smoke tests there draw no model.
+
+## 0.6.33 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, on top of 0.6.32 in its worktree, local: nothing was pushed
+and no release was made. Commits `8fab10e` (a message shows at once; a large folder can't hang
+a turn, its Stop or its Delete), `683f157` (scrollbars), `3af972b` (connectors with their apps'
+icons), `32c2b12` ("Stopped." before any reply), `947da5a` (Open a file), `14e2057` (the tour),
+`529991b` (the card chooser), `b181d1f` (the version and the documents), `41d99c5` and `feb4dd0`
+(what the Linux run found), `9d63bdf` (documents). Windows 11 (Node 26.7.0, Electron 44.5.1)
+and a Linux container (`node:24-bookworm`). Not macOS: see the end.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npx playwright test tests/e2e/tour.spec.ts tests/e2e/mcp.spec.ts --repeat-each 2` | working tree before `14e2057` | 10 passed |
+| `npm run verify` | `b181d1f` | typecheck, lint, build exit 0; unit 134 files passed, 3 skipped, 1560 passed, 30 skipped; e2e 82 passed, 6 skipped, 483 s |
+| `npm run verify:docker` | `b181d1f` | typecheck, lint, unit (1552 passed, 38 skipped), build exit 0; e2e exit 1: 80 passed, 2 failed, 6 skipped |
+| the queue test with each send slowed by 400 ms, on the composer of `b181d1f` | `41d99c5` test, old composer | 1 failed, as in the container |
+| `npx playwright test` of `recordings`, `session`, `chat`, `power`, `tour` | the tree then committed as `41d99c5` and `feb4dd0` | 20 passed |
+| `npm run verify:docker` | `9d63bdf` | every step exit 0; unit 1554 passed, 38 skipped; e2e 82 passed, 6 skipped (7.9 min) |
+| `npm run verify` | `9d63bdf` | every step exit 0; unit 134 files passed, 3 skipped, 1562 passed, 30 skipped; e2e 82 passed, 6 skipped, 485 s |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `9d63bdf` | installer built; the archive holds `out/main`, `out/preload`, `out/renderer` and `package.json` 0.6.33; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `9d63bdf` | AppImage and .deb built; 3 passed |
+
+What the runs found, and what was done:
+
+- The user's "it doesn't delete or send a message": a session on a very large folder snapshotted
+  it before storing the message, unstoppably, with a ten-minute timeout, and closing the session
+  waited for the turn without end. Fixed in `8fab10e`; unit tests in `checkpointBudget.test.ts`
+  (the message before the snapshot, the budget and its notice, Stop during the snapshot, a
+  session that closes whatever the snapshot does).
+- The tour (`tour.spec.ts`) found two faults on its first runs. Stop pressed right after sending
+  ended the turn during the snapshot and left the message with no word under it (`32c2b12`: a
+  "Stopped." notice, unit-tested in `agent.test.ts` and `checkpointBudget.test.ts`). Ctrl+P, a
+  name typed and Enter at once opened another file (`947da5a`, `paletteModel.test.ts`).
+- The first Linux run failed two desktop tests that pass on Windows, both real. In the queue
+  test, two of three messages typed one after another were lost: the box was emptied when a send
+  came back, taking what had been typed meanwhile, and an Enter before then did nothing
+  (`41d99c5`; the test now slows each send and failed on the old composer on Windows too). In the
+  details column, a short path such as `/tmp/project` was shown whole beside the folder's name,
+  so the test found the name twice (`feb4dd0`, `detailsModel.test.ts`).
+
+What the tests of this round show, and with what:
+
+- Unit: the snapshot's budget and Stop (4), "Stopped." (2), server info from MCP (title, version,
+  data: icons only, the largest or the SVG) in `mcp.test.ts`, the app marks by name, address and
+  command and the names shown (`brands.test.ts`), the scrollbar marks (`scrollbars.test.ts`),
+  hidden cards kept (`keptStates.test.ts`), the folder line (`detailsModel.test.ts`), the file
+  palette's rows (`paletteModel.test.ts`).
+- Desktop: `tour.spec.ts` (every Settings page and its search, every Customize tab, every view in
+  both modes, the palettes, the scrollbar while scrolling, a session that writes code, the
+  Terminal, Changes, Files, Search and Problems tabs, Browser, Agents, the details column and its
+  card chooser, each composer menu, find, open a file, go to a symbol, Stop the moment a message
+  is sent, a message after it, Delete while a reply streams; no page error, no console error, no
+  part that failed to display); `mcp.spec.ts` (a server's own name and icon in Customize and in
+  the Connectors card); `recordings.spec.ts` (the queue with slow sends).
+
+Not verified:
+
+- macOS, at all: it needs a Mac, and GitHub's runners don't start while the account is locked
+  for billing.
+- A real large folder: the budget and Stop are tested with snapshots that never end; the user's
+  own Downloads folder was not opened.
+- Icons sent by a real third-party MCP server; the fixture sends one SVG. The Roblox Studio and
+  Blender marks were checked in the renderer preview.
