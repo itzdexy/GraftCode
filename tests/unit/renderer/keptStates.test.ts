@@ -8,18 +8,24 @@ const storage = (values: Record<string, string>): Pick<Storage, 'getItem'> => ({
 
 describe('the details column as it was left', () => {
   it('opens the first time with Context and Connectors folded', () => {
-    expect(readDetails(null)).toEqual({ open: true, folded: ['context', 'connectors'] });
-    expect(readDetails(storage({}))).toEqual({ open: true, folded: ['context', 'connectors'] });
+    expect(readDetails(null)).toEqual({ open: true, folded: ['context', 'connectors'], hidden: [] });
+    expect(readDetails(storage({}))).toEqual({ open: true, folded: ['context', 'connectors'], hidden: [] });
   });
 
   it('comes back as it was left, keeping only cards it knows', () => {
-    expect(readDetails(storage({ 'graft.details.v1': JSON.stringify({ open: false, folded: ['outputs', 'nonsense', 'tasks'] }) }))).toEqual({ open: false, folded: ['outputs', 'tasks'] });
+    expect(readDetails(storage({ 'graft.details.v1': JSON.stringify({ open: false, folded: ['outputs', 'nonsense', 'tasks'] }) }))).toEqual({ open: false, folded: ['outputs', 'tasks'], hidden: [] });
+  });
+
+  it('keeps the cards taken out of it, in its order, and only cards it knows', () => {
+    const kept = JSON.stringify({ open: true, folded: [], hidden: ['changes', 'nonsense', 'environment'] });
+    expect(readDetails(storage({ 'graft.details.v1': kept }))).toEqual({ open: true, folded: [], hidden: ['environment', 'changes'] });
+    expect(readDetails(storage({ 'graft.details.v1': JSON.stringify({ open: true, folded: [], hidden: 'all' }) })).hidden).toEqual([]);
   });
 
   it('opens as the first time when what was kept can’t be read', () => {
-    expect(readDetails(storage({ 'graft.details.v1': '{not json' }))).toEqual({ open: true, folded: ['context', 'connectors'] });
-    expect(readDetails(storage({ 'graft.details.v1': JSON.stringify({ open: 'yes', folded: 'all' }) }))).toEqual({ open: true, folded: ['context', 'connectors'] });
-    expect(readDetails({ getItem: () => { throw new Error('blocked'); } })).toEqual({ open: true, folded: ['context', 'connectors'] });
+    expect(readDetails(storage({ 'graft.details.v1': '{not json' }))).toEqual({ open: true, folded: ['context', 'connectors'], hidden: [] });
+    expect(readDetails(storage({ 'graft.details.v1': JSON.stringify({ open: 'yes', folded: 'all' }) }))).toEqual({ open: true, folded: ['context', 'connectors'], hidden: [] });
+    expect(readDetails({ getItem: () => { throw new Error('blocked'); } })).toEqual({ open: true, folded: ['context', 'connectors'], hidden: [] });
   });
 });
 

@@ -28,6 +28,7 @@ import type { SessionSummary } from '@shared/schemas/sessions';
 import { ConnectorIcon } from '../../../components/ConnectorIcon';
 import { Button, IconButton } from '../../../components/Button';
 import { Collapse } from '../../../components/Collapse';
+import { ContextMenu, ContextMenuCheckItem, ContextMenuContent, ContextMenuLabel, ContextMenuTrigger } from '../../../components/Menu';
 import { Spinner } from '../../../components/ContextRing';
 import { onChanged } from '../../../lib/bus';
 import { connectorName } from '../../../lib/brands';
@@ -44,9 +45,11 @@ import { panelBus, panelsOf, usePanels } from '../../../stores/panels';
 import { reportError, useToasts } from '../../../stores/toasts';
 import { ChangeCount, formatCount, GitActions } from '../StatusBar';
 import {
+  CARD_TITLES,
   connectorRow,
   connectorsSummary,
   contextBreakdown,
+  DETAIL_CARDS,
   DETAILS_WIDTH,
   detailsShown,
   elapsedText,
@@ -718,18 +721,43 @@ export interface DetailsColumnProps {
 export function DetailsColumn({ summary, messages, runs, limit, stats, busy, refreshKey, shown, onCompact, onStatsChanged }: DetailsColumnProps) {
   const present = usePresence(shown, SLIDE_EXIT_MS);
   const outputs = useMemo(() => sessionOutputs(messages), [messages]);
+  const hidden = useDetails((s) => s.hidden);
+  const shows = (card: DetailCard): boolean => !hidden.includes(card);
   return (
     <div className="graft-slide-x graft-slide-x--flush h-full shrink-0" data-state={shown ? 'open' : 'closed'}>
       <div>
         {present ? (
-          <aside aria-label="Session details" className="flex h-full flex-col gap-8 overflow-y-auto py-8 pr-8 pl-2" style={{ width: DETAILS_WIDTH }}>
-            <EnvironmentCard summary={summary} branch={stats?.branch ?? null} index={0} />
-            <ContextCard summary={summary} limit={limit} busy={busy} empty={messages.length === 0} refreshKey={refreshKey} onCompact={onCompact} index={1} />
-            <ConnectorsCard projectPath={summary.projectPath} index={2} />
-            <OutputsCard sessionId={summary.id} outputs={outputs} index={3} />
-            <TasksCard sessionId={summary.id} runs={runs} index={4} />
-            <ChangesCard summary={summary} stats={stats} onChanged={onStatsChanged} index={5} />
-          </aside>
+          // A right-click anywhere on the column chooses its cards, as the Claude desktop app's session rail does.
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <aside aria-label="Session details" className="flex h-full flex-col gap-8 overflow-y-auto py-8 pr-8 pl-2" style={{ width: DETAILS_WIDTH }}>
+                {shows('environment') ? <EnvironmentCard summary={summary} branch={stats?.branch ?? null} index={0} /> : null}
+                {shows('context') ? (
+                  <ContextCard summary={summary} limit={limit} busy={busy} empty={messages.length === 0} refreshKey={refreshKey} onCompact={onCompact} index={1} />
+                ) : null}
+                {shows('connectors') ? <ConnectorsCard projectPath={summary.projectPath} index={2} /> : null}
+                {shows('outputs') ? <OutputsCard sessionId={summary.id} outputs={outputs} index={3} /> : null}
+                {shows('tasks') ? <TasksCard sessionId={summary.id} runs={runs} index={4} /> : null}
+                {shows('changes') ? <ChangesCard summary={summary} stats={stats} onChanged={onStatsChanged} index={5} /> : null}
+                {hidden.length === DETAIL_CARDS.length ? (
+                  <div className="motion-rise flex flex-col items-start gap-6 px-8 py-6">
+                    <p className="text-sm text-fg-muted">Every card is taken out. A right-click here chooses the cards.</p>
+                    <Button size="sm" variant="secondary" onClick={() => DETAIL_CARDS.forEach((card) => useDetails.getState().showCard(card, true))}>
+                      Show all cards
+                    </Button>
+                  </div>
+                ) : null}
+              </aside>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="min-w-[200px]">
+              <ContextMenuLabel>Cards in this column</ContextMenuLabel>
+              {DETAIL_CARDS.map((card) => (
+                <ContextMenuCheckItem key={card} checked={shows(card)} onCheckedChange={(on) => useDetails.getState().showCard(card, on)}>
+                  {CARD_TITLES[card]}
+                </ContextMenuCheckItem>
+              ))}
+            </ContextMenuContent>
+          </ContextMenu>
         ) : null}
       </div>
     </div>

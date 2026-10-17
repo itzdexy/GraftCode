@@ -16,6 +16,16 @@ import { serverSummary } from '../../customize/mcpModel';
 export const DETAIL_CARDS = ['environment', 'context', 'connectors', 'outputs', 'tasks', 'changes'] as const;
 export type DetailCard = (typeof DETAIL_CARDS)[number];
 
+/** Each card's name, as its header and the column's right-click menu say it. */
+export const CARD_TITLES: Record<DetailCard, string> = {
+  environment: 'Environment',
+  context: 'Context',
+  connectors: 'Connectors',
+  outputs: 'Outputs',
+  tasks: 'Background tasks',
+  changes: 'Changes'
+};
+
 /** Folded when nothing was said yet: the two whose one-line summary says most of what they hold. */
 export const FOLDED_AT_FIRST: readonly DetailCard[] = ['context', 'connectors'];
 

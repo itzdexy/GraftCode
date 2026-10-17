@@ -199,6 +199,17 @@ test('a session writes code, shows it in every panel, opens every menu, and stop
   await expect(details).toBeHidden();
   await w.getByRole('button', { name: 'Session details' }).click();
   await expect(details).toBeVisible();
+  // A right-click on it chooses its cards: one taken out, then put back.
+  const environment = details.getByRole('group', { name: 'Environment' });
+  await expect(environment).toBeVisible();
+  for (const shown of [false, true]) {
+    await details.click({ button: 'right', position: { x: 60, y: 14 } });
+    const item = w.getByRole('menuitemcheckbox', { name: 'Environment' });
+    await expect(item).toHaveAttribute('aria-checked', String(!shown));
+    await item.click();
+    await w.keyboard.press('Escape');
+    await expect(environment).toHaveCount(shown ? 1 : 0);
+  }
 
   // Each menu of the composer opens and closes.
   for (const name of [/^Permission mode:/, /^Model:/, /^Effort:/, /^Transcript view:/]) {
