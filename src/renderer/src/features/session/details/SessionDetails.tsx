@@ -724,7 +724,7 @@ export function DetailsColumn({ summary, messages, runs, limit, stats, busy, ref
     <div className="graft-slide-x graft-slide-x--flush h-full shrink-0" data-state={shown ? 'open' : 'closed'}>
       <div>
         {present ? (
-          // A right-click anywhere on the column chooses its cards, as the Claude desktop app's session rail does.
+          // A right-click anywhere on the column chooses its cards.
           <ContextMenu>
             <ContextMenuTrigger asChild>
               <aside aria-label="Session details" className="flex h-full flex-col gap-8 overflow-y-auto py-8 pr-8 pl-2" style={{ width: DETAILS_WIDTH }}>

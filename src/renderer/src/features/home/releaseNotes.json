@@ -7,7 +7,7 @@
       "A turn stopped before the model said a word says \"Stopped.\" under your message, as a reply cut short does.",
       "Slim scrollbars: rounded, faint until you point at them or scroll, brighter while you scroll and tinted while you drag.",
       "Connectors show the apps they reach. Roblox Studio, Blender, Figma, GitHub, Linear, Notion and about fifty more get their own icon and name, and a server that names itself and sends an icon is shown by those. In the details column a connector opens to where it runs, its version, its tools, Reconnect and Open in Customize; Customize and the steps of a turn show the same icons.",
-      "A right-click on the details column chooses its cards, as in the Claude desktop app.",
+      "A right-click on the details column chooses which of its cards it shows.",
       "Open a file (Ctrl+P) opens a file that matches what you typed, however quickly you press Enter."
     ]
   },
