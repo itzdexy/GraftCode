@@ -1,6 +1,6 @@
-# Try Graft 0.6.33
+# Try Graft 0.6.34
 
-1. Open **Settings → About** and confirm version **0.6.33**. In
+1. Open **Settings → About** and confirm version **0.6.34**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -211,6 +211,19 @@
     fades after. Point at it and drag it.
 49. In a code session press **Ctrl+P**, type part of a file's name and press Enter at once:
     the file that opens matches what you typed.
+50. With OpenRouter as a provider, open **Settings → Models** and scroll past the backup
+    model: **Image models**, **Video models**, **Voices**, **Music and sound** and
+    **Transcription** list what OpenRouter has, with OpenAI's and Google's when you have those
+    keys. Type `veo` in the search: only the video section stays. Press **Use for images** on
+    one image model, and check **Settings → Images** names it.
+51. In a code session ask for "a 6-second clip of a sprout growing in a clay pot, saved as
+    assets/sprout.mp4". Allow GenerateVideo: after a minute or two the clip plays in the
+    conversation, the file is in the project, and the session's cost went up by what it cost.
+    Try it again with "start it on assets/hero.png".
+52. **Customize → Integrations** says 54 to choose from. Search `papers`, `postgres` or
+    `figma`; add **DeepWiki** (nothing to set up) and ask about a public repository.
+53. Start a turn in a very large folder, press **Stop**, then delete the session: it goes, with
+    no "EPERM" message. The reply of a turn there starts without waiting for the snapshot.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

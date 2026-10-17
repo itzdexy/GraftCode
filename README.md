@@ -130,6 +130,39 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Media models, video, and 54 integrations (0.6.34)
+
+**Image, video and audio models.** Settings → Models lists, below the models you chat with, a
+section for each kind of media model your providers offer: **Image models**, **Video models**,
+**Voices**, **Music and sound** and **Transcription**. OpenRouter says which kind each of its models
+is; OpenAI's and Google's are known by their names, and so are the well-known ones on other
+OpenAI-compatible servers (which also leaves them out of the list of models to chat with). A
+video model shows the lengths and shapes it makes, whether it can start on a picture, and what a
+second costs. **Use** makes a model the one for images, for video or for Read aloud, where Graft
+can use it; one search narrows every section.
+
+**Video.** The agent's new **GenerateVideo** tool makes a clip with the video model chosen there
+(Veo 3.1 Lite unless you pick another), through OpenRouter's video API and your OpenRouter key: a
+trailer shot, a cutscene, an animated background, or a picture of your project brought to life.
+The clip is saved in the project (or in a chat's files), plays in the conversation, and what it
+cost is added to the session. Like a picture, it is asked about first in Ask mode.
+
+**Integrations.** Customize → Integrations has 54 MCP servers to add in one step, sorted by the
+kind of work, with a search: game engines and sound (Blender, Roblox Studio, Unity, Godot,
+ElevenLabs), design and front end (Figma, Figma files, shadcn/ui, Chrome DevTools, Playwright,
+Next.js DevTools, Svelte, Astro, Webflow), docs (Context7, DeepWiki, Microsoft Learn, AWS,
+Cloudflare, Shopify), developer tools (GitHub, Sentry, Semgrep, CircleCI, Kubernetes), cloud and
+payments (Cloudflare, Netlify, Render, Stripe, PostHog), data (Supabase, Neon, PostgreSQL,
+MongoDB, Redis, DuckDB), research (Hugging Face, arXiv, paper search, Wikipedia, Zotero,
+Perplexity, Exa, Brave Search, Firecrawl, Tavily), plans and notes (Linear, Notion, Jira and
+Confluence, Asana, Airtable), memory and reasoning, and reverse engineering (Ghidra).
+
+**Delete, fixed again.** On Windows the git on PATH is a launcher that starts the real git; a
+stopped snapshot used to stop only the launcher, so the real git kept the session's private index
+locked and Delete failed with "EPERM, Permission denied". Graft now stops both, a delete no longer
+fails on that folder (what is still held goes at the next start), and the snapshot is taken
+while the model starts answering instead of before.
+
 ### Large folders, connectors with their own icons (0.6.33)
 
 **Sending in a large folder.** A code session snapshots its folder before each turn, so

@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.34",
+    "date": "2026-10-17",
+    "items": [
+      "Deleting a session works again after a large folder was being snapshotted: Graft now stops the whole git it started (on Windows the git on PATH starts a second one, which kept running and held the session’s files), and a delete never fails on that folder.",
+      "Replies start sooner in large folders: the snapshot Rewind needs is taken while the model starts answering, and only a change to a file waits for it.",
+      "Settings → Models has a section for each kind of media model your providers offer: images, video, voices, music and transcription. OpenRouter’s are listed by kind, OpenAI’s and Google’s too, and the well-known ones on other servers. Use makes one the model for images, video or Read aloud.",
+      "Graft makes video. GenerateVideo turns a prompt, or a picture of your project, into a clip with OpenRouter’s video models (Veo, Seedance, Kling, Wan, Hailuo and more) and saves it in the project. Pick the model in Settings → Models.",
+      "54 integrations to add in one step, 42 of them new: ElevenLabs for game sound; Figma files, shadcn/ui, Chrome DevTools, Next.js, Svelte, Astro and Webflow for interfaces; DeepWiki, Microsoft Learn, AWS and Cloudflare docs, Netlify, Render, Stripe, PostHog, Semgrep, CircleCI and Kubernetes for developers; Supabase, Neon, PostgreSQL, MongoDB, Redis and DuckDB for data; Hugging Face, arXiv, paper search, Wikipedia, Zotero, Perplexity, Exa, Brave Search, Firecrawl and Tavily for research; Jira and Confluence, Asana, Airtable, Memory and Sequential thinking. A search finds them."
+    ]
+  },
+  {
     "version": "0.6.33",
     "date": "2026-10-17",
     "items": [

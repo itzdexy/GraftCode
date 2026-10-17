@@ -19,6 +19,50 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.34 media models, video, 54 integrations, and Delete that can't be locked (2026-10-17)
+
+Asked for as: "fix" with a screenshot of the delete dialog of 0.6.33 saying "EPERM, Permission
+denied: \\?\C:\Users\…\Graft\checkpoint-index\e0ba8b19-…"; "btw if a provider support image
+model,audio model or video model make it show on the model page and make it like different
+sections and make this good. do not add any "claude code" name on the app its graft code and make
+this good make this amazing for coders,ui,devs,game makers, and etc researchers and etc"; and
+"continue and also add alot more MCP's". No new package or table; one setting
+(`media.videoModel`), one channel (`models:media`), one tool (GenerateVideo).
+
+- **Delete that can't be locked** (`git/git.ts`, `git/checkpoints.ts`, `sessionManager.ts`). The
+  user's log showed "A turn did not end when its session was closed" and then the EPERM four
+  times; a `git add -A` of Graft's started 22:13 was still running ten minutes later with its
+  parent gone. Git for Windows' `cmd\git.exe` is a launcher whose child is the real git: the
+  stop killed the launcher only, and the real git held the private index and the pipes, so the
+  turn didn't end either. git is now stopped with `taskkill /T` on Windows and a stop ends the call
+  at once; the index folder is removed without blocking, retried briefly, and left for a sweep at
+  the next start when it is still held, so a delete never fails on it.
+- **The snapshot beside the reply** (`agent/session.ts`, `agent/loop.ts` `beforeChange`). A code
+  turn asked the model only after the snapshot; now they run together, a call that changes
+  something waits for the snapshot before it runs, a call that only looks doesn't, and the
+  snapshot ends with Stop and with the session.
+- **Media models on the Models page** (`media/mediaModels.ts`, `settings/MediaModelsSections.tsx`,
+  `settings/mediaModels.ts`). OpenRouter's lists by `output_modalities` (image, speech, audio,
+  transcription) and its video list (`/videos/models`, with durations, shapes, first frames and
+  per-second prices); OpenAI's and Google's model lists classified by name; OpenAI-compatible
+  servers by the names of well-known media models, which the chat list now leaves out.
+- **GenerateVideo** (`media/videos.ts`, `tools/media.ts`). OpenRouter's asynchronous video API:
+  submit with a length and a shape the model makes, poll, download; the key is only sent to the
+  provider's own origin, whatever address a response names.
+- **54 integrations** (`shared/integrations.ts`). Every launch checked on 2026-10-17 against npm,
+  PyPI or the live server (initialize answered, or a token or OAuth with dynamic client
+  registration asked for).
+
+Different from what was asked, and why:
+
+- Music and transcription models are listed, not used: nothing in Graft calls them yet (Read
+  aloud uses OpenRouter's voices, and there is no dictation). OpenAI's Sora and Google's Veo are
+  listed but made through OpenRouter only for now; their own APIs differ and were not built.
+- Remote integrations that only accept approved clients (Vercel, Slack, Canva) were left out:
+  their sign-in would fail. Unreal Engine has no official MCP server to point at yet.
+- "No Claude Code name in the app": the one place was the 0.6.33 What's new note, now reworded;
+  Graft's own name is unchanged. Claude stays where it names Anthropic's models.
+
 ### 0.6.33 large folders, connectors with their own icons, a tour of the app (2026-10-17)
 
 Asked for as: "fix make it show their real icons and like make this better check twitter and
@@ -1586,3 +1630,6 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
     with their apps' icons, the card chooser, slim scrollbars, a tour of the whole app. Next
     there, from the October research: a recap card with what to do next, compaction while a
     session is idle, and nested sessions.
+11. Done in 0.6.34: media models by kind on the Models page, video the agent makes through
+    OpenRouter, 54 integrations, and a delete that a running git can't block. Next there: video
+    through OpenAI's and Google's own APIs, transcription for dictation, and music for games.
