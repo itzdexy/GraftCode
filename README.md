@@ -139,7 +139,9 @@ as it took. Now the message shows the moment you send it; the snapshot follows, 
 seconds it is given up with a note ("No checkpoint for this turn: … took longer than 20 seconds
 to snapshot"), and Graft doesn't try that folder again until it restarts. Stop and Delete end
 the turn wherever it has got to, the snapshot included. A turn stopped before the model said a
-word says **Stopped.** under the message.
+word says **Stopped.** under the message. The message box empties the moment you press Enter, so
+messages sent one after another while Graft works all queue, in order; on a slow computer the
+second and third used to be lost.
 
 **Connectors you recognize.** An MCP server is shown with the icon of the app it reaches, found
 by its name, its address or the command that starts it (Roblox Studio, Blender, Unity, Unreal,

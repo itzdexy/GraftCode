@@ -199,7 +199,8 @@
     message: it shows at once. When the folder takes longer than 20 seconds to snapshot, a
     note says the turn has no checkpoint, and the turn goes on. Press **Stop** right after
     sending: the turn ends and **Stopped.** appears under the message. Delete a session while
-    it replies: it goes at once.
+    it replies: it goes at once. While it replies, type and send three messages quickly: all
+    three queue, in the order sent.
 46. Add an MCP server for an app Graft knows (Blender, Roblox Studio, Figma, GitHub, Linear,
     …). Customize → Integrations, the **Connectors** card of the details column and the steps
     of a turn that used it show the app's icon. Open its row in the card: where it runs, its

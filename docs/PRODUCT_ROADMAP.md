@@ -38,6 +38,10 @@ new table, setting, channel or shortcut.
   attempts until restart; and `dispose()` waits at most `DISPOSE_WAIT_MS` (8 s) for a turn
   that doesn't hear the stop. A turn stopped before the model wrote anything stores a
   "Stopped." notice (`kind: 'notice'`, never sent to the model), as a reply cut short shows one.
+- **Messages typed while one is being sent** (`composer/Composer.tsx`). The box was emptied when
+  the send came back, wiping what had been typed meanwhile, and an Enter before then did nothing:
+  in the Linux container two of three queued messages were lost. The box now empties at once,
+  sends wait for the one before them, and a message that is not sent comes back.
 - **Connectors with their own icons** (`lib/brands.ts`, `components/ConnectorIcon.tsx`,
   `mcp/mcpManager.ts` `serverInfoOf`). 57 marks from Simple Icons, matched on the server's name,
   then its host, then its command and arguments; white or black ink by luminance, as app icons
@@ -57,7 +61,9 @@ new table, setting, channel or shortcut.
   Customize tab, every view in both modes, the palettes, the scrollbars, a session that writes
   code, every panel and composer menu, find, open a file, a symbol, Stop the moment a message is
   sent, the card chooser, and Delete while a reply streams; it fails on any page error or console
-  error and on any part that fails to display. It found the "Stopped." gap and the palette bug.
+  error and on any part that fails to display. It found the "Stopped." gap and the palette bug;
+  the Linux run of the whole suite found the lost messages and a folder line that repeated the
+  folder's name for a short path (`nearPath`).
 
 What the research found (October 2026), and what Graft does with it:
 
@@ -69,6 +75,14 @@ What the research found (October 2026), and what Graft does with it:
 - Cursor: canvases for cloud agents (Oct 16), a marketplace (Oct 13), remote control (Oct 6).
 - Codex 0.162–0.163: searchable settings and steering (Graft has both), a daemon, parallel
   read-only tools, managed worktrees, pinned tasks, clickable links, composer predictions.
+
+Sources, read on 2026-10-17: https://code.claude.com/docs/en/changelog,
+https://x.com/ClaudeDevs/status/2110445852905062457,
+https://aicatchup.com/news/claude-code-desktop-redesign,
+https://pasqualepillitteri.it/en/news/24032/claude-code-desktop-nested-sessions-environments,
+https://releasebot.io/updates/anthropic/claude-code, https://cursor.com/changelog,
+https://releasebot.io/updates/cursor, https://developers.openai.com/codex/changelog and
+https://releasebot.io/updates/openai/codex.
 
 Different from what was asked, and why:
 

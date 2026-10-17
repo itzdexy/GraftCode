@@ -3,7 +3,7 @@
     "version": "0.6.33",
     "date": "2026-10-17",
     "items": [
-      "Sending and deleting work in any folder again. Your message shows the moment you send it; the snapshot Rewind needs is taken after it, and is given up with a note when a folder (a whole Downloads folder, say) takes longer than 20 seconds. Stop and Delete end a turn at once, wherever it has got to.",
+      "Sending and deleting work in any folder again. Your message shows the moment you send it; the snapshot Rewind needs is taken after it, and is given up with a note when a folder (a whole Downloads folder, say) takes longer than 20 seconds. Stop and Delete end a turn at once, wherever it has got to, and messages sent one after another all arrive, in order, even while the one before is still on its way.",
       "A turn stopped before the model said a word says \"Stopped.\" under your message, as a reply cut short does.",
       "Slim scrollbars: rounded, faint until you point at them or scroll, brighter while you scroll and tinted while you drag.",
       "Connectors show the apps they reach. Roblox Studio, Blender, Figma, GitHub, Linear, Notion and about fifty more get their own icon and name, and a server that names itself and sends an icon is shown by those. In the details column a connector opens to where it runs, its version, its tools, Reconnect and Open in Customize; Customize and the steps of a turn show the same icons.",
