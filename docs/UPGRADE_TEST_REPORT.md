@@ -1064,3 +1064,92 @@ Not verified:
 - The six new rows walked in the Settings UI beyond the smallest token choice; the
   desktop suite does not visit them.
 - The push to GitHub and the pull request: this report was written before them.
+
+## 0.6.32 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, cut from `origin/main` at `d50d997` (0.6.31) in its own
+worktree, local: nothing was pushed and no release was made. Commits `225e31c` (the details
+column, the folded queue, the effort note), `a78e51a` (pictures from tools), `926b644` (3D
+models), `f9db56e` (their desktop tests), `be19aa7` (code colors), `b27290d` (terminal and
+diff options), `145567f` (what the first full desktop run found), `b322e9a` (the version and
+the documents) and `bdf48fd` (what is packed). Windows 11 (Node 26.7.0, npm 11.19.0, Electron
+44.5.1) and a Linux container (`node:24-bookworm`). Not macOS: see the end.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npm test` | working tree after `f9db56e` | 130 files passed, 3 skipped; 1536 passed, 30 skipped |
+| `npx playwright test tests/e2e/recordings.spec.ts` | working tree after `f9db56e` | 3 passed (WebGL drew the model on this computer) |
+| `npm run verify` | working tree before `b322e9a` | typecheck, lint, build exit 0; unit exit 1 (below); e2e exit 1: 77 passed, 3 failed, 6 skipped, 502 s |
+| `npx playwright test` of `diagrams`, `session`, `recordings`, `layout` | after `145567f` | 15 passed |
+| `npx vitest run tests/unit/computer.test.ts` | `145567f` | 9 passed |
+| `npm run verify` | `b322e9a` | stopped by me before its desktop suite, when the user asked for the builds at once |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `b322e9a` | the package was broken: 1 passed, 2 failed (below) |
+| `npm run dist:win`, then `packaged.spec.ts` | `bdf48fd` | installer built; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `b322e9a` | AppImage and .deb built; 3 passed |
+
+The unit failure of the full run was `computer.test.ts` "starts and round-trips the pointer
+position": the test moves the real pointer and read it back one pixel off (`190 281` for
+`191 281`) while this computer was in use. Alone it passed. It touches nothing of this round.
+
+The three desktop failures of the full run were this round's, and are fixed in `145567f`:
+
+- `diagrams.spec.ts`: "Save as…" was never still enough to press. With the details column the
+  conversation is narrower, the diagram card sat at the window's height, and the scrollbar came
+  and went; the column widened and narrowed and the scaled diagram with it, for ever. The
+  conversation now keeps its scrollbar's place (`scrollbar-gutter: stable`).
+- `session.spec.ts` "an edit turn … status bar" looked for the git bar's change count, which the
+  column replaces while it is shown. The column's Changes card now shows the same labelled
+  chip; the test's comment says where the count is.
+- `session.spec.ts` "the session menu opens Files …" found two regions named Changes: the panel
+  and the column's card. The column's cards are groups now, not landmarks.
+
+The broken package: `files: ['out/**']` packed everything under `out/`, and the first Windows
+build's own log was being written to `out/` while the archive was made. Its header and its bytes
+disagreed, so every file after the log was read at the wrong place, and the packaged app quit as
+it started (its `package.json` read as the end of a test log). The user had installed it by then;
+their data folder was not touched, since the app quit before opening it. `bdf48fd` packs only
+`out/main`, `out/preload` and `out/renderer`, and the rebuilt installer passed the three
+packaged tests. The Linux packages were built from `b322e9a` in a container from `git archive`,
+where `out/` holds only the build, so the same fault could not reach them; they were not built
+again from `bdf48fd`.
+
+What the tests of this round show, and with what:
+
+- Unit, 52 new cases. The column (`detailsModel.test.ts`): when it is drawn (wanted, no panel,
+  room for 420 pixels of conversation), the context's parts scaled to the session's count with
+  the free space and the distance to compaction, connectors' rows in Customize's words with the
+  one action each needs, the outputs a session's tools made and nothing they only edited, the
+  background tasks with what runs first, elapsed times. Kept states (`keptStates.test.ts`): the
+  column's toggle and folded cards, the effort notes put away, the terminal's and the diff's
+  choices, each read back field by field and unreadable storage as the defaults. Pictures and the
+  queue (`toolPictures.test.ts`). Models (`modelFormats.test.ts`, `modelRefs.test.ts`): formats by
+  name, the files a .gltf loads kept inside the folder, Draco and meshopt refused with a sentence,
+  the JSON of a .glb, the stats line and the size, the camera's distance for a narrow view, the
+  models a turn wrote or named and their place after its diagrams. The reader (`panels.test.ts`):
+  a model offered as one, its buffers and textures handed over, a text file, `.env`, a path
+  outside the folder, a missing file and one past 64 MB refused. Code colors
+  (`codeThemes.test.ts`, `db.test.ts`): a profile from before the setting loads with Vitesse, a
+  light theme can't be the dark one, the tokens' colors change with the theme, previews carry the
+  theme's background. The diff (`git.test.ts`): whitespace-only changes left out when asked, and
+  only then.
+- Desktop (`recordings.spec.ts`): the column after a turn that wrote a file (Environment, Outputs,
+  Changes with Create PR, Context opened to its parts, Connectors), the git bar giving way, a
+  panel taking the column's place and giving it back, the header button; three queued messages
+  folding, opening, Clear all behind its confirmation, nothing of them sent; a model named in a
+  reply drawn at the end of the turn (12 triangles, 2 × 2 × 2, wireframe) and in the Files panel.
+
+Not verified:
+
+- macOS, at all. electron-builder builds macOS only on a Mac, and GitHub's runners did not start:
+  the newest CI runs (2026-10-16) end with "The job was not started because your account is locked
+  due to a billing issue". No macOS package exists.
+- The full desktop suite at the release commit: it was stopped before it ran (the table). The
+  rounds' tests and every spec the fixes touched were run after the fixes.
+- The effort note in the app: the scripted endpoint's models have no effort levels, so only its
+  texts and storage are tested.
+- Pictures from a real MCP server: the scripted endpoint's models can't see pictures, and for such
+  a model an MCP picture is replaced by text before it is stored. The row and the viewer were
+  checked in the renderer preview with a stand-in picture.
+- Real exports: Blender's and Roblox Studio's own .glb and .fbx files, Draco-compressed models,
+  a .gltf with its textures beside it. The tests draw a twelve-triangle .stl.
+- WebGL in the Linux container: the packaged smoke tests there draw no model.
