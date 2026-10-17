@@ -38,20 +38,17 @@ export function useDiffStats(sessionId: string, refreshKey: unknown): DiffStatsV
   return stats;
 }
 
-function formatCount(n: number): string {
+export function formatCount(n: number): string {
   return n.toLocaleString('en-US');
 }
 
 /**
- * Git status under the transcript: project and branch, +added / −removed,
- * and the Create PR split button (commit, commit & push, copy branch, open
- * in editor). Hidden outside git repositories.
+ * The Create PR split button and the commit dialog behind its menu (commit,
+ * commit & push, copy branch, open in editor). `side` is where the menu opens.
  */
-export function StatusBar({ summary, stats, onChanged }: { summary: SessionSummary; stats: DiffStatsView | null; onChanged: () => void }) {
-  const hidden = useUi((s) => s.hiddenStatusBars[summary.id] === true);
+export function GitActions({ summary, branch, onChanged, side = 'top' }: { summary: SessionSummary; branch: string; onChanged: () => void; side?: 'top' | 'bottom' }) {
   const [busy, setBusy] = useState(false);
   const [commit, setCommit] = useState<{ push: boolean } | null>(null);
-  if (hidden || !stats?.branch) return null;
   const workDir = summary.worktreePath ?? summary.cwd;
 
   const createPr = async (): Promise<void> => {
@@ -83,29 +80,14 @@ export function StatusBar({ summary, stats, onChanged }: { summary: SessionSumma
   };
 
   const copyBranch = (): void => {
-    navigator.clipboard.writeText(stats.branch ?? '').then(
+    navigator.clipboard.writeText(branch).then(
       () => useToasts.getState().push({ tone: 'success', title: 'Branch name copied' }),
       (error: unknown) => reportError("Couldn't copy to the clipboard", error)
     );
   };
 
   return (
-    <div className="flex h-[var(--g-status-bar-height)] items-center gap-8 rounded-md bg-raised pr-6 pl-12 text-md">
-      <span className="truncate text-fg-secondary">{summary.projectName ?? 'Project'}</span>
-      <span className="min-w-0 truncate font-mono text-sm text-fg-muted" title={stats.branch}>
-        {stats.branch}
-      </span>
-      <div className="flex-1" />
-      {stats.added > 0 || stats.removed > 0 ? (
-        <span
-          role="img"
-          className="inline-flex h-22 shrink-0 items-center gap-6 rounded-xs bg-strong px-6 font-mono text-sm"
-          aria-label={`${stats.added} ${stats.added === 1 ? 'line' : 'lines'} added, ${stats.removed} removed`}
-        >
-          <span className="text-diff-add">+{formatCount(stats.added)}</span>
-          <span className="text-diff-del">-{formatCount(stats.removed)}</span>
-        </span>
-      ) : null}
+    <>
       <div className="inline-flex h-24 shrink-0 items-center rounded-sm bg-btn-ghost">
         <button
           type="button"
@@ -127,7 +109,7 @@ export function StatusBar({ summary, stats, onChanged }: { summary: SessionSumma
               <ChevronDown className="size-14" />
             </button>
           </MenuTrigger>
-          <MenuContent side="top" align="end" className="w-[220px]">
+          <MenuContent side={side} align="end" className="w-[220px]">
             <MenuItem icon={<GitPullRequest className="size-14" />} onSelect={() => void createPr()} disabled={busy}>
               Create PR
             </MenuItem>
@@ -154,9 +136,6 @@ export function StatusBar({ summary, stats, onChanged }: { summary: SessionSumma
           </MenuContent>
         </Menu>
       </div>
-      <IconButton label="Hide git status" size="xs" onClick={() => useUi.getState().hideStatusBar(summary.id)}>
-        <X className="size-14" />
-      </IconButton>
       <CommitDialog
         sessionId={summary.id}
         open={commit !== null}
@@ -169,6 +148,44 @@ export function StatusBar({ summary, stats, onChanged }: { summary: SessionSumma
           onChanged();
         }}
       />
+    </>
+  );
+}
+
+/** Lines added and removed in the folder, as one chip. */
+export function ChangeCount({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span
+      role="img"
+      className="inline-flex h-22 shrink-0 items-center gap-6 rounded-xs bg-strong px-6 font-mono text-sm"
+      aria-label={`${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`}
+    >
+      <span className="text-diff-add">+{formatCount(added)}</span>
+      <span className="text-diff-del">-{formatCount(removed)}</span>
+    </span>
+  );
+}
+
+/**
+ * Git status under the transcript: project and branch, +added / −removed,
+ * and the Create PR split button (commit, commit & push, copy branch, open
+ * in editor). Hidden outside git repositories.
+ */
+export function StatusBar({ summary, stats, onChanged }: { summary: SessionSummary; stats: DiffStatsView | null; onChanged: () => void }) {
+  const hidden = useUi((s) => s.hiddenStatusBars[summary.id] === true);
+  if (hidden || !stats?.branch) return null;
+  return (
+    <div className="flex h-[var(--g-status-bar-height)] items-center gap-8 rounded-md bg-raised pr-6 pl-12 text-md">
+      <span className="truncate text-fg-secondary">{summary.projectName ?? 'Project'}</span>
+      <span className="min-w-0 truncate font-mono text-sm text-fg-muted" title={stats.branch}>
+        {stats.branch}
+      </span>
+      <div className="flex-1" />
+      {stats.added > 0 || stats.removed > 0 ? <ChangeCount added={stats.added} removed={stats.removed} /> : null}
+      <GitActions summary={summary} branch={stats.branch} onChanged={onChanged} />
+      <IconButton label="Hide git status" size="xs" onClick={() => useUi.getState().hideStatusBar(summary.id)}>
+        <X className="size-14" />
+      </IconButton>
     </div>
   );
 }
