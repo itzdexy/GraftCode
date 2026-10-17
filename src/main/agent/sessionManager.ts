@@ -217,9 +217,9 @@ export class SessionManager {
         const info = await gitInfo(cwd);
         return { isRepo: info.isRepo, branch: info.branch };
       },
-      checkpoint: async (sessionId, cwd, messageId) => {
+      checkpoint: async (sessionId, cwd, messageId, signal) => {
         if (store === this.incognito) return null;
-        const record = await d.checkpoints.create(sessionId, cwd, messageId);
+        const record = await d.checkpoints.create(sessionId, cwd, messageId, signal);
         return record.id;
       },
       emit: (sessionId, event) => this.onEvent(sessionId, event),

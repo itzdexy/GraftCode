@@ -269,13 +269,14 @@ export class CheckpointService {
     return row ? toRecord(row) : null;
   }
 
-  async create(sessionId: string, workDir: string, messageId: string): Promise<CheckpointRecord> {
+  /** `signal` ends the snapshot (its git processes are stopped): a turn that is stopped, or a folder too large to snapshot in time. */
+  async create(sessionId: string, workDir: string, messageId: string, signal?: AbortSignal): Promise<CheckpointRecord> {
     const target = await this.target(workDir);
     const previous = this.list(sessionId).filter((c) => c.gitDir === target.gitDir).at(-1);
-    const { commit } = await this.snapshot(target, sessionId, `graft checkpoint for session ${sessionId}`, previous?.commitSha ?? null);
+    const { commit } = await this.snapshot(target, sessionId, `graft checkpoint for session ${sessionId}`, previous?.commitSha ?? null, signal);
     const id = randomUUID();
     const ref = `refs/graft/checkpoints/${safeRefPart(sessionId)}/${id}`;
-    await git(this.args(target, ['update-ref', ref, commit]), { cwd: target.root, env: target.env });
+    await git(this.args(target, ['update-ref', ref, commit]), { cwd: target.root, env: target.env, ...(signal ? { signal } : {}) });
     this.db
       .prepare('INSERT INTO checkpoints (id, session_id, message_id, repo_dir, git_dir, ref, commit_sha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, sessionId, messageId, target.root, target.gitDir, ref, commit, Date.now());
