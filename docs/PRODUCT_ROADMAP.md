@@ -19,6 +19,80 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.32 what two recordings of the Claude desktop app show (2026-10-17)
+
+Asked for as: "CHECK BOTH OF THE RECORDINGS IN C:\Recordings AND LIKE COPY THE STUFF SHOWN
+IN THE IMAGE AND ADD IT INTO GRAFT MAKE GOOD UI, ANIMATIONS AND ETC MAKE THIS GOOD AND WORKING
+FOR CODING,DEVS,MODELING,UI AND ETC". The two recordings (2 and 3½ minutes, 2026-10-17) walk
+the Claude desktop app's Code tab through several sessions: a design vault, a Roblox game built
+from FBX models, Blender work. Much of what they show Graft already had (the mode and model menus
+with their number keys, split diffs, terminal tabs, What's new, Settings as a window, long
+messages that fold). This round built what it lacked, in Graft's own look. One new package
+(`three` 0.186.1 and its types), no new table, no new shortcut; two settings, two channels.
+
+- **The details column** (`session/details/SessionDetails.tsx`, `detailsModel.ts`,
+  `stores/details.ts`). A code session's right-hand column of cards, as the recordings show in
+  nearly every frame: Environment, Context (a stacked bar and a row for each part, scaled to the
+  session's own count, the free space, "About 58K until Graft compacts" and Compact session),
+  Connectors (each MCP server in Customize's words, the one action it needs, Manage), Outputs (the
+  files its tools created, opening in the Files panel), Background tasks (background commands and
+  agents, live times, a pulse while running) and Changes (+/−, Review, the Create PR menu, shared
+  with the git bar as `GitActions`). It takes the panels' place and gives it back; opening it from
+  the header closes the panels, whose terminals keep running. The git bar under the transcript
+  gives way while the column holds the branch and the changes. The cards rise in one after
+  another and the context bar grows part by part. The compaction threshold moved to
+  `shared/compaction.ts` so the column and the agent read one number.
+- **The queue folds** (`QueueBar.tsx`, `queueModel.ts`). Two or more queued messages are one
+  line, "N messages queued · Next: …", that opens to the rows (clamped to two lines, each with
+  Send now, Edit, Remove) and Clear all behind an inline confirmation.
+- **A note at the deepest efforts** (`EffortNotice.tsx`, `effortNoticeModel.ts`). At Max and
+  Taproot, above the message box, until closed for that level.
+- **Pictures from tools** (`toolPictures.ts`, `ToolGroup.tsx`, `ToolDetail.tsx`,
+  `ImageViewer.tsx`). The image blocks of a tool's result, which reached the model and never the
+  screen for MCP tools, are thumbnails on the call's row and pictures in its details that open in
+  the picture viewer, whose frame and dialog are now shared with the generated-media viewer.
+- **3D models** (`models/`, `ModelsCard.tsx`, `modelRefs.ts`, `fileTree.ts`
+  `modelBytes`, channel `files:modelBytes`). A media kind `model` for .glb .gltf .obj .stl .fbx
+  .ply; the Files panel draws them with three.js (studio light, floor grid, contact shadow, orbit
+  with damping, turning by itself until touched, wireframe, reset, clips with play and pause,
+  triangles, meshes, materials and size), and a finished turn whose tools wrote, or whose reply
+  names in a code span, model files that exist ends with a card that draws up to four.
+- **Code colors** (`shared/codeThemes.ts`, `lib/highlight.ts`, `lib/codeThemes.ts`,
+  `AppearanceSection.tsx`). `appearance.codeThemeDark` and `appearance.codeThemeLight`, from
+  twelve dark and ten light shiki themes, previewed on their own backgrounds; code blocks, diffs
+  and the Files panel follow.
+- **Panel options** (`terminalPrefs.ts`, `diffPrefs.ts`). The terminal's cursor style and
+  blink, Copy on select, scrollback and Clear; the diff's Side by side, Word wrap and Hide
+  whitespace changes (`git diff -w`, an `ignoreWhitespace` input to `git:fileDiff`).
+
+Different from the recordings, and why:
+
+- Claude's column also has a Remote Control switch, and its Usage popover shows a subscription's
+  session and weekly limits. Graft has neither a remote session nor a subscription; its own limits
+  (0.6.31) are in Settings → Permissions, and a popover for them was not built.
+- The column is for code sessions only and needs about 1,000 pixels of window beside the
+  sidebar; below that its button says it needs a wider window. Claude's side chat, the tiled
+  two-column panels and its account menu were not copied: Graft has /btw, a panel column and
+  its own menu.
+- Outputs are the files a session's tools created, not every file it edited: those are
+  Changes. A model Blender exports through a script is only known by its name in the reply, so
+  the models card follows the reply's code spans; a model never named is not drawn.
+- The bytes of a model come over IPC from a reader that serves model files, and only the
+  buffers and textures a .gltf loads beside itself, inside the folder and at most 64 MB. The
+  window's CSP gained `blob:` and `data:` for connections, which three.js's loaders need for what
+  they unpack; nothing else changed in it, and WebAssembly stays off, so Draco and meshopt
+  models are refused with a sentence instead of a blank view.
+- A viewer draws only while on screen and hands its WebGL context back when it goes (a window has
+  a handful); a card far up the conversation waits until it is scrolled near. A computer without
+  WebGL is told so, with the model's stats left out.
+- Pictures of a tool's result are those a model that sees got: for a model that can't, an MCP
+  tool's picture is replaced by a line of text before it is stored, and the screen gets nothing
+  either. Keeping such pictures for the screen alone is open.
+- With whitespace changes hidden, the diff's hunks are not the file's, so changes are staged and
+  discarded whole meanwhile; staging a hunk of such a diff would stage a different one.
+- The note at Max and Taproot promises no multiplier: how many tokens a level costs depends on
+  the provider and the task, and the recording's "3.5×" is Claude's figure for Claude.
+
 ### 0.6.31 limits that hold and a replace request (2026-10-15)
 
 Asked for as "what do big AI apps like Claude, Codex, Cursor and OpenCode have that people
@@ -1428,3 +1502,9 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    its diff. Next there: the check pressing keys (focus order, a focus that shows), the
    whole length of a page as one picture, and a picture compared with the one before a
    change.
+9. Done in 0.6.32: the details column, 3D models in the Files panel and the conversation,
+   pictures from tools, code colors, terminal and diff options. Next there: a Usage popover
+   for the limits of 0.6.31 (it needs a project's total over IPC), MCP pictures kept for the
+   screen when the model can't see them, Draco and meshopt models (they need WebAssembly in
+   the window, a CSP decision), a model's .mtl and textures beside an .obj, and a turntable
+   picture of a model for the agent to look at.

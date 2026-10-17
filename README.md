@@ -130,6 +130,35 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### A details column, 3D models and code colors (0.6.32)
+
+A code session has a **details column** at its right, as the Claude desktop app has one:
+**Environment** (this computer, the folder, the worktree and the branch), **Context** (how
+much of the window is used, part by part — your messages, replies, tool results, tools, MCP
+tools, the system prompt — with the free space and how far automatic compaction is, and
+**Compact session**), **Connectors** (each MCP server with its state and **Reconnect** or
+**Sign in** when it needs one), **Outputs** (the files the session's tools made), **Background
+tasks** (commands and agents still running, with their time) and **Changes** (lines added and
+removed, **Review**, **Create PR**). It takes the place of the panels and comes back when they
+close; the first button at the top right, or the palette's **Show or hide session details**,
+shows and hides it, and it remembers which cards you folded.
+
+**3D models.** A `.glb`, `.gltf`, `.obj`, `.stl`, `.fbx` or `.ply` file opens in the Files
+panel as a model on a lit floor: drag to turn it, scroll to come closer, right-drag to move,
+switch to wireframe, and play its animations. When a reply names a model file of the folder —
+one Blender just exported, say — the turn ends with the model drawn in the conversation.
+Models are read from the session's folder only, and a model compressed with Draco or meshopt
+gets a sentence saying the preview can't unpack it yet. **Pictures a tool sends back** — a
+render from Blender, a capture of Roblox Studio — show as thumbnails on the tool's row and open
+large.
+
+Two or more messages typed while Graft works fold into one line, **3 messages queued · Next:
+…**, that opens to the list, with **Clear all**. At Max and Taproot a short note says what the
+level costs until you close it. **Settings → Appearance → Code colors** picks the theme code is
+colored in, one for dark and one for light, each previewed live. The Terminal panel's menu sets
+the cursor, **Copy on select** and the scrollback, and clears the terminal; the Changes panel's
+menu wraps long lines and can hide changes of whitespace alone.
+
 ### Limits that hold, and a replace request (0.6.31)
 
 **Settings → Permissions → Limits for a session, a project or a day** pauses a turn once

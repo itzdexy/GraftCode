@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.32",
+    "date": "2026-10-17",
+    "items": [
+      "A code session has a details column at its right: where it runs (this computer, the folder, the worktree, the branch), what fills its context part by part with the free space and how far automatic compaction is, your MCP connectors with Reconnect and Sign in, the files it made, its background commands and agents with live times, and its changes with Review and Create PR. It takes the panels' place and comes back when they close; the button at the top right shows and hides it.",
+      "3D models open in Graft. A .glb, .gltf, .obj, .stl, .fbx or .ply file shows in the Files panel as a model you can turn, zoom and move, in wireframe or not, with its animations playing. When a reply names a model file, say one Blender just exported, the turn ends with the model drawn in the conversation.",
+      "Pictures a tool sends back, a render from Blender or a capture of Roblox Studio, show as thumbnails on its row and open large.",
+      "Several queued messages fold into one line, \"3 messages queued · Next: …\", that opens to the list, with Clear all. At Max and Taproot a short note above the message box says what the level costs, until you close it.",
+      "Settings → Appearance → Code colors: a theme for code while Graft is dark and one while it is light, among Vitesse, GitHub, Catppuccin, Night Owl, One, Tokyo Night, Dracula, Rosé Pine, Everforest, Gruvbox, Nord, Monokai, Solarized and Min, each previewed live.",
+      "The Terminal panel's menu sets the cursor, copy on select and how many lines are kept, and clears the terminal. The Changes panel's menu wraps long lines and can hide changes of whitespace alone."
+    ]
+  },
+  {
     "version": "0.6.31",
     "date": "2026-10-15",
     "items": [

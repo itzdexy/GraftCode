@@ -1,6 +1,6 @@
-# Try Graft 0.6.31
+# Try Graft 0.6.32
 
-1. Open **Settings → About** and confirm version **0.6.31**. In
+1. Open **Settings → About** and confirm version **0.6.32**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -171,6 +171,30 @@
 38. Ask Graft, in a session with a page open in the Browser panel, to "check the page at
     phone width". Its steps should read "Checked the page", and its answer should name
     what the check found. The panel is the size it was afterwards.
+39. Open a code session in a window wider than about 1,000 pixels: the **details column**
+    is at the right. Its cards: **Environment** (folder and branch; a click on the folder
+    shows it in Explorer), **Context** (open it: a bar part by part, the free space, "About …
+    until Graft compacts", **Compact session**), **Connectors** (your MCP servers; one that
+    failed offers **Reconnect**), and, once there is something to show, **Outputs**,
+    **Background tasks** and **Changes**. Open the Terminal: the column gives way, and comes
+    back when the Terminal closes. The first button at the top right hides it.
+40. While a long turn runs, send three more messages: they fold into **3 messages queued ·
+    Next: …**. Open it, then **Clear all** and confirm.
+41. Set a session's effort to **Max** (or **Taproot**): a note above the message box says
+    what it costs. Close it; it stays closed for that level.
+42. Put a model file in a project (`.glb` from Blender is the usual one; `.obj`, `.stl`,
+    `.fbx`, `.ply` and `.gltf` work too) and open it from the Files panel: it stands on a
+    lit floor and turns by itself. Drag to turn it, scroll to zoom, right-drag to move;
+    try **Wireframe** and **Reset the view**; a model with animations plays them, with a
+    list when it has several. Ask Graft, in a session where Blender's MCP server is
+    connected, to export something and name the file: the turn ends with the model drawn
+    in the conversation. A render the Blender connector sends back shows as a thumbnail on
+    its step.
+43. **Settings → Appearance → Code colors**: pick a dark and a light theme and watch their
+    previews; a reply's code, a diff and the Files panel follow.
+44. In the Terminal panel's **⋮** menu, try **Cursor style**, **Copy on select** (select
+    text, paste it elsewhere) and **Clear terminal**. In the Changes panel's **⋮** menu, try
+    **Word wrap** and **Hide whitespace changes** on a file whose indentation changed.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:
