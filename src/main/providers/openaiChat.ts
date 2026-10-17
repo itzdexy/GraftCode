@@ -6,6 +6,7 @@ import { isLocalUrl } from '@shared/privacy';
 import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { mediaKindOf } from '../media/mediaModels';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
 import { isDamagedEvent, parseSse } from './sse';
@@ -366,7 +367,8 @@ export class OpenAiChatProvider implements LLMProvider {
     const models: ModelInfo[] = listed
       .filter((m) => {
         if (this.kind === 'openai') return !NON_CHAT.test(m.id);
-        if (this.kind === 'openai-compatible') return this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id);
+        // A picture, video, voice or music model is listed with the media models (Settings → Models), not as one to chat with.
+        if (this.kind === 'openai-compatible') return (this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id)) && mediaKindOf(m.id) === null;
         return true;
       })
       .map((m): ModelInfo => {

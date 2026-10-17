@@ -45,6 +45,8 @@ import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
 import { canOpen } from '../chat/chatFiles';
 import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
+import { mediaModelsOf, type MediaSourceKind } from '../media/mediaModels';
+import type { ProviderMediaModels } from '@shared/ipc/contracts';
 import { DEFAULT_IMAGE_MODEL } from '../media/images';
 import type { MediaService } from '../media/mediaService';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
@@ -157,6 +159,40 @@ function openRouterAccess(s: Services): SpeechAccess | null {
     apiKey = null;
   }
   return apiKey ? { apiKey, baseUrl: provider.baseUrl } : null;
+}
+
+const MEDIA_SOURCES: readonly string[] = ['openrouter', 'openai', 'gemini', 'openai-compatible'] satisfies MediaSourceKind[];
+const MEDIA_TTL_MS = 30 * 60_000;
+const mediaCache = new Map<string, { at: number; value: ProviderMediaModels }>();
+
+/**
+ * The image, video, voice, music and transcription models of each provider that is set up, for Settings → Models;
+ * a provider whose list can't be read says why. Lists are kept for half an hour unless asked again.
+ */
+async function mediaModelsList(s: Services, refresh: boolean): Promise<ProviderMediaModels[]> {
+  const providers = s.registry.summaries().filter((p) => p.enabled && MEDIA_SOURCES.includes(p.kind) && (p.hasKey || p.kind === 'openai-compatible'));
+  return Promise.all(
+    providers.map(async (p): Promise<ProviderMediaModels> => {
+      let apiKey: string | null;
+      try {
+        apiKey = s.keys.get(p.id);
+      } catch {
+        apiKey = null;
+      }
+      const key = `${p.id}|${p.kind}|${p.baseUrl ?? ''}|${apiKey ? apiKey.length : 0}`;
+      const kept = mediaCache.get(key);
+      if (!refresh && kept && Date.now() - kept.at < MEDIA_TTL_MS) return kept.value;
+      let value: ProviderMediaModels;
+      try {
+        const models = await mediaModelsOf({ kind: p.kind as MediaSourceKind, baseUrl: p.baseUrl, apiKey }, AbortSignal.timeout(30_000));
+        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models, error: null };
+      } catch (error) {
+        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models: [], error: (error as Error).message };
+      }
+      mediaCache.set(key, { at: Date.now(), value });
+      return value;
+    })
+  );
 }
 
 /** Where a chat's file is stored; an error when the chat no longer has it. */
@@ -440,6 +476,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       }
     },
     'models:list': async ({ refresh }) => (await ctx.services()).registry.allModels({ refresh }),
+    'models:media': async ({ refresh }) => mediaModelsList(await ctx.services(), refresh),
     'secrets:status': async () => (await ctx.services()).keys.status(),
 
     'projects:list': async () => (await ctx.services()).projects.list().map(projectSummary),

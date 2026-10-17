@@ -14,7 +14,7 @@ import { webSearchTool } from './web/webSearch';
 import { computerTool } from './computer';
 import { browserTool } from './browserTool';
 import { createFileTool, runCodeTool } from './chat/chatTools';
-import { comfyTool, generateImageTool } from './media';
+import { comfyTool, generateImageTool, generateVideoTool } from './media';
 import { toolSearchTool } from './toolSearch';
 import { skillTool } from './skillTool';
 import { semanticCodeTool } from './search/semantic';
@@ -54,6 +54,7 @@ export function createBuiltinRegistry(languages: LanguageServers | null = null):
   registry.register(runCodeTool);
   registry.register(skillTool);
   registry.register(generateImageTool);
+  registry.register(generateVideoTool);
   registry.register(comfyTool);
   registry.register(toolSearchTool);
   return registry;

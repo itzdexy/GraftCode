@@ -96,6 +96,10 @@
     "label": "Tries again after a provider failure"
   },
   {
+    "section": "models",
+    "label": "Image, video and audio models"
+  },
+  {
     "section": "search",
     "label": "Web access"
   },

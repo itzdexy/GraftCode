@@ -46,8 +46,8 @@ export interface CodePromptContext {
   sandbox?: { image: string; network: boolean; ports: number[] } | null;
   /** This session builds a site from the Sites tab, served live at this address, with what it is built with. */
   site?: { name: string; url: string; stack: SiteStack } | null;
-  /** Generated media: the image model behind GenerateImage (null when none), and whether the user's ComfyUI is connected. */
-  media?: { image: string | null; comfy: boolean } | null;
+  /** Generated media: the image model behind GenerateImage and the video model behind GenerateVideo (null when none), and whether the user's ComfyUI is connected. */
+  media?: { image: string | null; video?: string | null; comfy: boolean } | null;
 }
 
 const MODE_LABEL: Record<PermissionMode, string> = {
@@ -158,11 +158,14 @@ function siteSection(ctx: CodePromptContext): string {
 
 function mediaSection(ctx: CodePromptContext): string {
   const media = ctx.media;
-  if (!media || (!media.image && !media.comfy)) return '';
+  if (!media || (!media.image && !media.video && !media.comfy)) return '';
   return lines(
     '# Generated images and video',
     media.image
       ? `- GenerateImage makes a picture with ${media.image} and saves it in the project. Use it when the user asks for generated or AI-made imagery; describe the picture concretely (subject, style, composition, a palette that fits the design), save it where the project keeps images, and give it real alt text where it is used. Each picture costs money on the user's key: make the ones the work needs, and write simple icons and shapes as SVG yourself.`
+      : null,
+    media.video
+      ? `- GenerateVideo makes a short clip with ${media.video} and saves it in the project: a shot for a trailer or a cutscene, an animated background, a product clip. Use it when the user asks for generated or AI-made video; describe the shot concretely (subject and action, camera movement, style, light, sound), and give first_frame to bring a picture of the project to life. A clip takes a minute or more and costs money on the user's key for every second: make the ones the work needs.`
       : null,
     media.comfy
       ? '- The user runs ComfyUI on their computer. When they ask for images or video from it, call ComfyUI with action "status" first: it lists the installed models, whether video nodes are present and the saved workflows. Then run a saved workflow, or write one in API format for what is installed (actions "nodes" and "node" give the inputs). Say plainly when their setup cannot do what they asked.'
@@ -374,6 +377,8 @@ export function buildChatSystemPrompt(ctx: {
   deferredTools?: Array<{ server: string; count: number }>;
   /** The image model behind GenerateImage, when the chat can make pictures. */
   images?: string | null;
+  /** The video model behind GenerateVideo, when the chat can make clips. */
+  videos?: string | null;
 }): string {
   const web = ctx.web ?? { search: false, fetch: false };
   const work = ctx.workspace ?? { files: false, code: false };
@@ -406,6 +411,11 @@ export function buildChatSystemPrompt(ctx: {
   if (ctx.images) {
     tools.push(
       `GenerateImage makes a picture with ${ctx.images} and adds it to the chat for the user to save. Use it when they ask for an image, a logo, an illustration or a picture of something; describe the picture concretely, and afterwards say in a sentence what you made. Each picture costs money on their key, so make one unless they ask for more.`
+    );
+  }
+  if (ctx.videos) {
+    tools.push(
+      `GenerateVideo makes a short clip with ${ctx.videos} and adds it to the chat for the user to save. Use it when they ask for a video, an animation or a clip; describe the shot concretely (what happens, the camera, the style), and afterwards say in a sentence what you made. Every second costs money on their key, so make one unless they ask for more.`
     );
   }
   const apps = ctx.mcpServers ?? [];

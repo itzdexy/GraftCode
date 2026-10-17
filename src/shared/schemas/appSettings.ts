@@ -224,7 +224,9 @@ export const AppSettingsSchema = z.object({
     comfyEnabled: z.boolean(),
     comfyUrl: z.url({ protocol: /^https?$/ }).max(500),
     /** Checkpoint for plain text-to-image; empty uses the first one installed. */
-    comfyCheckpoint: z.string().max(300)
+    comfyCheckpoint: z.string().max(300),
+    /** OpenRouter video model GenerateVideo uses; empty uses the default. */
+    videoModel: z.string().max(200)
   }),
   /** Read aloud: a natural voice from OpenRouter's speech models, or this computer's own voices. */
   voice: z.object({
@@ -267,7 +269,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   agents: { routing: 'session', roles: Object.fromEntries(MODEL_ROLES.map((role) => [role, null])) as Record<ModelRoleId, null>, maxParallel: 4, tokenBudget: null, retries: 1 },
-  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '' },
+  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '', videoModel: '' },
   personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }

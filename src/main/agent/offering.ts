@@ -24,9 +24,10 @@ export interface ChatWork {
   skills: boolean;
 }
 
-/** Generated media a model is offered: the image engine behind GenerateImage, and whether ComfyUI is connected. */
+/** Generated media a model is offered: the image engine behind GenerateImage, the video model behind GenerateVideo, and whether ComfyUI is connected. */
 export interface MediaOffer {
   image: string | null;
+  video: string | null;
   comfy: boolean;
 }
 
@@ -106,9 +107,13 @@ export class ModelOffering {
   media(model: ModelInfo): MediaOffer {
     const inputs = this.inputs();
     const media = inputs.media;
-    if (!media || !model.supportsTools || inputs.incognito) return { image: null, comfy: false };
+    if (!media || !model.supportsTools || inputs.incognito) return { image: null, video: null, comfy: false };
     const engine = media.imageEngine();
-    return { image: engine ? (engine.engine === 'comfyui' ? 'ComfyUI on this computer' : engine.model) : null, comfy: media.comfy() !== null };
+    return {
+      image: engine ? (engine.engine === 'comfyui' ? 'ComfyUI on this computer' : engine.model) : null,
+      video: media.videoModel(),
+      comfy: media.comfy() !== null
+    };
   }
 
   /** Computer use: code sessions with it switched on, on a model that can see screenshots. */
@@ -141,6 +146,7 @@ export class ModelOffering {
                 (n !== 'Computer' || computer) &&
                 (n !== 'Browser' || inputs.hasBrowser) &&
                 (n !== 'GenerateImage' || media.image !== null) &&
+                (n !== 'GenerateVideo' || media.video !== null) &&
                 (n !== 'ComfyUI' || media.comfy) &&
                 (n !== 'MissionUpdate' || onMission)
             )
@@ -153,7 +159,8 @@ export class ModelOffering {
             ...(work.code ? ['RunCode'] : []),
             ...(work.skills ? ['Skill'] : []),
             // A chat keeps what it makes in its own files, so pictures need those.
-            ...(work.files && media.image !== null ? ['GenerateImage'] : [])
+            ...(work.files && media.image !== null ? ['GenerateImage'] : []),
+            ...(work.files && media.video !== null ? ['GenerateVideo'] : [])
           ];
     const { offered } = this.splitMcp(mcpTools, model);
     return [...builtins, ...(this.deferredAll ? ['ToolSearch'] : []), ...offered];

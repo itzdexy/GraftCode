@@ -11,6 +11,7 @@ import { allModelsOf } from '../models/modelChoice';
 import { ModelListbox } from '../models/ModelListbox';
 import { AgentsSettings } from './AgentsSettings';
 import { Group, saveSettings, SettingRow, SwitchRow } from './common';
+import { MediaModelsSections } from './MediaModelsSections';
 
 function parseCount(text: string, min: number, max: number): number | undefined | null {
   const t = text.trim().replace(/[_,\s]/g, '');
@@ -176,6 +177,8 @@ export function ModelsSection() {
           )}
         </div>
       </Group>
+
+      <MediaModelsSections />
 
       <Group title="Sessions">
         <SwitchRow

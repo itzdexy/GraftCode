@@ -1146,7 +1146,8 @@ export class AgentSession {
       mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
       mcpNotes: summary.incognito ? [] : this.deps.mcpInstructions(null),
       deferredTools: this.offering.deferredByServer(model),
-      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null
+      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null,
+      videos: this.offering.chatWork(model).files ? this.offering.media(model).video : null
     });
   }
 

@@ -131,6 +131,39 @@ export const ProviderModelsSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).nullable()
 });
 
+/** What a media model makes: pictures, clips, a voice, music and sound, or text from speech. */
+export const MEDIA_MODEL_KINDS = ['image', 'video', 'speech', 'audio', 'transcription'] as const;
+export const MediaModelKindSchema = z.enum(MEDIA_MODEL_KINDS);
+export type MediaModelKind = z.infer<typeof MediaModelKindSchema>;
+
+export const MediaModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: MediaModelKindSchema,
+  description: z.string().nullable(),
+  /** Unix seconds, when the provider says. */
+  created: z.number().nullable(),
+  /** Video: the lengths in seconds and the shapes it makes, and whether a picture can be its first frame. */
+  durations: z.array(z.number()).optional(),
+  aspects: z.array(z.string()).optional(),
+  firstFrame: z.boolean().optional(),
+  /** Video: USD for a second at its cheapest setting, when priced per second. */
+  pricePerSecond: z.number().nullable().optional(),
+  /** Speech: the voices it speaks with. */
+  voices: z.array(z.string()).optional()
+});
+export type MediaModel = z.infer<typeof MediaModelSchema>;
+
+/** The media models of one provider, or why they couldn't be listed. */
+export const ProviderMediaModelsSchema = z.object({
+  providerId: z.string(),
+  providerLabel: z.string(),
+  providerKind: z.string(),
+  models: z.array(MediaModelSchema),
+  error: z.string().nullable()
+});
+export type ProviderMediaModels = z.infer<typeof ProviderMediaModelsSchema>;
+
 export const CreateSessionInputSchema = z.object({
   kind: SessionKindSchema,
   projectPath: PathSchema.nullable(),
@@ -238,6 +271,7 @@ export const contracts = {
   'providers:setDefault': channel(z.object({ id: IdSchema }), Ok),
   'providers:test': channel(z.object({ id: IdSchema }), VerifyResultSchema),
   'models:list': channel(z.object({ refresh: z.boolean() }), z.array(ProviderModelsSchema)),
+  'models:media': channel(z.object({ refresh: z.boolean() }), z.array(ProviderMediaModelsSchema)),
   'secrets:status': channel(Void, z.object({ encryptionAvailable: z.boolean(), plaintextAllowed: z.boolean() })),
 
   // Projects & git info

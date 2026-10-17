@@ -38,6 +38,8 @@ function fakeMedia(overrides: Partial<MediaAccess> = {}): MediaAccess {
     thumbnail: () => null,
     comfy: () => null,
     workflows: () => [],
+    videoModel: () => null,
+    generateVideo: () => Promise.reject(new Error('No video in this test.')),
     ...overrides
   };
 }
@@ -110,13 +112,20 @@ describe('what a model is offered', () => {
   it('offers generated media as it is set up, and never in incognito', () => {
     const media = fakeMedia({ imageEngine: () => ({ engine: 'openai', model: 'gpt-image' }) });
     const comfy = fakeMedia({ imageEngine: () => ({ engine: 'comfyui', model: '' }), comfy: () => ({}) as unknown as NonNullable<ReturnType<MediaAccess['comfy']>> });
-    expect(offering({ media }).media(fakeModel())).toEqual({ image: 'gpt-image', comfy: false });
-    expect(offering({ media: comfy }).media(fakeModel())).toEqual({ image: 'ComfyUI on this computer', comfy: true });
-    expect(offering({ media, incognito: true }).media(fakeModel())).toEqual({ image: null, comfy: false });
+    expect(offering({ media }).media(fakeModel())).toEqual({ image: 'gpt-image', video: null, comfy: false });
+    expect(offering({ media: comfy }).media(fakeModel())).toEqual({ image: 'ComfyUI on this computer', video: null, comfy: true });
+    expect(offering({ media, incognito: true }).media(fakeModel())).toEqual({ image: null, video: null, comfy: false });
     // ComfyUI is a tool of code sessions; GenerateImage comes to a chat only with its files.
     expect(offering({ media: comfy }).tools(fakeModel())).toContain('ComfyUI');
     expect(offering({ kind: 'chat', media }).tools(fakeModel())).not.toContain('GenerateImage');
     expect(offering({ kind: 'chat', media, hasChatFiles: true }).tools(fakeModel())).toContain('GenerateImage');
+    // Video comes with an OpenRouter key: GenerateVideo to code sessions, and to a chat that keeps files.
+    const video = fakeMedia({ videoModel: () => 'google/veo-3.1-lite' });
+    expect(offering({ media: video }).media(fakeModel()).video).toBe('google/veo-3.1-lite');
+    expect(offering({ media: video }).tools(fakeModel())).toContain('GenerateVideo');
+    expect(offering({ media }).tools(fakeModel())).not.toContain('GenerateVideo');
+    expect(offering({ kind: 'chat', media: video, hasChatFiles: true }).tools(fakeModel())).toContain('GenerateVideo');
+    expect(offering({ media: video, incognito: true }).media(fakeModel()).video).toBeNull();
   });
 
   it('keeps a big MCP setup waiting for ToolSearch, and offers what was loaded', () => {
