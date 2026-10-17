@@ -50,7 +50,8 @@ export default function ModelViewer({ sessionId, path, variant = 'panel' }: Mode
   // Null while the model is on its way: then it is waiting to be scrolled near, or loading.
   const [outcome, setOutcome] = useState<Exclude<ViewState, { status: 'waiting' | 'loading' }> | null>(null);
   const state: ViewState = outcome ?? (near ? { status: 'loading' } : { status: 'waiting' });
-  const [turning, setTurning] = useState(true);
+  // With motion reduced the model holds still until it is turned by hand.
+  const [turning, setTurning] = useState(() => !reducedMotion());
   const [wireframe, setWireframe] = useState(false);
   const [clip, setClip] = useState(0);
   const [playing, setPlaying] = useState(true);

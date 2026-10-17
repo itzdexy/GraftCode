@@ -64,27 +64,27 @@ test('the details column says where a session runs, what fills its context, what
 
   const details = w.getByRole('complementary', { name: 'Session details' });
   await expect(details).toBeVisible();
-  const environment = details.getByRole('region', { name: 'Environment' });
+  const environment = details.getByRole('group', { name: 'Environment' });
   await expect(environment.getByText('This computer')).toBeVisible();
   await expect(environment.getByText(path.basename(project))).toBeVisible();
   await expect(environment.getByText('main', { exact: true })).toBeVisible();
 
   // What the session made, and what it changed in the folder.
-  await expect(details.getByRole('region', { name: 'Outputs' }).getByText('plan.md')).toBeVisible();
-  const changes = details.getByRole('region', { name: 'Changes' });
+  await expect(details.getByRole('group', { name: 'Outputs' }).getByText('plan.md')).toBeVisible();
+  const changes = details.getByRole('group', { name: 'Changes' });
   await expect(changes.getByText('in 1 file')).toBeVisible();
   await expect(changes.getByRole('button', { name: 'Create PR' })).toBeVisible();
   // The bar under the transcript gives way: the column holds the branch and the changes.
   await expect(w.getByRole('button', { name: 'Hide git status' })).toHaveCount(0);
 
   // The context opens to its parts, with how far automatic compaction is.
-  const context = details.getByRole('region', { name: 'Context' });
+  const context = details.getByRole('group', { name: 'Context' });
   await context.getByRole('button', { name: /^Context/ }).click();
   await expect(context.getByText(/% used$/)).toBeVisible();
   await expect(context.getByText('Free space')).toBeVisible();
   await expect(context.getByText(/until Graft compacts$|^Window size unknown$/)).toBeVisible();
   await expect(context.getByRole('button', { name: 'Compact session' })).toBeEnabled();
-  await expect(details.getByRole('region', { name: 'Connectors' }).getByText('None')).toBeVisible();
+  await expect(details.getByRole('group', { name: 'Connectors' }).getByText('None')).toBeVisible();
   await shot(w, 'session-details');
 
   // A panel takes its place, and gives it back when it closes.

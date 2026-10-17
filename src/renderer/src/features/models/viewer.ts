@@ -242,7 +242,8 @@ export function createModelView(host: HTMLElement, options: { reducedMotion: boo
       return measure(object, model.clips.length);
     },
     setAutoRotate(on) {
-      controls.autoRotate = on && !options.reducedMotion;
+      // The viewer starts still when motion is reduced (ModelViewer); turning it on is then the person's own choice.
+      controls.autoRotate = on;
     },
     setWireframe(on) {
       for (const material of materialsOf(pivot)) if ('wireframe' in material) (material as Material & { wireframe: boolean }).wireframe = on;

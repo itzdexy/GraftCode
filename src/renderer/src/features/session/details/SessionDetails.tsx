@@ -38,7 +38,7 @@ import { useDetails } from '../../../stores/details';
 import { useNav } from '../../../stores/nav';
 import { panelBus, panelsOf, usePanels } from '../../../stores/panels';
 import { reportError, useToasts } from '../../../stores/toasts';
-import { formatCount, GitActions } from '../StatusBar';
+import { ChangeCount, formatCount, GitActions } from '../StatusBar';
 import {
   connectorRow,
   connectorsSummary,
@@ -123,7 +123,8 @@ export function DetailsToggle({ sessionId }: { sessionId: string }) {
 function DetailsCard({ id, title, summary, index, children }: { id: DetailCard; title: string; summary?: ReactNode; index: number; children: ReactNode }) {
   const open = useDetails((s) => !s.folded.includes(id));
   return (
-    <section aria-label={title} className="motion-rise shrink-0 rounded-lg border border-border-card bg-raised" style={{ animationDelay: `${String(index * 45)}ms` }}>
+    // A group, not a landmark: "Changes" here and the Changes panel would otherwise be two regions of one name.
+    <div role="group" aria-label={title} className="motion-rise shrink-0 rounded-lg border border-border-card bg-raised" style={{ animationDelay: `${String(index * 45)}ms` }}>
       <h2>
         <button
           type="button"
@@ -140,7 +141,7 @@ function DetailsCard({ id, title, summary, index, children }: { id: DetailCard; 
       <Collapse open={open} className="px-12 pb-10">
         {children}
       </Collapse>
-    </section>
+    </div>
   );
 }
 
@@ -575,10 +576,8 @@ function ChangesCard({ summary, stats, onChanged, index }: { summary: SessionSum
       }
     >
       {any ? (
-        <p className="flex items-baseline gap-8">
-          <span className="font-mono text-md tabular-nums">
-            <span className="text-diff-add">+{formatCount(stats.added)}</span> <span className="text-diff-del">−{formatCount(stats.removed)}</span>
-          </span>
+        <p className="flex items-center gap-8">
+          <ChangeCount added={stats.added} removed={stats.removed} />
           <span className="text-sm text-fg-muted">{stats.files === 1 ? 'in 1 file' : `in ${formatCount(stats.files)} files`}</span>
         </p>
       ) : (
