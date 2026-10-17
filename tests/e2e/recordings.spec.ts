@@ -114,6 +114,18 @@ test('several queued messages fold into one line that opens, and can all be clea
   await start.press('Enter');
   await expect(w.getByText('Thinking about a long answer')).toBeVisible();
 
+  // As on a slow computer (the Linux run found it): each message takes a while to reach the session, and the next one
+  // is typed and sent meanwhile. None may be lost, and they queue in the order they were sent.
+  await graft.app.evaluate(({ ipcMain }) => {
+    type Handler = (event: unknown, ...args: unknown[]) => unknown;
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers;
+    const handle = handlers.get('graft:invoke');
+    if (!handle) throw new Error('No invoke handler');
+    handlers.set('graft:invoke', async (event, channel, input) => {
+      if (channel === 'sessions:send') await new Promise((resolve) => setTimeout(resolve, 400));
+      return handle(event, channel, input);
+    });
+  });
   const box = w.getByRole('textbox', { name: SESSION_BOX });
   for (const text of ['Then add tests for the parser', 'After that, update the README', 'Finally commit everything']) {
     await box.fill(text);
