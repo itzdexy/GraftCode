@@ -1,12 +1,15 @@
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
+import { DARK_CODE_THEMES, LIGHT_CODE_THEMES, type CodeTheme, type DarkCodeTheme, type LightCodeTheme } from '@shared/codeThemes';
 import { DEFAULT_APP_SETTINGS, TRANSCRIPT_VIEWS, type AccentId, type AppSettings, type PaletteId } from '@shared/schemas/appSettings';
 import { Button } from '../../components/Button';
 import { Slider } from '../../components/Slider';
 import { cn } from '../../lib/cn';
 import { TRANSCRIPT_VIEW_INFO } from '../../lib/format';
+import { themePreview } from '../../lib/highlight';
+import { useLoad } from '../../lib/useLoad';
 import { motionReduced, useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
-import { Group, saveSettings, SettingRow } from './common';
+import { Group, saveSettings, SelectField, SettingRow } from './common';
 import { ACCENTS, PALETTES } from './sections';
 
 const WIDTHS = [
@@ -142,6 +145,74 @@ function ColorsGroup({ theme, palette, accent }: { theme: AppSettings['appearanc
   );
 }
 
+/** What each theme is shown with: a few lines with a keyword, a type, a comment and a string. */
+const SAMPLE = ['function greet(name: string) {', '  // Say hello to someone', '  return `Hello, ${name}!`;', '}'].join('\n');
+
+/** The sample as one theme draws it, on the theme's own background. */
+function ThemeSample({ theme, label }: { theme: CodeTheme; label: string }) {
+  const { load } = useLoad(() => themePreview(SAMPLE, 'ts', theme), theme);
+  const preview = load.status === 'ready' ? load.data : null;
+  return (
+    <pre
+      aria-label={label}
+      className="motion-pop min-h-[92px] overflow-x-auto rounded-md border border-border-card px-12 py-10 font-mono text-[12px] leading-[1.65]"
+      style={preview ? { background: preview.background, color: preview.foreground } : undefined}
+    >
+      <code>
+        {preview
+          ? preview.lines.map((line, i) => (
+              <span key={i} className="block whitespace-pre">
+                {line.length === 0
+                  ? ' '
+                  : line.map((token, j) => (
+                      <span key={j} style={{ color: token.color, fontStyle: token.italic ? 'italic' : undefined }}>
+                        {token.content}
+                      </span>
+                    ))}
+              </span>
+            ))
+          : SAMPLE}
+      </code>
+    </pre>
+  );
+}
+
+const isDark = (id: string): id is DarkCodeTheme => DARK_CODE_THEMES.some((theme) => theme.id === id);
+const isLight = (id: string): id is LightCodeTheme => LIGHT_CODE_THEMES.some((theme) => theme.id === id);
+
+function CodeGroup({ dark, light }: { dark: DarkCodeTheme; light: LightCodeTheme }) {
+  return (
+    <Group title="Code">
+      <SettingRow label="Code colors" description="How code is colored in replies, diffs and the Files panel: one theme while Graft is dark, one while it is light.">
+        <div className="grid grid-cols-1 gap-12 sm:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-8">
+            <SelectField
+              label="Dark code"
+              value={dark}
+              options={DARK_CODE_THEMES.map((theme) => ({ value: theme.id, label: theme.label }))}
+              onChange={(value) => {
+                if (isDark(value)) saveSettings({ appearance: { codeThemeDark: value } });
+              }}
+            />
+            <ThemeSample key={dark} theme={dark} label={`${DARK_CODE_THEMES.find((theme) => theme.id === dark)?.label ?? dark} preview`} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-8">
+            <SelectField
+              label="Light code"
+              value={light}
+              options={LIGHT_CODE_THEMES.map((theme) => ({ value: theme.id, label: theme.label }))}
+              onChange={(value) => {
+                if (isLight(value)) saveSettings({ appearance: { codeThemeLight: value } });
+              }}
+            />
+            <ThemeSample key={light} theme={light} label={`${LIGHT_CODE_THEMES.find((theme) => theme.id === light)?.label ?? light} preview`} />
+          </div>
+        </div>
+      </SettingRow>
+    </Group>
+  );
+}
+
 function SizeRow({ label, description, value, min, max, fallback, onChange }: { label: string; description: string; value: number; min: number; max: number; fallback: number; onChange: (value: number) => void }) {
   return (
     <SettingRow
@@ -176,6 +247,7 @@ export function AppearanceSection() {
   return (
     <div className="flex flex-col gap-24">
       <ColorsGroup theme={appearance.theme} palette={appearance.palette} accent={appearance.accent} />
+      <CodeGroup dark={appearance.codeThemeDark} light={appearance.codeThemeLight} />
       <Group title="Layout and text">
         <SettingRow
           label="Transcript width"

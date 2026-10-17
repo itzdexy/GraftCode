@@ -281,6 +281,22 @@
   },
   {
     "section": "appearance",
+    "label": "Code"
+  },
+  {
+    "section": "appearance",
+    "label": "Code colors"
+  },
+  {
+    "section": "appearance",
+    "label": "Dark code"
+  },
+  {
+    "section": "appearance",
+    "label": "Light code"
+  },
+  {
+    "section": "appearance",
     "label": "Layout and text"
   },
   {

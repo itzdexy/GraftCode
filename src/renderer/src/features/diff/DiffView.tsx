@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { useCodeThemes } from '../../lib/codeThemes';
 import { highlightLines, type Token } from '../../lib/highlight';
 import { logError } from '../../lib/log';
 import { CommentBox, CommentNote } from '../review/CommentBox';
@@ -107,12 +108,13 @@ const NO_INK: LineInk = { tokens: null, spans: [], cover: null };
 
 /** Syntax tokens for every row: each hunk's two texts are highlighted whole and their tokens handed back to the rows they came from. */
 function useRowTokens(rows: DiffRow[], language: string | null): Array<Token[] | null> {
+  const themes = useCodeThemes();
   const sides = useMemo(() => hunkTexts(rows), [rows]);
   const [done, setDone] = useState<{ sides: typeof sides; language: string; lines: Array<{ before: Token[][] | null; after: Token[][] | null }> } | null>(null);
   useEffect(() => {
     if (language === null || sides.texts.length === 0) return;
     let cancelled = false;
-    Promise.all(sides.texts.map(async (text) => ({ before: await highlightLines(text.before, language), after: await highlightLines(text.after, language) })))
+    Promise.all(sides.texts.map(async (text) => ({ before: await highlightLines(text.before, language, themes), after: await highlightLines(text.after, language, themes) })))
       .then((lines) => {
         if (!cancelled) setDone({ sides, language, lines });
       })
@@ -120,7 +122,7 @@ function useRowTokens(rows: DiffRow[], language: string | null): Array<Token[] |
     return () => {
       cancelled = true;
     };
-  }, [sides, language]);
+  }, [sides, language, themes]);
   return useMemo(() => {
     const lines = done && done.sides === sides && done.language === language ? done.lines : null;
     return sides.placeOf.map((at) => (at === null || lines === null ? null : (lines[at.hunk]?.[at.side]?.[at.line] ?? null)));
