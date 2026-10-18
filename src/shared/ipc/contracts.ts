@@ -45,7 +45,7 @@ import {
 } from '../schemas/panels';
 import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
 import { MISSION_LIMITS, MissionStartSchema } from '../schemas/missions';
-import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
+import { CustomModelSchema, DetectedServerSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
@@ -235,6 +235,7 @@ export const contracts = {
   // Providers & models
   'providers:list': channel(Void, z.array(ProviderSummarySchema)),
   'providers:presets': channel(Void, z.array(ProviderPresetSchema)),
+  'providers:detectLocal': channel(Void, z.array(DetectedServerSchema)),
   'catalog:status': channel(Void, CatalogSyncStatusSchema),
   'catalog:refresh': channel(Void, CatalogSyncStatusSchema),
   'providers:verify': channel(

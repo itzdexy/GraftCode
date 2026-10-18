@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { CircleCheck, ExternalLink, Eye, EyeOff, MoreHorizontal, Plus, TriangleAlert } from 'lucide-react';
+import { CircleCheck, ExternalLink, Eye, EyeOff, MoreHorizontal, Plus, Search, TriangleAlert } from 'lucide-react';
 import type { ProviderKind } from '@shared/schemas/common';
-import type { ProviderPreset, ProviderSummary, VerifyResult } from '@shared/schemas/models';
+import type { DetectedServer, ProviderPreset, ProviderSummary, VerifyResult } from '@shared/schemas/models';
 import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
@@ -13,6 +13,7 @@ import { errorText, invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { describeVerifyFailure } from '../onboarding/KeyStep';
+import { addFoundServer, FoundServerList, NO_SERVER_FOUND } from '../providers/FoundServers';
 import { ProviderPicker, type PickedProvider } from '../providers/ProviderPicker';
 import { targetFor, urlPlaceholder, type ProviderTarget } from '../providers/targets';
 import { ConfirmDialog, Group } from './common';
@@ -307,6 +308,66 @@ function ProviderRow({ provider, onEdit, onRemove }: { provider: ProviderSummary
   );
 }
 
+/** Searches this computer for model servers on their usual ports, and adds the ones the user picks. */
+function FindServers() {
+  const [found, setFound] = useState<DetectedServer[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
+
+  const search = async (): Promise<void> => {
+    setSearching(true);
+    try {
+      setFound(await invoke('providers:detectLocal'));
+    } catch (e) {
+      reportError("Couldn't search this computer", e);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const add = async (server: DetectedServer): Promise<void> => {
+    setAdding(server.baseUrl);
+    try {
+      await addFoundServer(server);
+      useToasts.getState().push({ tone: 'success', title: `${server.name} added` });
+      // When the last one is added the list closes, rather than reading as a search that found nothing.
+      setFound((list) => {
+        const rest = list?.filter((s) => s.baseUrl !== server.baseUrl) ?? [];
+        return rest.length > 0 ? rest : null;
+      });
+    } catch (e) {
+      reportError(`Couldn't add ${server.name}`, e);
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  return (
+    <Group
+      title="On this computer"
+      actions={
+        <Button size="sm" variant="secondary" leading={<Search className="size-14" />} disabled={searching} onClick={() => void search()}>
+          Find servers on this computer
+        </Button>
+      }
+    >
+      {searching ? (
+        <p className="flex items-center gap-6 px-14 py-12 text-base text-fg-muted">
+          <Spinner size={12} label="Searching" /> Looking for model servers…
+        </p>
+      ) : found === null ? (
+        <p className="px-14 py-12 text-base text-fg-muted">Graft looks for Ollama, LM Studio, llama-server, vLLM, Jan and KoboldCpp on the ports they use out of the box.</p>
+      ) : found.length === 0 ? (
+        <p role="status" className="px-14 py-12 text-base text-fg-muted">
+          {NO_SERVER_FOUND}
+        </p>
+      ) : (
+        <FoundServerList servers={found} adding={adding} onAdd={(server) => void add(server)} />
+      )}
+    </Group>
+  );
+}
+
 export function ProvidersSection() {
   const providers = useApp((s) => s.providers);
   useEffect(() => {
@@ -339,6 +400,7 @@ export function ProvidersSection() {
           </ul>
         )}
       </Group>
+      <FindServers />
 
       <Dialog open={dialog !== null} onOpenChange={(open) => (open ? undefined : setDialog(null))}>
         {dialog ? <ProviderDialog key={dialog.provider?.id ?? 'new'} existing={dialog.provider} onClose={() => setDialog(null)} /> : null}

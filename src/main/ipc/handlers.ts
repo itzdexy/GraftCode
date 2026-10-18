@@ -58,6 +58,7 @@ import { findCommand, integrationSetup, integrationStatus } from '../mcp/integra
 import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
+import { detectLocalServers, newServers, type Candidate } from '../providers/localServer';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
 import { mcpPromptCommand, promptHint } from '../mcp/names';
 import type { SessionManager } from '../agent/sessionManager';
@@ -145,6 +146,16 @@ function verifyError(error: unknown): VerifyResult {
   if (error instanceof ProviderError) return { ok: false, code: error.code === 'not_found' ? 'bad_base_url' : error.code, message: error.message };
   if (error instanceof GraftError) return { ok: false, code: 'bad_request', message: error.message };
   return { ok: false, code: 'unknown', message: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * The ports to search in a desktop test: the stub servers named in GRAFT_LOCAL_PORTS, and none when it is unset,
+ * so a test never finds a model server the developer happens to be running. Null outside tests.
+ */
+function testCandidates(): Candidate[] | null {
+  if (process.env.GRAFT_E2E !== '1') return null;
+  const ports = (process.env.GRAFT_LOCAL_PORTS ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  return ports.map((port) => ({ name: 'OpenAI-compatible server', port, kind: 'openai-compatible', preset: null, path: 'v1/models' }));
 }
 
 /** What Settings → Web search shows; key values never leave the main process. */
@@ -372,6 +383,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'providers:list': async () => (await ctx.services()).registry.summaries(),
     'providers:presets': async () => (await ctx.services()).catalog.presets(),
+    'providers:detectLocal': async () => {
+      const candidates = testCandidates();
+      const found = await detectLocalServers(candidates ? { candidates } : {});
+      return newServers(found, (await ctx.services()).registry.summaries());
+    },
     'catalog:status': async () => (await ctx.services()).catalogSync.status(),
     'catalog:refresh': async () => (await ctx.services()).catalogSync.refresh(),
 

@@ -99,6 +99,17 @@ export const ProviderPresetSchema = z.object({
 });
 export type ProviderPreset = z.infer<typeof ProviderPresetSchema>;
 
+/** A model server found running on this computer, not yet added as a provider. */
+export const DetectedServerSchema = z.object({
+  name: z.string(),
+  kind: z.enum(['ollama', 'openai-compatible']),
+  /** The preset a provider made from it uses (null for a plain OpenAI-compatible endpoint). */
+  preset: z.string().nullable(),
+  baseUrl: z.string(),
+  models: z.number().int().nonnegative()
+});
+export type DetectedServer = z.infer<typeof DetectedServerSchema>;
+
 export const ProviderSummarySchema = z.object({
   id: z.string(),
   kind: ProviderKindSchema,

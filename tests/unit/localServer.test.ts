@@ -1,6 +1,7 @@
+import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { contextSize, OpenAiChatProvider } from '../../src/main/providers/openaiChat';
-import { firstByteTimeout, flavorOf, serverOrigin } from '../../src/main/providers/localServer';
+import { detectLocalServers, firstByteTimeout, flavorOf, newServers, serverOrigin, type Candidate } from '../../src/main/providers/localServer';
 import { json, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 
 describe('a server on this computer', () => {
@@ -82,5 +83,72 @@ describe('a server on this computer', () => {
     server.route('GET', '/props', (_req, res) => json(res, 200, { default_generation_settings: { n_ctx: 32768 } }));
     const [model] = await provider().listModels();
     expect(model?.contextWindow).toBe(8192);
+  });
+});
+
+describe('finding the servers on this computer', () => {
+  let server: FixtureServer;
+
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  const port = (): number => Number(new URL(server.url).port);
+  const host = (): string => new URL(server.url).hostname;
+
+  /** A port nothing listens on: one the system just handed out and took back. */
+  async function closedPort(): Promise<number> {
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port: free } = probe.address() as net.AddressInfo;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    return free;
+  }
+
+  function candidate(overrides: Partial<Candidate>): Candidate {
+    return { name: 'vLLM', port: port(), kind: 'openai-compatible', preset: null, path: 'v1/models', ...overrides };
+  }
+
+  it('finds a server that answers and skips one that does not', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'a' }, { id: 'b' }] }));
+    const found = await detectLocalServers({
+      host: host(),
+      timeoutMs: 1_000,
+      candidates: [
+        candidate({}),
+        candidate({ name: 'Jan', port: await closedPort() }),
+        // The port answers, but not with a model list on this path.
+        candidate({ name: 'Ollama', kind: 'ollama', preset: 'ollama', path: 'api/tags' })
+      ]
+    });
+    expect(found).toEqual([{ name: 'vLLM', kind: 'openai-compatible', preset: null, baseUrl: `${server.url}/v1`, models: 2 }]);
+
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'qwen3:8b' }] }));
+    const ollama = await detectLocalServers({ host: host(), candidates: [candidate({ name: 'Ollama', kind: 'ollama', preset: 'ollama', path: 'api/tags' })] });
+    expect(ollama).toEqual([{ name: 'Ollama', kind: 'ollama', preset: 'ollama', baseUrl: server.url, models: 1 }]);
+  });
+
+  it('names a llama.cpp server only when its own endpoint says it is one', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'qwen3-coder' }] }));
+    const llama = candidate({ name: 'llama.cpp' });
+    expect((await detectLocalServers({ host: host(), candidates: [llama] }))[0]?.name).toBe('OpenAI-compatible server');
+    server.route('GET', '/props', (_req, res) => json(res, 200, { default_generation_settings: { n_ctx: 8192 } }));
+    expect((await detectLocalServers({ host: host(), candidates: [llama] }))[0]?.name).toBe('llama.cpp');
+  });
+
+  it('skips a server already added', () => {
+    const found = [
+      { name: 'Ollama', kind: 'ollama' as const, preset: 'ollama', baseUrl: 'http://127.0.0.1:11434', models: 3 },
+      { name: 'LM Studio', kind: 'openai-compatible' as const, preset: 'lmstudio', baseUrl: 'http://127.0.0.1:1234/v1', models: 1 },
+      { name: 'vLLM', kind: 'openai-compatible' as const, preset: null, baseUrl: 'http://127.0.0.1:8000/v1', models: 1 }
+    ];
+    const providers = [{ baseUrl: 'http://LOCALHOST:11434/' }, { baseUrl: 'http://[::1]:1234/v1' }, { baseUrl: 'http://127.0.0.1:8000' }, { baseUrl: null }];
+    // The server on 8000 was added without /v1: that is another address, so it is still offered.
+    expect(newServers(found, providers).map((s) => s.name)).toEqual(['vLLM']);
+    expect(newServers(found, [{ baseUrl: 'http://127.0.0.1:8000/v1/' }]).map((s) => s.name)).toEqual(['Ollama', 'LM Studio']);
   });
 });
