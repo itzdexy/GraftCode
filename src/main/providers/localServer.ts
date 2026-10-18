@@ -106,11 +106,29 @@ export async function detectLocalServers(
 ): Promise<DetectedServer[]> {
   const host = opts.host ?? '127.0.0.1';
   const timeoutMs = opts.timeoutMs ?? DETECT_TIMEOUT_MS;
-  // The request timeout only covers the first byte; this deadline also covers a body that never ends.
+  // The request timeout only covers the first byte. This deadline aborts a model list that never ends, and each
+  // probe is raced against it because the body of an error answer is read with nothing that can abort it.
   const deadline = AbortSignal.timeout(timeoutMs);
   const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
-  const found = await Promise.all((opts.candidates ?? LOCAL_CANDIDATES).map((c) => probe(`http://${host}:${c.port}`, c, timeoutMs, signal)));
+  const found = await Promise.all(
+    (opts.candidates ?? LOCAL_CANDIDATES).map((c) => settledBy(probe(`http://${host}:${c.port}`, c, timeoutMs, signal), signal))
+  );
   return found.filter((server): server is DetectedServer => server !== null);
+}
+
+/**
+ * A probe's answer, or null once the signal aborts: a server still sending its answer by then is not counted.
+ * The abandoned request ends when that server closes the connection.
+ */
+function settledBy(work: Promise<DetectedServer | null>, signal: AbortSignal): Promise<DetectedServer | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const giveUp = (): void => resolve(null);
+    signal.addEventListener('abort', giveUp, { once: true });
+    work
+      .then(resolve, () => resolve(null))
+      .finally(() => signal.removeEventListener('abort', giveUp));
+  });
 }
 
 async function probe(origin: string, candidate: Candidate, timeoutMs: number, signal: AbortSignal): Promise<DetectedServer | null> {

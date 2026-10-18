@@ -140,6 +140,19 @@ describe('finding the servers on this computer', () => {
     expect((await detectLocalServers({ host: host(), candidates: [llama] }))[0]?.name).toBe('llama.cpp');
   });
 
+  // Headers come, the body never ends: the search gives up on the server at its deadline. Closing the fixture in
+  // afterEach drops these open connections.
+  it.each([200, 404])('gives up on a server whose %i answer never finishes', async (status) => {
+    server.route('GET', '/v1/models', (_req, res) => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.write('{"data":[');
+    });
+    const started = Date.now();
+    const found = await detectLocalServers({ host: host(), candidates: [candidate({})], timeoutMs: 300 });
+    expect(found).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
   it('skips a server already added', () => {
     const found = [
       { name: 'Ollama', kind: 'ollama' as const, preset: 'ollama', baseUrl: 'http://127.0.0.1:11434', models: 3 },
