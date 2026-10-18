@@ -383,7 +383,7 @@ describe('a finished reply whose tool calls were written as text', () => {
       adapter: new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
     });
   }
-  const look = { type: 'tool_use', id: expect.stringMatching(/^call_/), name: 'Look', input: { n: 1 } };
+  const look = { type: 'tool_use', id: expect.stringMatching(/^call_/) as unknown, name: 'Look', input: { n: 1 } };
 
   it('stores a reply that is only a JSON call as the call alone, and sends it back once', async () => {
     // The filter does not hold a bare JSON reply, so all of it streamed as text before it was read as a call.

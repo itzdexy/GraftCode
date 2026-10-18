@@ -48,7 +48,7 @@ export function memoryFileIn(dir: string): string | null {
  */
 export function cursorRules(dir: string): MemoryFile | null {
   const rulesDir = path.join(dir, '.cursor', 'rules');
-  let names: string[] = [];
+  let names: string[];
   try {
     names = fs
       .readdirSync(rulesDir)
