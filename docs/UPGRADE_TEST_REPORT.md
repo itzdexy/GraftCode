@@ -1268,3 +1268,9 @@ Not verified:
 - Starting the 23 new local servers: their packages were checked in npm and PyPI, not run on this
   computer (some are community packages, and running them is the user's call).
 - macOS.
+
+## 0.6.35 round (2026-10-18)
+
+Branch `feat/local-models`, on top of 0.6.34, local: nothing was pushed and no release was made.
+
+Pending: verification runs after review.

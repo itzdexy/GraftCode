@@ -19,6 +19,74 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.35 local models that work (2026-10-18)
+
+The round came from an audit of 0.6.34 on 2026-10-18 and from what the user's installed 0.6.34
+logged. Graft claimed to run on small and local models; on a model served from this computer it
+took the wrong window, spent a third of a 32K window on tool schemas before the first message, lost
+tool calls written as text and timed out on long prompts. No new package, table or migration: the
+per-model choices live in the `custom_models` JSON through `CustomModelSchema`, and one channel was
+added (`providers:detectLocal`).
+
+- **The context a local server loaded** (`providers/localServer.ts`, `openaiChat.ts`). llama.cpp
+  lists `meta.n_ctx_train`, the trained length (262,144 for Qwen3-Coder), while llama-server often
+  runs with 4K to 32K. A model list that looks like llama.cpp (`owned_by: "llamacpp"` or a `meta`
+  object) or LM Studio (`owned_by: "organization_owner"`) is followed by one probe, `GET /props`
+  (`n_ctx`) or `GET /api/v0/models` (`loaded_context_length`), with a 2-second limit. The trained
+  length only caps that figure, a failed probe keeps the list's size, and a size set in Settings
+  still wins. Other servers get no extra request.
+- **Time to read a long prompt** (`localServer.ts` `firstByteTimeout`, `openaiChat.ts`, `ollama.ts`).
+  A local server gets 15 minutes to the first byte instead of 120 s (60 s for a ping), hosted ones
+  keep their limits; Ollama is sent `keep_alive: "30m"`, so a turn that waits on an approval doesn't
+  reload the model.
+- **Tool calls written as text** (`providers/textToolCalls.ts`, `openaiChat.ts`, `ollama.ts`). Hermes
+  `<tool_call>{…}</tool_call>`, Qwen3-Coder's `<function=…><parameter=…>` XML and Mistral's
+  `[TOOL_CALLS]` are read, only for names Graft offered and never inside a ``` fence; a value the
+  tool's schema calls a string stays a string. A model without native tools is told the tools in the
+  prompt, its earlier calls and results go back as the same markup, and a streaming filter holds
+  markup back and returns any text that turns out not to be a call. In native mode a local model's
+  text calls are recovered too. A server that answers "does not support tools" is asked again in
+  text, and that model stays in text while Graft runs. The turn loop does not change: a finished
+  reply's blocks, not its streamed deltas, are what is stored (`agent/loop.ts`).
+- **The lean profile** (`agent/offering.ts`, `tools/builtin.ts` `LEAN_TOOLS`, the code prompt). A local
+  model (by `isLocalUrl`, Ollama's hosted models excepted) with a window of 65,536 tokens or less gets
+  a short code prompt and AskUserQuestion, Edit, ExitPlanMode, Glob, Grep, KillShell, Read, Shell,
+  ShellOutput, TodoWrite, WebFetch and Write, plus ToolSearch. The other built-ins wait behind
+  ToolSearch under the server name `graft`, with the session's MCP tools. The lean prompt keeps every
+  safety rule of the full one in fewer words, and the Sandbox section when a sandbox is on; a lean
+  model in a mission is sent MissionUpdate. Switching between a lean and a full model sends the
+  matching prompt and tools on the next request. Modelled on Cline's compact prompt for local models;
+  Roo Code's users, who never got one, hit 300 s timeouts. The 28 built-in schemas weigh about 8,750
+  tokens.
+- **Servers on this computer** (`localServer.ts` `detectLocalServers`, `providers/FoundServers.tsx`,
+  Settings → Providers and the onboarding's provider step). Ollama, LM Studio, llama.cpp, vLLM, Jan
+  and KoboldCpp are probed on their default ports; one found is added in a click. A server that never
+  finishes its answer can't stall the search.
+- **Per-model choices** (`settings/ModelsSection.tsx`). A custom model's Prompt (Automatic, Full,
+  Lean) and Tool calls (Automatic, Native, Written in text).
+- **A model a provider doesn't serve** (`openaiChat.ts`). NVIDIA NIM's bare `404 page not found`
+  reached the user nine times on 2026-10-17; the message now names the host and the model and says
+  to pick another or refresh the list. One message makes one chat request: the nine came from
+  parallel agents or resends.
+- **Notes from other tools** (`agent/memory.ts`). `GEMINI.md` joins the instruction files, last in
+  priority; at the project root the `.cursor/rules/*.mdc` files with `alwaysApply: true`, in name
+  order, or else `.cursorrules`, are added. Glob-scoped and model-chosen rules are skipped, since
+  Graft can't honour those conditions, and a rule that can't be read is skipped.
+
+Left out, and why:
+
+- An edit flow for custom models: the new Prompt and Tool calls choices are set when a model is
+  added; changing them means removing and adding the model again.
+- Servers on the local network: only this computer is probed, and `isLocalUrl` matches
+  `localhost`, `127.0.0.1` and `[::1]` only, so a model server on another machine gets the hosted
+  limits and the full profile.
+- Cursor rules in subfolders: only the project root's `.cursor/rules` and `.cursorrules` are read.
+- Deferred from the reviews: a call quoted in single-backtick inline code is still read (only
+  ``` fences are excluded); `keep_alive: "30m"` overrides a user's `OLLAMA_KEEP_ALIVE`; an
+  OpenRouter 404 other than its data-policy one is reworded as "doesn't serve the model", hiding
+  reasons such as "No endpoints found that support tool use"; a locked `GRAFT.md`, `AGENTS.md`,
+  `CLAUDE.md` or `GEMINI.md` still breaks the prompt build (pre-existing).
+
 ### 0.6.34 media models, video, 54 integrations, and Delete that can't be locked (2026-10-17)
 
 Asked for as: "fix" with a screenshot of the delete dialog of 0.6.33 saying "EPERM, Permission
@@ -1633,3 +1701,7 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
 11. Done in 0.6.34: media models by kind on the Models page, video the agent makes through
     OpenRouter, 54 integrations, and a delete that a running git can't block. Next there: video
     through OpenAI's and Google's own APIs, transcription for dictation, and music for games.
+12. Done in 0.6.35: local models with the window their server loaded, tool calls written as
+    text, a lean profile for small windows, servers found on this computer, per-model prompt and
+    tool-call choices. Next there: editing a custom model's choices, model servers on the local
+    network, Cursor rules in subfolders, and measuring the lean threshold on real setups.
