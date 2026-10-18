@@ -5,6 +5,7 @@ import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { firstByteTimeout } from './localServer';
 import { parseNdjson } from './sse';
 import type { FinishReason, LLMProvider, ProviderConnection, StreamEvent, StreamRequest } from './types';
 
@@ -184,10 +185,12 @@ export class OllamaProvider implements LLMProvider {
             ? { tools: req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })) }
             : {}),
           ...(think !== undefined ? { think } : {}),
-          options: { num_ctx: req.model.contextWindow }
+          options: { num_ctx: req.model.contextWindow },
+          // Ollama unloads a model after five idle minutes, and loading it again costs the next turn a long wait.
+          keep_alive: '30m'
         },
         signal,
-        timeoutMs: 300_000
+        timeoutMs: firstByteTimeout(this.base, 300_000)
       });
     } catch (error) {
       throw this.unreachable(error);

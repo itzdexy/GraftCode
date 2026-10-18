@@ -6,7 +6,7 @@ import { isLocalUrl } from '@shared/privacy';
 import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
-import { flavorOf, loadedContexts } from './localServer';
+import { firstByteTimeout, flavorOf, loadedContexts } from './localServer';
 import { mediaKindOf } from '../media/mediaModels';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
@@ -403,7 +403,7 @@ export class OpenAiChatProvider implements LLMProvider {
       headers: this.headers(),
       body: { model: modelId, messages: [{ role: 'user', content: 'Reply with OK.' }], max_tokens: 1, stream: false },
       ...(signal ? { signal } : {}),
-      timeoutMs: 60_000
+      timeoutMs: firstByteTimeout(this.base, 60_000)
     });
     await response.text().catch(() => '');
   }
@@ -518,7 +518,7 @@ export class OpenAiChatProvider implements LLMProvider {
     let refusal: ProviderError | null = null;
     for (let attempt = 0; attempt < 6 && !response; attempt++) {
       try {
-        response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
+        response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: firstByteTimeout(this.base, 120_000) });
       } catch (error) {
         if (this.kind === 'openrouter') throwIfPrivacyBlocked(error, req.privacy);
         // A model chat completions doesn't serve: this one is answered by the Responses API.

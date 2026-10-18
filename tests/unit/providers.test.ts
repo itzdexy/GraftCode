@@ -854,6 +854,14 @@ describe('Ollama adapter', () => {
     }
   });
 
+  it('keeps the Ollama model loaded between turns', async () => {
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    await collect(provider.streamText(request(), new AbortController().signal));
+    const body = server.requests.at(-1)?.json() as Record<string, unknown>;
+    expect(body.keep_alive).toBe('30m');
+  });
+
   it('explains when Ollama is not running', async () => {
     const closed = await startFixtureServer();
     const url = closed.url;

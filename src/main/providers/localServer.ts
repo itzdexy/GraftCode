@@ -1,3 +1,4 @@
+import { isLocalUrl } from '@shared/privacy';
 import { joinUrl, requestJson } from './http';
 
 /** Servers on this computer whose own API says how much context they loaded a model with. */
@@ -5,6 +6,18 @@ export type LocalFlavor = 'llamacpp' | 'lmstudio' | null;
 
 /** How long each question to a local server may take before Graft goes on without the answer. */
 const PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * How long a server on this computer may take to start answering. On a CPU it
+ * can spend many minutes reading a long prompt before the first byte, and a
+ * hosted limit would cut it off while it is still working.
+ */
+export const LOCAL_FIRST_BYTE_MS = 900_000;
+
+/** The time to the first byte for a base URL: the local limit on this computer, the hosted one anywhere else. */
+export function firstByteTimeout(base: string, hosted: number): number {
+  return isLocalUrl(base) ? LOCAL_FIRST_BYTE_MS : hosted;
+}
 
 /** The server behind an OpenAI-style base URL: its own endpoints live beside `/v1`, not under it. */
 export function serverOrigin(base: string): string {

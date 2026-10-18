@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { contextSize, OpenAiChatProvider } from '../../src/main/providers/openaiChat';
-import { flavorOf, serverOrigin } from '../../src/main/providers/localServer';
+import { firstByteTimeout, flavorOf, serverOrigin } from '../../src/main/providers/localServer';
 import { json, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 
 describe('a server on this computer', () => {
@@ -27,6 +27,11 @@ describe('a server on this computer', () => {
     expect(flavorOf([{ owned_by: 'organization_owner' }])).toBe('lmstudio');
     expect(flavorOf([{ owned_by: 'openai' }])).toBeNull();
     expect(flavorOf([])).toBeNull();
+  });
+
+  it('waits fifteen minutes for a local server and keeps hosted limits', () => {
+    expect(firstByteTimeout('http://127.0.0.1:1234/v1', 120_000)).toBe(900_000);
+    expect(firstByteTimeout('https://api.groq.com/openai/v1', 120_000)).toBe(120_000);
   });
 
   it("reads llama.cpp's loaded n_ctx, not n_ctx_train", async () => {
