@@ -564,6 +564,15 @@ export class OpenAiChatProvider implements LLMProvider {
           yield* this.streamResponses(req, signal);
           return;
         }
+        // A 404 from chat completions means the server doesn't have this model, and its own text
+        // ("404 page not found") says nothing about which model or what to do.
+        if (error instanceof ProviderError && error.code === 'not_found') {
+          throw new ProviderError(
+            'not_found',
+            `${hostOf(this.base)} doesn't serve the model ${modelId}. Pick another model, or refresh the list in Settings → Models.`,
+            { status: error.status, retryable: false, cause: error }
+          );
+        }
         if (!(error instanceof ProviderError) || (error.code !== 'bad_request' && error.code !== 'context_length')) throw error;
         refusal = error;
         const smaller = smallerReplyBudget(error.message, maxTokens);

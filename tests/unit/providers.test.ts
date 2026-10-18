@@ -436,6 +436,22 @@ describe('OpenAI-style chat adapter', () => {
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
   });
 
+  it('names the model when the provider does not serve it', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('404 page not found');
+    });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'stepfun-ai/step-5-preview' }, effort: null });
+    const host = new URL(server.url).host;
+    await expect(collect(streamWithRetry(provider, request({ model }), new AbortController().signal, () => undefined))).rejects.toMatchObject({
+      code: 'not_found',
+      retryable: false,
+      message: `${host} doesn't serve the model stepfun-ai/step-5-preview. Pick another model, or refresh the list in Settings → Models.`
+    });
+    expect(server.requests).toHaveLength(1);
+  });
+
   it.each([
     { end: 'EOF', args: '{"path":"a.ts"}' },
     { end: '[DONE]', args: '{"path":"a.ts"}' },

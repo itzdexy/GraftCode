@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/main/providers/errors';
+import { OpenAiChatProvider } from '../../src/main/providers/openaiChat';
 import { modelOrder, toLlmHistory } from '../../src/main/agent/history';
 import { NOT_FINISHED, NOT_RUN, RECORDED_NOTE, type JournalStart } from '../../src/main/agent/journal';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
@@ -24,6 +25,7 @@ import { createBuiltinRegistry } from '../../src/main/tools/builtin';
 import { fakeModel } from '../support/fakeProvider';
 import { testTool } from '../support/loopHarness';
 import { searchTools } from '../../src/main/tools/toolSearch';
+import { startFixtureServer } from '../support/httpFixture';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
@@ -205,6 +207,30 @@ describe('cancellation, retries and errors', () => {
         expect(h.session.summary.lastError).toMatchObject({ code: 'overloaded' });
         expect(h.provider.requests).toHaveLength(3);
         expect(switched(h)).toBe(false);
+      }
+    });
+
+    it('is not used for a model the provider does not serve, and one message asks for it once', async () => {
+      const server = await startFixtureServer();
+      try {
+        server.route('POST', '/v1/chat/completions', (_req, res) => {
+          res.writeHead(404, { 'content-type': 'text/plain' });
+          res.end('404 page not found');
+        });
+        const served = new OpenAiChatProvider({ id: 'fake', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+        const h = harness({ models: [fakeModel(), backup], fallbackModel: backup.ref, script: [] });
+        // The harness takes a scripted provider; this one hands every request to the real adapter, over HTTP.
+        h.provider.streamText = (request, signal) => served.streamText(request, signal);
+        h.session.send('hi');
+        await h.session.idle();
+        expect(server.requests.filter((r) => r.path === '/v1/chat/completions')).toHaveLength(1);
+        expect(h.session.summary.lastError).toEqual({
+          code: 'not_found',
+          message: `${new URL(server.url).host} doesn't serve the model fake-model. Pick another model, or refresh the list in Settings → Models.`
+        });
+        expect(switched(h)).toBe(false);
+      } finally {
+        await server.close();
       }
     });
 
