@@ -166,9 +166,19 @@ describe('finding the servers on this computer', () => {
       { name: 'LM Studio', kind: 'openai-compatible' as const, preset: 'lmstudio', baseUrl: 'http://127.0.0.1:1234/v1', models: 1 },
       { name: 'vLLM', kind: 'openai-compatible' as const, preset: null, baseUrl: 'http://127.0.0.1:8000/v1', models: 1 }
     ];
-    const providers = [{ baseUrl: 'http://LOCALHOST:11434/' }, { baseUrl: 'http://[::1]:1234/v1' }, { baseUrl: 'http://127.0.0.1:8000' }, { baseUrl: null }];
+    const providers = [
+      { kind: 'ollama' as const, baseUrl: 'http://LOCALHOST:11434/' },
+      { kind: 'openai-compatible' as const, baseUrl: 'http://[::1]:1234/v1' },
+      { kind: 'openai-compatible' as const, baseUrl: 'http://127.0.0.1:8000' },
+      { kind: 'openai-compatible' as const, baseUrl: null }
+    ];
     // The server on 8000 was added without /v1: that is another address, so it is still offered.
     expect(newServers(found, providers).map((s) => s.name)).toEqual(['vLLM']);
-    expect(newServers(found, [{ baseUrl: 'http://127.0.0.1:8000/v1/' }]).map((s) => s.name)).toEqual(['Ollama', 'LM Studio']);
+    expect(newServers(found, [{ kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:8000/v1/' }]).map((s) => s.name)).toEqual(['Ollama', 'LM Studio']);
+  });
+
+  it('counts a provider with no URL as one at its default address', () => {
+    const found = [{ name: 'Ollama', kind: 'ollama' as const, preset: 'ollama', baseUrl: 'http://127.0.0.1:11434', models: 3 }];
+    expect(newServers(found, [{ kind: 'ollama', baseUrl: null }])).toEqual([]);
   });
 });

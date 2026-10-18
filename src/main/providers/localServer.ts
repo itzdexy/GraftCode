@@ -1,4 +1,6 @@
 import { isLocalUrl } from '@shared/privacy';
+import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
+import type { ProviderKind } from '@shared/schemas/common';
 import type { DetectedServer } from '@shared/schemas/models';
 import { joinUrl, requestJson } from './http';
 
@@ -172,8 +174,16 @@ function addressKey(url: string): string {
   }
 }
 
-/** The servers found that no provider points at yet. */
-export function newServers(found: DetectedServer[], providers: Array<{ baseUrl: string | null }>): DetectedServer[] {
-  const added = new Set(providers.flatMap((p) => (p.baseUrl ? [addressKey(p.baseUrl)] : [])));
+/**
+ * The servers found that no provider points at yet. A provider with no URL talks to its kind's
+ * default address (Ollama's is localhost:11434), so it counts as pointing there.
+ */
+export function newServers(found: DetectedServer[], providers: Array<{ kind: ProviderKind; baseUrl: string | null }>): DetectedServer[] {
+  const added = new Set(
+    providers.flatMap((p) => {
+      const url = p.baseUrl ?? PROVIDER_KIND_INFO[p.kind].defaultBaseUrl;
+      return url ? [addressKey(url)] : [];
+    })
+  );
   return found.filter((server) => !added.has(addressKey(server.baseUrl)));
 }
