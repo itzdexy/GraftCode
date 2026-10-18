@@ -3,8 +3,8 @@
     "version": "0.6.35",
     "date": "2026-10-18",
     "items": [
-      "A model on your computer is measured against the context its server loaded, not the length it was trained for: llama.cpp and LM Studio are asked what they hold. Local servers get up to 15 minutes to read a long prompt, and Ollama keeps a model loaded for 30 minutes between turns.",
-      "Models whose server has no tool support can use tools: Graft describes the tools in the prompt and reads the calls the model writes as text, in the Hermes, Qwen and Mistral forms. A call a local model writes as text in a normal reply is run too, and when a server refuses tools, Graft switches that model to text.",
+      "A model on your computer is measured against the context its server loaded, not the length it was trained for: llama.cpp and LM Studio are asked what they hold. Local servers get up to 15 minutes to read a long prompt, and Ollama keeps a model loaded for 30 minutes between turns, unless OLLAMA_KEEP_ALIVE sets another time.",
+      "Models whose server has no tool support can use tools: Graft describes the tools in the prompt and reads the calls the model writes as text, in the Hermes, Qwen and Mistral forms. A call a local model writes as text in a normal reply is run too, and when a server refuses tools, Graft switches that model to text until Graft restarts.",
       "A local model with a window of 64K or less gets a lean code prompt, with the same safety rules, and the core tools (Read, Write, Edit, Glob, Grep, Shell and the like). The others are one ToolSearch away.",
       "Settings → Providers → Find servers on this computer finds Ollama, LM Studio, llama.cpp, vLLM, Jan and KoboldCpp on their usual ports and adds one in a click. The first-run setup offers it too.",
       "Settings → Models: a custom model can choose its prompt (Automatic, Full or Lean) and how it calls tools (Automatic, Native or Written in text).",
