@@ -45,6 +45,14 @@
   },
   {
     "section": "models",
+    "label": "Prompt"
+  },
+  {
+    "section": "models",
+    "label": "Tool calls"
+  },
+  {
+    "section": "models",
     "label": "Default model"
   },
   {

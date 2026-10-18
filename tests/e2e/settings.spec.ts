@@ -289,6 +289,22 @@ test('Settings → Providers finds a model server running on this computer and a
     // Once added it is no longer offered, so a second search finds nothing new.
     await w.getByRole('button', { name: 'Find servers on this computer' }).click();
     await expect(w.getByText('No model server answered on this computer. Start Ollama, LM Studio or llama-server and try again.')).toBeVisible();
+
+    // The model it lists can be given the lean prompt, and the choice is still there when Settings is opened again.
+    await openSettings(w, 'Models');
+    const addModel = w.getByRole('form', { name: 'Add a custom model to OpenAI-compatible server' });
+    await addModel.getByLabel('Model ID').fill('stub-coder');
+    await addModel.getByRole('combobox', { name: 'Prompt', exact: true }).selectOption({ label: 'Lean' });
+    await expect(addModel.getByRole('combobox', { name: 'Tool calls', exact: true })).toHaveValue('');
+    await addModel.getByRole('button', { name: 'Add' }).click();
+    const custom = w.getByRole('list', { name: 'Custom models for OpenAI-compatible server' });
+    await expect(custom.getByRole('listitem').filter({ hasText: 'stub-coder' })).toContainText('lean prompt');
+    await closeSettings(w);
+    await openSettings(w, 'Models');
+    await expect(custom.getByRole('listitem').filter({ hasText: 'stub-coder' })).toContainText('lean prompt');
+    await expect(custom).not.toContainText('tools');
+    await addModel.scrollIntoViewIfNeeded();
+    await shot(w, 'settings-custom-model-lean');
   } finally {
     await new Promise<void>((resolve) => stub.close(() => resolve()));
   }
