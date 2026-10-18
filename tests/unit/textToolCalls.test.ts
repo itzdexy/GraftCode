@@ -6,6 +6,7 @@ import {
   ToolMarkupFilter,
   toolResponseMarkup,
 } from '../../src/main/providers/textToolCalls';
+import { ReadInput } from '../../src/main/tools/fs/read';
 
 const tools = new Map<string, Record<string, unknown>>([
   ['Read', { type: 'object', properties: { path: { type: 'string' }, limit: { type: 'integer' } } }],
@@ -111,6 +112,26 @@ describe('extractTextToolCalls', () => {
     });
   });
 
+  it('leaves a call quoted in inline code alone', () => {
+    const single = 'The format is `<tool_call>{"name":"Read","arguments":{"path":"a.ts"}}</tool_call>`.';
+    expect(extractTextToolCalls(single, tools)).toEqual({ text: single, calls: [] });
+    const double = 'Write ``<tool_call>{"name":"Read","arguments":{"path":"a.ts"}}</tool_call>`` to call one.';
+    expect(extractTextToolCalls(double, tools)).toEqual({ text: double, calls: [] });
+    const xml = 'Or `<function=Read><parameter=path>a.ts</parameter></function>` in XML.';
+    expect(extractTextToolCalls(xml, tools)).toEqual({ text: xml, calls: [] });
+  });
+
+  it('reads the real call on the line after an inline-code mention', () => {
+    const mention = 'The format is `<tool_call>{"name":"Read","arguments":{"path":"x"}}</tool_call>`.';
+    const input = `${mention}\n<tool_call>{"name":"Read","arguments":{"path":"a.ts"}}</tool_call>`;
+    expect(extractTextToolCalls(input, tools)).toEqual({ text: mention, calls: [{ name: 'Read', input: { path: 'a.ts' } }] });
+  });
+
+  it('reads a call after a lone backtick that opens no code span', () => {
+    const input = 'Note the ` mark. <tool_call>{"name":"Read","arguments":{"path":"a.ts"}}</tool_call>';
+    expect(extractTextToolCalls(input, tools)).toEqual({ text: 'Note the ` mark.', calls: [{ name: 'Read', input: { path: 'a.ts' } }] });
+  });
+
   it('does not read a sentence that mentions the tag as a call', () => {
     const input = 'To call a tool, use <tool_call> tags around the JSON.';
     expect(extractTextToolCalls(input, tools)).toEqual({ text: input, calls: [] });
@@ -179,6 +200,14 @@ describe('textToolPrompt', () => {
     expect(prompt.startsWith('# Calling tools')).toBe(true);
     expect(prompt).toContain('### Read\nReads a file.');
     expect(prompt).toContain('Arguments (JSON Schema): {"type":"object"}');
+  });
+
+  it("teaches with an example call the Read tool's own schema accepts", () => {
+    const prompt = textToolPrompt([]);
+    const example = /<tool_call>\n(.*)\n<\/tool_call>/.exec(prompt)?.[1] ?? '';
+    const call = JSON.parse(example) as { name: string; arguments: unknown };
+    expect(call.name).toBe('Read');
+    expect(ReadInput.safeParse(call.arguments).success).toBe(true);
   });
 });
 

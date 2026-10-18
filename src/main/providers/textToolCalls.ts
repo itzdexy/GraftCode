@@ -177,6 +177,29 @@ function fenceRuns(text: string): { text: string; fenced: boolean }[] {
 }
 
 /**
+ * The end of the inline code span that holds `index`, or -1 when it is in none. A span opens
+ * with a run of backticks and closes at the next run of the same length on the same line, as in
+ * Markdown; a run with no match on its line is a literal backtick. Only the line from `from`
+ * on is read, so backticks inside markup already read as a call don't pair with later ones.
+ */
+function codeSpanEnd(text: string, from: number, index: number): number {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  const newline = text.indexOf('\n', index);
+  const lineEnd = newline === -1 ? text.length : newline;
+  const runs = /`+/g;
+  runs.lastIndex = Math.max(from, lineStart);
+  for (let open = runs.exec(text); open && open.index < index; open = runs.exec(text)) {
+    const closer = new RegExp(`(?<!\`)\`{${open[0].length}}(?!\`)`, 'g');
+    closer.lastIndex = open.index + open[0].length;
+    const close = closer.exec(text);
+    if (!close || close.index >= lineEnd) continue;
+    if (close.index > index) return close.index + close[0].length;
+    runs.lastIndex = close.index + close[0].length;
+  }
+  return -1;
+}
+
+/**
  * A reply that is nothing but `{"name": …, "arguments": …}`, bare or in one json fence. Some
  * models answer a tools prompt this way. It only counts when the whole reply is that object.
  */
@@ -192,7 +215,8 @@ const OPENERS = [TOOL_CALL_OPEN, FUNCTION_OPEN, MISTRAL_OPEN];
 
 /**
  * Reads the tool calls a model wrote as text, in the order it wrote them, and returns the text
- * with that markup removed and trimmed. Markup inside a ``` fence is an example, not a call.
+ * with that markup removed and trimmed. Markup inside a ``` fence or an inline code span is an
+ * example, not a call.
  * A call to a tool that isn't in `tools`, or one whose JSON doesn't parse, stays in the text
  * so the user sees what the model wrote. When nothing is read, the text comes back unchanged.
  */
@@ -215,6 +239,13 @@ export function extractTextToolCalls(
       const starts = OPENERS.map((opener) => run.text.indexOf(opener, position)).filter((index) => index !== -1);
       if (starts.length === 0) break;
       const start = Math.min(...starts);
+      // Markup quoted in inline code is the model showing the format, not using it.
+      const quoted = codeSpanEnd(run.text, position, start);
+      if (quoted !== -1) {
+        out += run.text.slice(position, quoted);
+        position = quoted;
+        continue;
+      }
       const span = readMarkup(run.text, start, tools);
       if (span) {
         out += run.text.slice(position, span.start);
@@ -286,7 +317,7 @@ function partialMarkerLength(text: string): number {
 const PROMPT_HEADER = `# Calling tools
 You have tools. To use one, write a tool call in exactly this form:
 <tool_call>
-{"name": "Read", "arguments": {"path": "src/index.ts"}}
+{"name": "Read", "arguments": {"file_path": "src/index.ts"}}
 </tool_call>
 You can write several tool calls in one reply. After them, stop: the results come back in the next message inside <tool_response> tags. Use only the tools listed below, with arguments that match their schema.
 
