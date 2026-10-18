@@ -573,14 +573,18 @@ export class OpenAiChatProvider implements LLMProvider {
             { status: error.status, retryable: false, cause: error }
           );
         }
+        // A model without native tool calls: from now on its tools go in the prompt. This comes before the
+        // check below because llama-server refuses with a 500.
+        if (offered && !textMode && refusesTools(error)) {
+          refusal = error;
+          this.textTools.add(modelId);
+          textMode = true;
+          continue;
+        }
         if (!(error instanceof ProviderError) || (error.code !== 'bad_request' && error.code !== 'context_length')) throw error;
         refusal = error;
         const smaller = smallerReplyBudget(error.message, maxTokens);
-        if (offered && !textMode && refusesTools(error)) {
-          // A model without native tool calls: from now on its tools go in the prompt.
-          this.textTools.add(modelId);
-          textMode = true;
-        } else if (error.code === 'bad_request' && streamOptions && /stream_options/i.test(error.message)) {
+        if (error.code === 'bad_request' && streamOptions && /stream_options/i.test(error.message)) {
           this.noStreamOptions.add(modelId);
           streamOptions = false;
         } else if (error.code === 'bad_request' && reasoningParam && wire !== undefined && this.kind === 'openai-compatible' && /reasoning/i.test(error.message)) {

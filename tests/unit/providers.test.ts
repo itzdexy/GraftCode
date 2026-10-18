@@ -956,12 +956,17 @@ describe('tool calls written as text', () => {
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
   });
 
+  const vllm = '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set';
+  const llamaCpp = 'tools param requires --jinja flag';
   it.each([
-    { adapter: 'Ollama', path: '/api/chat', refusal: { error: 'registry.ollama.ai/library/x does not support tools' } },
-    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', refusal: { error: { message: 'x does not support tools' } } }
-  ])('switches to text tools when the server refuses the tools parameter ($adapter)', async ({ adapter, path, refusal }) => {
+    { adapter: 'Ollama', path: '/api/chat', status: 400, refusal: { error: 'registry.ollama.ai/library/x does not support tools' } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 400, refusal: { error: { message: 'x does not support tools' } } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 400, refusal: { error: { message: vllm } } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 500, refusal: { error: { code: 500, message: llamaCpp, type: 'server_error' } } },
+    { adapter: 'Ollama', path: '/api/chat', status: 500, refusal: { error: llamaCpp } }
+  ])('switches to text tools when the server refuses the tools parameter ($adapter, $status)', async ({ adapter, path, status, refusal }) => {
     server.route('POST', path, async (req, res) => {
-      if ((req.json() as Record<string, unknown>).tools) return json(res, 400, refusal);
+      if ((req.json() as Record<string, unknown>).tools) return json(res, status, refusal);
       if (adapter === 'Ollama') return ndjson(res, [{ message: { role: 'assistant', content: call }, done: true, done_reason: 'stop' }]);
       await sse(res, [{ data: { choices: [{ index: 0, delta: { content: call }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]);
     });

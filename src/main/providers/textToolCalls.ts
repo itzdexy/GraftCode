@@ -344,12 +344,15 @@ export function toolResponseMarkup(name: string, text: string, isError: boolean)
 /**
  * Whether a server refused a request because the model has no native tool calls. Ollama and
  * the OpenAI-compatible servers word it differently, and the adapter then asks again with the
- * tools written into the prompt.
+ * tools written into the prompt. vLLM refuses when it was started without a tool-call parser,
+ * and llama-server without --jinja; llama-server says so with a 500, so a server error counts
+ * too. The adapter has to catch it itself, since a 500 would otherwise be retried unchanged.
  */
-export function refusesTools(error: unknown): boolean {
+export function refusesTools(error: unknown): error is ProviderError {
   return (
     error instanceof ProviderError &&
-    error.code === 'bad_request' &&
-    /does not support tools|tools? (are |is )?not supported|unsupported.*\btools?\b/i.test(error.message)
+    (error.code === 'bad_request' || error.code === 'server') &&
+    (/does not support tools|tools? (are |is )?not supported|unsupported.*\btools?\b/i.test(error.message) ||
+      /enable-auto-tool-choice|tool-call-parser|requires --jinja/i.test(error.message))
   );
 }
