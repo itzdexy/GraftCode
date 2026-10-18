@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseNdjson, parseSse } from '../../src/main/providers/sse';
-import { errorFromHttp, parseRetryAfter, ProviderError } from '../../src/main/providers/errors';
+import { errorFromHttp, isAbortError, parseRetryAfter, ProviderError } from '../../src/main/providers/errors';
 import { backoffDelay, DEFAULT_RETRY_POLICY, streamWithRetry } from '../../src/main/providers/retry';
 import { AnthropicProvider, toAnthropicMessages } from '../../src/main/providers/anthropic';
 import { OpenAiChatProvider, toChatMessages } from '../../src/main/providers/openaiChat';
@@ -941,6 +941,19 @@ describe('an event of a stream that cannot be read', () => {
     });
     const events = await collect(readResponsesStream(body, new AbortController().signal, 'gpt-test'));
     expect(finish(events)).toMatchObject({ type: 'finish', damaged: 1 });
+  });
+});
+
+describe('isAbortError', () => {
+  it('recognizes ProviderError aborted, DOM AbortError, and GraftError interrupted/aborted', () => {
+    expect(isAbortError(new ProviderError('aborted', 'cancelled'))).toBe(true);
+    expect(isAbortError(new ProviderError('network', 'failed'))).toBe(false);
+    const abortErr = new Error('abort');
+    abortErr.name = 'AbortError';
+    expect(isAbortError(abortErr)).toBe(true);
+    expect(isAbortError({ code: 'interrupted', message: 'Interrupted by user' })).toBe(true);
+    expect(isAbortError({ code: 'aborted', message: 'Aborted' })).toBe(true);
+    expect(isAbortError({ code: 'subagent_failed', message: 'Failed' })).toBe(false);
   });
 });
 

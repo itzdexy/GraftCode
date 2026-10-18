@@ -2029,6 +2029,25 @@ describe('custom agents in sessions', () => {
     expect(result).toContain('There is no agent named \\"ghost\\"');
     expect(result).toContain('\\"general\\", \\"explore\\"');
   });
+
+  it('fails a subagent that is stopped by a guard rather than treating it as successful', async () => {
+    const glob = { toolCalls: [{ id: 'glob-1', name: 'Glob', input: { pattern: '*.md' } }] };
+    const h = harness({
+      script: [
+        { toolCalls: [{ id: 'task-1', name: 'Task', input: { description: 'Look around', prompt: 'Look', subagent_type: 'explore' } }] },
+        glob,
+        glob,
+        glob,
+        glob,
+        { text: 'Subagent stopped as expected.' }
+      ]
+    });
+    h.session.send('start subagent');
+    await h.session.idle();
+    expect(h.provider.requests).toHaveLength(6);
+    const lastUser = h.provider.requests[5]!.messages.at(-1);
+    expect(JSON.stringify(lastUser)).toContain('Stopped: the sub-agent reached its step limit or was stopped by the guard');
+  });
 });
 
 describe('steps per turn', () => {

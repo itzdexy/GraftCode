@@ -9,8 +9,8 @@ export function makeTempDir(prefix = 'graft test (tmp) '): string {
 
 export function removeDir(dir: string): void {
   // On Windows a process that was just ended (a language server whose folder this is) holds the folder a moment
-  // longer, and under a full run that moment outlasted five tries. Each try waits 100 ms more than the one before.
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // longer, and under a full run that moment outlasted five tries. Retry up to 30 times with 100 ms delay.
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
 }
 
 export function writeFile(root: string, relative: string, content: string | Buffer): string {

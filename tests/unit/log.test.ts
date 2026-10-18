@@ -9,10 +9,25 @@ describe('secret redaction', () => {
     'access_token=abcde&model=alpha',
     'https://alice:secret@api.test/v1',
     '{"password":"shortpass","secret":"custom-secret"}',
-    'x-api-key: custom-authentication-token'
+    'x-api-key: custom-authentication-token',
+    'git clone https://ghp_123456789012345678901234567890123456@github.com/repo',
+    'auth token gho_abcdefghijklmnopqrstuvwxyz0123456789 received',
+    'github_pat_11AAAAAAA0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01'
   ])('redacts credentials in %s', (input) => {
     expect(redact(input)).toContain('[redacted]');
-    for (const secret of ['arbitrary-provider-key-123456', 'tiny', 'another-provider-key', 'abcde', 'alice:secret', 'shortpass', 'custom-secret', 'custom-authentication-token']) {
+    for (const secret of [
+      'arbitrary-provider-key-123456',
+      'tiny',
+      'another-provider-key',
+      'abcde',
+      'alice:secret',
+      'shortpass',
+      'custom-secret',
+      'custom-authentication-token',
+      'ghp_123456789012345678901234567890123456',
+      'gho_abcdefghijklmnopqrstuvwxyz0123456789',
+      'github_pat_11AAAAAAA0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01'
+    ]) {
       expect(redact(input)).not.toContain(secret);
     }
   });

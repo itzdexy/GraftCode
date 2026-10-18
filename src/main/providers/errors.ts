@@ -25,6 +25,10 @@ export class ProviderError extends Error {
 
 export function isAbortError(error: unknown): boolean {
   if (error instanceof ProviderError) return error.code === 'aborted';
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === 'interrupted' || code === 'aborted') return true;
+  }
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'APIUserAbortError');
 }
 

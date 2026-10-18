@@ -354,3 +354,16 @@ describe('a reply that lost a piece on the way', () => {
   });
 });
 
+describe('refusals from model', () => {
+  it('returns reason error when the model refuses the prompt', async () => {
+    const h = makeLoopHarness({
+      script: [{ text: 'I cannot comply.', finish: 'refusal' }],
+      tools: []
+    });
+    const result = await h.run('do something refused');
+    expect(result.reason).toBe('error');
+    expect(result.error?.code).toBe('refusal');
+    expect(h.notices()).toContain('The model declined to continue with this request.');
+  });
+});
+

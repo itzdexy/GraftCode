@@ -56,6 +56,8 @@ describe('dangerous command detection', () => {
     ['cmd /c "rd /s /q build"', 'Recursively deletes files'],
     ['bash -c "rm -rf node_modules"', 'Recursively deletes files'],
     ['Remove-Item -Recurse -Force .\\out', 'Recursively deletes files'],
+    ['Remove-Item -r dist', 'Recursively deletes files'],
+    ['ri -r dist', 'Recursively deletes files'],
     ['find . -type f -delete', 'Recursively deletes files'],
     ['git push --force origin main', 'Force-pushes git history'],
     ['git push -f', 'Force-pushes git history'],

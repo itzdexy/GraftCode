@@ -22,6 +22,9 @@ public static class GraftInput {
   [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr SetProcessDpiAwarenessContext(IntPtr value);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+  [DllImport("user32.dll", SetLastError = true)] static extern bool SetThreadDesktop(IntPtr hDesktop);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
   [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, INPUT[] inputs, int size);
@@ -29,6 +32,27 @@ public static class GraftInput {
   const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004, RIGHTDOWN = 0x0008, RIGHTUP = 0x0010, MIDDLEDOWN = 0x0020, MIDDLEUP = 0x0040, WHEEL = 0x0800;
   public static void Init() {
     try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { SetProcessDPIAware(); }
+  }
+  static void EnsureDesktop() {
+    try {
+      IntPtr hDesk = OpenInputDesktop(0, false, 0x01FF);
+      if (hDesk == IntPtr.Zero) hDesk = OpenDesktop("Default", 0, false, 0x01FF);
+      if (hDesk != IntPtr.Zero) SetThreadDesktop(hDesk);
+    } catch {}
+  }
+  static void RunOnWorker(Action action) {
+    Exception ex = null;
+    Thread t = new Thread(() => {
+      try {
+        EnsureDesktop();
+        action();
+      } catch (Exception e) {
+        ex = e;
+      }
+    });
+    t.Start();
+    t.Join();
+    if (ex != null) throw ex;
   }
   static void Send(INPUT input) {
     if (SendInput(1, new INPUT[] { input }, Marshal.SizeOf(typeof(INPUT))) != 1) throw new Exception("input was blocked (error " + Marshal.GetLastWin32Error() + ")");
@@ -39,32 +63,62 @@ public static class GraftInput {
   static void Key(ushort vk, ushort scan, uint flags) {
     INPUT i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.wScan = scan; i.u.ki.dwFlags = flags; Send(i);
   }
-  public static void Move(int x, int y) { if (!SetCursorPos(x, y)) throw new Exception("could not move the pointer"); }
+  public static void Move(int x, int y) {
+    RunOnWorker(() => {
+      if (!SetCursorPos(x, y)) throw new Exception("could not move the pointer");
+    });
+  }
   public static void Click(int x, int y, string button, int count) {
-    Move(x, y); Thread.Sleep(40);
-    uint down = button == "right" ? RIGHTDOWN : button == "middle" ? MIDDLEDOWN : LEFTDOWN;
-    uint up = button == "right" ? RIGHTUP : button == "middle" ? MIDDLEUP : LEFTUP;
-    for (int n = 0; n < count; n++) { Mouse(down, 0); Mouse(up, 0); Thread.Sleep(70); }
+    RunOnWorker(() => {
+      if (!SetCursorPos(x, y)) throw new Exception("could not move the pointer");
+      Thread.Sleep(40);
+      uint down = button == "right" ? RIGHTDOWN : button == "middle" ? MIDDLEDOWN : LEFTDOWN;
+      uint up = button == "right" ? RIGHTUP : button == "middle" ? MIDDLEUP : LEFTUP;
+      for (int n = 0; n < count; n++) { Mouse(down, 0); Mouse(up, 0); Thread.Sleep(70); }
+    });
   }
   public static void Drag(int x, int y, int toX, int toY) {
-    Move(x, y); Thread.Sleep(40); Mouse(LEFTDOWN, 0);
-    for (int s = 1; s <= 16; s++) { Move(x + (toX - x) * s / 16, y + (toY - y) * s / 16); Thread.Sleep(15); }
-    Mouse(LEFTUP, 0);
+    RunOnWorker(() => {
+      if (!SetCursorPos(x, y)) throw new Exception("could not move the pointer");
+      Thread.Sleep(40); Mouse(LEFTDOWN, 0);
+      for (int s = 1; s <= 16; s++) {
+        if (!SetCursorPos(x + (toX - x) * s / 16, y + (toY - y) * s / 16)) throw new Exception("could not move the pointer");
+        Thread.Sleep(15);
+      }
+      Mouse(LEFTUP, 0);
+    });
   }
-  public static void Scroll(int x, int y, int notches) { Move(x, y); Thread.Sleep(40); Mouse(WHEEL, -120 * notches); }
+  public static void Scroll(int x, int y, int notches) {
+    RunOnWorker(() => {
+      if (!SetCursorPos(x, y)) throw new Exception("could not move the pointer");
+      Thread.Sleep(40); Mouse(WHEEL, -120 * notches);
+    });
+  }
   public static void Type(string text) {
-    foreach (char c in text) {
-      if (c == '\r') continue;
-      if (c == '\n') { Key(0x0D, 0, 0); Key(0x0D, 0, KEYUP); }
-      else { Key(0, c, UNICODE); Key(0, c, UNICODE | KEYUP); }
-      Thread.Sleep(6);
-    }
+    RunOnWorker(() => {
+      foreach (char c in text) {
+        if (c == '\r') continue;
+        if (c == '\n') { Key(0x0D, 0, 0); Key(0x0D, 0, KEYUP); }
+        else { Key(0, c, UNICODE); Key(0, c, UNICODE | KEYUP); }
+        Thread.Sleep(6);
+      }
+    });
   }
   public static void Keys(int[] codes) {
-    foreach (int vk in codes) Key((ushort)vk, 0, 0);
-    for (int k = codes.Length - 1; k >= 0; k--) Key((ushort)codes[k], 0, KEYUP);
+    RunOnWorker(() => {
+      foreach (int vk in codes) Key((ushort)vk, 0, 0);
+      for (int k = codes.Length - 1; k >= 0; k--) Key((ushort)codes[k], 0, KEYUP);
+    });
   }
-  public static string Cursor() { POINT p; GetCursorPos(out p); return p.X + " " + p.Y; }
+  public static string Cursor() {
+    string res = "";
+    RunOnWorker(() => {
+      POINT p;
+      if (!GetCursorPos(out p)) throw new Exception("could not get cursor position");
+      res = p.X + " " + p.Y;
+    });
+    return res;
+  }
 }
 "@
 [GraftInput]::Init()

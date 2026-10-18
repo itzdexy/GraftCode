@@ -606,6 +606,11 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         iteration--;
         continue;
       }
+      if (finish === 'refusal') {
+        const notice = FINISH_NOTICES['refusal'];
+        if (notice) host.emit({ type: 'notice', level: notice.level, text: notice.text });
+        return done('error', { code: 'refusal', message: 'The model declined to continue with this request.' });
+      }
       const notice = FINISH_NOTICES[finish];
       if (notice) host.emit({ type: 'notice', level: notice.level, text: notice.text });
       if (host.hooks?.has('Stop') && finish === 'stop') {
