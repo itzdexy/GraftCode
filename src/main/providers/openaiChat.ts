@@ -465,15 +465,16 @@ export class OpenAiChatProvider implements LLMProvider {
       }
     }
     // What a server says about its own model is about this server; the catalog's figure is about the model in general.
-    // llama.cpp's trained length says what the model could hold, so it only caps what the server says it loaded.
+    // llama.cpp's trained length says what the model could hold, so it is never taken as the size, only as its
+    // cap: on what the server says it loaded, and on the size assumed when the server didn't say.
     const trained = reported(m, [['meta', 'n_ctx_train']], 1024);
     const size = contextSize({
-      reported: (loaded !== null ? Math.min(loaded, trained ?? loaded) : null) ?? reported(m, CONTEXT_PATHS, 1024),
+      reported: loaded ?? reported(m, CONTEXT_PATHS, 1024),
       listed: known.context,
       typical: this.catalog?.typicalContext(m.id) ?? null,
       local: isLocalUrl(this.base)
     });
-    let context = size.tokens;
+    let context = trained !== null ? Math.min(size.tokens, trained) : size.tokens;
     let output = reported(m, OUTPUT_PATHS, 256) ?? known.output ?? (this.kind === 'openrouter' ? Math.min(32_768, Math.floor(context / 4)) : 8_192);
     if (custom) {
       context = custom.contextWindow ?? context;

@@ -69,6 +69,13 @@ describe('a server on this computer', () => {
     expect(model?.contextWindow).toBe(contextSize({ reported: null, listed: null, typical: null, local: true }).tokens);
   });
 
+  it('never assumes more than the model was trained for when the probe fails', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'tiny', owned_by: 'llamacpp', meta: { n_ctx_train: 4096 } }] }));
+    server.route('GET', '/props', (_req, res) => json(res, 500, { error: { message: 'busy' } }));
+    const [model] = await provider().listModels();
+    expect(model?.contextWindow).toBe(4096);
+  });
+
   it('lets a context size set in Settings win over the probe', async () => {
     server.route('GET', '/v1/models', (_req, res) =>
       json(res, 200, { data: [{ id: 'qwen3-coder', owned_by: 'llamacpp', meta: { n_ctx_train: 262144 } }] })
