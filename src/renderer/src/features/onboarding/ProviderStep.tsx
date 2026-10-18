@@ -58,7 +58,7 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
   };
 
   const submit = async (chosen: ProviderKind | null = kind, preset: string | null = chosen ? NATIVE_PRESET[chosen] : null): Promise<void> => {
-    if (!chosen || busy) return;
+    if (!chosen || busy || adding !== null) return;
     setBusy(true);
     setError(null);
     try {
@@ -99,7 +99,7 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
       onSubmit={() => submit()}
       onBack={onBack}
       primaryLabel="Continue"
-      primaryDisabled={kind === null}
+      primaryDisabled={kind === null || adding !== null}
       busy={busy}
       error={error}
     >
