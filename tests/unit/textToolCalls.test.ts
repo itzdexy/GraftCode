@@ -7,7 +7,12 @@ import {
   toolResponseMarkup,
 } from '../../src/main/providers/textToolCalls';
 
-const tools = new Set(['Read', 'Edit', 'Grep']);
+const tools = new Map<string, Record<string, unknown>>([
+  ['Read', { type: 'object', properties: { path: { type: 'string' }, limit: { type: 'integer' } } }],
+  ['Edit', { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } } }],
+  ['Grep', { type: 'object', properties: { pattern: { type: 'string' } } }],
+  ['Write', { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' }, mode: { type: ['string', 'null'] } } }],
+]);
 
 describe('extractTextToolCalls', () => {
   it('reads the Hermes JSON form and keeps the prose around it', () => {
@@ -34,6 +39,28 @@ describe('extractTextToolCalls', () => {
     });
     const numeric = '<function=Read><parameter=path>a.ts</parameter><parameter=limit>20</parameter></function>';
     expect(extractTextToolCalls(numeric, tools).calls).toEqual([{ name: 'Read', input: { path: 'a.ts', limit: 20 } }]);
+  });
+
+  it('keeps an XML value the schema calls a string as the text the model wrote', () => {
+    const json = '<function=Write><parameter=path>a.json</parameter><parameter=content>{"name":"x"}</parameter></function>';
+    expect(extractTextToolCalls(json, tools).calls).toEqual([
+      { name: 'Write', input: { path: 'a.json', content: '{"name":"x"}' } },
+    ]);
+    const number =
+      '<function=Write><parameter=path>n.txt</parameter><parameter=content>\n42\n</parameter><parameter=mode>true</parameter></function>';
+    expect(extractTextToolCalls(number, tools).calls).toEqual([
+      { name: 'Write', input: { path: 'n.txt', content: '42', mode: 'true' } },
+    ]);
+  });
+
+  it('still reads an XML value as JSON when the schema gives another type', () => {
+    const input = '<function=Read><parameter=path>a.ts</parameter><parameter=limit>20</parameter></function>';
+    expect(extractTextToolCalls(input, tools).calls).toEqual([{ name: 'Read', input: { path: 'a.ts', limit: 20 } }]);
+  });
+
+  it('reads an XML value as JSON when the schema has no entry for it', () => {
+    const input = '<function=Grep><parameter=pattern>x</parameter><parameter=count>7</parameter></function>';
+    expect(extractTextToolCalls(input, tools).calls).toEqual([{ name: 'Grep', input: { pattern: 'x', count: 7 } }]);
   });
 
   it('reads the Qwen XML form inside <tool_call>, trimming one newline from each end of a value', () => {
@@ -110,7 +137,7 @@ describe('extractTextToolCalls', () => {
   });
 
   it('reads back the markup toolCallMarkup writes', () => {
-    expect(extractTextToolCalls(toolCallMarkup('Read', { path: 'a' }), new Set(['Read']))).toEqual({
+    expect(extractTextToolCalls(toolCallMarkup('Read', { path: 'a' }), new Map([['Read', {}]]))).toEqual({
       text: '',
       calls: [{ name: 'Read', input: { path: 'a' } }],
     });

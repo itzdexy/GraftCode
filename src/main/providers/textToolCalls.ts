@@ -18,6 +18,9 @@ const FUNCTION_OPEN = '<function=';
 const FUNCTION_CLOSE = '</function>';
 const MISTRAL_OPEN = '[TOOL_CALLS]';
 
+/** The offered tools, by name, each with its `inputSchema`. A name not in the map is unknown. */
+type ToolSchemas = ReadonlyMap<string, Record<string, unknown>>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -36,23 +39,39 @@ function parseJson(text: string): unknown {
  * and may be a JSON string, as some chat templates encode them. Inside explicit markup a call
  * may leave its arguments out; a whole reply of bare JSON must carry them to count as a call.
  */
-function callFrom(value: unknown, toolNames: ReadonlySet<string>, requireArguments: boolean): TextToolCall | null {
-  if (!isRecord(value) || typeof value.name !== 'string' || !toolNames.has(value.name)) return null;
+function callFrom(value: unknown, tools: ToolSchemas, requireArguments: boolean): TextToolCall | null {
+  if (!isRecord(value) || typeof value.name !== 'string' || !tools.has(value.name)) return null;
   const raw = value.arguments ?? value.parameters;
   if (raw === undefined) return requireArguments ? null : { name: value.name, input: {} };
   const args = typeof raw === 'string' ? (raw.trim() === '' ? {} : parseJson(raw)) : raw;
   return isRecord(args) ? { name: value.name, input: args } : null;
 }
 
-/** A Qwen3-Coder `<function=N>` element's name and body, read as a call. */
-function functionCall(name: string, body: string, toolNames: ReadonlySet<string>): TextToolCall | null {
+/** Whether the schema declares this property a string, alone or as one of several types. */
+function isStringProperty(schema: Record<string, unknown>, key: string): boolean {
+  const properties = schema.properties;
+  const property = isRecord(properties) ? properties[key] : undefined;
+  const type = isRecord(property) ? property.type : undefined;
+  return type === 'string' || (Array.isArray(type) && type.includes('string'));
+}
+
+/**
+ * A Qwen3-Coder `<function=N>` element's name and body, read as a call. The XML form carries
+ * no types, so a value the schema calls a string stays the text the model wrote: a file's
+ * content of `{"a":1}` or `42` must not turn into an object or a number. Other values are
+ * read as JSON when they parse, so numbers and booleans arrive typed.
+ */
+function functionCall(name: string, body: string, tools: ToolSchemas): TextToolCall | null {
   const trimmedName = name.trim();
-  if (!toolNames.has(trimmedName)) return null;
+  const schema = tools.get(trimmedName);
+  if (!schema) return null;
   const input: Record<string, unknown> = {};
   const parameter = /<parameter=([^>\n]+)>([\s\S]*?)<\/parameter>/g;
-  const rest = body.replace(parameter, (_whole, key: string, value: string) => {
-    const parsed = parseJson(value);
-    input[key.trim()] = parsed !== undefined ? parsed : value.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+  const rest = body.replace(parameter, (_whole, rawKey: string, value: string) => {
+    const key = rawKey.trim();
+    const text = value.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+    const parsed = isStringProperty(schema, key) ? undefined : parseJson(value);
+    input[key] = parsed !== undefined ? parsed : text;
     return '';
   });
   // Anything but whitespace between the parameters means this isn't a well-formed call.
@@ -60,9 +79,9 @@ function functionCall(name: string, body: string, toolNames: ReadonlySet<string>
 }
 
 /** A `<function=N>…</function>` element that is the whole of `text`, read as a call. */
-function functionElement(text: string, toolNames: ReadonlySet<string>): TextToolCall | null {
+function functionElement(text: string, tools: ToolSchemas): TextToolCall | null {
   const match = /^<function=([^>\n]+)>([\s\S]*)<\/function>$/.exec(text.trim());
-  return match ? functionCall(match[1] ?? '', match[2] ?? '', toolNames) : null;
+  return match ? functionCall(match[1] ?? '', match[2] ?? '', tools) : null;
 }
 
 /**
@@ -94,7 +113,7 @@ interface Span {
 }
 
 /** The markup at `start` (which begins with one of the openers), read as calls, or null. */
-function readMarkup(text: string, start: number, toolNames: ReadonlySet<string>): Span | null {
+function readMarkup(text: string, start: number, tools: ToolSchemas): Span | null {
   if (text.startsWith(TOOL_CALL_OPEN, start)) {
     const bodyStart = start + TOOL_CALL_OPEN.length;
     const close = text.indexOf(TOOL_CALL_CLOSE, bodyStart);
@@ -103,15 +122,15 @@ function readMarkup(text: string, start: number, toolNames: ReadonlySet<string>)
     // A later opener before the close means this one was prose ("use <tool_call> tags").
     if (body.includes(TOOL_CALL_OPEN)) return null;
     const call = body.trim().startsWith(FUNCTION_OPEN)
-      ? functionElement(body, toolNames)
-      : callFrom(parseJson(body), toolNames, false);
+      ? functionElement(body, tools)
+      : callFrom(parseJson(body), tools, false);
     return call ? { start, end: close + TOOL_CALL_CLOSE.length, calls: [call] } : null;
   }
   if (text.startsWith(FUNCTION_OPEN, start)) {
     const close = text.indexOf(FUNCTION_CLOSE, start);
     if (close === -1) return null;
     const end = close + FUNCTION_CLOSE.length;
-    const call = functionElement(text.slice(start, end), toolNames);
+    const call = functionElement(text.slice(start, end), tools);
     return call ? { start, end, calls: [call] } : null;
   }
   // Mistral: `[TOOL_CALLS]` followed by a JSON list of calls.
@@ -122,7 +141,7 @@ function readMarkup(text: string, start: number, toolNames: ReadonlySet<string>)
   if (end === -1) return null;
   const list = parseJson(text.slice(listStart, end));
   if (!Array.isArray(list) || list.length === 0) return null;
-  const calls = list.map((item) => callFrom(item, toolNames, false));
+  const calls = list.map((item) => callFrom(item, tools, false));
   // The list is one piece of markup, so it is read whole or left whole: removing only the
   // known calls would leave a rewritten list the model never wrote.
   if (calls.some((call) => call === null)) return null;
@@ -160,12 +179,12 @@ function fenceRuns(text: string): { text: string; fenced: boolean }[] {
  * A reply that is nothing but `{"name": …, "arguments": …}`, bare or in one json fence. Some
  * models answer a tools prompt this way. It only counts when the whole reply is that object.
  */
-function wholeReplyCall(text: string, toolNames: ReadonlySet<string>): TextToolCall | null {
+function wholeReplyCall(text: string, tools: ToolSchemas): TextToolCall | null {
   const trimmed = text.trim();
   const fence = /^```[ \t]*(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```$/i.exec(trimmed);
   const body = (fence ? (fence[1] ?? '') : trimmed).trim();
   if (!body.startsWith('{')) return null;
-  return callFrom(parseJson(body), toolNames, true);
+  return callFrom(parseJson(body), tools, true);
 }
 
 const OPENERS = [TOOL_CALL_OPEN, FUNCTION_OPEN, MISTRAL_OPEN];
@@ -173,14 +192,14 @@ const OPENERS = [TOOL_CALL_OPEN, FUNCTION_OPEN, MISTRAL_OPEN];
 /**
  * Reads the tool calls a model wrote as text, in the order it wrote them, and returns the text
  * with that markup removed and trimmed. Markup inside a ``` fence is an example, not a call.
- * A call to a tool that isn't in `toolNames`, or one whose JSON doesn't parse, stays in the text
+ * A call to a tool that isn't in `tools`, or one whose JSON doesn't parse, stays in the text
  * so the user sees what the model wrote. When nothing is read, the text comes back unchanged.
  */
 export function extractTextToolCalls(
   text: string,
-  toolNames: ReadonlySet<string>,
+  tools: ToolSchemas,
 ): { text: string; calls: TextToolCall[] } {
-  const whole = wholeReplyCall(text, toolNames);
+  const whole = wholeReplyCall(text, tools);
   if (whole) return { text: '', calls: [whole] };
 
   const calls: TextToolCall[] = [];
@@ -195,7 +214,7 @@ export function extractTextToolCalls(
       const starts = OPENERS.map((opener) => run.text.indexOf(opener, position)).filter((index) => index !== -1);
       if (starts.length === 0) break;
       const start = Math.min(...starts);
-      const span = readMarkup(run.text, start, toolNames);
+      const span = readMarkup(run.text, start, tools);
       if (span) {
         out += run.text.slice(position, span.start);
         calls.push(...span.calls);
