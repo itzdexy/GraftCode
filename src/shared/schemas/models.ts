@@ -41,6 +41,13 @@ export const ModelInfoSchema = z.object({
   contextWindow: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
   supportsTools: z.boolean(),
+  /**
+   * How the model calls tools: through the API's own tool calls, or written as text in its reply
+   * for a model that has none. Absent means native.
+   */
+  toolFormat: z.enum(['native', 'text']).optional(),
+  /** Whether the model gets the shorter system prompt that suits a small local model. */
+  lean: z.boolean().optional(),
   supportsVision: z.boolean(),
   supportsWebSearch: z.boolean(),
   /** null hides the effort control for this model. */
@@ -69,7 +76,11 @@ export const CustomModelSchema = z.object({
   label: z.string().max(120).optional(),
   contextWindow: z.number().int().min(1024).max(10_000_000).optional(),
   maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
-  vision: z.boolean().optional()
+  vision: z.boolean().optional(),
+  /** How the model calls tools, set in Settings; absent means Graft decides from what the server says. */
+  toolFormat: z.enum(['native', 'text']).optional(),
+  /** Which system prompt the model gets; absent means Graft decides. */
+  prompt: z.enum(['full', 'lean']).optional()
 });
 export type CustomModel = z.infer<typeof CustomModelSchema>;
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseNdjson, parseSse } from '../../src/main/providers/sse';
 import { errorFromHttp, parseRetryAfter, ProviderError } from '../../src/main/providers/errors';
 import { backoffDelay, DEFAULT_RETRY_POLICY, streamWithRetry } from '../../src/main/providers/retry';
@@ -9,7 +9,7 @@ import { OpenAiChatProvider, toChatMessages } from '../../src/main/providers/ope
 import { GeminiProvider, toGeminiContents } from '../../src/main/providers/gemini';
 import { readResponsesStream } from '../../src/main/providers/openaiResponses';
 import { ProviderCatalog } from '../../src/main/providers/presets';
-import { OllamaProvider } from '../../src/main/providers/ollama';
+import { OllamaProvider, toOllamaMessages } from '../../src/main/providers/ollama';
 import { arrangeModels, familyOf, formatTokens } from '../../src/main/providers/catalog';
 import type { StreamEvent, StreamRequest } from '../../src/main/providers/types';
 import type { LlmMessage } from '../../src/shared/schemas/messages';
@@ -873,6 +873,143 @@ describe('Ollama adapter', () => {
   it('rejects ports that fetch refuses with a base-URL error', async () => {
     const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: 'http://127.0.0.1:9' });
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'bad_base_url', retryable: false });
+  });
+});
+
+describe('tool calls written as text', () => {
+  const call = '<tool_call>{"name":"Read","arguments":{"path":"a"}}</tool_call>';
+  const readCall = { type: 'block', block: { type: 'tool_use', id: expect.stringMatching(/^call_/), name: 'Read', input: { path: 'a' } } };
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await server.close();
+  });
+
+  const blocksOf = (events: StreamEvent[]): StreamEvent[] => events.filter((e) => e.type === 'block');
+  const deltasOf = (events: StreamEvent[]): string[] => events.flatMap((e) => (e.type === 'text-delta' ? [e.text] : []));
+
+  it('offers tools in the prompt to an Ollama model without native tools', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'plain:7b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'llama.context_length': 32768 } }));
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [
+      { message: { role: 'assistant', content: 'Reading it. <tool' }, done: false },
+      { message: { role: 'assistant', content: call.slice(5) }, done: false },
+      { message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' }
+    ]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).toMatchObject({ supportsTools: true, toolFormat: 'text' });
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    const body = server.requests.at(-1)?.json() as { messages: Array<{ role: string; content: string }> };
+    expect(body).not.toHaveProperty('tools');
+    expect(body.messages[0]?.content).toMatch(/^You are a test\.\n\n# Calling tools\n[\s\S]*\n### Read\nRead a file\nArguments \(JSON Schema\): \{.*\}$/);
+    expect(blocksOf(events)).toEqual([{ type: 'block', block: { type: 'text', text: 'Reading it.' } }, readCall]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+    expect(deltasOf(events).some((d) => d.includes('<tool'))).toBe(false);
+    expect(deltasOf(events).join('')).toBe('Reading it. ');
+  });
+
+  it('recovers a text tool call from a local OpenAI-compatible server in native mode', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+      { data: { choices: [{ index: 0, delta: { role: 'assistant', content: call } }] } },
+      { data: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } },
+      { data: '[DONE]' }
+    ]));
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null });
+    const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests[0]?.json()).toHaveProperty('tools');
+    expect(blocksOf(events)).toEqual([readCall]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+    expect(deltasOf(events).some((d) => d.includes('<tool'))).toBe(false);
+  });
+
+  it('leaves text tool markup alone on a hosted server', async () => {
+    const stream = [
+      { choices: [{ index: 0, delta: { role: 'assistant', content: call } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
+    ].map((data) => `data: ${JSON.stringify(data)}\n\n`).join('') + 'data: [DONE]\n\n';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(stream, { headers: { 'content-type': 'text/event-stream' } })));
+    const provider = new OpenAiChatProvider({ id: 'h', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: 'https://api.example.com/v1' });
+    const model = fakeModel({ ref: { providerId: 'h', modelId: 'hosted-model' }, effort: null });
+    const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(blocksOf(events)).toEqual([{ type: 'block', block: { type: 'text', text: call } }]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it.each([
+    { adapter: 'Ollama', path: '/api/chat', refusal: { error: 'registry.ollama.ai/library/x does not support tools' } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', refusal: { error: { message: 'x does not support tools' } } }
+  ])('switches to text tools when the server refuses the tools parameter ($adapter)', async ({ adapter, path, refusal }) => {
+    server.route('POST', path, async (req, res) => {
+      if ((req.json() as Record<string, unknown>).tools) return json(res, 400, refusal);
+      if (adapter === 'Ollama') return ndjson(res, [{ message: { role: 'assistant', content: call }, done: true, done_reason: 'stop' }]);
+      await sse(res, [{ data: { choices: [{ index: 0, delta: { content: call }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]);
+    });
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null });
+    const first = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[0]?.json()).toHaveProperty('tools');
+    const retried = server.requests[1]?.json() as { messages: Array<{ content: string }> };
+    expect(retried).not.toHaveProperty('tools');
+    expect(retried.messages[0]?.content).toContain('### Read');
+    expect(blocksOf(first)).toEqual([readCall]);
+    // The model is remembered: the next request goes straight to text tools.
+    await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests).toHaveLength(3);
+    expect(server.requests[2]?.json()).not.toHaveProperty('tools');
+  });
+
+  it('keeps native tools for an Ollama hosted model', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'gpt-oss:120b-cloud' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'gptoss.context_length': 131072 } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).not.toHaveProperty('toolFormat');
+    expect(model?.supportsTools).toBe(false);
+  });
+
+  it('lets Settings force native tool calls', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'plain:7b' }, { name: 'coder:7b' }] }));
+    server.route('POST', '/api/show', (req, res) =>
+      json(res, 200, { capabilities: (req.json() as { model: string }).model === 'coder:7b' ? ['completion', 'tools'] : ['completion'] }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [
+      { id: 'plain:7b', toolFormat: 'native' },
+      { id: 'coder:7b', toolFormat: 'text' }
+    ]);
+    const models = Object.fromEntries((await provider.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['plain:7b']).not.toHaveProperty('toolFormat');
+    expect(models['plain:7b']?.supportsTools).toBe(false);
+    // And the other way: a model with native tools can be told to write them as text.
+    expect(models['coder:7b']).toMatchObject({ toolFormat: 'text', supportsTools: true });
+  });
+
+  it('writes earlier calls and their results into the transcript as text', () => {
+    const history: LlmMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Read a' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Reading.' }, { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a' } }] },
+      { role: 'user', content: [{ type: 'tool_result', toolUseId: 't1', content: [{ type: 'text', text: 'hello' }], isError: false }] }
+    ];
+    const assistant = 'Reading.\n\n<tool_call>\n{"name":"Read","arguments":{"path":"a"}}\n</tool_call>';
+    const result = '<tool_response name="Read">\nhello\n</tool_response>';
+    expect(toOllamaMessages('sys', history, false, true)).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Read a' },
+      { role: 'assistant', content: assistant },
+      { role: 'user', content: result }
+    ]);
+    expect(toChatMessages('sys', history, false, undefined, { textTools: true })).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Read a' },
+      { role: 'assistant', content: assistant },
+      { role: 'user', content: result }
+    ]);
   });
 });
 

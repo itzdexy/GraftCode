@@ -1,3 +1,4 @@
+import { ProviderError } from './errors';
 import type { ToolSpec } from './types';
 
 /**
@@ -307,4 +308,17 @@ export function toolCallMarkup(name: string, input: unknown): string {
 /** A tool's result written into the transcript for a model that reads calls as text. */
 export function toolResponseMarkup(name: string, text: string, isError: boolean): string {
   return `<tool_response name="${name}">\n${isError ? 'Error: ' : ''}${text}\n</tool_response>`;
+}
+
+/**
+ * Whether a server refused a request because the model has no native tool calls. Ollama and
+ * the OpenAI-compatible servers word it differently, and the adapter then asks again with the
+ * tools written into the prompt.
+ */
+export function refusesTools(error: unknown): boolean {
+  return (
+    error instanceof ProviderError &&
+    error.code === 'bad_request' &&
+    /does not support tools|tools? (are |is )?not supported|unsupported.*\btools?\b/i.test(error.message)
+  );
 }
