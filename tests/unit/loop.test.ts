@@ -367,3 +367,20 @@ describe('refusals from model', () => {
   });
 });
 
+describe('aborted turns and tool execution', () => {
+  it('does not execute an allowed tool when the signal was aborted before execution', async () => {
+    let executed = false;
+    const controller = new AbortController();
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'c1', name: 'SafeTool', input: {} }] }],
+      tools: [testTool('SafeTool', { run: () => { executed = true; return 'done'; } })]
+    });
+    // Abort the controller before the loop runs the tool
+    controller.abort();
+    const result = await h.run('go', controller.signal);
+    expect(result.reason).toBe('interrupted');
+    expect(executed).toBe(false);
+  });
+});
+
+

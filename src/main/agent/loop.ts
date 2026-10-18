@@ -289,6 +289,8 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
     }
   }
 
+  if (signal.aborted) return errorBlock(call.id, NOT_RUN);
+
   // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.
   host.journal?.started({ id: call.id, name: tool.name, summary: p.descriptor.summary, effect: effectOf(call) }, config.agentLabel);
   /** How the call ended, written down before anything else is done with it. */
@@ -299,7 +301,8 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
   host.emit({ type: 'tool-start', toolUseId: call.id, name: tool.name, summary: p.descriptor.summary });
   const controller = new AbortController();
   const forward = (): void => controller.abort();
-  signal.addEventListener('abort', forward, { once: true });
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener('abort', forward, { once: true });
   let result: ToolResult | 'timeout' | 'ignored';
   try {
     result = await waitForTool(tool.execute(p.input as never, host.toolContext(call.id, controller.signal)), tool.timeoutMs, () => controller.abort(), signal, config.stopGraceMs ?? STOP_GRACE_MS);

@@ -64,7 +64,22 @@ export default defineConfig({
     build: {
       // Smaller to load and parse at startup; stack traces in logs still name the files.
       minify: 'esbuild',
-      rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } }
+      rollupOptions: {
+        input: { index: resolve(__dirname, 'src/renderer/index.html') },
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/monaco-editor')) {
+              return 'monaco-vendor';
+            }
+            if (id.includes('node_modules/katex')) {
+              return 'katex-vendor';
+            }
+            if (id.includes('node_modules/@xterm')) {
+              return 'xterm-vendor';
+            }
+          }
+        }
+      }
     }
   }
 });

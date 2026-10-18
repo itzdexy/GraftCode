@@ -16,6 +16,7 @@ const OUT = path.join(ROOT, 'out', 'verify');
 const STEPS = [
   ['typecheck', 'npm run typecheck'],
   ['lint', 'npm run lint'],
+  ['secrets', 'npm run check:secrets'],
   ['unit', 'npm test'],
   ['build', 'npm run build'],
   ['e2e', 'npx playwright test']
