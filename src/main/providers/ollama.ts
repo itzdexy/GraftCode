@@ -230,7 +230,8 @@ export class OllamaProvider implements LLMProvider {
             ...(think !== undefined ? { think } : {}),
             options: { num_ctx: req.model.contextWindow },
             // Ollama unloads a model after five idle minutes, and loading it again costs the next turn a long wait.
-            keep_alive: '30m'
+            // Someone who set OLLAMA_KEEP_ALIVE chose their own time, and a request's keep_alive would override it.
+            ...(process.env.OLLAMA_KEEP_ALIVE ? {} : { keep_alive: '30m' })
           },
           signal,
           timeoutMs: firstByteTimeout(this.base, 300_000)

@@ -891,11 +891,29 @@ describe('Ollama adapter', () => {
   });
 
   it('keeps the Ollama model loaded between turns', async () => {
-    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
-    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
-    await collect(provider.streamText(request(), new AbortController().signal));
-    const body = server.requests.at(-1)?.json() as Record<string, unknown>;
-    expect(body.keep_alive).toBe('30m');
+    // As on a computer where OLLAMA_KEEP_ALIVE isn't set, whatever this one has.
+    vi.stubEnv('OLLAMA_KEEP_ALIVE', '');
+    try {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
+      const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+      await collect(provider.streamText(request(), new AbortController().signal));
+      const body = server.requests.at(-1)?.json() as Record<string, unknown>;
+      expect(body.keep_alive).toBe('30m');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('leaves keep_alive to OLLAMA_KEEP_ALIVE when it is set', async () => {
+    vi.stubEnv('OLLAMA_KEEP_ALIVE', '-1');
+    try {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
+      const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+      await collect(provider.streamText(request(), new AbortController().signal));
+      expect(server.requests.at(-1)?.json()).not.toHaveProperty('keep_alive');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('explains when Ollama is not running', async () => {
