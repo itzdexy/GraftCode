@@ -291,9 +291,14 @@ export class OllamaProvider implements LLMProvider {
     if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
     // A closed connection is not a completed reply. The loop retains text
     // deltas on failure, but tools are emitted only after Ollama's done:true.
-    if (!completed) throw new ProviderError('network', 'The reply stopped before it was complete. Ollama did not confirm completion.');
-    // The text block replaces what the deltas showed, so what the filter still holds is never sent as a
-    // delta: the block carries the reply without the markup that was read as calls.
+    if (!completed) {
+      // The deltas are all that is kept of a reply that broke off, so what the filter held goes out as one.
+      const held = filter?.flush() ?? '';
+      if (held.length > 0) yield { type: 'text-delta', text: held };
+      throw new ProviderError('network', 'The reply stopped before it was complete. Ollama did not confirm completion.');
+    }
+    // A finished reply's text block replaces what the deltas showed, so what the filter still holds is
+    // not sent as a delta: the block carries the reply without the markup that was read as calls.
     if (recover && (textMode || calls.length === 0)) {
       const read = extractTextToolCalls(text, new Map(req.tools.map((t) => [t.name, t.inputSchema])));
       text = read.text;

@@ -966,6 +966,27 @@ describe('tool calls written as text', () => {
     expect(server.requests[2]?.json()).not.toHaveProperty('tools');
   });
 
+  it.each(['Ollama', 'OpenAI-compatible'])('keeps the text it held back in the deltas when the reply from %s breaks off after a marker', async (adapter) => {
+    const parts = ['Reading. <tool_', 'call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, parts.map((content) => ({ message: { role: 'assistant', content }, done: false }))));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, parts.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } }))));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const seen: StreamEvent[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of provider.streamText(request({ model }), new AbortController().signal)) seen.push(event);
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'network' });
+    // The deltas are all the loop keeps of a reply that broke off, so nothing the filter held is lost.
+    expect(deltasOf(seen).join('')).toBe(parts.join(''));
+    expect(blocksOf(seen)).toEqual([]);
+  });
+
   it('keeps native tools for an Ollama hosted model', async () => {
     server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'gpt-oss:120b-cloud' }] }));
     server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'gptoss.context_length': 131072 } }));

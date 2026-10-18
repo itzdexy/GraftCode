@@ -470,6 +470,8 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let pendingText = '';
     let pendingThinking = '';
     let finish: FinishReason = 'other';
+    /** Whether the stream said the reply was complete; only then are its blocks the whole record. */
+    let finished = false;
     /** Events of this reply that arrived unreadable (see StreamEvent 'finish'). */
     let damaged = 0;
     let responseUsage: Usage | null = null;
@@ -520,6 +522,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             responseCost = event.costUsd ?? null;
             break;
           case 'finish':
+            finished = true;
             finish = event.reason;
             damaged = event.damaged ?? 0;
             break;
@@ -530,8 +533,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
     // A failed or cancelled stream may never emit its final blocks. Retain the
     // summaries already visible in the UI, without inventing provider signatures.
-    if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
-    if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    // A finished reply's blocks are its record: an adapter may have streamed text
+    // it then left out, such as a tool call the model wrote as text.
+    if (failure || !finished) {
+      if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
+      if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    }
 
     // Some servers send no usage at all, or zeros (an OpenAI-compatible endpoint that
     // rejects stream_options reports nothing). Counting that as a real reading would

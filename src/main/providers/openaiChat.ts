@@ -671,9 +671,14 @@ export class OpenAiChatProvider implements LLMProvider {
     // confirms this reply is complete. Keep streamed text visible on failure;
     // never offer accumulated tool calls from an unconfirmed reply to the loop.
     // Servers may omit [DONE] when they do send a finish reason.
-    if (finish === null) throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
-    // The text block replaces what the deltas showed, so what the filter still holds is never sent as a
-    // delta: the block carries the reply without the markup that was read as calls.
+    if (finish === null) {
+      // The deltas are all that is kept of a reply that broke off, so what the filter held goes out as one.
+      const held = filter?.flush() ?? '';
+      if (held.length > 0) yield { type: 'text-delta', text: held };
+      throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
+    }
+    // A finished reply's text block replaces what the deltas showed, so what the filter still holds is
+    // not sent as a delta: the block carries the reply without the markup that was read as calls.
     let written: TextToolCall[] = [];
     if (recover && (textMode || calls.length === 0)) {
       const read = extractTextToolCalls(text, new Map(req.tools.map((t) => [t.name, t.inputSchema])));

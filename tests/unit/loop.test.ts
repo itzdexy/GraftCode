@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { allow, makeLoopHarness, resultTexts, testTool } from '../support/loopHarness';
+import { ndjson, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 import { ProviderError } from '../../src/main/providers/errors';
+import { OllamaProvider } from '../../src/main/providers/ollama';
+import { toolCallMarkup } from '../../src/main/providers/textToolCalls';
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -354,3 +357,46 @@ describe('a reply that lost a piece on the way', () => {
   });
 });
 
+describe('a finished reply whose tool calls were written as text', () => {
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** A loop on an Ollama model that writes its tool calls as text: it streams `first`, then answers "Done.". */
+  function textModel(first: string[]) {
+    let replies = 0;
+    server.route('POST', '/api/chat', (_req, res) => {
+      const chunks = replies++ === 0 ? first : ['Done.'];
+      return ndjson(res, [
+        ...chunks.map((content) => ({ message: { role: 'assistant', content }, done: false })),
+        { message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' }
+      ]);
+    });
+    return makeLoopHarness({
+      script: [],
+      tools: [testTool('Look', { safe: true })],
+      model: { ref: { providerId: 'l', modelId: 'x' }, toolFormat: 'text', effort: null },
+      adapter: new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+    });
+  }
+  const look = { type: 'tool_use', id: expect.stringMatching(/^call_/), name: 'Look', input: { n: 1 } };
+
+  it('stores a reply that is only a JSON call as the call alone, and sends it back once', async () => {
+    // The filter does not hold a bare JSON reply, so all of it streamed as text before it was read as a call.
+    const h = textModel(['{"name":"Look",', '"arguments":{"n":1}}']);
+    expect((await h.run('look')).reason).toBe('completed');
+    expect(h.stored.find((m) => m.role === 'assistant')?.content).toEqual([look]);
+    const sent = server.requests[1]?.json() as { messages: Array<{ role: string; content: string }> };
+    expect(sent.messages.filter((m) => m.role === 'assistant')).toEqual([{ role: 'assistant', content: toolCallMarkup('Look', { n: 1 }) }]);
+  });
+
+  it('stores no text block of the whitespace that came before the markup', async () => {
+    const h = textModel(['\n', '<tool_call>{"name":"Look","arguments":{"n":1}}</tool_call>']);
+    expect((await h.run('look')).reason).toBe('completed');
+    expect(h.stored.find((m) => m.role === 'assistant')?.content).toEqual([look]);
+  });
+});
