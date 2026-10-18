@@ -6,6 +6,7 @@ import { isLocalUrl } from '@shared/privacy';
 import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { flavorOf, loadedContexts } from './localServer';
 import { mediaKindOf } from '../media/mediaModels';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
@@ -62,7 +63,6 @@ const CONTEXT_PATHS = [
   ['n_ctx'],
   ['top_provider', 'context_length'],
   ['metadata', 'context_length'],
-  ['meta', 'n_ctx_train'],
   ['limits', 'max_input_tokens'],
   ['capabilities', 'limits', 'max_context_window_tokens'],
   ['model_spec', 'availableContextTokens'],
@@ -138,6 +138,9 @@ interface OpenAiModel {
   name?: string;
   description?: string;
   context_length?: number;
+  owned_by?: unknown;
+  /** llama.cpp's facts about the model file, among them the length it was trained for (`n_ctx_train`). */
+  meta?: unknown;
   architecture?: { input_modalities?: string[] };
   supported_parameters?: string[];
   top_provider?: { max_completion_tokens?: number | null };
@@ -364,6 +367,10 @@ export class OpenAiChatProvider implements LLMProvider {
       catalogFallback = true;
       listed = known.filter((m) => !m.deprecated).map((m) => ({ id: m.id }));
     }
+    // A server on this computer may have loaded a model with far less context than it could hold; ask it, once.
+    const flavor = isLocalUrl(this.base) ? flavorOf(listed) : null;
+    const loadedAt = flavor ? await loadedContexts(this.base, flavor, signal, this.headers()) : new Map<string, number>();
+    const loaded = (id: string): number | null => loadedAt.get(id) ?? loadedAt.get('*') ?? null;
     const models: ModelInfo[] = listed
       .filter((m) => {
         if (this.kind === 'openai') return !NON_CHAT.test(m.id);
@@ -373,7 +380,7 @@ export class OpenAiChatProvider implements LLMProvider {
       })
       .map((m): ModelInfo => {
         const lifecycle = official ? openAiShutdownDate(m.shutdown_date) : undefined;
-        return withModelLifecycle({ ...this.toModelInfo(m), ...(lifecycle ? { lifecycle } : {}), availability: {
+        return withModelLifecycle({ ...this.toModelInfo(m, loaded(m.id)), ...(lifecycle ? { lifecycle } : {}), availability: {
           state: catalogFallback || this.kind === 'openrouter' ? 'cataloged-unverified' as const : 'available' as const,
           source: catalogFallback ? 'catalog' as const : 'provider' as const, checkedAt: Date.now(),
           reason: catalogFallback ? 'Catalog metadata; this provider has no model-list API. Account access to each model is unverified.'
@@ -382,7 +389,7 @@ export class OpenAiChatProvider implements LLMProvider {
       });
     const ids = new Set(models.map((m) => m.ref.modelId));
     for (const custom of this.customModels) {
-      if (!ids.has(custom.id)) models.push({ ...this.toModelInfo({ id: custom.id }), availability: {
+      if (!ids.has(custom.id)) models.push({ ...this.toModelInfo({ id: custom.id }, loaded(custom.id)), availability: {
         state: 'cataloged-unverified', source: 'custom', checkedAt: null, reason: 'Custom model ID; account access has not been verified.', selectable: true
       } });
     }
@@ -401,7 +408,8 @@ export class OpenAiChatProvider implements LLMProvider {
     await response.text().catch(() => '');
   }
 
-  private toModelInfo(m: OpenAiModel): ModelInfo {
+  /** `loaded` is the context the server says it loaded this model with, when it is a local server that says. */
+  private toModelInfo(m: OpenAiModel, loaded: number | null = null): ModelInfo {
     const custom = this.customModels.find((c) => c.id === m.id);
     const meta = this.meta(m.id);
     let known: { context: number | null; output: number | null } = { context: meta?.context ?? null, output: meta?.output ?? null };
@@ -429,8 +437,10 @@ export class OpenAiChatProvider implements LLMProvider {
       }
     }
     // What a server says about its own model is about this server; the catalog's figure is about the model in general.
+    // llama.cpp's trained length says what the model could hold, so it only caps what the server says it loaded.
+    const trained = reported(m, [['meta', 'n_ctx_train']], 1024);
     const size = contextSize({
-      reported: reported(m, CONTEXT_PATHS, 1024),
+      reported: (loaded !== null ? Math.min(loaded, trained ?? loaded) : null) ?? reported(m, CONTEXT_PATHS, 1024),
       listed: known.context,
       typical: this.catalog?.typicalContext(m.id) ?? null,
       local: isLocalUrl(this.base)
