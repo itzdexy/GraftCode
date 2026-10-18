@@ -932,7 +932,7 @@ describe('Ollama adapter', () => {
 
 describe('tool calls written as text', () => {
   const call = '<tool_call>{"name":"Read","arguments":{"path":"a"}}</tool_call>';
-  const readCall = { type: 'block', block: { type: 'tool_use', id: expect.stringMatching(/^call_/), name: 'Read', input: { path: 'a' } } };
+  const readCall = { type: 'block', block: { type: 'tool_use', id: expect.stringMatching(/^call_/) as unknown, name: 'Read', input: { path: 'a' } } };
   let server: FixtureServer;
   beforeEach(async () => {
     server = await startFixtureServer();
@@ -986,7 +986,7 @@ describe('tool calls written as text', () => {
       { choices: [{ index: 0, delta: { role: 'assistant', content: call } }] },
       { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
     ].map((data) => `data: ${JSON.stringify(data)}\n\n`).join('') + 'data: [DONE]\n\n';
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(stream, { headers: { 'content-type': 'text/event-stream' } })));
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream' } }))));
     const provider = new OpenAiChatProvider({ id: 'h', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: 'https://api.example.com/v1' });
     const model = fakeModel({ ref: { providerId: 'h', modelId: 'hosted-model' }, effort: null });
     const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
