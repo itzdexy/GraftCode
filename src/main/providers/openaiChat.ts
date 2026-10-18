@@ -621,82 +621,89 @@ export class OpenAiChatProvider implements LLMProvider {
     let costUsd: number | undefined;
 
     let damaged = 0;
-    for await (const msg of parseSse(response.body)) {
-      if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-      if (msg.data === '[DONE]') break;
-      let chunk: Record<string, unknown>;
-      try {
-        chunk = JSON.parse(msg.data) as Record<string, unknown>;
-      } catch {
-        if (isDamagedEvent(msg.data)) damaged++;
-        continue;
-      }
-      const err = chunk.error as { message?: string; code?: number | string } | undefined;
-      if (err) {
-        const code = Number(err.code);
-        throw new ProviderError(code === 429 ? 'rate_limit' : code >= 500 ? 'server' : 'unknown', err.message ?? 'Provider error', {
-          retryable: code === 429 || code >= 500
-        });
-      }
-      const u = chunk.usage as
-        | {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-            prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
-            cost?: number;
-            cost_details?: { upstream_inference_cost?: number | null };
-          }
-        | undefined;
-      if (u) {
-        // prompt_tokens counts every input token; cache reads and writes are reported inside it.
-        const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
-        const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
-        usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached - written);
-        usage.cacheReadTokens = cached;
-        usage.cacheWriteTokens = written;
-        usage.outputTokens = u.completion_tokens ?? 0;
-        // OpenRouter reports what it charged; with your own upstream key the upstream bill comes on top.
-        if (this.kind === 'openrouter' && typeof u.cost === 'number') costUsd = u.cost + (u.cost_details?.upstream_inference_cost ?? 0);
-      }
-      const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
-      if (!choice) continue;
-      const delta = (choice.delta ?? {}) as Record<string, unknown>;
-      if (typeof delta.content === 'string' && delta.content.length > 0) {
-        text += delta.content;
-        const shown = filter ? filter.push(delta.content) : delta.content;
-        if (shown.length > 0) yield { type: 'text-delta', text: shown };
-      }
-      const reasoning = typeof delta.reasoning === 'string' ? delta.reasoning : delta.reasoning_content;
-      if (typeof reasoning === 'string' && reasoning.length > 0) {
-        thinking += reasoning;
-        yield { type: 'thinking-delta', text: reasoning };
-      }
-      if (Array.isArray(delta.reasoning_details)) {
-        for (const fragment of delta.reasoning_details) mergeReasoningDetail(details, fragment);
-      }
-      if (Array.isArray(delta.tool_calls)) {
-        for (const raw of delta.tool_calls as Array<Record<string, unknown>>) {
-          const index = typeof raw.index === 'number' ? raw.index : calls.length;
-          const slot = (calls[index] ??= { id: '', name: '', args: '' });
-          if (typeof raw.id === 'string' && raw.id) slot.id = raw.id;
-          const fn = raw.function as { name?: string; arguments?: string } | undefined;
-          if (fn?.name && !slot.name) slot.name = fn.name;
-          if (typeof fn?.arguments === 'string') slot.args += fn.arguments;
+    let shownAny = false;
+    try {
+      for await (const msg of parseSse(response.body)) {
+        if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+        if (msg.data === '[DONE]') break;
+        let chunk: Record<string, unknown>;
+        try {
+          chunk = JSON.parse(msg.data) as Record<string, unknown>;
+        } catch {
+          if (isDamagedEvent(msg.data)) damaged++;
+          continue;
         }
+        const err = chunk.error as { message?: string; code?: number | string } | undefined;
+        if (err) {
+          const code = Number(err.code);
+          throw new ProviderError(code === 429 ? 'rate_limit' : code >= 500 ? 'server' : 'unknown', err.message ?? 'Provider error', {
+            retryable: code === 429 || code >= 500
+          });
+        }
+        const u = chunk.usage as
+          | {
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+              cost?: number;
+              cost_details?: { upstream_inference_cost?: number | null };
+            }
+          | undefined;
+        if (u) {
+          // prompt_tokens counts every input token; cache reads and writes are reported inside it.
+          const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+          const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
+          usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached - written);
+          usage.cacheReadTokens = cached;
+          usage.cacheWriteTokens = written;
+          usage.outputTokens = u.completion_tokens ?? 0;
+          // OpenRouter reports what it charged; with your own upstream key the upstream bill comes on top.
+          if (this.kind === 'openrouter' && typeof u.cost === 'number') costUsd = u.cost + (u.cost_details?.upstream_inference_cost ?? 0);
+        }
+        const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
+        if (!choice) continue;
+        const delta = (choice.delta ?? {}) as Record<string, unknown>;
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+          text += delta.content;
+          const shown = filter ? filter.push(delta.content) : delta.content;
+          if (shown.length > 0) {
+            shownAny = true;
+            yield { type: 'text-delta', text: shown };
+          }
+        }
+        const reasoning = typeof delta.reasoning === 'string' ? delta.reasoning : delta.reasoning_content;
+        if (typeof reasoning === 'string' && reasoning.length > 0) {
+          thinking += reasoning;
+          shownAny = true;
+          yield { type: 'thinking-delta', text: reasoning };
+        }
+        if (Array.isArray(delta.reasoning_details)) {
+          for (const fragment of delta.reasoning_details) mergeReasoningDetail(details, fragment);
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const raw of delta.tool_calls as Array<Record<string, unknown>>) {
+            const index = typeof raw.index === 'number' ? raw.index : calls.length;
+            const slot = (calls[index] ??= { id: '', name: '', args: '' });
+            if (typeof raw.id === 'string' && raw.id) slot.id = raw.id;
+            const fn = raw.function as { name?: string; arguments?: string } | undefined;
+            if (fn?.name && !slot.name) slot.name = fn.name;
+            if (typeof fn?.arguments === 'string') slot.args += fn.arguments;
+          }
+        }
+        if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) finish = choice.finish_reason;
       }
-      if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) finish = choice.finish_reason;
-    }
-
-    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-    // EOF or [DONE] closes the transport, but only the choice's finish reason
-    // confirms this reply is complete. Keep streamed text visible on failure;
-    // never offer accumulated tool calls from an unconfirmed reply to the loop.
-    // Servers may omit [DONE] when they do send a finish reason.
-    if (finish === null) {
-      // The deltas are all that is kept of a reply that broke off, so what the filter held goes out as one.
+      if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+      // EOF or [DONE] closes the transport, but only the choice's finish reason
+      // confirms this reply is complete. Keep streamed text visible on failure;
+      // never offer accumulated tool calls from an unconfirmed reply to the loop.
+      // Servers may omit [DONE] when they do send a finish reason.
+      if (finish === null) throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
+    } catch (error) {
+      // Once something was shown the reply can't be asked for again and its deltas are all that is kept, so
+      // what the filter held goes out with them. Before that, nothing goes out, and the request can be retried.
       const held = filter?.flush() ?? '';
-      if (held.length > 0) yield { type: 'text-delta', text: held };
-      throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
+      if (shownAny && held.length > 0) yield { type: 'text-delta', text: held };
+      throw error;
     }
     // A finished reply's text block replaces what the deltas showed, so what the filter still holds is
     // not sent as a delta: the block carries the reply without the markup that was read as calls.

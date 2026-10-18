@@ -1028,6 +1028,56 @@ describe('tool calls written as text', () => {
     expect(blocksOf(seen)).toEqual([]);
   });
 
+  it.each(['Ollama', 'OpenAI-compatible'])('retries a reply from %s that broke off while all of it was held back', async (adapter) => {
+    let calls = 0;
+    const broken = ['<tool_', 'call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, ++calls === 1
+        ? broken.map((content) => ({ message: { role: 'assistant', content }, done: false }))
+        : [{ message: { role: 'assistant', content: call }, done: true, done_reason: 'stop' }]));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, ++calls === 1
+        ? broken.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } }))
+        : [{ data: { choices: [{ index: 0, delta: { content: call }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const retries: number[] = [];
+    const policy = { ...DEFAULT_RETRY_POLICY, maxRetries: 1, baseDelayMs: 0 };
+    const events = await collect(streamWithRetry(provider, request({ model }), new AbortController().signal, ({ attempt }) => retries.push(attempt), policy));
+    // Nothing was shown, so the broken reply left no trace and could be asked for again.
+    expect(retries).toEqual([1]);
+    expect(deltasOf(events)).toEqual([]);
+    expect(blocksOf(events)).toEqual([readCall]);
+  });
+
+  it.each(['Ollama', 'OpenAI-compatible'])('keeps the held text when %s sends an error after showing some', async (adapter) => {
+    const parts = ['Reading. ', '<tool_call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [
+        ...parts.map((content) => ({ message: { role: 'assistant', content }, done: false })),
+        { error: 'the model stopped' }
+      ]));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+        ...parts.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } })),
+        { data: { error: { message: 'the model stopped', code: 500 } } }
+      ]));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const seen: StreamEvent[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of provider.streamText(request({ model }), new AbortController().signal)) seen.push(event);
+    };
+    await expect(run()).rejects.toThrow(/the model stopped/);
+    expect(deltasOf(seen).join('')).toBe(parts.join(''));
+  });
+
   it('keeps native tools for an Ollama hosted model', async () => {
     server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'gpt-oss:120b-cloud' }] }));
     server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'gptoss.context_length': 131072 } }));

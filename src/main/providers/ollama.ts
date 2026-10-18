@@ -262,46 +262,54 @@ export class OllamaProvider implements LLMProvider {
     let doneReason: string | undefined;
     let completed = false;
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-    for await (const raw of parseNdjson(response.body)) {
+    let shownAny = false;
+    try {
+      for await (const raw of parseNdjson(response.body)) {
+        if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+        const chunk = raw as {
+          error?: string;
+          message?: { content?: string; thinking?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }> };
+          done?: boolean;
+          done_reason?: string;
+          prompt_eval_count?: number;
+          eval_count?: number;
+        };
+        if (chunk.error) throw new ProviderError('server', `Ollama: ${chunk.error}`, { retryable: false });
+        const m = chunk.message;
+        if (m?.thinking) {
+          thinking += m.thinking;
+          shownAny = true;
+          yield { type: 'thinking-delta', text: m.thinking };
+        }
+        if (m?.content) {
+          text += m.content;
+          const shown = filter ? filter.push(m.content) : m.content;
+          if (shown.length > 0) {
+            shownAny = true;
+            yield { type: 'text-delta', text: shown };
+          }
+        }
+        for (const call of m?.tool_calls ?? []) {
+          if (call.function?.name) calls.push({ name: call.function.name, args: call.function.arguments ?? {} });
+        }
+        if (chunk.done === true) {
+          completed = true;
+          doneReason = chunk.done_reason;
+          usage.inputTokens = chunk.prompt_eval_count ?? 0;
+          usage.outputTokens = chunk.eval_count ?? 0;
+          break;
+        }
+      }
       if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-      const chunk = raw as {
-        error?: string;
-        message?: { content?: string; thinking?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }> };
-        done?: boolean;
-        done_reason?: string;
-        prompt_eval_count?: number;
-        eval_count?: number;
-      };
-      if (chunk.error) throw new ProviderError('server', `Ollama: ${chunk.error}`, { retryable: false });
-      const m = chunk.message;
-      if (m?.thinking) {
-        thinking += m.thinking;
-        yield { type: 'thinking-delta', text: m.thinking };
-      }
-      if (m?.content) {
-        text += m.content;
-        const shown = filter ? filter.push(m.content) : m.content;
-        if (shown.length > 0) yield { type: 'text-delta', text: shown };
-      }
-      for (const call of m?.tool_calls ?? []) {
-        if (call.function?.name) calls.push({ name: call.function.name, args: call.function.arguments ?? {} });
-      }
-      if (chunk.done === true) {
-        completed = true;
-        doneReason = chunk.done_reason;
-        usage.inputTokens = chunk.prompt_eval_count ?? 0;
-        usage.outputTokens = chunk.eval_count ?? 0;
-        break;
-      }
-    }
-    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-    // A closed connection is not a completed reply. The loop retains text
-    // deltas on failure, but tools are emitted only after Ollama's done:true.
-    if (!completed) {
-      // The deltas are all that is kept of a reply that broke off, so what the filter held goes out as one.
+      // A closed connection is not a completed reply. The loop retains text
+      // deltas on failure, but tools are emitted only after Ollama's done:true.
+      if (!completed) throw new ProviderError('network', 'The reply stopped before it was complete. Ollama did not confirm completion.');
+    } catch (error) {
+      // Once something was shown the reply can't be asked for again and its deltas are all that is kept, so
+      // what the filter held goes out with them. Before that, nothing goes out, and the request can be retried.
       const held = filter?.flush() ?? '';
-      if (held.length > 0) yield { type: 'text-delta', text: held };
-      throw new ProviderError('network', 'The reply stopped before it was complete. Ollama did not confirm completion.');
+      if (shownAny && held.length > 0) yield { type: 'text-delta', text: held };
+      throw error;
     }
     // A finished reply's text block replaces what the deltas showed, so what the filter still holds is
     // not sent as a delta: the block carries the reply without the markup that was read as calls.
