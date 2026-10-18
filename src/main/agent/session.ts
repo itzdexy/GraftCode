@@ -1131,7 +1131,8 @@ export class AgentSession {
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,
-        media: this.offering.media(model)
+        media: this.offering.media(model),
+        lean: model.lean === true
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -1166,7 +1167,7 @@ export class AgentSession {
     const { model, ref } = await this.resolveModel(new AbortController().signal);
     const tools = this.offering.tools(model);
     const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
-    if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
+    if (this.system && this.modelKey === this.promptModelKey(ref, model)) return { system: this.system, tools, model: label };
     return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
   }
 
@@ -1183,6 +1184,11 @@ export class AgentSession {
       measured: measured > 0 ? measured : null,
       limit: model.contextWindow
     };
+  }
+
+  /** What the session's prompt was built for: the model, and whether it got the lean prompt (Settings can change that for the same model). */
+  private promptModelKey(ref: ModelRef, model: ModelInfo): string {
+    return `${ref.providerId}:${ref.modelId}${model.lean === true ? ':lean' : ''}`;
   }
 
   /**
@@ -1303,7 +1309,7 @@ export class AgentSession {
       }
 
       const { provider, model, ref } = await this.resolveModel(signal);
-      const key = `${ref.providerId}:${ref.modelId}`;
+      const key = this.promptModelKey(ref, model);
       if (this.modelKey !== null && this.modelKey !== key) {
         this.markThinkingStale();
         this.system = null;
@@ -1549,11 +1555,11 @@ export class AgentSession {
     this.emit({ type: 'mode', permissionMode: mode });
   }
 
-  /** ToolSearch's view of the MCP tools still waiting; null when the session sends them all. */
+  /** ToolSearch's view of the tools still waiting (a lean model's built-ins, MCP tools); null when the session sends them all. */
   private deferredTools(model: ModelInfo): ToolContext['deferredTools'] {
-    if (!this.offering.deferring) return null;
+    if (!this.offering.deferring(model)) return null;
     return {
-      find: (query, limit) => searchTools(this.offering.deferredEntries(), query, limit),
+      find: (query, limit) => searchTools(this.offering.deferredEntries(model), query, limit),
       load: (names) => {
         this.offering.load(names);
         for (const name of names) {

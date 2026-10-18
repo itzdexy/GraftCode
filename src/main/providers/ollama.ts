@@ -3,7 +3,7 @@ import type { EffortLevel, Usage } from '@shared/schemas/common';
 import type { LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { isLocalUrl } from '@shared/privacy';
-import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier } from './catalog';
+import { arrangeModels, describeCapabilities, effortSupport, familyOf, isFastTier, leanByDefault } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
 import { firstByteTimeout } from './localServer';
@@ -110,6 +110,8 @@ export class OllamaProvider implements LLMProvider {
   private readonly sizes: Map<string, number>;
   /** How the user said each model calls tools (Settings → Models → Custom model IDs). */
   private readonly toolFormats: Map<string, 'native' | 'text'>;
+  /** Which prompt the user chose for each model (Settings → Models → Custom model IDs). */
+  private readonly prompts: Map<string, 'full' | 'lean'>;
   /** Models the server passes on to a hosted one, as the last model list said. */
   private readonly hosted = new Set<string>();
   /** Models that refused the tools parameter; they get their tools in the prompt from then on. */
@@ -120,6 +122,7 @@ export class OllamaProvider implements LLMProvider {
     this.base = connection.baseUrl ?? 'http://localhost:11434';
     this.sizes = new Map(customModels.flatMap((m) => (m.contextWindow !== undefined ? [[m.id, m.contextWindow] as const] : [])));
     this.toolFormats = new Map(customModels.flatMap((m) => (m.toolFormat !== undefined ? [[m.id, m.toolFormat] as const] : [])));
+    this.prompts = new Map(customModels.flatMap((m) => (m.prompt !== undefined ? [[m.id, m.prompt] as const] : [])));
   }
 
   /** Whether this model runs on a server of the user's own, rather than passed on to a hosted one. */
@@ -177,6 +180,8 @@ export class OllamaProvider implements LLMProvider {
     // A model on this computer without native tool calls is taught to write them as text.
     const toolFormat = this.toolFormats.get(name) ?? (this.isLocalModel(name) && !caps.includes('tools') ? 'text' : undefined);
     const tools = toolFormat === 'text' || caps.includes('tools');
+    const prompt = this.prompts.get(name);
+    const lean = prompt ? prompt === 'lean' : leanByDefault(this.isLocalModel(name), contextWindow);
     const vision = caps.includes('vision');
     const effort = caps.includes('thinking')
       ? effortSupport(LEVELED_THINKING.test(name) ? ['low', 'medium', 'high', 'taproot'] : ['low', 'high', 'taproot'])
@@ -190,6 +195,7 @@ export class OllamaProvider implements LLMProvider {
       maxOutputTokens: Math.min(contextWindow, 32_768),
       supportsTools: tools,
       ...(toolFormat === 'text' ? { toolFormat } : {}),
+      ...(lean ? { lean } : {}),
       supportsVision: vision,
       supportsWebSearch: false,
       effort,

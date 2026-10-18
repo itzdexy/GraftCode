@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { errorResult, textResult, type DeferredTool, type ToolDefinition } from './types';
 
-/** An MCP tool that is not loaded: enough to find it by. */
+/** A tool that is not loaded (an MCP tool, or a built-in a lean model waits for): enough to find it by. */
 export type SearchableTool = DeferredTool;
 
 /** Most tools one search loads when it asks for a whole server. */
@@ -42,7 +42,9 @@ export function searchTools(tools: SearchableTool[], query: string, limit: numbe
       .slice(0, Math.max(limit, WHOLE_SERVER));
   }
   const scored = tools.map((tool) => {
-    const own = tool.name.split('__').slice(2).join('_').toLowerCase();
+    // An MCP tool's own name follows its server's; a built-in's is its whole name, in words (GenerateImage is generate image).
+    const parts = tool.name.split('__');
+    const own = (parts.length > 2 ? parts.slice(2).join('_') : tool.name.replace(/([a-z])([A-Z])/g, '$1_$2')).toLowerCase();
     const ownWords = wordsOf(own);
     const server = tool.server.toLowerCase();
     const description = tool.description.toLowerCase();
@@ -77,7 +79,7 @@ function firstLine(text: string): string {
 export const toolSearchTool: ToolDefinition<ToolSearchInput> = {
   name: 'ToolSearch',
   description:
-    'Finds tools of the connected MCP servers that are not loaded yet, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.',
+    'Finds tools that are not loaded yet, Graft\'s own or those of the connected MCP servers, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.',
   input: ToolSearchInput,
   permissionClass: 'none',
   concurrencySafe: () => false,

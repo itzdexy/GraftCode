@@ -1,7 +1,7 @@
 import type { ModelInfo } from '@shared/schemas/models';
 import type { MediaAccess } from '../media/mediaService';
 import { RUN_AGENTS_IN_CHAT } from '../tools/agentTools';
-import { CHAT_ONLY_TOOLS } from '../tools/builtin';
+import { CHAT_ONLY_TOOLS, LEAN_TOOLS } from '../tools/builtin';
 import type { ToolRegistry } from '../tools/registry';
 import type { SearchableTool } from '../tools/toolSearch';
 import type { SearchEngineId } from '../tools/web/search';
@@ -9,6 +9,10 @@ import { estimateTextTokens } from './tokens';
 
 /** MCP tool definitions weighing more than this (or a tenth of the model's window) wait to be loaded with ToolSearch. */
 const DEFER_MCP_TOKENS = 10_000;
+
+/** The server name ToolSearch and the prompt give the built-in tools a lean model waits for. */
+const GRAFT_SERVER = 'graft';
+const LEAN = new Set<string>(LEAN_TOOLS);
 
 /** Web access a model is offered: a search its provider runs, a search Graft runs, and reading pages. */
 export interface WebAccess {
@@ -69,7 +73,7 @@ export interface OfferInputs {
 export class ModelOffering {
   /** A setup too big to send with every request waits; once the decision is made it holds for the session. */
   private deferredAll = false;
-  /** The MCP tools ToolSearch has loaded: the running turn offers them from its next request on. */
+  /** The tools ToolSearch has loaded, MCP or built-in: the running turn offers them from its next request on. */
   private readonly loaded = new Set<string>();
 
   constructor(private readonly inputs: () => OfferInputs) {}
@@ -122,48 +126,62 @@ export class ModelOffering {
     return inputs.kind === 'code' && inputs.hasComputer && inputs.computerUse && model.supportsVision;
   }
 
+  /**
+   * A lean model (a small window on this computer) works in a code session with the core
+   * tools; the other built-ins and every MCP tool wait for ToolSearch. It is read from the
+   * model on every call, so a switch to a full model gives the full set from the next request on.
+   */
+  private lean(model: ModelInfo): boolean {
+    return this.inputs().kind === 'code' && model.lean === true;
+  }
+
   /** Tools a turn on this model offers: built-ins for the session kind, plus MCP tools in code sessions. */
   tools(model: ModelInfo): string[] {
+    const builtins = this.builtins(model);
+    // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
+    const { offered } = this.splitMcp(this.mcpTools(model), model);
+    const lean = this.lean(model);
+    const sent = lean ? builtins.filter((n) => LEAN.has(n) || this.loaded.has(n)) : builtins;
+    return [...sent, ...(lean || this.deferredAll ? ['ToolSearch'] : []), ...offered];
+  }
+
+  /** The built-in tools this session and model may use, before a lean model's wait for ToolSearch. */
+  private builtins(model: ModelInfo): string[] {
     const inputs = this.inputs();
     const web = this.web(model);
     const work = this.chatWork(model);
     const computer = this.computer(model);
     const media = this.media(model);
-    // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
-    const mcpTools = this.mcpTools(model);
     const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
     const onMission = inputs.kind === 'code' && inputs.missionOpen;
-    const builtins =
-      inputs.kind === 'code'
-        ? inputs.registry
-            .names()
-            .filter(
-              (n) =>
-                !n.startsWith('mcp__') &&
-                !chatOnly.has(n) &&
-                (n !== 'WebSearch' || web.clientSearch) &&
-                n !== 'ToolSearch' &&
-                (n !== 'Computer' || computer) &&
-                (n !== 'Browser' || inputs.hasBrowser) &&
-                (n !== 'GenerateImage' || media.image !== null) &&
-                (n !== 'GenerateVideo' || media.video !== null) &&
-                (n !== 'ComfyUI' || media.comfy) &&
-                (n !== 'MissionUpdate' || onMission)
-            )
-        : [
-            ...(web.fetch ? ['WebFetch'] : []),
-            ...(web.clientSearch ? ['WebSearch'] : []),
-            // Researchers, for a question with several parts: they get the web tools above and nothing else.
-            ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
-            ...(work.files ? ['CreateFile'] : []),
-            ...(work.code ? ['RunCode'] : []),
-            ...(work.skills ? ['Skill'] : []),
-            // A chat keeps what it makes in its own files, so pictures need those.
-            ...(work.files && media.image !== null ? ['GenerateImage'] : []),
-            ...(work.files && media.video !== null ? ['GenerateVideo'] : [])
-          ];
-    const { offered } = this.splitMcp(mcpTools, model);
-    return [...builtins, ...(this.deferredAll ? ['ToolSearch'] : []), ...offered];
+    return inputs.kind === 'code'
+      ? inputs.registry
+          .names()
+          .filter(
+            (n) =>
+              !n.startsWith('mcp__') &&
+              !chatOnly.has(n) &&
+              (n !== 'WebSearch' || web.clientSearch) &&
+              n !== 'ToolSearch' &&
+              (n !== 'Computer' || computer) &&
+              (n !== 'Browser' || inputs.hasBrowser) &&
+              (n !== 'GenerateImage' || media.image !== null) &&
+              (n !== 'GenerateVideo' || media.video !== null) &&
+              (n !== 'ComfyUI' || media.comfy) &&
+              (n !== 'MissionUpdate' || onMission)
+          )
+      : [
+          ...(web.fetch ? ['WebFetch'] : []),
+          ...(web.clientSearch ? ['WebSearch'] : []),
+          // Researchers, for a question with several parts: they get the web tools above and nothing else.
+          ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
+          ...(work.files ? ['CreateFile'] : []),
+          ...(work.code ? ['RunCode'] : []),
+          ...(work.skills ? ['Skill'] : []),
+          // A chat keeps what it makes in its own files, so pictures need those.
+          ...(work.files && media.image !== null ? ['GenerateImage'] : []),
+          ...(work.files && media.video !== null ? ['GenerateVideo'] : [])
+        ];
   }
 
   /** What a tool is in this session, where its own description is about another kind: in a chat a group of agents only researches. */
@@ -184,17 +202,26 @@ export class ModelOffering {
    */
   splitMcp(mcpTools: string[], model: ModelInfo): { offered: string[]; deferred: string[] } {
     if (mcpTools.length === 0) return { offered: [], deferred: [] };
-    if (!this.deferredAll) {
+    // A lean model waits for all of them without deciding for the session: a full model weighs them as usual.
+    if (!this.deferredAll && !this.lean(model)) {
       const weight = estimateTextTokens(JSON.stringify(this.inputs().registry.specs(mcpTools)));
       if (weight > Math.min(DEFER_MCP_TOKENS, Math.floor(model.contextWindow * 0.1))) this.deferredAll = true;
     }
-    if (!this.deferredAll) return { offered: mcpTools, deferred: [] };
+    if (!this.deferredAll && !this.lean(model)) return { offered: mcpTools, deferred: [] };
     return { offered: mcpTools.filter((n) => this.loaded.has(n)), deferred: mcpTools.filter((n) => !this.loaded.has(n)) };
   }
 
-  /** Whether a big setup keeps its MCP tools waiting for ToolSearch. */
-  get deferring(): boolean {
+  /** Whether tools wait for ToolSearch on this model: a lean model's, or those of a big MCP setup. */
+  deferring(model: ModelInfo): boolean {
+    if (this.lean(model)) return true;
+    // Weighing the MCP tools makes the session's decision, when it is not made yet.
+    this.splitMcp(this.mcpTools(model), model);
     return this.deferredAll;
+  }
+
+  /** The built-ins a lean model waits for; none for a full model. */
+  private deferredBuiltins(model: ModelInfo): string[] {
+    return this.lean(model) ? this.builtins(model).filter((n) => !LEAN.has(n) && !this.loaded.has(n)) : [];
   }
 
   /** Marks tools as loaded with ToolSearch, so this session offers them from its next request on. */
@@ -202,11 +229,13 @@ export class ModelOffering {
     for (const name of names) this.loaded.add(name);
   }
 
-  /** How many tools of each server are waiting, for the prompt. */
+  /** How many tools of each server are waiting, for the prompt; Graft's own built-ins count under `graft`. */
   deferredByServer(model: ModelInfo): Array<{ server: string; count: number }> {
     const inputs = this.inputs();
     const { deferred } = this.splitMcp(this.mcpTools(model), model);
     const counts = new Map<string, number>();
+    const builtins = this.deferredBuiltins(model).length;
+    if (builtins > 0) counts.set(GRAFT_SERVER, builtins);
     for (const name of deferred) {
       const server = inputs.registry.get(name)?.mcp?.server ?? 'other';
       counts.set(server, (counts.get(server) ?? 0) + 1);
@@ -214,15 +243,15 @@ export class ModelOffering {
     return [...counts].map(([server, count]) => ({ server, count }));
   }
 
-  /** The tools waiting to be loaded, as ToolSearch searches them. */
-  deferredEntries(): SearchableTool[] {
+  /** The tools waiting to be loaded, as ToolSearch searches them: a lean model's built-ins under `graft`, then the MCP tools. */
+  deferredEntries(model: ModelInfo): SearchableTool[] {
     const inputs = this.inputs();
-    const names = inputs.kind === 'code' ? inputs.mcpToolNames(inputs.settingsRoot) : inputs.mcpToolNames(null);
-    return names
-      .filter((n) => !this.loaded.has(n))
-      .flatMap((name) => {
-        const tool = inputs.registry.get(name);
-        return tool ? [{ name, server: tool.mcp?.server ?? '', description: tool.description }] : [];
-      });
+    const { deferred } = this.splitMcp(this.mcpTools(model), model);
+    const builtins = this.deferredBuiltins(model).map((name) => ({ name, server: GRAFT_SERVER }));
+    const mcp = deferred.map((name) => ({ name, server: inputs.registry.get(name)?.mcp?.server ?? '' }));
+    return [...builtins, ...mcp].flatMap(({ name, server }) => {
+      const tool = inputs.registry.get(name);
+      return tool ? [{ name, server, description: tool.description }] : [];
+    });
   }
 }

@@ -17,8 +17,13 @@ import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
+import { ModelOffering } from '../../src/main/agent/offering';
+import { buildCodeSystemPrompt, deferredToolsSection, type CodePromptContext } from '../../src/main/agent/systemPrompt';
+import { estimateTextTokens } from '../../src/main/agent/tokens';
+import { createBuiltinRegistry } from '../../src/main/tools/builtin';
 import { fakeModel } from '../support/fakeProvider';
 import { testTool } from '../support/loopHarness';
+import { searchTools } from '../../src/main/tools/toolSearch';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
@@ -2562,5 +2567,130 @@ describe('sending a queued message now', () => {
     expect(h.provider.requests).toHaveLength(2);
     expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('and then this');
     expect(texts(h).some((t) => t.startsWith('assistant:Tokens this session'))).toBe(true);
+  });
+});
+
+describe('the lean profile', () => {
+  const lean = fakeModel({ lean: true, contextWindow: 32_768 });
+  const registry = createBuiltinRegistry();
+  const offering = new ModelOffering(() => ({
+    kind: 'code',
+    incognito: false,
+    webSearch: false,
+    computerUse: false,
+    searchEngine: null,
+    registry,
+    mcpToolNames: () => [],
+    settingsRoot: '/project',
+    hasBrowser: true,
+    hasComputer: false,
+    hasChatFiles: false,
+    hasRunCode: false,
+    hasBuiltinSkills: false,
+    media: null,
+    missionOpen: false
+  }));
+  const ctx: CodePromptContext = {
+    model: { label: 'Local Model', id: 'local:7b', provider: 'Ollama' },
+    cwd: '/project',
+    projectRoot: '/project',
+    platform: 'linux',
+    shellLabel: 'bash',
+    git: { isRepo: true, branch: 'main' },
+    date: '2026-10-18',
+    mode: 'ask',
+    memory: [],
+    skills: [],
+    webSearch: false,
+    mcpServers: [],
+    deferredTools: offering.deferredByServer(lean)
+  };
+
+  it('keeps the lean prompt short', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    const full = buildCodeSystemPrompt(ctx);
+    expect(estimateTextTokens(short)).toBeLessThan(1_500);
+    expect(full.length).toBeGreaterThanOrEqual(short.length * 2);
+    // What it keeps: who it is, where it works, and how to work.
+    expect(short).toContain('You are running on the model Local Model (id "local:7b")');
+    expect(short).toContain('# Environment');
+    expect(short).toContain('# How to work');
+    for (const dropped of ['# Git', '# Safety', '# Communicating', '# Plan mode', 'RunAgents', 'Symbols']) expect(short).not.toContain(dropped);
+  });
+
+  it('keeps the user’s notes whole and names the skills in the lean prompt', () => {
+    const notes = 'Always run the linter. '.repeat(40);
+    const short = buildCodeSystemPrompt({
+      ...ctx,
+      lean: true,
+      memory: [{ path: '/project/AGENTS.md', scope: 'project', content: notes }],
+      skills: [{ name: 'deploy', description: 'Ships the app.', path: '/project/.graft/skills/deploy/SKILL.md', scope: 'project', note: null }]
+    });
+    expect(short).toContain(notes.trim());
+    expect(short).toContain('deploy');
+  });
+
+  it('tells a lean model how to find the other tools', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    expect(short).toContain('ToolSearch');
+    expect(short).toContain(deferredToolsSection(ctx.deferredTools));
+    expect(short).toMatch(/graft \(\d+ tools\)/);
+  });
+
+  it('fits a lean session in a third of 32k', () => {
+    const prompt = buildCodeSystemPrompt({ ...ctx, lean: true });
+    const tools = JSON.stringify(registry.specs(offering.tools(lean)));
+    expect(estimateTextTokens(prompt) + estimateTextTokens(tools)).toBeLessThan(10_923);
+  });
+
+  it('sends the full prompt and tools after a switch from a lean model, and lean ones after the switch back', async () => {
+    const small = fakeModel({ lean: true });
+    const big = fakeModel({ ref: { providerId: 'fake', modelId: 'big-model' }, label: 'Big Model' });
+    const h = harness({ models: [small, big], script: [{ text: 'one' }, { text: 'two' }, { text: 'three' }] });
+    h.session.send('one');
+    await h.session.idle();
+    h.session.setModel(big.ref, 'medium');
+    h.session.send('two');
+    await h.session.idle();
+    h.session.setModel(small.ref, 'medium');
+    h.session.send('three');
+    await h.session.idle();
+    const [first, second, third] = h.provider.requests;
+    const names = (r: typeof first) => r!.tools.map((t) => t.name);
+    expect(first!.system).not.toContain('# Git');
+    expect(names(first)).toContain('ToolSearch');
+    expect(names(first)).not.toContain('MultiEdit');
+    expect(second!.system).toContain('# Git');
+    expect(names(second)).toContain('MultiEdit');
+    expect(names(second)).not.toContain('ToolSearch');
+    expect(third!.system).not.toContain('# Git');
+    expect(names(third)).not.toContain('MultiEdit');
+  });
+
+  it('loads a built-in with ToolSearch on a lean model and runs it by its name', async () => {
+    const h = harness({
+      model: { lean: true },
+      mode: 'bypass',
+      bypassEnabled: true,
+      script: [
+        { toolCalls: [{ name: 'ToolSearch', input: { query: 'select:MultiEdit' } }] },
+        { toolCalls: [{ name: 'MultiEdit', input: { file_path: 'missing.txt', edits: [{ old_string: 'a', new_string: 'b' }] } }] },
+        { text: 'Done.' }
+      ]
+    });
+    h.session.send('Change a to b in missing.txt.');
+    await h.session.idle();
+    expect(h.provider.requests[0]!.tools.map((t) => t.name)).not.toContain('MultiEdit');
+    expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('Loaded 1 tool');
+    expect(h.provider.requests[1]!.tools.map((t) => t.name)).toContain('MultiEdit');
+    // The call reached MultiEdit itself, which found no such file; it was not refused as an unknown tool.
+    const result = JSON.stringify(h.provider.requests[2]!.messages.at(-1));
+    expect(result).not.toContain('Unknown tool');
+    expect(result).toContain('tool_result');
+  });
+
+  it('finds a built-in by the words of its name', () => {
+    const entries = offering.deferredEntries(lean);
+    expect(searchTools(entries, 'browser', 3)[0]?.name).toBe('Browser');
   });
 });

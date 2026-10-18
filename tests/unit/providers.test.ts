@@ -10,7 +10,7 @@ import { GeminiProvider, toGeminiContents } from '../../src/main/providers/gemin
 import { readResponsesStream } from '../../src/main/providers/openaiResponses';
 import { ProviderCatalog } from '../../src/main/providers/presets';
 import { OllamaProvider, toOllamaMessages } from '../../src/main/providers/ollama';
-import { arrangeModels, familyOf, formatTokens } from '../../src/main/providers/catalog';
+import { arrangeModels, familyOf, formatTokens, LEAN_CONTEXT, leanByDefault } from '../../src/main/providers/catalog';
 import type { StreamEvent, StreamRequest } from '../../src/main/providers/types';
 import type { LlmMessage } from '../../src/shared/schemas/messages';
 import { FakeProvider, fakeModel } from '../support/fakeProvider';
@@ -1031,6 +1031,60 @@ describe('tool calls written as text', () => {
       { role: 'assistant', content: assistant },
       { role: 'user', content: result }
     ]);
+  });
+});
+
+describe('the lean profile for models with a small window on this computer', () => {
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('is lean by default for a model on this computer with a window of up to 64K', () => {
+    expect(leanByDefault(true, LEAN_CONTEXT)).toBe(true);
+    expect(leanByDefault(true, LEAN_CONTEXT + 1)).toBe(false);
+    expect(leanByDefault(false, 8192)).toBe(false);
+  });
+
+  it('marks a 32k local Ollama model lean and a 128k one full', async () => {
+    const trained: Record<string, number> = { 'coder:7b': 32768, 'big:70b': 131072, 'giant:480b-cloud': 32768 };
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: Object.keys(trained).map((name) => ({ name })) }));
+    server.route('POST', '/api/show', (req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': trained[(req.json() as { model: string }).model] } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [{ id: 'big:70b', contextWindow: 131072 }]);
+    const models = Object.fromEntries((await provider.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['coder:7b']).toMatchObject({ contextWindow: 32768, lean: true });
+    expect(models['big:70b']?.contextWindow).toBe(131072);
+    expect(models['big:70b']).not.toHaveProperty('lean');
+    // A hosted model costs this computer nothing and is never lean by default, whatever its window.
+    expect(models['giant:480b-cloud']).not.toHaveProperty('lean');
+  });
+
+  it('lets Settings force the full prompt', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'coder:7b' }, { name: 'big:70b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': 131072 } }));
+    const ollama = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [
+      { id: 'coder:7b', prompt: 'full' },
+      { id: 'big:70b', contextWindow: 131072, prompt: 'lean' }
+    ]);
+    const models = Object.fromEntries((await ollama.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['coder:7b']?.contextWindow).toBe(32768);
+    expect(models['coder:7b']).not.toHaveProperty('lean');
+    expect(models['big:70b']).toMatchObject({ contextWindow: 131072, lean: true });
+
+    // An OpenAI-compatible server on this computer follows the same rule, and the same setting.
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [] }));
+    const local = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` }, [
+      { id: 'small', contextWindow: 32768 },
+      { id: 'wide', contextWindow: 131072 },
+      { id: 'forced', contextWindow: 16384, prompt: 'full' }
+    ]);
+    const listed = Object.fromEntries((await local.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(listed['small']).toMatchObject({ lean: true });
+    expect(listed['wide']).not.toHaveProperty('lean');
+    expect(listed['forced']).not.toHaveProperty('lean');
   });
 });
 

@@ -48,6 +48,8 @@ export interface CodePromptContext {
   site?: { name: string; url: string; stack: SiteStack } | null;
   /** Generated media: the image model behind GenerateImage and the video model behind GenerateVideo (null when none), and whether the user's ComfyUI is connected. */
   media?: { image: string | null; video?: string | null; comfy: boolean } | null;
+  /** A model with a small window on this computer: a short prompt for the core tools, the rest found with ToolSearch. */
+  lean?: boolean;
 }
 
 const MODE_LABEL: Record<PermissionMode, string> = {
@@ -173,13 +175,14 @@ function mediaSection(ctx: CodePromptContext): string {
   );
 }
 
-/** Tells the agent which MCP tools are not loaded, so it knows what ToolSearch can bring in. */
+/** Tells the agent which tools are not loaded (Graft's own under `graft`, then MCP servers'), so it knows what ToolSearch can bring in. */
 export function deferredToolsSection(servers: Array<{ server: string; count: number }> | undefined): string {
   if (!servers || servers.length === 0) return '';
   const list = servers.map((s) => `${s.server} (${String(s.count)} ${s.count === 1 ? 'tool' : 'tools'})`).join(', ');
+  const own = servers.some((s) => s.server === 'graft') ? " graft holds Graft's own tools beyond the core ones, such as sub-agents (Task) and several edits at once (MultiEdit)." : '';
   return [
     '# Tools you can load',
-    `These MCP tools are not loaded, to keep every request small: ${list}. When the task needs a capability they may have, call ToolSearch with a few words about it (or select:<tool name>); the matching tools are loaded for the rest of the session, and you call them by name.`
+    `These tools are not loaded, to keep every request small: ${list}.${own} When the task needs a capability they may have, call ToolSearch with a few words about it (or select:<tool name>); the matching tools are loaded for the rest of the session, and you call them by name.`
   ].join('\n');
 }
 
@@ -262,6 +265,40 @@ function personalizationSection(p: Personalization | null | undefined, styles: R
 }
 
 /**
+ * The prompt of a lean model: who it is, where it works, the essentials of how to work with
+ * the core tools, and the user's own notes, which stay whole because they are the user's
+ * instructions. Everything else is left out so a small window has room for the work.
+ */
+function leanCodePrompt(ctx: CodePromptContext, env: string): string {
+  const skills =
+    ctx.skills.length > 0
+      ? ['# Skills', 'Skills are instruction files for specialized tasks. When a task matches one, Read its SKILL.md first and follow it.', ...ctx.skills.map((s) => `- ${s.name} (${s.path})`)].join('\n')
+      : '';
+  const sections = [
+    `You are Graft, a coding agent running inside the Graft desktop app. You work in the user's project through tools, and the user approves the actions their settings require. ${identityLine(ctx.model)}`,
+    env,
+    lines(
+      '# How to work',
+      '- Own the task. Keep going until the request is fully handled: investigate, change, verify, report.',
+      '- Read before you change: the code involved, its callers and its tests. Follow how the project already does things.',
+      '- Stay in scope. Do what was asked, completely, and nothing more.',
+      "- Verify with the project's own checks (tests, type checker, linter, build). Never claim a check passed that you didn't run.",
+      "- Ask only when a decision is genuinely the user's, with AskUserQuestion. Otherwise choose the sensible default and say which you chose."
+    ),
+    lines(
+      '# Using tools',
+      '- Prefer the dedicated tools to Shell: Read to view files, Glob to find files by name, Grep to search contents, Edit to change a file and Write for a new one. Use Shell for builds, tests, git and other programs.',
+      '- Read a file before you Edit it.',
+      '- You have the core tools. For anything else, call ToolSearch with a few words about what you need; the tools it finds are loaded, and you call them by name.'
+    ),
+    notesSection(ctx.memory),
+    skills,
+    deferredToolsSection(ctx.deferredTools)
+  ];
+  return sections.filter((s) => s.length > 0).join('\n\n');
+}
+
+/**
  * System prompt for Code sessions. Built once per session and then kept
  * byte-for-byte stable (provider caches and thinking replay depend on it);
  * later changes such as a new permission mode arrive as conversation notes.
@@ -280,6 +317,7 @@ export function buildCodeSystemPrompt(ctx: CodePromptContext): string {
     `- Permission mode at session start: ${MODE_LABEL[ctx.mode]}. Mode changes arrive later as notes in the conversation.`,
     ctx.mcpServers.length > 0 ? `- Connected MCP servers: ${ctx.mcpServers.join(', ')} (their tools are named mcp__<server>__<tool>)` : null
   );
+  if (ctx.lean) return leanCodePrompt(ctx, env);
 
   const sections = [
     `You are Graft, a coding agent running inside the Graft desktop app. You work in the user's project the way a careful senior engineer would: reading and changing code, running commands, debugging, testing, reviewing and explaining. You act through tools; the user watches your work as it happens and approves the actions their settings require. ${identityLine(ctx.model)}`,

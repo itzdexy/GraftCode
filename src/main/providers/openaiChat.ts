@@ -3,7 +3,7 @@ import type { ProviderKind, Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { isLocalUrl } from '@shared/privacy';
-import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
+import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId, leanByDefault } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
 import { firstByteTimeout, flavorOf, loadedContexts } from './localServer';
@@ -478,6 +478,7 @@ export class OpenAiChatProvider implements LLMProvider {
     // A model on this computer without native tool calls is taught to write them as text.
     const toolFormat = custom?.toolFormat ?? (isLocalUrl(this.base) && !tools ? 'text' : undefined);
     if (toolFormat === 'text') tools = true;
+    const lean = custom?.prompt ? custom.prompt === 'lean' : leanByDefault(isLocalUrl(this.base), context);
     // Plain OpenAI-compatible servers only get the levels the catalog says the model accepts.
     const effort = catalogEffort(meta, {
       reasoning,
@@ -497,6 +498,7 @@ export class OpenAiChatProvider implements LLMProvider {
       maxOutputTokens: output,
       supportsTools: tools,
       ...(toolFormat === 'text' ? { toolFormat } : {}),
+      ...(lean ? { lean } : {}),
       supportsVision: vision,
       supportsWebSearch: false,
       effort,
