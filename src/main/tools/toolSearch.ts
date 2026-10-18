@@ -65,6 +65,10 @@ export function searchTools(tools: SearchableTool[], query: string, limit: numbe
     .map((s) => s.tool);
 }
 
+/** ToolSearch on a lean model, where Graft's own tools beyond the core ones wait as well as MCP tools. */
+export const TOOL_SEARCH_LEAN =
+  'Finds tools that are not loaded yet, Graft\'s own or those of the connected MCP servers, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.';
+
 const ToolSearchInput = z.object({
   query: z.string().min(1).max(200).describe('What you need a tool for, in a few words, or select:<tool name>[,<tool name>] to load tools by their exact names.'),
   max_results: z.number().int().min(1).max(20).optional().describe('At most this many tools are loaded (default 8).')
@@ -79,7 +83,7 @@ function firstLine(text: string): string {
 export const toolSearchTool: ToolDefinition<ToolSearchInput> = {
   name: 'ToolSearch',
   description:
-    'Finds tools that are not loaded yet, Graft\'s own or those of the connected MCP servers, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.',
+    'Finds tools of the connected MCP servers that are not loaded yet, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.',
   input: ToolSearchInput,
   permissionClass: 'none',
   concurrencySafe: () => false,

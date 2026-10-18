@@ -187,6 +187,19 @@ describe('what a model is offered', () => {
     expect(offering({ kind: 'chat', webSearch: true, searchEngine: 'exa' }).tools(model)).not.toContain('ToolSearch');
   });
 
+  it('sends MissionUpdate to a lean model while a mission is open, without making it wait', () => {
+    const model = fakeModel({ lean: true });
+    const subject = offering({ missionOpen: true });
+    expect(subject.tools(model)).toContain('MissionUpdate');
+    expect(subject.deferredEntries(model).map((t) => t.name)).not.toContain('MissionUpdate');
+    expect(offering().tools(model)).not.toContain('MissionUpdate');
+  });
+
+  it('tells a lean model that ToolSearch finds Graft’s own tools, and leaves a full model’s description alone', () => {
+    expect(offering().toolDescriptions(fakeModel({ lean: true })).ToolSearch).toMatch(/Graft's own/);
+    expect(offering().toolDescriptions(fakeModel())).toEqual({});
+  });
+
   it('offers a tool ToolSearch loaded on a lean model', () => {
     const model = fakeModel({ lean: true });
     const subject = offering({ hasBrowser: true });
@@ -218,7 +231,7 @@ describe('what a model is offered', () => {
   });
 
   it('describes RunAgents in a chat only', () => {
-    expect(Object.keys(offering({ kind: 'chat' }).toolDescriptions())).toEqual(['RunAgents']);
-    expect(offering().toolDescriptions()).toEqual({});
+    expect(Object.keys(offering({ kind: 'chat' }).toolDescriptions(fakeModel()))).toEqual(['RunAgents']);
+    expect(offering().toolDescriptions(fakeModel())).toEqual({});
   });
 });

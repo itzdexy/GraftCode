@@ -3,7 +3,7 @@ import type { MediaAccess } from '../media/mediaService';
 import { RUN_AGENTS_IN_CHAT } from '../tools/agentTools';
 import { CHAT_ONLY_TOOLS, LEAN_TOOLS } from '../tools/builtin';
 import type { ToolRegistry } from '../tools/registry';
-import type { SearchableTool } from '../tools/toolSearch';
+import { TOOL_SEARCH_LEAN, type SearchableTool } from '../tools/toolSearch';
 import type { SearchEngineId } from '../tools/web/search';
 import { estimateTextTokens } from './tokens';
 
@@ -13,6 +13,15 @@ const DEFER_MCP_TOKENS = 10_000;
 /** The server name ToolSearch and the prompt give the built-in tools a lean model waits for. */
 const GRAFT_SERVER = 'graft';
 const LEAN = new Set<string>(LEAN_TOOLS);
+
+/**
+ * Whether a lean model is sent this built-in from the start: the core tools, and a tool the
+ * session switches on for the work at hand (MissionUpdate while a mission is open), which the
+ * agent is told to call by name.
+ */
+function leanCore(name: string): boolean {
+  return LEAN.has(name) || name === 'MissionUpdate';
+}
 
 /** Web access a model is offered: a search its provider runs, a search Graft runs, and reading pages. */
 export interface WebAccess {
@@ -141,7 +150,7 @@ export class ModelOffering {
     // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
     const { offered } = this.splitMcp(this.mcpTools(model), model);
     const lean = this.lean(model);
-    const sent = lean ? builtins.filter((n) => LEAN.has(n) || this.loaded.has(n)) : builtins;
+    const sent = lean ? builtins.filter((n) => leanCore(n) || this.loaded.has(n)) : builtins;
     return [...sent, ...(lean || this.deferredAll ? ['ToolSearch'] : []), ...offered];
   }
 
@@ -184,9 +193,13 @@ export class ModelOffering {
         ];
   }
 
-  /** What a tool is in this session, where its own description is about another kind: in a chat a group of agents only researches. */
-  toolDescriptions(): Partial<Record<string, string>> {
-    return this.inputs().kind === 'chat' ? { RunAgents: RUN_AGENTS_IN_CHAT } : {};
+  /**
+   * What a tool is in this session, where its own description is about another kind: in a chat
+   * a group of agents only researches, and on a lean model ToolSearch also finds Graft's own tools.
+   */
+  toolDescriptions(model: ModelInfo): Partial<Record<string, string>> {
+    if (this.inputs().kind === 'chat') return { RunAgents: RUN_AGENTS_IN_CHAT };
+    return this.lean(model) ? { ToolSearch: TOOL_SEARCH_LEAN } : {};
   }
 
   /** The MCP tools this session can use: a code session's own and the user's, a chat's user-level ones, none in incognito. */
@@ -221,7 +234,7 @@ export class ModelOffering {
 
   /** The built-ins a lean model waits for; none for a full model. */
   private deferredBuiltins(model: ModelInfo): string[] {
-    return this.lean(model) ? this.builtins(model).filter((n) => !LEAN.has(n) && !this.loaded.has(n)) : [];
+    return this.lean(model) ? this.builtins(model).filter((n) => !leanCore(n) && !this.loaded.has(n)) : [];
   }
 
   /** Marks tools as loaded with ToolSearch, so this session offers them from its next request on. */

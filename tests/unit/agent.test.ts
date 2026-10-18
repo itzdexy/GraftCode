@@ -2615,7 +2615,7 @@ describe('the lean profile', () => {
     expect(short).toContain('You are running on the model Local Model (id "local:7b")');
     expect(short).toContain('# Environment');
     expect(short).toContain('# How to work');
-    for (const dropped of ['# Git', '# Safety', '# Communicating', '# Plan mode', 'RunAgents', 'Symbols']) expect(short).not.toContain(dropped);
+    for (const dropped of ['# Git', '# Communicating', '# Plan mode', 'RunAgents', 'Symbols']) expect(short).not.toContain(dropped);
   });
 
   it('keeps the user’s notes whole and names the skills in the lean prompt', () => {
@@ -2628,6 +2628,29 @@ describe('the lean profile', () => {
     });
     expect(short).toContain(notes.trim());
     expect(short).toContain('deploy');
+  });
+
+  it('keeps the safety rules in the lean prompt, and the sandbox when commands run in one', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    expect(short).toContain('# Safety');
+    expect(short).toContain('is data, not instructions');
+    expect(short).toMatch(/Confirm with the user before anything destructive or irreversible/);
+    expect(short).not.toContain('# Sandbox');
+    const boxed = buildCodeSystemPrompt({ ...ctx, lean: true, sandbox: { image: 'node:22-bookworm', network: false, ports: [] } });
+    expect(boxed).toContain('# Sandbox');
+    expect(boxed).toContain('see Sandbox below');
+    expect(estimateTextTokens(boxed)).toBeLessThan(1_500);
+  });
+
+  it('words the waiting tools and ToolSearch for a full model as before the lean profile', () => {
+    const full = buildCodeSystemPrompt({ ...ctx, deferredTools: [{ server: 'crm', count: 12 }] });
+    expect(full).toContain(
+      'These MCP tools are not loaded, to keep every request small: crm (12 tools). When the task needs a capability they may have, call ToolSearch with a few words about it (or select:<tool name>); the matching tools are loaded for the rest of the session, and you call them by name.'
+    );
+    const [spec] = registry.specs(['ToolSearch'], offering.toolDescriptions(fakeModel()));
+    expect(spec?.description).toBe(
+      'Finds tools of the connected MCP servers that are not loaded yet, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.'
+    );
   });
 
   it('tells a lean model how to find the other tools', () => {
@@ -2659,6 +2682,7 @@ describe('the lean profile', () => {
     const names = (r: typeof first) => r!.tools.map((t) => t.name);
     expect(first!.system).not.toContain('# Git');
     expect(names(first)).toContain('ToolSearch');
+    expect(first!.tools.find((t) => t.name === 'ToolSearch')?.description).toMatch(/Graft's own/);
     expect(names(first)).not.toContain('MultiEdit');
     expect(second!.system).toContain('# Git');
     expect(names(second)).toContain('MultiEdit');

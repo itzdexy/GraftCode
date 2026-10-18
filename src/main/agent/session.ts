@@ -1180,7 +1180,7 @@ export class AgentSession {
     const { model } = await this.resolveModel(new AbortController().signal);
     const measured = this.summary.usage.contextTokens;
     return {
-      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions()), messages: this.history() }),
+      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions(model)), messages: this.history() }),
       measured: measured > 0 ? measured : null,
       limit: model.contextWindow
     };
@@ -1340,7 +1340,7 @@ export class AgentSession {
           model,
           registry: this.deps.tools,
           toolNames,
-          toolDescriptions: this.offering.toolDescriptions(),
+          toolDescriptions: this.offering.toolDescriptions(model),
           system,
           effort,
           webSearch: this.offering.web(model).native,
