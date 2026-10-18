@@ -452,6 +452,26 @@ describe('OpenAI-style chat adapter', () => {
     expect(server.requests).toHaveLength(1);
   });
 
+  it.each(['', 'Not Found'])('names the model when the 404 says nothing more (%j)', async (body) => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end(body);
+    });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'gone' }, effort: null });
+    await expect(collect(provider.streamText(request({ model }), new AbortController().signal))).rejects.toThrow(/doesn't serve the model gone\./);
+  });
+
+  it("keeps the provider's own reason for a 404", async () => {
+    server.route('POST', '/api/v1/chat/completions', (_req, res) => json(res, 404, { error: { message: 'No endpoints found that support tool use.' } }));
+    const provider = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', preset: null, apiKey: 'k', baseUrl: `${server.url}/api/v1` });
+    const model = fakeModel({ ref: { providerId: 'o', modelId: 'vendor/model' }, effort: null });
+    await expect(collect(provider.streamText(request({ model }), new AbortController().signal))).rejects.toMatchObject({
+      code: 'not_found',
+      message: `Not found at ${new URL(server.url).host} (404): No endpoints found that support tool use.`
+    });
+  });
+
   it.each([
     { end: 'EOF', args: '{"path":"a.ts"}' },
     { end: '[DONE]', args: '{"path":"a.ts"}' },

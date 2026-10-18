@@ -33,6 +33,11 @@ const NON_CHAT_LIGHT = /(embed|whisper|tts|dall-e|moderation|rerank|transcri|tex
  * a tool loop reads the prefix the previous step wrote.
  */
 const BREAKPOINT_CACHING = /^~?anthropic\//;
+/**
+ * The end of a 404 error whose body gave no reason: it was empty, a web page (both leave the
+ * message ending at the status), or only said "Not Found" or "404 page not found".
+ */
+const BARE_404 = /\(404\)(?:\.|: (?:404 )?(?:page )?not found\.?)$/i;
 
 /**
  * Size hints for OpenAI models the catalog doesn't know, keyed by id prefix;
@@ -564,9 +569,10 @@ export class OpenAiChatProvider implements LLMProvider {
           yield* this.streamResponses(req, signal);
           return;
         }
-        // A 404 from chat completions means the server doesn't have this model, and its own text
-        // ("404 page not found") says nothing about which model or what to do.
-        if (error instanceof ProviderError && error.code === 'not_found') {
+        // A bare 404 from chat completions means the server doesn't have this model, and its own text
+        // ("404 page not found") says nothing about which model or what to do. A 404 that gives a reason
+        // (OpenRouter's "No endpoints found that support tool use.") keeps it.
+        if (error instanceof ProviderError && error.code === 'not_found' && BARE_404.test(error.message)) {
           throw new ProviderError(
             'not_found',
             `${hostOf(this.base)} doesn't serve the model ${modelId}. Pick another model, or refresh the list in Settings → Models.`,
