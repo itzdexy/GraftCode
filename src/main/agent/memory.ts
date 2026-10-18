@@ -42,30 +42,44 @@ export function memoryFileIn(dir: string): string | null {
  * The project's Cursor rules: the `.cursor/rules/*.mdc` files marked `alwaysApply: true`, in name order,
  * else the older single `.cursorrules` file. Rules scoped by globs or left to the model's choice are
  * skipped, because Graft has no way to honour those conditions.
+ *
+ * These are another tool's files and optional, so any file or folder that can't be read (locked, denied,
+ * deleted mid-read, a dangling link) is skipped rather than allowed to stop the session from starting.
  */
 export function cursorRules(dir: string): MemoryFile | null {
   const rulesDir = path.join(dir, '.cursor', 'rules');
   let names: string[] = [];
   try {
     names = fs
-      .readdirSync(rulesDir, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.mdc'))
-      .map((e) => e.name)
+      .readdirSync(rulesDir)
+      .filter((name) => name.toLowerCase().endsWith('.mdc'))
       .sort();
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+  } catch {
+    names = [];
   }
   const bodies: string[] = [];
   for (const name of names) {
+    const text = readOptional(path.join(rulesDir, name));
+    if (text === null) continue;
     // parseFrontmatter lowercases keys, so `alwaysApply` arrives as `alwaysapply`.
-    const { data, body } = parseFrontmatter(fs.readFileSync(path.join(rulesDir, name), 'utf8'));
+    const { data, body } = parseFrontmatter(text);
     if (data.alwaysapply === 'true' && body.trim()) bodies.push(body.trim());
   }
   if (bodies.length > 0) return { path: rulesDir, scope: 'project', content: cap(bodies.join('\n\n')) };
   const legacy = path.join(dir, '.cursorrules');
-  const content = readCapped(legacy);
+  const text = readOptional(legacy);
+  const content = text === null ? '' : cap(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   return content ? { path: legacy, scope: 'project', content } : null;
+}
+
+/** A regular file's text, following links; null for anything missing, unreadable or not a file. */
+function readOptional(file: string): string | null {
+  try {
+    if (!fs.statSync(file).isFile()) return null;
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /**

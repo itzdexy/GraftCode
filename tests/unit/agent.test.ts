@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderError } from '../../src/main/providers/errors';
 import { OpenAiChatProvider } from '../../src/main/providers/openaiChat';
 import { modelOrder, toLlmHistory } from '../../src/main/agent/history';
@@ -2754,6 +2754,20 @@ describe('the lean profile', () => {
   });
 });
 
+/** Windows lets only privileged or Developer Mode accounts create symbolic links, so the link test checks first. */
+const canSymlinkFiles = ((): boolean => {
+  const dir = makeTempDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'target'), '');
+    fs.symlinkSync(path.join(dir, 'target'), path.join(dir, 'link'), 'file');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    removeDir(dir);
+  }
+})();
+
 describe('project notes from other tools', () => {
   const dirs: string[] = [];
   function project(files: Record<string, string>): { home: string; root: string; notes: () => ReturnType<MemoryLoader['initial']> } {
@@ -2764,6 +2778,7 @@ describe('project notes from other tools', () => {
     return { home, root, notes: () => new MemoryLoader(home, root).initial(root) };
   }
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of dirs.splice(0)) removeDir(dir);
   });
 
@@ -2812,5 +2827,56 @@ describe('project notes from other tools', () => {
     const content = p.notes()[0]!.content;
     expect(content.endsWith('\n… [truncated]')).toBe(true);
     expect(content.length).toBe(40_000 + '\n… [truncated]'.length);
+  });
+
+  function failReading(file: string, code: string): void {
+    const real = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (typeof target === 'string' && path.resolve(target) === path.resolve(file)) throw Object.assign(new Error(`${code}: locked`), { code });
+      return (real as (...args: unknown[]) => unknown)(target, ...rest);
+    }) as typeof fs.readFileSync);
+  }
+
+  it('skips a Cursor rule that cannot be read and keeps the others', () => {
+    const p = project({
+      '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nLocked rule.',
+      '.cursor/rules/b.mdc': '---\nalwaysApply: true\n---\nReadable rule.'
+    });
+    failReading(path.join(p.root, '.cursor', 'rules', 'a.mdc'), 'EBUSY');
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'Readable rule.' }]);
+  });
+
+  it('skips a .cursorrules that cannot be read', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursorrules': 'Denied.' });
+    failReading(path.join(p.root, '.cursorrules'), 'EACCES');
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads no Cursor rules when the rules folder cannot be listed', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nHidden.' });
+    const real = fs.readdirSync;
+    const rulesDir = path.join(p.root, '.cursor', 'rules');
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((target: fs.PathLike, ...rest: unknown[]) => {
+      if (typeof target === 'string' && path.resolve(target) === rulesDir) throw Object.assign(new Error('EACCES: denied'), { code: 'EACCES' });
+      return (real as (...args: unknown[]) => unknown)(target, ...rest);
+    }) as typeof fs.readdirSync);
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads no Cursor rules when .cursor/rules is a file, not a folder', () => {
+    const p = project({ '.cursor/rules': 'not a folder', 'AGENTS.md': 'From agents.' });
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('skips a folder whose name ends in .mdc', () => {
+    const p = project({ '.cursor/rules/x.mdc/inner.md': 'Inside a folder.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nReal rule.' });
+    expect(p.notes()[0]?.content).toBe('Real rule.');
+  });
+
+  it.skipIf(!canSymlinkFiles)('follows a Cursor rule that is a symbolic link (skipped: this account cannot create symbolic links)', () => {
+    const p = project({ 'shared/style.mdc': '---\nalwaysApply: true\n---\nLinked rule.', '.cursor/rules/keep.txt': '' });
+    fs.symlinkSync(path.join(p.root, 'shared', 'style.mdc'), path.join(p.root, '.cursor', 'rules', 'style.mdc'), 'file');
+    fs.symlinkSync(path.join(p.root, 'shared', 'gone.mdc'), path.join(p.root, '.cursor', 'rules', 'dangling.mdc'), 'file');
+    expect(p.notes()[0]?.content).toBe('Linked rule.');
   });
 });
