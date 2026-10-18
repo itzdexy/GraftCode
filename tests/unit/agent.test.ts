@@ -2753,3 +2753,64 @@ describe('the lean profile', () => {
     expect(searchTools(entries, 'browser', 3)[0]?.name).toBe('Browser');
   });
 });
+
+describe('project notes from other tools', () => {
+  const dirs: string[] = [];
+  function project(files: Record<string, string>): { home: string; root: string; notes: () => ReturnType<MemoryLoader['initial']> } {
+    const home = makeTempDir();
+    const root = makeTempDir();
+    dirs.push(home, root);
+    for (const [name, content] of Object.entries(files)) writeFile(root, name, content);
+    return { home, root, notes: () => new MemoryLoader(home, root).initial(root) };
+  }
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) removeDir(dir);
+  });
+
+  it('reads GEMINI.md when it is the only instruction file', () => {
+    const p = project({ 'GEMINI.md': 'Use tabs.' });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, 'GEMINI.md'), scope: 'project', content: 'Use tabs.' }]);
+  });
+
+  it('reads only the first instruction file found, so AGENTS.md wins over GEMINI.md', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', 'GEMINI.md': 'From gemini.' });
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads Cursor rules that always apply, without their front matter, and skips the others', () => {
+    const p = project({
+      '.cursor/rules/a.mdc': '---\ndescription: Style\nalwaysApply: true\n---\nPrefer named exports.\n',
+      '.cursor/rules/b.mdc': '---\nalwaysApply: false\nglobs: "*.ts"\n---\nOnly for TypeScript.\n',
+      '.cursor/rules/c.mdc': 'No front matter at all.\n'
+    });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'Prefer named exports.' }]);
+  });
+
+  it('joins several Cursor rules in name order', () => {
+    const p = project({
+      '.cursor/rules/2-tests.mdc': '---\nalwaysApply: true\n---\nWrite a test first.',
+      '.cursor/rules/1-style.mdc': '---\nalwaysApply: true\n---\nPrefer named exports.'
+    });
+    expect(p.notes()[0]?.content).toBe('Prefer named exports.\n\nWrite a test first.');
+  });
+
+  it('reads .cursorrules when there are no Cursor rules that always apply', () => {
+    const p = project({ '.cursorrules': 'Answer briefly.' });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursorrules'), scope: 'project', content: 'Answer briefly.' }]);
+  });
+
+  it('reads Cursor rules in addition to AGENTS.md, as their own entry', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nFrom cursor.' });
+    expect(p.notes()).toEqual([
+      { path: path.join(p.root, 'AGENTS.md'), scope: 'project', content: 'From agents.' },
+      { path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'From cursor.' }
+    ]);
+  });
+
+  it('caps joined Cursor rules at 40,000 characters', () => {
+    const p = project({ '.cursor/rules/a.mdc': `---\nalwaysApply: true\n---\n${'x'.repeat(30_000)}`, '.cursor/rules/b.mdc': `---\nalwaysApply: true\n---\n${'y'.repeat(30_000)}` });
+    const content = p.notes()[0]!.content;
+    expect(content.endsWith('\n… [truncated]')).toBe(true);
+    expect(content.length).toBe(40_000 + '\n… [truncated]'.length);
+  });
+});
