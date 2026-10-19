@@ -1273,4 +1273,34 @@ Not verified:
 
 Branch `feat/local-models`, on top of 0.6.34, local: nothing was pushed and no release was made.
 
-Pending: verification runs after review.
+Built task by task, each task reviewed on its own, then a whole-branch review and one fix wave
+(nine commits). Verified on `2a2987d`.
+
+- **Windows, `npm run verify`:** exit 0 in 554 s. Typecheck, lint, unit (1,691 passed, 73 skipped),
+  build, and the desktop suite (84 passed, 6 skipped). No flakes this run.
+- **Linux, `npm run verify:docker`:** exit 0 in 611 s; typecheck, lint, unit, build and e2e all 0.
+  Unit 1,684 passed, 80 skipped; desktop 84 passed, 6 skipped. The symlinked-Cursor-rule test, which
+  this Windows account can't run, ran here.
+- **First Windows run, on `4e5cfb4`, failed 14 desktop tests,** all from the lean profile: the test
+  server runs on localhost and reports no window, so every test session got the short prompt and core
+  tools. On the base `8d02fa2` the same specs passed 24/24. Fixed in `2a2987d`: a local model is lean
+  only when its window is known, and the lean prompt keeps the site brief and personalization.
+- **Package, `npm run dist:win`, on `4622347`** (`2a2987d` plus the What's new wording):
+  `dist/Graft-Setup-0.6.35.exe`, 126,217,783 bytes, SHA-256
+  `8378a16bbbf21cd6ce35faf2c5e65cf7431df58a7508c98576567ba95c2a6c37`. `app.asar` holds 122 top-level
+  packages, the same count as 0.6.34's by the same method.
+- **A broken installer was built first and deleted.** The worktree's `node_modules` was a junction to
+  another worktree's, npm couldn't read the tree through it, and electron-builder left out 113
+  packages. The app then opened no window. It was replaced with a real copy of the same
+  `node_modules` before the build above. Lesson: never package from a worktree whose `node_modules`
+  is a junction.
+- **Packaged smoke test, `packaged.spec.ts`:** 3 passed (15.4 s) on the installer above: onboarding,
+  a session with SQLite, ripgrep and the terminal, Settings, and a diagram drawn with the bundled
+  skill and fonts.
+- **No database migration:** the schema is still 9, so installing 0.6.35 over 0.6.34 is not one-way.
+
+Not run:
+- A live check against a real local model. Ollama is installed on this computer but has no model
+  downloaded, and a download is the user's call. The adapters were tested against stub servers that
+  answer as Ollama, llama.cpp, LM Studio and vLLM do.
+- macOS.
