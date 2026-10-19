@@ -49,11 +49,15 @@ added (`providers:detectLocal`).
   text, and that model stays in text while Graft runs. The turn loop does not change: a finished
   reply's blocks, not its streamed deltas, are what is stored (`agent/loop.ts`).
 - **The lean profile** (`agent/offering.ts`, `tools/builtin.ts` `LEAN_TOOLS`, the code prompt). A local
-  model (by `isLocalUrl`, Ollama's hosted models excepted) with a window of 65,536 tokens or less gets
-  a short code prompt and AskUserQuestion, Edit, ExitPlanMode, Glob, Grep, KillShell, Read, Shell,
-  ShellOutput, TodoWrite, WebFetch and Write, plus ToolSearch. The other built-ins wait behind
+  model (by `isLocalUrl`, Ollama's hosted models excepted) whose window is known to be 65,536 tokens or
+  less gets a short code prompt. Known means its server reported the loaded window, the user set one,
+  its trained length is that small, or it runs in Ollama, where Graft sets `num_ctx` itself; a local
+  server that reports nothing gets the full profile. A lean model is offered AskUserQuestion, Edit,
+  ExitPlanMode, Glob, Grep, KillShell, Read, Shell, ShellOutput, TodoWrite, WebFetch and Write, plus
+  ToolSearch. The other built-ins wait behind
   ToolSearch under the server name `graft`, with the session's MCP tools. The lean prompt keeps every
-  safety rule of the full one in fewer words, and the Sandbox section when a sandbox is on; a lean
+  safety rule of the full one in fewer words, the Sandbox section when a sandbox is on, the site brief
+  and the user's personalization; a lean
   model in a mission is sent MissionUpdate. Switching between a lean and a full model sends the
   matching prompt and tools on the next request. Modelled on Cline's compact prompt for local models;
   Roo Code's users, who never got one, hit 300 s timeouts. The 28 built-in schemas weigh about 8,750
