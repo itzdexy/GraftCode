@@ -62,7 +62,7 @@ test('an edit turn asks for approval, applies the change and shows it in the tra
   await expect(w.getByRole('button', { name: /^Edited notes\.txt(?!,)/ })).toBeVisible();
   await expect(w.getByRole('button', { name: /^Read notes\.txt/ })).toBeVisible();
 
-  // The status bar shows the branch and the diff counts.
+  // The diff counts and Create PR: in the details column while it is open, in the status bar under the transcript otherwise.
   await expect(w.getByRole('img', { name: '1 line added, 1 removed' })).toBeVisible();
   await expect(w.getByRole('button', { name: 'Create PR' })).toBeVisible();
 

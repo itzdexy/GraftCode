@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } from '@shared/schemas/common';
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
@@ -171,8 +172,10 @@ export interface SessionDeps {
   /** Shows the Browser panel in a session's view, when the agent opens a page there. */
   revealBrowser?(sessionId: string): void;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
-  /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
-  checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
+  /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. `signal` ends it early. */
+  checkpoint(sessionId: string, cwd: string, messageId: string, signal?: AbortSignal): Promise<string | null>;
+  /** How long a turn waits for its folder's snapshot, and closing a session for its turn (defaults CHECKPOINT_BUDGET_MS, DISPOSE_WAIT_MS); tests shorten them. */
+  timings?: { checkpointMs?: number; disposeMs?: number };
   emit(sessionId: string, event: AgentEvent): void;
   notify(summary: SessionSummary, kind: 'needs-input' | 'finished' | 'error', text: string): void;
   generateTitle(summary: SessionSummary, firstText: string): void;
@@ -199,6 +202,14 @@ const MODE_CYCLE: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
 /** Removing old tool output counts as enough when the context falls to this share of the window; otherwise the session summarizes. */
 const PRUNE_TARGET = 0.6;
 const DEFAULT_TITLES = new Set(['New session', 'New chat']);
+
+/** How long a turn waits for the snapshot of its folder before it goes on without one. */
+export const CHECKPOINT_BUDGET_MS = 20_000;
+/** How long closing a session waits for its turn to end. */
+export const DISPOSE_WAIT_MS = 8_000;
+/** Folders whose snapshot ran past the budget in this run of Graft: they are not snapshotted again until it restarts. */
+const TOO_LARGE_TO_SNAPSHOT = new Set<string>();
+const folderKey = (folder: string): string => (process.platform === 'win32' ? path.resolve(folder).toLowerCase() : path.resolve(folder));
 
 /**
  * One conversation and its agent runtime. Turns run one at a time; input
@@ -238,6 +249,12 @@ export class AgentSession {
   private ranTurn = false;
   /** Whether this runtime has said that nothing checks the project's changes (see sayUnchecked). */
   private saidUnchecked = false;
+  /** Whether this runtime has said that its folder gets no checkpoints (see takeCheckpoint). */
+  private checkpointSkipSaid = false;
+  /** Snapshots still being taken: one can outlast the reply it was taken for. */
+  private readonly snapshots = new Set<Promise<void>>();
+  /** Aborted when the session closes, which ends a snapshot that outlasted its turn. */
+  private readonly closing = new AbortController();
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
 
@@ -642,8 +659,19 @@ export class AgentSession {
     // keep writing to a session that is being removed.
     this.disposed = true;
     this.interrupt();
+    this.closing.abort();
     for (const aside of this.asides.values()) aside.abort();
-    await this.idle();
+    // A turn caught in something that doesn't hear the stop must not keep its session from being deleted, or the
+    // app from closing: after DISPOSE_WAIT_MS the session is let go and the turn is left to end on its own.
+    let timer: NodeJS.Timeout | undefined;
+    const ended = await Promise.race([
+      this.idle().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.deps.timings?.disposeMs ?? DISPOSE_WAIT_MS);
+      })
+    ]);
+    clearTimeout(timer);
+    if (!ended) this.deps.log('warn', 'A turn did not end when its session was closed', { session: this.id });
     this.flushDeltas();
     await this.deps.shells.disposeSession(this.id);
   }
@@ -732,9 +760,68 @@ export class AgentSession {
     }
   }
 
-  /** Waits for the current turn, and for any turn it hands off to (tests and shutdown). */
+  /** Waits for the current turn, for any turn it hands off to, and for a snapshot that outlasted its turn (tests and shutdown). */
   async idle(): Promise<void> {
-    while (this.running) await this.running.catch(() => undefined);
+    while (this.running || this.snapshots.size > 0) {
+      if (this.running) await this.running.catch(() => undefined);
+      else await Promise.all(this.snapshots);
+    }
+  }
+
+  /**
+   * Starts the snapshot of a user turn and names it on the message once taken. It ends with the turn's Stop and when
+   * the session closes; otherwise it may go on after a reply in words, and the next snapshot waits for it.
+   */
+  private startSnapshot(messageId: string, signal: AbortSignal): Promise<void> {
+    const taking = this.takeCheckpoint(messageId, AbortSignal.any([signal, this.closing.signal])).then((checkpointId) => {
+      if (!checkpointId || this.disposed) return;
+      try {
+        this.emit({ type: 'message', message: this.deps.store.updateMessageMeta(messageId, { checkpointId }) });
+      } catch (error) {
+        this.deps.log('warn', 'Could not name a checkpoint on its message', { session: this.id, message: (error as Error).message });
+      }
+    });
+    this.snapshots.add(taking);
+    void taking.finally(() => this.snapshots.delete(taking));
+    return taking;
+  }
+
+  /**
+   * The snapshot a user turn starts from, for Rewind. It gets CHECKPOINT_BUDGET_MS: a folder that takes longer
+   * (a whole Downloads folder, a drive) gets no checkpoint for the rest of this run of Graft, and the turn goes on
+   * without one and says so. Stopping the turn ends the snapshot at once.
+   */
+  private async takeCheckpoint(messageId: string, signal: AbortSignal): Promise<string | null> {
+    const folder = this.workingDir();
+    const name = path.basename(folder) || folder;
+    if (TOO_LARGE_TO_SNAPSHOT.has(folderKey(folder))) {
+      if (!this.checkpointSkipSaid) {
+        this.checkpointSkipSaid = true;
+        this.notice('warning', `No checkpoints in ${name}: it is too large to snapshot before each turn, so Rewind can't restore its files. Open a project's own folder to have them.`);
+      }
+      return null;
+    }
+    const budget = new AbortController();
+    const budgetMs = this.deps.timings?.checkpointMs ?? CHECKPOINT_BUDGET_MS;
+    const timer = setTimeout(() => budget.abort(new Error('checkpoint budget')), budgetMs);
+    try {
+      return await this.deps.checkpoint(this.id, folder, messageId, AbortSignal.any([signal, budget.signal]));
+    } catch (error) {
+      if (signal.aborted) return null;
+      if (budget.signal.aborted) {
+        TOO_LARGE_TO_SNAPSHOT.add(folderKey(folder));
+        this.checkpointSkipSaid = true;
+        this.notice(
+          'warning',
+          `No checkpoint for this turn: ${name} took longer than ${String(Math.round(budgetMs / 1000))} seconds to snapshot, so Rewind can't restore its files. Graft won't try again in this folder until it restarts; open a project's own folder to have checkpoints.`
+        );
+        return null;
+      }
+      this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
@@ -1044,7 +1131,8 @@ export class AgentSession {
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,
-        media: this.offering.media(model)
+        media: this.offering.media(model),
+        lean: model.lean === true
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -1059,7 +1147,8 @@ export class AgentSession {
       mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
       mcpNotes: summary.incognito ? [] : this.deps.mcpInstructions(null),
       deferredTools: this.offering.deferredByServer(model),
-      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null
+      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null,
+      videos: this.offering.chatWork(model).files ? this.offering.media(model).video : null
     });
   }
 
@@ -1078,7 +1167,7 @@ export class AgentSession {
     const { model, ref } = await this.resolveModel(new AbortController().signal);
     const tools = this.offering.tools(model);
     const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
-    if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
+    if (this.system && this.modelKey === this.promptModelKey(ref, model)) return { system: this.system, tools, model: label };
     return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
   }
 
@@ -1091,10 +1180,15 @@ export class AgentSession {
     const { model } = await this.resolveModel(new AbortController().signal);
     const measured = this.summary.usage.contextTokens;
     return {
-      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions()), messages: this.history() }),
+      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions(model)), messages: this.history() }),
       measured: measured > 0 ? measured : null,
       limit: model.contextWindow
     };
+  }
+
+  /** What the session's prompt was built for: the model, and whether it got the lean prompt (Settings can change that for the same model). */
+  private promptModelKey(ref: ModelRef, model: ModelInfo): string {
+    return `${ref.providerId}:${ref.modelId}${model.lean === true ? ':lean' : ''}`;
   }
 
   /**
@@ -1172,6 +1266,7 @@ export class AgentSession {
 
       let userText: string | null = null;
       let starting: Mission | null = null;
+      let snapshot: Promise<void> | null = null;
       const missionTurn = item?.mission;
       if (missionTurn && missionTurn.kind !== 'start') {
         // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
@@ -1195,30 +1290,26 @@ export class AgentSession {
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (!(await this.promptAllowed(hooks, userText, signal))) return;
         const userMessageId = randomUUID();
-        let checkpointId: string | null = null;
-        if (summary.kind === 'code') {
-          try {
-            checkpointId = await this.deps.checkpoint(this.id, this.workingDir(), userMessageId);
-          } catch (error) {
-            this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);
-          }
-        }
         const content = this.userContent(item, userText);
         // The transcript shows what was typed; notes and attachments travel only to the model.
         const meta: MessageMeta = {
           turnId,
           typed: handled.typed ?? item.text,
-          ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}),
-          ...(checkpointId ? { checkpointId } : {})
+          ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {})
         };
+        // The message is saved and shown at once. The folder's snapshot follows, and nothing is changed before it is
+        // taken: a large folder used to keep the message unseen, and the turn unstoppable, for as long as it took.
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
         this.emit({ type: 'message', message: stored });
         // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
         if (starting) this.missions.save({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
+        // The snapshot Rewind goes back to is taken while the model starts answering: a reply in words never waits
+        // for it, and nothing that changes a file runs before it is taken (the loop's beforeChange).
+        if (summary.kind === 'code') snapshot = this.startSnapshot(userMessageId, signal);
       }
 
       const { provider, model, ref } = await this.resolveModel(signal);
-      const key = `${ref.providerId}:${ref.modelId}`;
+      const key = this.promptModelKey(ref, model);
       if (this.modelKey !== null && this.modelKey !== key) {
         this.markThinkingStale();
         this.system = null;
@@ -1235,10 +1326,12 @@ export class AgentSession {
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
       const scope: TurnScope = { hooks, root, trusted };
+      const taken = snapshot;
       const host: LoopHost = {
         ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),
         takeSteering: (s) => this.deliverSteering(turnId, hooks, s),
-        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined
+        checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined,
+        ...(taken ? { beforeChange: () => taken } : {})
       };
       const result = await runAgentLoop(
         this.history(),
@@ -1247,7 +1340,7 @@ export class AgentSession {
           model,
           registry: this.deps.tools,
           toolNames,
-          toolDescriptions: this.offering.toolDescriptions(),
+          toolDescriptions: this.offering.toolDescriptions(model),
           system,
           effort,
           webSearch: this.offering.web(model).native,
@@ -1295,9 +1388,27 @@ export class AgentSession {
     } finally {
       // A turn that failed between a tool and its answer: what the tool returned is put into the conversation now.
       this.reconcile('failed');
+      if (endReason === 'interrupted') this.sayStopped(turnId);
       this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
+    }
+  }
+
+  /**
+   * A turn stopped before the model said a word says so under the message, as a reply cut short does: otherwise
+   * the message sits there unanswered, with nothing to tell what happened to it. The model never sees the note.
+   */
+  private sayStopped(turnId: string): void {
+    // A session being closed or deleted has no one to tell.
+    if (this.disposed) return;
+    try {
+      const last = this.deps.store.listMessages(this.id).at(-1);
+      if (last?.role !== 'user' || last.content.some((b) => b.type === 'tool_result')) return;
+      const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text: 'Stopped.' }], { kind: 'notice', turnId });
+      this.emit({ type: 'message', message: stored });
+    } catch (error) {
+      this.deps.log('error', 'Could not note a stopped turn', { session: this.id, message: (error as Error).message });
     }
   }
 
@@ -1444,11 +1555,11 @@ export class AgentSession {
     this.emit({ type: 'mode', permissionMode: mode });
   }
 
-  /** ToolSearch's view of the MCP tools still waiting; null when the session sends them all. */
+  /** ToolSearch's view of the tools still waiting (a lean model's built-ins, MCP tools); null when the session sends them all. */
   private deferredTools(model: ModelInfo): ToolContext['deferredTools'] {
-    if (!this.offering.deferring) return null;
+    if (!this.offering.deferring(model)) return null;
     return {
-      find: (query, limit) => searchTools(this.offering.deferredEntries(), query, limit),
+      find: (query, limit) => searchTools(this.offering.deferredEntries(model), query, limit),
       load: (names) => {
         this.offering.load(names);
         for (const name of names) {

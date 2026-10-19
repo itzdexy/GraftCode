@@ -45,7 +45,7 @@ import {
 } from '../schemas/panels';
 import { FileAttachmentSchema, ImageBlockSchema } from '../schemas/messages';
 import { MISSION_LIMITS, MissionStartSchema } from '../schemas/missions';
-import { CustomModelSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
+import { CustomModelSchema, DetectedServerSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
 import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
@@ -131,6 +131,39 @@ export const ProviderModelsSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).nullable()
 });
 
+/** What a media model makes: pictures, clips, a voice, music and sound, or text from speech. */
+export const MEDIA_MODEL_KINDS = ['image', 'video', 'speech', 'audio', 'transcription'] as const;
+export const MediaModelKindSchema = z.enum(MEDIA_MODEL_KINDS);
+export type MediaModelKind = z.infer<typeof MediaModelKindSchema>;
+
+export const MediaModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: MediaModelKindSchema,
+  description: z.string().nullable(),
+  /** Unix seconds, when the provider says. */
+  created: z.number().nullable(),
+  /** Video: the lengths in seconds and the shapes it makes, and whether a picture can be its first frame. */
+  durations: z.array(z.number()).optional(),
+  aspects: z.array(z.string()).optional(),
+  firstFrame: z.boolean().optional(),
+  /** Video: USD for a second at its cheapest setting, when priced per second. */
+  pricePerSecond: z.number().nullable().optional(),
+  /** Speech: the voices it speaks with. */
+  voices: z.array(z.string()).optional()
+});
+export type MediaModel = z.infer<typeof MediaModelSchema>;
+
+/** The media models of one provider, or why they couldn't be listed. */
+export const ProviderMediaModelsSchema = z.object({
+  providerId: z.string(),
+  providerLabel: z.string(),
+  providerKind: z.string(),
+  models: z.array(MediaModelSchema),
+  error: z.string().nullable()
+});
+export type ProviderMediaModels = z.infer<typeof ProviderMediaModelsSchema>;
+
 export const CreateSessionInputSchema = z.object({
   kind: SessionKindSchema,
   projectPath: PathSchema.nullable(),
@@ -202,6 +235,7 @@ export const contracts = {
   // Providers & models
   'providers:list': channel(Void, z.array(ProviderSummarySchema)),
   'providers:presets': channel(Void, z.array(ProviderPresetSchema)),
+  'providers:detectLocal': channel(Void, z.array(DetectedServerSchema)),
   'catalog:status': channel(Void, CatalogSyncStatusSchema),
   'catalog:refresh': channel(Void, CatalogSyncStatusSchema),
   'providers:verify': channel(
@@ -238,6 +272,7 @@ export const contracts = {
   'providers:setDefault': channel(z.object({ id: IdSchema }), Ok),
   'providers:test': channel(z.object({ id: IdSchema }), VerifyResultSchema),
   'models:list': channel(z.object({ refresh: z.boolean() }), z.array(ProviderModelsSchema)),
+  'models:media': channel(z.object({ refresh: z.boolean() }), z.array(ProviderMediaModelsSchema)),
   'secrets:status': channel(Void, z.object({ encryptionAvailable: z.boolean(), plaintextAllowed: z.boolean() })),
 
   // Projects & git info
@@ -256,7 +291,7 @@ export const contracts = {
   'git:branches': channel(z.object({ path: PathSchema }), BranchListSchema),
   'git:diffStats': channel(z.object({ sessionId: IdSchema }), DiffStatsSchema),
   'git:status': channel(z.object({ sessionId: IdSchema }), GitStatusSchema),
-  'git:fileDiff': channel(z.object({ sessionId: IdSchema, path: PathSchema, staged: z.boolean() }), FileDiffSchema),
+  'git:fileDiff': channel(z.object({ sessionId: IdSchema, path: PathSchema, staged: z.boolean(), ignoreWhitespace: z.boolean().optional() }), FileDiffSchema),
   'git:stage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
   'git:unstage': channel(z.object({ sessionId: IdSchema, paths: z.array(PathSchema).min(1).max(5000) }), Ok),
   /** Discards working-tree changes. Destructive: the renderer confirms with the user first. */
@@ -355,6 +390,8 @@ export const contracts = {
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
   /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */
   'files:open': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
+  /** A 3D model from the session's folder (or a buffer or texture a .gltf loads beside it), as bytes for the viewer. */
+  'files:modelBytes': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.instanceof(Uint8Array)),
   /** Puts a picture from the session's folder on the clipboard, as a picture. */
   'files:copyImage': channel(z.object({ sessionId: IdSchema, path: PathSchema }), Void),
   /** An address that shows one diagram of the session (a page the tools marked as one, and nothing beside it) and lets it tell its frame how large it is. */

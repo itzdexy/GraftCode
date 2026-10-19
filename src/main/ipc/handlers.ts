@@ -35,7 +35,7 @@ import { localServers } from '../browser/servers';
 import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
-import { diagramFile, listDirectory, mediaFile, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { diagramFile, listDirectory, mediaFile, modelBytes, openableFile, readPreview, savePreview } from '../files/fileTree';
 import { searchText } from '../files/textSearch';
 import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
@@ -45,6 +45,8 @@ import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
 import { canOpen } from '../chat/chatFiles';
 import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
+import { mediaModelsOf, type MediaSourceKind } from '../media/mediaModels';
+import type { ProviderMediaModels } from '@shared/ipc/contracts';
 import { DEFAULT_IMAGE_MODEL } from '../media/images';
 import type { MediaService } from '../media/mediaService';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
@@ -56,6 +58,7 @@ import { findCommand, integrationSetup, integrationStatus } from '../mcp/integra
 import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
+import { detectLocalServers, newServers, type Candidate } from '../providers/localServer';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
 import { mcpPromptCommand, promptHint } from '../mcp/names';
 import type { SessionManager } from '../agent/sessionManager';
@@ -145,6 +148,16 @@ function verifyError(error: unknown): VerifyResult {
   return { ok: false, code: 'unknown', message: error instanceof Error ? error.message : String(error) };
 }
 
+/**
+ * The ports to search in a desktop test: the stub servers named in GRAFT_LOCAL_PORTS, and none when it is unset,
+ * so a test never finds a model server the developer happens to be running. Null outside tests.
+ */
+function testCandidates(): Candidate[] | null {
+  if (process.env.GRAFT_E2E !== '1') return null;
+  const ports = (process.env.GRAFT_LOCAL_PORTS ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  return ports.map((port) => ({ name: 'OpenAI-compatible server', port, kind: 'openai-compatible', preset: null, path: 'v1/models' }));
+}
+
 /** What Settings → Web search shows; key values never leave the main process. */
 /** The user's OpenRouter key on OpenRouter's own endpoint, for natural voices; null when there is none. */
 function openRouterAccess(s: Services): SpeechAccess | null {
@@ -157,6 +170,40 @@ function openRouterAccess(s: Services): SpeechAccess | null {
     apiKey = null;
   }
   return apiKey ? { apiKey, baseUrl: provider.baseUrl } : null;
+}
+
+const MEDIA_SOURCES: readonly string[] = ['openrouter', 'openai', 'gemini', 'openai-compatible'] satisfies MediaSourceKind[];
+const MEDIA_TTL_MS = 30 * 60_000;
+const mediaCache = new Map<string, { at: number; value: ProviderMediaModels }>();
+
+/**
+ * The image, video, voice, music and transcription models of each provider that is set up, for Settings → Models;
+ * a provider whose list can't be read says why. Lists are kept for half an hour unless asked again.
+ */
+async function mediaModelsList(s: Services, refresh: boolean): Promise<ProviderMediaModels[]> {
+  const providers = s.registry.summaries().filter((p) => p.enabled && MEDIA_SOURCES.includes(p.kind) && (p.hasKey || p.kind === 'openai-compatible'));
+  return Promise.all(
+    providers.map(async (p): Promise<ProviderMediaModels> => {
+      let apiKey: string | null;
+      try {
+        apiKey = s.keys.get(p.id);
+      } catch {
+        apiKey = null;
+      }
+      const key = `${p.id}|${p.kind}|${p.baseUrl ?? ''}|${apiKey ? apiKey.length : 0}`;
+      const kept = mediaCache.get(key);
+      if (!refresh && kept && Date.now() - kept.at < MEDIA_TTL_MS) return kept.value;
+      let value: ProviderMediaModels;
+      try {
+        const models = await mediaModelsOf({ kind: p.kind as MediaSourceKind, baseUrl: p.baseUrl, apiKey }, AbortSignal.timeout(30_000));
+        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models, error: null };
+      } catch (error) {
+        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models: [], error: (error as Error).message };
+      }
+      mediaCache.set(key, { at: Date.now(), value });
+      return value;
+    })
+  );
 }
 
 /** Where a chat's file is stored; an error when the chat no longer has it. */
@@ -336,6 +383,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
 
     'providers:list': async () => (await ctx.services()).registry.summaries(),
     'providers:presets': async () => (await ctx.services()).catalog.presets(),
+    'providers:detectLocal': async () => {
+      const candidates = testCandidates();
+      const found = await detectLocalServers(candidates ? { candidates } : {});
+      return newServers(found, (await ctx.services()).registry.summaries());
+    },
     'catalog:status': async () => (await ctx.services()).catalogSync.status(),
     'catalog:refresh': async () => (await ctx.services()).catalogSync.refresh(),
 
@@ -440,6 +492,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       }
     },
     'models:list': async ({ refresh }) => (await ctx.services()).registry.allModels({ refresh }),
+    'models:media': async ({ refresh }) => mediaModelsList(await ctx.services(), refresh),
     'secrets:status': async () => (await ctx.services()).keys.status(),
 
     'projects:list': async () => (await ctx.services()).projects.list().map(projectSummary),
@@ -485,7 +538,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if (!info.isRepo) return { isRepo: false, workDir: dir, branch: null, files: [] };
       return { isRepo: true, workDir: dir, branch: info.branch, files: await listChanges(dir) };
     },
-    'git:fileDiff': async ({ sessionId, path, staged }) => fileDiff(await workDirFor(sessionId), path, staged),
+    'git:fileDiff': async ({ sessionId, path, staged, ignoreWhitespace }) => fileDiff(await workDirFor(sessionId), path, staged, ignoreWhitespace ?? false),
     'git:stage': async ({ sessionId, paths }) => {
       const dir = await workDirFor(sessionId);
       await stageFiles(dir, paths);
@@ -787,6 +840,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return saved;
     },
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
+    'files:modelBytes': async ({ sessionId, path }) => modelBytes(await workDirFor(sessionId), path),
     'diagrams:previewUrl': async ({ sessionId, source }) => ({ url: `${ctx.artifacts.urlForFile((await diagramOf(sessionId, source)).file)}?report=size` }),
     'diagrams:copyImage': async ({ sessionId, source }) => {
       const { file, info } = await diagramOf(sessionId, source);
@@ -1019,7 +1073,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
             hint: matches ? st.hint : null,
             tools: matches ? st.tools.map((t) => ({ name: t.name, registeredAs: t.registeredAs, description: t.description, readOnly: t.readOnly })) : [],
             prompts: matches ? st.prompts.map((p) => ({ command: mcpPromptCommand(p.server, p.name), description: p.description, argumentHint: promptHint(p) || null })) : [],
-            resources: matches ? st.resources : false
+            resources: matches ? st.resources : false,
+            ...(matches ? { title: st.info.title, version: st.info.version, icon: st.info.icon } : {})
           });
         }
       }

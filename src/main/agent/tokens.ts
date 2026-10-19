@@ -1,3 +1,4 @@
+import { COMPACT_THRESHOLD } from '@shared/compaction';
 import type { Usage } from '@shared/schemas/common';
 import type { ModelInfo } from '@shared/schemas/models';
 import type { LlmMessage } from '@shared/schemas/messages';
@@ -60,8 +61,7 @@ export function usageCost(pricing: ModelInfo['pricing'], usage: Usage): number |
   );
 }
 
-/** Automatic compaction starts once the context passes this share of the window. */
-export const COMPACT_THRESHOLD = 0.8;
+export { COMPACT_THRESHOLD };
 
 export function shouldCompact(currentTokens: number, contextWindow: number): boolean {
   return contextWindow > 0 && currentTokens >= contextWindow * COMPACT_THRESHOLD;

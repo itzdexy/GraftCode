@@ -27,8 +27,8 @@ export const FilePreviewSchema = z.object({
   binary: z.boolean(),
   tooLarge: z.boolean(),
   size: z.number().int(),
-  /** A picture, clip or sound, shown through a preview address (files:previewUrl) instead of as text. */
-  media: z.enum(['image', 'video', 'audio']).nullable()
+  /** A picture, clip or sound, shown through a preview address (files:previewUrl), or a 3D model (files:modelBytes), instead of as text. */
+  media: z.enum(['image', 'video', 'audio', 'model']).nullable()
 });
 export type FilePreviewView = z.infer<typeof FilePreviewSchema>;
 

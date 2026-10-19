@@ -16,6 +16,7 @@ const PAGES: Record<string, SettingsSection> = {
   'CatalogSection.tsx': 'providers',
   'ModelsSection.tsx': 'models',
   'AgentsSettings.tsx': 'models',
+  'MediaModelsSections.tsx': 'models',
   'WebSearchSection.tsx': 'search',
   'MediaSection.tsx': 'media',
   'VoiceSection.tsx': 'voice',
@@ -47,7 +48,7 @@ describe('the index that Settings search reads', () => {
   });
 
   it('knows every file that draws a page, so a new page cannot be left out of the search', () => {
-    const drawn = fs.readdirSync(DIR).filter((name) => /Section\.tsx$/.test(name) || name === 'AgentsSettings.tsx');
+    const drawn = fs.readdirSync(DIR).filter((name) => /Sections?\.tsx$/.test(name) || name === 'AgentsSettings.tsx');
     expect(drawn.filter((name) => !(name in PAGES))).toEqual([]);
     expect(Object.keys(PAGES).filter((name) => !drawn.includes(name))).toEqual([]);
   });

@@ -89,7 +89,11 @@ export const McpServerViewSchema = z.object({
   /** Prompts the server publishes, as the slash commands they appear as. */
   prompts: z.array(z.object({ command: z.string(), description: z.string(), argumentHint: z.string().nullable() })),
   /** The server publishes resources the agent can read. */
-  resources: z.boolean()
+  resources: z.boolean(),
+  /** What a connected server says about itself: its name for people, its version, its icon (a data: address). */
+  title: z.string().nullable().optional(),
+  version: z.string().nullable().optional(),
+  icon: z.string().nullable().optional()
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;
 

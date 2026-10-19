@@ -97,6 +97,11 @@ export interface LoopHost {
    */
   takeSteering?(signal: AbortSignal): Promise<ContentBlock[][]>;
   /**
+   * What has to be done before anything changes: the snapshot Rewind goes back to, which is taken while the model
+   * starts answering. Awaited before each call that may change something; a call that only looks doesn't wait.
+   */
+  beforeChange?(): Promise<void>;
+  /**
    * Another model to finish the turn with, after `error` ended a request before any
    * output and after its retries; null when there is none. Asked at most once a turn.
    */
@@ -289,6 +294,11 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
     }
   }
 
+  if (host.beforeChange && changesSomething(call)) {
+    await host.beforeChange();
+    if (signal.aborted) return errorBlock(call.id, NOT_RUN);
+  }
+
   // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.
   host.journal?.started({ id: call.id, name: tool.name, summary: p.descriptor.summary, effect: effectOf(call) }, config.agentLabel);
   /** How the call ended, written down before anything else is done with it. */
@@ -460,6 +470,8 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let pendingText = '';
     let pendingThinking = '';
     let finish: FinishReason = 'other';
+    /** Whether the stream said the reply was complete; only then are its blocks the whole record. */
+    let finished = false;
     /** Events of this reply that arrived unreadable (see StreamEvent 'finish'). */
     let damaged = 0;
     let responseUsage: Usage | null = null;
@@ -510,6 +522,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             responseCost = event.costUsd ?? null;
             break;
           case 'finish':
+            finished = true;
             finish = event.reason;
             damaged = event.damaged ?? 0;
             break;
@@ -520,8 +533,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
     // A failed or cancelled stream may never emit its final blocks. Retain the
     // summaries already visible in the UI, without inventing provider signatures.
-    if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
-    if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    // A finished reply's blocks are its record: an adapter may have streamed text
+    // it then left out, such as a tool call the model wrote as text.
+    if (failure || !finished) {
+      if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
+      if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    }
 
     // Some servers send no usage at all, or zeros (an OpenAI-compatible endpoint that
     // rejects stream_options reports nothing). Counting that as a real reading would

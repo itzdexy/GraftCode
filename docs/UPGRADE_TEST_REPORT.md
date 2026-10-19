@@ -1064,3 +1064,243 @@ Not verified:
 - The six new rows walked in the Settings UI beyond the smallest token choice; the
   desktop suite does not visit them.
 - The push to GitHub and the pull request: this report was written before them.
+
+## 0.6.32 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, cut from `origin/main` at `d50d997` (0.6.31) in its own
+worktree, local: nothing was pushed and no release was made. Commits `225e31c` (the details
+column, the folded queue, the effort note), `a78e51a` (pictures from tools), `926b644` (3D
+models), `f9db56e` (their desktop tests), `be19aa7` (code colors), `b27290d` (terminal and
+diff options), `145567f` (what the first full desktop run found), `b322e9a` (the version and
+the documents) and `bdf48fd` (what is packed). Windows 11 (Node 26.7.0, npm 11.19.0, Electron
+44.5.1) and a Linux container (`node:24-bookworm`). Not macOS: see the end.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npm test` | working tree after `f9db56e` | 130 files passed, 3 skipped; 1536 passed, 30 skipped |
+| `npx playwright test tests/e2e/recordings.spec.ts` | working tree after `f9db56e` | 3 passed (WebGL drew the model on this computer) |
+| `npm run verify` | working tree before `b322e9a` | typecheck, lint, build exit 0; unit exit 1 (below); e2e exit 1: 77 passed, 3 failed, 6 skipped, 502 s |
+| `npx playwright test` of `diagrams`, `session`, `recordings`, `layout` | after `145567f` | 15 passed |
+| `npx vitest run tests/unit/computer.test.ts` | `145567f` | 9 passed |
+| `npm run verify` | `b322e9a` | stopped by me before its desktop suite, when the user asked for the builds at once |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `b322e9a` | the package was broken: 1 passed, 2 failed (below) |
+| `npm run dist:win`, then `packaged.spec.ts` | `bdf48fd` | installer built; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `b322e9a` | AppImage and .deb built; 3 passed |
+
+The unit failure of the full run was `computer.test.ts` "starts and round-trips the pointer
+position": the test moves the real pointer and read it back one pixel off (`190 281` for
+`191 281`) while this computer was in use. Alone it passed. It touches nothing of this round.
+
+The three desktop failures of the full run were this round's, and are fixed in `145567f`:
+
+- `diagrams.spec.ts`: "Save as…" was never still enough to press. With the details column the
+  conversation is narrower, the diagram card sat at the window's height, and the scrollbar came
+  and went; the column widened and narrowed and the scaled diagram with it, for ever. The
+  conversation now keeps its scrollbar's place (`scrollbar-gutter: stable`).
+- `session.spec.ts` "an edit turn … status bar" looked for the git bar's change count, which the
+  column replaces while it is shown. The column's Changes card now shows the same labelled
+  chip; the test's comment says where the count is.
+- `session.spec.ts` "the session menu opens Files …" found two regions named Changes: the panel
+  and the column's card. The column's cards are groups now, not landmarks.
+
+The broken package: `files: ['out/**']` packed everything under `out/`, and the first Windows
+build's own log was being written to `out/` while the archive was made. Its header and its bytes
+disagreed, so every file after the log was read at the wrong place, and the packaged app quit as
+it started (its `package.json` read as the end of a test log). The user had installed it by then;
+their data folder was not touched, since the app quit before opening it. `bdf48fd` packs only
+`out/main`, `out/preload` and `out/renderer`, and the rebuilt installer passed the three
+packaged tests. The Linux packages were built from `b322e9a` in a container from `git archive`,
+where `out/` holds only the build, so the same fault could not reach them; they were not built
+again from `bdf48fd`.
+
+What the tests of this round show, and with what:
+
+- Unit, 52 new cases. The column (`detailsModel.test.ts`): when it is drawn (wanted, no panel,
+  room for 420 pixels of conversation), the context's parts scaled to the session's count with
+  the free space and the distance to compaction, connectors' rows in Customize's words with the
+  one action each needs, the outputs a session's tools made and nothing they only edited, the
+  background tasks with what runs first, elapsed times. Kept states (`keptStates.test.ts`): the
+  column's toggle and folded cards, the effort notes put away, the terminal's and the diff's
+  choices, each read back field by field and unreadable storage as the defaults. Pictures and the
+  queue (`toolPictures.test.ts`). Models (`modelFormats.test.ts`, `modelRefs.test.ts`): formats by
+  name, the files a .gltf loads kept inside the folder, Draco and meshopt refused with a sentence,
+  the JSON of a .glb, the stats line and the size, the camera's distance for a narrow view, the
+  models a turn wrote or named and their place after its diagrams. The reader (`panels.test.ts`):
+  a model offered as one, its buffers and textures handed over, a text file, `.env`, a path
+  outside the folder, a missing file and one past 64 MB refused. Code colors
+  (`codeThemes.test.ts`, `db.test.ts`): a profile from before the setting loads with Vitesse, a
+  light theme can't be the dark one, the tokens' colors change with the theme, previews carry the
+  theme's background. The diff (`git.test.ts`): whitespace-only changes left out when asked, and
+  only then.
+- Desktop (`recordings.spec.ts`): the column after a turn that wrote a file (Environment, Outputs,
+  Changes with Create PR, Context opened to its parts, Connectors), the git bar giving way, a
+  panel taking the column's place and giving it back, the header button; three queued messages
+  folding, opening, Clear all behind its confirmation, nothing of them sent; a model named in a
+  reply drawn at the end of the turn (12 triangles, 2 × 2 × 2, wireframe) and in the Files panel.
+
+Not verified:
+
+- macOS, at all. electron-builder builds macOS only on a Mac, and GitHub's runners did not start:
+  the newest CI runs (2026-10-16) end with "The job was not started because your account is locked
+  due to a billing issue". No macOS package exists.
+- The full desktop suite at the release commit: it was stopped before it ran (the table). The
+  rounds' tests and every spec the fixes touched were run after the fixes.
+- The effort note in the app: the scripted endpoint's models have no effort levels, so only its
+  texts and storage are tested.
+- Pictures from a real MCP server: the scripted endpoint's models can't see pictures, and for such
+  a model an MCP picture is replaced by text before it is stored. The row and the viewer were
+  checked in the renderer preview with a stand-in picture.
+- Real exports: Blender's and Roblox Studio's own .glb and .fbx files, Draco-compressed models,
+  a .gltf with its textures beside it. The tests draw a twelve-triangle .stl.
+- WebGL in the Linux container: the packaged smoke tests there draw no model.
+
+## 0.6.33 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, on top of 0.6.32 in its worktree, local: nothing was pushed
+and no release was made. Commits `8fab10e` (a message shows at once; a large folder can't hang
+a turn, its Stop or its Delete), `683f157` (scrollbars), `3af972b` (connectors with their apps'
+icons), `32c2b12` ("Stopped." before any reply), `947da5a` (Open a file), `14e2057` (the tour),
+`529991b` (the card chooser), `b181d1f` (the version and the documents), `41d99c5` and `feb4dd0`
+(what the Linux run found), `9d63bdf` (documents). Windows 11 (Node 26.7.0, Electron 44.5.1)
+and a Linux container (`node:24-bookworm`). Not macOS: see the end.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npx playwright test tests/e2e/tour.spec.ts tests/e2e/mcp.spec.ts --repeat-each 2` | working tree before `14e2057` | 10 passed |
+| `npm run verify` | `b181d1f` | typecheck, lint, build exit 0; unit 134 files passed, 3 skipped, 1560 passed, 30 skipped; e2e 82 passed, 6 skipped, 483 s |
+| `npm run verify:docker` | `b181d1f` | typecheck, lint, unit (1552 passed, 38 skipped), build exit 0; e2e exit 1: 80 passed, 2 failed, 6 skipped |
+| the queue test with each send slowed by 400 ms, on the composer of `b181d1f` | `41d99c5` test, old composer | 1 failed, as in the container |
+| `npx playwright test` of `recordings`, `session`, `chat`, `power`, `tour` | the tree then committed as `41d99c5` and `feb4dd0` | 20 passed |
+| `npm run verify:docker` | `9d63bdf` | every step exit 0; unit 1554 passed, 38 skipped; e2e 82 passed, 6 skipped (7.9 min) |
+| `npm run verify` | `9d63bdf` | every step exit 0; unit 134 files passed, 3 skipped, 1562 passed, 30 skipped; e2e 82 passed, 6 skipped, 485 s |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `9d63bdf` | installer built; the archive holds `out/main`, `out/preload`, `out/renderer` and `package.json` 0.6.33; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `9d63bdf` | AppImage and .deb built; 3 passed |
+
+What the runs found, and what was done:
+
+- The user's "it doesn't delete or send a message": a session on a very large folder snapshotted
+  it before storing the message, unstoppably, with a ten-minute timeout, and closing the session
+  waited for the turn without end. Fixed in `8fab10e`; unit tests in `checkpointBudget.test.ts`
+  (the message before the snapshot, the budget and its notice, Stop during the snapshot, a
+  session that closes whatever the snapshot does).
+- The tour (`tour.spec.ts`) found two faults on its first runs. Stop pressed right after sending
+  ended the turn during the snapshot and left the message with no word under it (`32c2b12`: a
+  "Stopped." notice, unit-tested in `agent.test.ts` and `checkpointBudget.test.ts`). Ctrl+P, a
+  name typed and Enter at once opened another file (`947da5a`, `paletteModel.test.ts`).
+- The first Linux run failed two desktop tests that pass on Windows, both real. In the queue
+  test, two of three messages typed one after another were lost: the box was emptied when a send
+  came back, taking what had been typed meanwhile, and an Enter before then did nothing
+  (`41d99c5`; the test now slows each send and failed on the old composer on Windows too). In the
+  details column, a short path such as `/tmp/project` was shown whole beside the folder's name,
+  so the test found the name twice (`feb4dd0`, `detailsModel.test.ts`).
+
+What the tests of this round show, and with what:
+
+- Unit: the snapshot's budget and Stop (4), "Stopped." (2), server info from MCP (title, version,
+  data: icons only, the largest or the SVG) in `mcp.test.ts`, the app marks by name, address and
+  command and the names shown (`brands.test.ts`), the scrollbar marks (`scrollbars.test.ts`),
+  hidden cards kept (`keptStates.test.ts`), the folder line (`detailsModel.test.ts`), the file
+  palette's rows (`paletteModel.test.ts`).
+- Desktop: `tour.spec.ts` (every Settings page and its search, every Customize tab, every view in
+  both modes, the palettes, the scrollbar while scrolling, a session that writes code, the
+  Terminal, Changes, Files, Search and Problems tabs, Browser, Agents, the details column and its
+  card chooser, each composer menu, find, open a file, go to a symbol, Stop the moment a message
+  is sent, a message after it, Delete while a reply streams; no page error, no console error, no
+  part that failed to display); `mcp.spec.ts` (a server's own name and icon in Customize and in
+  the Connectors card); `recordings.spec.ts` (the queue with slow sends).
+
+Not verified:
+
+- macOS, at all: it needs a Mac, and GitHub's runners don't start while the account is locked
+  for billing.
+- A real large folder: the budget and Stop are tested with snapshots that never end; the user's
+  own Downloads folder was not opened.
+- Icons sent by a real third-party MCP server; the fixture sends one SVG. The Roblox Studio and
+  Blender marks were checked in the renderer preview.
+
+## 0.6.34 round (2026-10-17)
+
+Branch `feat/from-the-recordings`, on top of 0.6.33, local: nothing was pushed and no release was
+made. Commits `1a72ff5` (git stopped with what it started), `f3fd4f6` (a delete that never fails on
+the index folder), `a0e2cdc` (the snapshot beside the reply), `d9efa2d` (media models and video),
+`59b48a3` (54 integrations), `0b2fd87` (What's new without another app's name), `7dc622d` (the
+version and the documents), `30c3d75` (the live catalogue check). Windows 11 (Node 26.7.0,
+Electron 44.5.1) and a Linux container (`node:24-bookworm`). Not macOS.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npx vitest run tests/unit/git.test.ts -t "ends at once when stopped"` with the git runner of `83e8414` | `1a72ff5` test, old runner | 1 failed: the stop took 3064 ms, the length of the alias it stopped |
+| `npx playwright test` of `session`, `tour`, `recordings`, `review`, `recovery` | `a0e2cdc` | 18 passed |
+| `npx playwright test` of `tour`, `mcp`, `models` | `59b48a3` before commit | 6 passed |
+| `npm run verify` | `7dc622d` | every step exit 0; unit 136 files passed, 3 skipped, 1585 passed, 72 skipped; e2e 83 passed, 6 skipped, 478 s |
+| `GRAFT_LIVE_MCP=1 npx vitest run tests/unit/mcp.live.test.ts -t "catalogue against the real world"` | `30c3d75` | 53 passed: every package exists, every remote server answers or asks for credentials |
+| `npm run verify:docker` | `30c3d75` | every step exit 0; unit 1577 passed, 80 skipped; e2e 83 passed, 6 skipped (8.0 min) |
+| `npm run dist:win`, then `packaged.spec.ts` against `dist/win-unpacked` | `30c3d75` | installer built; the archive holds `out/main`, `out/preload`, `out/renderer` and `package.json` 0.6.34; 3 passed |
+| `npm run dist:linux:docker` (build and `packaged` smoke test in the container) | `30c3d75` | AppImage and .deb built; 3 passed |
+
+The 72 skipped unit tests are 30 as before plus the live tests that now cover 42 more
+integrations; they run only with `GRAFT_LIVE_MCP=1`.
+
+What the tests of this round show, and with what:
+
+- Unit: a stopped git ends at once and, on Windows, the real git and its shell with it (`git.test.ts`,
+  an alias that sleeps); a held index folder never fails a delete and goes at the next start's sweep;
+  the snapshot beside the reply (`checkpointBudget.test.ts`: the model is asked at once, a Write waits
+  for the snapshot, a reply in words doesn't, Stop ends the snapshot, a session closes whatever it
+  does); media models by kind from OpenRouter, OpenAI and Google wire formats, names on other servers
+  (`mediaModels.test.ts`); the video job submitted with a length and a shape the model makes, polled,
+  downloaded from the provider's own address only, and a failed job's reason; the GenerateVideo tool
+  (saving, first frame inside the project only, overwrite, no key, Ask and Plan modes); the offering
+  of GenerateVideo; the media sections' model (`renderer/mediaModels.test.ts`); the catalogue (54, every
+  kind used, https, a fixed environment for Zotero, keys as bearer headers).
+- Desktop: `models.spec.ts` (a server listing FLUX, Wan, Kokoro and Whisper beside its chat models:
+  four sections, the note instead of Use, the search, a chat list without them); `tour.spec.ts`
+  (the integrations search).
+
+Not verified:
+
+- A real video: no clip was made with a real key (it costs money on the user's account). The job
+  flow is tested against a local server that speaks OpenRouter's documented format, and the format
+  was read from OpenRouter's docs and its public model list on 2026-10-17.
+- Signing in to the OAuth integrations (Supabase, Neon, Cloudflare, Atlassian, Asana, Semgrep,
+  Webflow) with real accounts. Their servers advertise dynamic client registration, which is what
+  Graft's sign-in uses.
+- Starting the 23 new local servers: their packages were checked in npm and PyPI, not run on this
+  computer (some are community packages, and running them is the user's call).
+- macOS.
+
+## 0.6.35 round (2026-10-18)
+
+Branch `feat/local-models`, on top of 0.6.34, local: nothing was pushed and no release was made.
+
+Built task by task, each task reviewed on its own, then a whole-branch review and one fix wave
+(nine commits). Verified on `2a2987d`.
+
+- **Windows, `npm run verify`:** exit 0 in 554 s. Typecheck, lint, unit (1,691 passed, 73 skipped),
+  build, and the desktop suite (84 passed, 6 skipped). No flakes this run.
+- **Linux, `npm run verify:docker`:** exit 0 in 611 s; typecheck, lint, unit, build and e2e all 0.
+  Unit 1,684 passed, 80 skipped; desktop 84 passed, 6 skipped. The symlinked-Cursor-rule test, which
+  this Windows account can't run, ran here.
+- **First Windows run, on `4e5cfb4`, failed 14 desktop tests,** all from the lean profile: the test
+  server runs on localhost and reports no window, so every test session got the short prompt and core
+  tools. On the base `8d02fa2` the same specs passed 24/24. Fixed in `2a2987d`: a local model is lean
+  only when its window is known, and the lean prompt keeps the site brief and personalization.
+- **Package, `npm run dist:win`, on `4622347`** (`2a2987d` plus the What's new wording):
+  `dist/Graft-Setup-0.6.35.exe`, 126,217,783 bytes, SHA-256
+  `8378a16bbbf21cd6ce35faf2c5e65cf7431df58a7508c98576567ba95c2a6c37`. `app.asar` holds 122 top-level
+  packages, the same count as 0.6.34's by the same method.
+- **A broken installer was built first and deleted.** The worktree's `node_modules` was a junction to
+  another worktree's, npm couldn't read the tree through it, and electron-builder left out 113
+  packages. The app then opened no window. It was replaced with a real copy of the same
+  `node_modules` before the build above. Lesson: never package from a worktree whose `node_modules`
+  is a junction.
+- **Packaged smoke test, `packaged.spec.ts`:** 3 passed (15.4 s) on the installer above: onboarding,
+  a session with SQLite, ripgrep and the terminal, Settings, and a diagram drawn with the bundled
+  skill and fonts.
+- **No database migration:** the schema is still 9, so installing 0.6.35 over 0.6.34 is not one-way.
+
+Not run:
+- A live check against a real local model. Ollama is installed on this computer but has no model
+  downloaded, and a download is the user's call. The adapters were tested against stub servers that
+  answer as Ollama, llama.cpp, LM Studio and vLLM do.
+- macOS.

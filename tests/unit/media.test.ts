@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ComfyClient, fillWorkflow, sizeFor, textToImageGraph } from '../../src/main/media/comfy';
 import { extractImage, generateImage, DEFAULT_IMAGE_MODEL } from '../../src/main/media/images';
 import { MediaService, type MediaSettings, type ProviderImageAccess } from '../../src/main/media/mediaService';
-import { comfyTool, generateImageTool } from '../../src/main/tools/media';
+import { comfyTool, generateImageTool, generateVideoTool } from '../../src/main/tools/media';
 import { decide } from '../../src/main/permissions/engine';
 import { json, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 import { makeHarness } from '../support/sessionHarness';
@@ -26,7 +26,7 @@ afterEach(async () => {
   removeDir(dir);
 });
 
-const SETTINGS: MediaSettings = { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '' };
+const SETTINGS: MediaSettings = { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '', videoModel: '' };
 
 function service(settings: Partial<MediaSettings>, providers: ProviderImageAccess[] = []): MediaService {
   return new MediaService({ settings: () => ({ ...SETTINGS, ...settings }), providers: () => providers, graftHome: path.join(dir, 'home'), thumbnail: () => ({ mediaType: 'image/jpeg', data: 'thumb' }) });
@@ -217,7 +217,9 @@ describe('the GenerateImage tool', () => {
     generate: () => Promise.resolve({ data: PNG, mediaType: 'image/png', engine: 'openrouter' as const, model: 'google/gemini-3.1-flash-image', costUsd: cost }),
     thumbnail: () => ({ mediaType: 'image/jpeg' as const, data: 'thumb' }),
     comfy: () => null,
-    workflows: () => []
+    workflows: () => [],
+    videoModel: () => null,
+    generateVideo: () => Promise.reject(new Error('No video in this test.'))
   });
 
   it('saves the picture in the project, shows it and reports what it cost', async () => {
@@ -273,6 +275,72 @@ describe('the GenerateImage tool', () => {
   });
 });
 
+describe('the GenerateVideo tool', () => {
+  const MP4 = Buffer.from('mp4-bytes');
+  const asked: Array<{ seconds: number | null; aspect: string | null; firstFrame: { mediaType: string; data: string } | null; audio: boolean | null }> = [];
+  const media = (model: string | null = 'google/veo-3.1-lite') => ({
+    imageEngine: () => null,
+    generate: () => Promise.reject(new Error('No images in this test.')),
+    thumbnail: () => null,
+    comfy: () => null,
+    workflows: () => [],
+    videoModel: () => model,
+    generateVideo: (request: (typeof asked)[number]) => {
+      asked.push(request);
+      return Promise.resolve({ data: MP4, mediaType: 'video/mp4', model: model ?? '', costUsd: 0.32 });
+    }
+  });
+  beforeEach(() => {
+    asked.length = 0;
+  });
+
+  it('saves the clip in the project, shows it and adds what it cost', async () => {
+    const spent: number[] = [];
+    const ctx = makeToolContext(dir, { media: media(), spend: (usd) => spent.push(usd) });
+    const result = await generateVideoTool.execute({ prompt: 'a sprout grows in a clay pot', path: 'assets/intro.mp4', seconds: 6, aspect: '9:16' }, ctx);
+    expect(result.isError).toBe(false);
+    expect(fs.readFileSync(path.join(dir, 'assets', 'intro.mp4')).equals(MP4)).toBe(true);
+    expect(result.display).toMatchObject({ kind: 'media', engine: 'openrouter', model: 'google/veo-3.1-lite', costUsd: 0.32, files: [{ path: 'assets/intro.mp4', kind: 'video' }] });
+    expect(asked).toEqual([{ prompt: 'a sprout grows in a clay pot', seconds: 6, aspect: '9:16', firstFrame: null, audio: null }]);
+    expect(spent).toEqual([0.32]);
+  });
+
+  it('starts the clip on a picture of the project, and only of the project', async () => {
+    fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'assets', 'hero.png'), PNG);
+    const ctx = makeToolContext(dir, { media: media() });
+    expect((await generateVideoTool.execute({ prompt: 'bring it to life', path: 'hero.mp4', first_frame: 'assets/hero.png' }, ctx)).isError).toBe(false);
+    expect(asked[0]?.firstFrame).toEqual({ mediaType: 'image/png', data: B64 });
+    expect((await generateVideoTool.execute({ prompt: 'x', path: 'b.mp4', first_frame: '../outside.png' }, ctx)).isError).toBe(true);
+    expect((await generateVideoTool.execute({ prompt: 'x', path: 'c.mp4', first_frame: 'assets/missing.png' }, ctx)).isError).toBe(true);
+    expect((await generateVideoTool.execute({ prompt: 'x', path: 'd.mp4', first_frame: 'notes.txt' }, ctx)).isError).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('never replaces a file unless told to, and never writes outside the project', async () => {
+    const ctx = makeToolContext(dir, { media: media() });
+    fs.writeFileSync(path.join(dir, 'clip.mp4'), 'mine');
+    expect((await generateVideoTool.execute({ prompt: 'x', path: 'clip.mp4' }, ctx)).isError).toBe(true);
+    expect(fs.readFileSync(path.join(dir, 'clip.mp4'), 'utf8')).toBe('mine');
+    expect((await generateVideoTool.execute({ prompt: 'x', path: '../outside.mp4' }, ctx)).isError).toBe(true);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('says what to set up when there is no OpenRouter key', async () => {
+    const result = await generateVideoTool.execute({ prompt: 'x', path: 'a.mp4' }, makeToolContext(dir, { media: media(null) }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/OpenRouter/) as unknown });
+  });
+
+  it('is asked about in Ask mode and refused in Plan mode, as pictures are', async () => {
+    const descriptor = await generateVideoTool.describe({ prompt: 'x', path: 'assets/a.mp4' }, { cwd: dir, projectRoot: dir, platform: process.platform });
+    const env = { projectRoot: dir, platform: process.platform, rules: { allow: [], ask: [], deny: [] } };
+    const query = { toolName: 'GenerateVideo', permissionClass: generateVideoTool.permissionClass, descriptor };
+    expect(decide(query, { ...env, mode: 'ask' })).toMatchObject({ behavior: 'ask', suggestedRule: 'GenerateVideo' });
+    expect(decide(query, { ...env, mode: 'plan' }).behavior).toBe('deny');
+  });
+});
+
 describe('the ComfyUI tool', () => {
   const comfyMedia = () => {
     const svc = service({ comfyEnabled: true, comfyUrl: server.url });
@@ -320,7 +388,9 @@ describe('image generation in a session', () => {
     generate: () => Promise.resolve({ data: PNG, mediaType: 'image/png', engine: 'openrouter' as const, model: 'google/gemini-3.1-flash-image', costUsd: 0.04 }),
     thumbnail: () => null,
     comfy: () => null,
-    workflows: () => []
+    workflows: () => [],
+    videoModel: () => null,
+    generateVideo: () => Promise.reject(new Error('No video in this test.'))
   };
 
   it('offers GenerateImage only when an image model is set up, and names it in the prompt', async () => {

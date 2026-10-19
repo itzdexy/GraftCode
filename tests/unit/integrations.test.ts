@@ -60,6 +60,26 @@ describe('integrations', () => {
     expect(godot.config).toMatchObject({ type: 'stdio', command: 'npx', args: ['-y', '@coding-solo/godot-mcp'], env: { GODOT_PATH: 'C:\\Godot\\godot.exe' } });
   });
 
+  it('has something for each kind of work, every one of them in a kind the gallery shows, remote ones over https', () => {
+    expect(INTEGRATIONS.length).toBeGreaterThanOrEqual(50);
+    for (const category of INTEGRATION_CATEGORIES) expect(INTEGRATIONS.some((i) => i.category === category), category).toBe(true);
+    for (const i of INTEGRATIONS) {
+      expect(INTEGRATION_CATEGORIES, i.id).toContain(i.category);
+      for (const launch of Object.values(i.launch)) if (launch.type === 'http') expect(launch.url, i.id).toMatch(/^https:\/\/|^http:\/\/127\.0\.0\.1:/);
+    }
+  });
+
+  it('gives a local server its fixed environment, and a remote one only the key that is typed', () => {
+    const zotero = integrationSetup('zotero', {}, 'linux', { PATH: '' }, files([]));
+    expect(zotero.config).toMatchObject({ type: 'stdio', command: 'uvx', args: ['--from', 'zotero-mcp-server', 'zotero-mcp'], env: { ZOTERO_LOCAL: 'true' } });
+    // A token that may be left out is: the server works without it.
+    expect(integrationSetup('huggingface', {}, 'linux', { PATH: '' }, files([])).config).toMatchObject({ type: 'http', url: 'https://huggingface.co/mcp', headers: {} });
+    const stripe = integrationSetup('stripe', { token: ' rk_test_123 ' }, 'linux', { PATH: '' }, files([]));
+    expect(stripe.config).toMatchObject({ type: 'http', url: 'https://mcp.stripe.com' });
+    expect(Object.values(stripe.secrets)).toEqual(['Bearer rk_test_123']);
+    expect(() => integrationSetup('stripe', {}, 'linux', { PATH: '' }, files([]))).toThrow(/Enter the restricted api key first/);
+  });
+
   it('sets Ghidra up for reverse engineering: the documented server, with the folder Ghidra is installed in', () => {
     const ghidra = INTEGRATIONS.find((i) => i.id === 'ghidra')!;
     expect(ghidra.category).toBe('Reverse engineering');

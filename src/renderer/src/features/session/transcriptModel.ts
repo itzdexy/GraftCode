@@ -4,6 +4,7 @@ import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas
 import { maskSecrets } from '@shared/secrets';
 import type { Source } from '@shared/sources';
 import { madeDiagrams, type MadeDiagram } from './diagramModel';
+import { turnModels } from './modelRefs';
 import { turnSources } from './sourcesModel';
 import { inTense } from './verbs';
 import { changedTodos } from './todoMotion';
@@ -46,6 +47,8 @@ export type TranscriptItem =
   | { kind: 'files'; key: string; files: MadeFile[] }
   /** The diagrams a finished turn drew, shown as they are. */
   | { kind: 'diagrams'; key: string; diagrams: MadeDiagram[] }
+  /** The 3D models a finished turn made or named, as written; the card draws those that exist. */
+  | { kind: 'models'; key: string; paths: string[] }
   /** The pages a finished turn read. */
   | { kind: 'sources'; key: string; sources: Source[] }
   | { kind: 'media'; key: string; media: MadeMedia }
@@ -423,6 +426,12 @@ export function groupActivity(items: TranscriptItem[], turnActive: boolean, view
       // …and the diagrams it drew.
       const drawn = madeDiagrams(calls);
       if (drawn.length > 0) out.push({ kind: 'diagrams', key: `diagrams:${segment[0]?.key ?? String(index)}`, diagrams: drawn });
+      // …and the 3D models it made or named.
+      const models = turnModels(
+        segment.flatMap((item) => (item.kind === 'text' ? [item.text] : [])),
+        calls
+      );
+      if (models.length > 0) out.push({ kind: 'models', key: `models:${segment[0]?.key ?? String(index)}`, paths: models });
       // …and the pages it read on the web.
       const read = turnSources(calls);
       if (read.length > 0) out.push({ kind: 'sources', key: `sources:${segment[0]?.key ?? String(index)}`, sources: read });

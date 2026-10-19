@@ -164,6 +164,9 @@ test('a server’s prompts become slash commands, and the agent reads what it pu
     // The row says what the server offers besides tools.
     const list = w.getByRole('list', { name: 'MCP servers' });
     await expect(list.getByText('Connected · 2 tools · 1 prompt · resources')).toBeVisible();
+    // It goes by the name and the icon the server gives itself, with the name it has in the settings beside them.
+    await expect(list.getByText('Graft Rich Notes')).toBeVisible();
+    await expect(list.locator('img[src^="data:image/svg+xml"]')).toHaveCount(1);
     await list.getByRole('button', { name: /rich/ }).first().click();
     await expect(list.getByText('/mcp__rich__review <file>')).toBeVisible();
 
@@ -182,6 +185,12 @@ test('a server’s prompts become slash commands, and the agent reads what it pu
     await expect(w.getByText('Reviewed.')).toBeVisible();
     // The transcript shows what was typed, not the text the server sent.
     await expect(w.getByText('/mcp__rich__review src/app.ts').first()).toBeVisible();
+
+    // The session's Connectors card opens to the server, by its own name.
+    const connectors = w.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Connectors' });
+    await connectors.getByRole('button', { name: /^Connectors/ }).click();
+    await connectors.getByRole('button', { name: /^Graft Rich Notes: / }).click();
+    await expect(connectors.getByRole('list', { name: 'Tools of Graft Rich Notes' })).toBeVisible();
 
     const box = w.getByRole('combobox', { name: /Ask anything/ }).or(w.getByRole('textbox', { name: /Ask anything/ }));
     await box.fill('What does the readme resource say?');

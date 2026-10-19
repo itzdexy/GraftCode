@@ -19,7 +19,7 @@ export interface TreeEntry {
   size: number | null;
 }
 
-export type MediaKind = 'image' | 'video' | 'audio';
+export type MediaKind = 'image' | 'video' | 'audio' | 'model';
 
 export interface FilePreview {
   /** Present only for complete, losslessly decoded UTF-8 text that can be edited. */
@@ -30,7 +30,7 @@ export interface FilePreview {
   /** Text past the limit for text, or a picture or clip past the limit for those. */
   tooLarge: boolean;
   size: number;
-  /** A picture, clip or sound: the panel shows it through a preview address instead of as text. */
+  /** A picture, clip, sound or 3D model: the panel shows it as what it is instead of as text. */
   media: MediaKind | null;
 }
 
@@ -51,8 +51,17 @@ const MEDIA: Record<string, MediaKind> = {
   '.mp4': 'video',
   '.webm': 'video',
   '.mp3': 'audio',
-  '.wav': 'audio'
+  '.wav': 'audio',
+  '.glb': 'model',
+  '.gltf': 'model',
+  '.obj': 'model',
+  '.stl': 'model',
+  '.fbx': 'model',
+  '.ply': 'model'
 };
+
+/** A 3D model, and the files a .gltf model loads from beside it (its buffers and textures). */
+const MODEL_PARTS = new Set(['.glb', '.gltf', '.obj', '.stl', '.fbx', '.ply', '.bin', '.png', '.jpg', '.jpeg', '.webp']);
 
 /** What kind of picture, clip or sound a file is by its name, or null for anything else. */
 export function mediaKindOf(file: string): MediaKind | null {
@@ -160,6 +169,20 @@ export async function mediaFile(root: string, rel: string): Promise<{ file: stri
   if (!kind || !stat) throw new GraftError('not_media', `${rel} is not a picture, a clip or a sound.`);
   if (stat.size > MAX_MEDIA_BYTES) throw new GraftError('too_large', `${rel} is too large to show here (${String(Math.round(stat.size / 1048576))} MB).`);
   return { file, kind, size: stat.size };
+}
+
+/**
+ * A 3D model in the session's folder, or a file such a model loads, read
+ * whole for the viewer: no further than the folder, no larger than a clip may
+ * be, and nothing that is not part of a model.
+ */
+export async function modelBytes(root: string, rel: string): Promise<Uint8Array<ArrayBuffer>> {
+  const file = resolveInside(root, rel);
+  if (!MODEL_PARTS.has(path.extname(rel).toLowerCase())) throw new GraftError('not_a_model', `${rel} is not a 3D model or a file one loads.`);
+  const stat = await statFile(file, rel);
+  if (!stat) throw new GraftError('not_a_file', `${rel} is not a file.`);
+  if (stat.size > MAX_MEDIA_BYTES) throw new GraftError('too_large', `${rel} is too large to show here (${String(Math.round(stat.size / 1048576))} MB).`);
+  return Uint8Array.from(await fs.promises.readFile(file));
 }
 
 /** The diagram a file holds, as text: what a card shows for it, or the refusal a card shows instead. `name` is the file's own name. */

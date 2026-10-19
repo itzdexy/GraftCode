@@ -42,7 +42,7 @@ export interface MemoryInfo {
   path: string;
   exists: boolean;
   content: string;
-  /** Another instruction file Graft reads when GRAFT.md is absent (AGENTS.md / CLAUDE.md). */
+  /** Another instruction file Graft reads when GRAFT.md is absent (AGENTS.md / CLAUDE.md / GEMINI.md). */
   fallback: string | null;
 }
 

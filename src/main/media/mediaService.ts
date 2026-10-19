@@ -3,6 +3,7 @@ import path from 'node:path';
 import { GraftError } from '@shared/errors';
 import { ComfyClient, sizeFor, textToImageGraph, type ComfyGraph } from './comfy';
 import { DEFAULT_IMAGE_MODEL, generateImage, type ImageAspect, type ImageProviderKind } from './images';
+import { DEFAULT_VIDEO_MODEL, generateVideo, type MadeVideo, type VideoRequest } from './videos';
 
 /**
  * Generated media for the agent's tools (Settings → Images): which engine
@@ -20,6 +21,8 @@ export interface MediaSettings {
   comfyUrl: string;
   /** A checkpoint file for plain text-to-image; empty picks the first one installed. */
   comfyCheckpoint: string;
+  /** An OpenRouter video model; empty uses the default. */
+  videoModel: string;
 }
 
 export interface ProviderImageAccess {
@@ -58,6 +61,9 @@ export interface MediaAccess {
   thumbnail(data: Buffer): { mediaType: 'image/jpeg'; data: string } | null;
   comfy(): ComfyClient | null;
   workflows(projectRoot: string | null): WorkflowFile[];
+  /** The video model GenerateVideo uses, or null without an OpenRouter key. */
+  videoModel(): string | null;
+  generateVideo(request: Omit<VideoRequest, 'model'>, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo>;
 }
 
 const MAX_WORKFLOW_BYTES = 2_000_000;
@@ -143,6 +149,19 @@ export class MediaService implements MediaAccess {
     if (!image) throw new GraftError('comfy_failed', 'ComfyUI finished without making an image.');
     const ext = image.name.toLowerCase().split('.').pop() ?? 'png';
     return { data: image.data, mediaType: ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`, engine: 'comfyui', model: checkpoint, costUsd: 0 };
+  }
+
+  videoModel(): string | null {
+    if (!this.deps.providers().some((p) => p.kind === 'openrouter')) return null;
+    return this.deps.settings().videoModel.trim() || DEFAULT_VIDEO_MODEL;
+  }
+
+  /** One clip, made through OpenRouter's video API with the user's key. */
+  async generateVideo(request: Omit<VideoRequest, 'model'>, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo> {
+    const model = this.videoModel();
+    const access = this.deps.providers().find((p) => p.kind === 'openrouter');
+    if (!model || !access) throw new GraftError('no_video_model', 'Making video needs OpenRouter as a provider with its key. Add it in Settings → Providers.');
+    return generateVideo({ apiKey: access.apiKey, baseUrl: access.baseUrl }, { ...request, model }, signal, onProgress);
   }
 
   /** Providers with a key that can make images (for Settings). */

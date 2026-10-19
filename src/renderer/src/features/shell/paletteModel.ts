@@ -1,5 +1,7 @@
 /** What the palette is looking for: a command, a file by its name, or a symbol by its name (pure; unit-tested). */
 
+import { fuzzyFilter } from '@shared/fuzzy';
+
 export type PaletteMode = 'commands' | 'files' | 'symbols';
 
 /** The files the language server knows: TypeScript and JavaScript, module flavours included. */
@@ -29,6 +31,22 @@ export function fileQuery(query: string): { text: string; line: number | null } 
 export function fileRow(path: string): { name: string; folder: string } {
   const cut = path.lastIndexOf('/');
   return { name: path.slice(cut + 1), folder: cut === -1 ? '' : path.slice(0, cut) };
+}
+
+/** The most files the file palette lists. */
+export const FILES_SHOWN = 40;
+
+/**
+ * The files the file palette lists for what is typed: the answer for exactly that, else, while that answer is on its
+ * way, the last one narrowed to what is typed now (as the search narrows it). Never an older query's rows as they
+ * were: Enter opens the first row, and typing "greet" then Enter at once opened the folder's first file instead of
+ * greet.ts. With nothing typed, the files open in the Files panel come first.
+ */
+export function filesShown(text: string, found: { text: string; paths: string[] } | null, tabs: readonly string[]): { paths: string[]; fresh: boolean } {
+  const answered = found?.paths ?? [];
+  const fresh = found !== null && found.text === text;
+  if (text.length === 0) return { paths: [...tabs, ...answered.filter((path) => !tabs.includes(path))].slice(0, FILES_SHOWN), fresh };
+  return { paths: fresh ? answered : fuzzyFilter(text, answered, (path) => path, FILES_SHOWN), fresh };
 }
 
 /**

@@ -1,3 +1,4 @@
+import * as CM from '@radix-ui/react-context-menu';
 import * as DM from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronRight } from 'lucide-react';
 import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from 'react';
@@ -161,3 +162,43 @@ export function MenuSeparator({ className }: { className?: string }) {
 export function MenuLabel({ children, className }: { children: ReactNode; className?: string }) {
   return <DM.Label className={cn('px-8 pt-6 pb-4 text-sm leading-[1.35] text-fg-muted', className)}>{children}</DM.Label>;
 }
+
+/** The same menu, opened at the pointer by a right-click (or the keyboard's menu key) on what it wraps. */
+export const ContextMenu = CM.Root;
+export const ContextMenuTrigger = CM.Trigger;
+
+export const ContextMenuContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof CM.Content>>(
+  function ContextMenuContent({ className, collisionPadding = 8, ...props }, ref) {
+    return (
+      <CM.Portal>
+        <CM.Content ref={ref} collisionPadding={collisionPadding} className={cn(CONTENT, className)} {...props} />
+      </CM.Portal>
+    );
+  }
+);
+
+export function ContextMenuLabel({ children }: { children: ReactNode }) {
+  return <CM.Label className="px-8 pt-6 pb-4 text-sm leading-[1.35] text-fg-muted">{children}</CM.Label>;
+}
+
+/** A row that turns something on or off, with a check while on; the menu stays open so several can be changed. */
+export const ContextMenuCheckItem = forwardRef<
+  HTMLDivElement,
+  Omit<ComponentPropsWithoutRef<typeof CM.CheckboxItem>, 'checked' | 'onCheckedChange'> & { checked: boolean; onCheckedChange: (checked: boolean) => void }
+>(function ContextMenuCheckItem({ className, checked, onCheckedChange, children, ...props }, ref) {
+  return (
+    <CM.CheckboxItem
+      ref={ref}
+      checked={checked}
+      onCheckedChange={(value) => onCheckedChange(value === true)}
+      onSelect={(event) => event.preventDefault()}
+      className={cn(ITEM, 'h-[var(--g-menu-row-height)]', className)}
+      {...props}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <CM.ItemIndicator>
+        <Check className="size-16 shrink-0 text-blue" aria-hidden="true" />
+      </CM.ItemIndicator>
+    </CM.CheckboxItem>
+  );
+});

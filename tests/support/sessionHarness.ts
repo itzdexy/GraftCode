@@ -92,6 +92,10 @@ export interface HarnessOptions {
   checkEdits?: boolean;
   /** A shell manager of the test's own (default: a plain one). */
   shells?: SessionDeps['shells'];
+  /** Takes the snapshot before each user turn (default: none is taken). */
+  checkpoint?: SessionDeps['checkpoint'];
+  /** How long a turn waits for its snapshot, and closing for a turn (default: the app's own). */
+  timings?: SessionDeps['timings'];
   /** MCP tools connected for the session (default: none). */
   mcpTools?: Array<ToolDefinition<Record<string, unknown>>>;
   /** What connected MCP servers add: their notes, their prompts, and what filling one in gives (default: no servers). */
@@ -199,7 +203,8 @@ export function makeHarness(options: HarnessOptions): Harness {
       checkEdits: options.checkEdits ?? true
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
-    checkpoint: () => Promise.resolve(null),
+    checkpoint: options.checkpoint ?? (() => Promise.resolve(null)),
+    ...(options.timings ? { timings: options.timings } : {}),
     emit: (_id, event) => {
       events.push(event);
       for (const l of [...listeners]) l(event);

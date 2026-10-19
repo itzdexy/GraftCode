@@ -2,14 +2,18 @@ import type { ComponentType } from 'react';
 import {
   Archive,
   AtSign,
+  Box,
   Calendar,
   Code,
   Copy,
   EyeOff,
   FileDown,
+  Files,
   FileSearch,
   FileText,
+  FlaskConical,
   FolderOpen,
+  GitCompare,
   Globe,
   History,
   Info,
@@ -21,6 +25,7 @@ import {
   Moon,
   Palette,
   PanelLeft,
+  PanelRight,
   Pin,
   RefreshCw,
   Search,
@@ -31,10 +36,6 @@ import {
   Terminal,
   TextSearch,
   Workflow,
-  Files,
-  FlaskConical,
-  GitCompare,
-  Box,
   Wrench,
   Zap
 } from 'lucide-react';
@@ -46,6 +47,7 @@ import { setProjectSandbox } from '../../lib/sandbox';
 import { useApp } from '../../stores/app';
 import { useNav, type Route } from '../../stores/nav';
 import { usePanels } from '../../stores/panels';
+import { detailsShownNow, toggleDetails } from '../session/details/SessionDetails';
 import { openSearch } from '../../stores/textSearch';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
@@ -128,6 +130,16 @@ function sessionCommands(session: SessionSummary, ctx: PaletteContext): PaletteC
     out.push({ id: 'session.duplicate', title: 'Duplicate', group, keywords: 'copy fork', icon: Copy, run: () => duplicateSession(session) });
     out.push({ id: 'session.pin', title: session.pinned ? 'Unpin' : 'Pin', group, icon: Pin, run: () => setPinned(session, !session.pinned) });
     if (!session.archived) out.push({ id: 'session.archive', title: 'Archive…', group, icon: Archive, run: () => useSessionDialog.getState().open('archive', session) });
+  }
+  if (session.kind === 'code') {
+    out.push({
+      id: 'view.details',
+      title: 'Show or hide session details',
+      group,
+      keywords: 'context connectors outputs environment changes background tasks right column rail',
+      icon: PanelRight,
+      run: () => toggleDetails(session.id, detailsShownNow(session.id))
+    });
   }
   if (session.kind === 'code' && folder) {
     const panels = usePanels.getState();

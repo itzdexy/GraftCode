@@ -37,7 +37,19 @@
   },
   {
     "section": "providers",
+    "label": "On this computer"
+  },
+  {
+    "section": "providers",
     "label": "Model catalog"
+  },
+  {
+    "section": "models",
+    "label": "Prompt"
+  },
+  {
+    "section": "models",
+    "label": "Tool calls"
   },
   {
     "section": "models",
@@ -94,6 +106,10 @@
   {
     "section": "models",
     "label": "Tries again after a provider failure"
+  },
+  {
+    "section": "models",
+    "label": "Image, video and audio models"
   },
   {
     "section": "search",
@@ -278,6 +294,22 @@
   {
     "section": "appearance",
     "label": "Accent"
+  },
+  {
+    "section": "appearance",
+    "label": "Code"
+  },
+  {
+    "section": "appearance",
+    "label": "Code colors"
+  },
+  {
+    "section": "appearance",
+    "label": "Dark code"
+  },
+  {
+    "section": "appearance",
+    "label": "Light code"
   },
   {
     "section": "appearance",

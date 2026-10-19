@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isInside } from '../tools/paths';
+import { parseFrontmatter } from './frontmatter';
 
 export interface MemoryFile {
   path: string;
@@ -9,8 +10,12 @@ export interface MemoryFile {
 }
 
 /** Instruction file names, in priority order; the first found in a directory wins. */
-export const MEMORY_FILE_NAMES = ['GRAFT.md', 'AGENTS.md', 'CLAUDE.md'] as const;
+export const MEMORY_FILE_NAMES = ['GRAFT.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md'] as const;
 const MAX_BYTES = 40_000;
+
+function cap(text: string): string {
+  return text.length > MAX_BYTES ? `${text.slice(0, MAX_BYTES)}\n… [truncated]` : text;
+}
 
 function readCapped(file: string): string | null {
   try {
@@ -18,7 +23,7 @@ function readCapped(file: string): string | null {
     if (!stat.isFile()) return null;
     const text = fs.readFileSync(file, 'utf8');
     const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-    return clean.length > MAX_BYTES ? `${clean.slice(0, MAX_BYTES)}\n… [truncated]` : clean;
+    return cap(clean);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
@@ -31,6 +36,50 @@ export function memoryFileIn(dir: string): string | null {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * The project's Cursor rules: the `.cursor/rules/*.mdc` files marked `alwaysApply: true`, in name order,
+ * else the older single `.cursorrules` file. Rules scoped by globs or left to the model's choice are
+ * skipped, because Graft has no way to honour those conditions.
+ *
+ * These are another tool's files and optional, so any file or folder that can't be read (locked, denied,
+ * deleted mid-read, a dangling link) is skipped rather than allowed to stop the session from starting.
+ */
+export function cursorRules(dir: string): MemoryFile | null {
+  const rulesDir = path.join(dir, '.cursor', 'rules');
+  let names: string[];
+  try {
+    names = fs
+      .readdirSync(rulesDir)
+      .filter((name) => name.toLowerCase().endsWith('.mdc'))
+      .sort();
+  } catch {
+    names = [];
+  }
+  const bodies: string[] = [];
+  for (const name of names) {
+    const text = readOptional(path.join(rulesDir, name));
+    if (text === null) continue;
+    // parseFrontmatter lowercases keys, so `alwaysApply` arrives as `alwaysapply`.
+    const { data, body } = parseFrontmatter(text);
+    if (data.alwaysapply === 'true' && body.trim()) bodies.push(body.trim());
+  }
+  if (bodies.length > 0) return { path: rulesDir, scope: 'project', content: cap(bodies.join('\n\n')) };
+  const legacy = path.join(dir, '.cursorrules');
+  const text = readOptional(legacy);
+  const content = text === null ? '' : cap(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  return content ? { path: legacy, scope: 'project', content } : null;
+}
+
+/** A regular file's text, following links; null for anything missing, unreadable or not a file. */
+function readOptional(file: string): string | null {
+  try {
+    if (!fs.statSync(file).isFile()) return null;
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -75,7 +124,11 @@ export class MemoryLoader {
       this.loadedDirs.add(this.key(dir));
       const file = memoryFileIn(dir);
       const content = file ? readCapped(file) : null;
-      if (file && content) files.push({ path: file, scope: this.key(dir) === this.key(root) ? 'project' : 'directory', content });
+      const isRoot = this.key(dir) === this.key(root);
+      if (file && content) files.push({ path: file, scope: isRoot ? 'project' : 'directory', content });
+      // Cursor rules are the project's setup, not a note for one folder, so only the root's are read.
+      const rules = isRoot ? cursorRules(dir) : null;
+      if (rules) files.push(rules);
     }
     return files;
   }

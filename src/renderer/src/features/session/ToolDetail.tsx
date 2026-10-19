@@ -24,7 +24,9 @@ import { fileSize } from './FilesCard';
 import { Markdown } from './Markdown';
 import { Output, SecretsToggle } from './Output';
 import { todoKey } from './todoMotion';
-import type { ToolCall } from './transcriptModel';
+import { PictureViewer, type ToolPicture } from './ImageViewer';
+import { pictureName, pictureSrc, picturesToDraw } from './toolPictures';
+import { callParts, type ToolCall } from './transcriptModel';
 
 /** The command a step ran, in full: its row shows the first line only, with any key in it covered. */
 const COMMAND = 'selectable max-h-[120px] overflow-auto rounded-sm bg-code-block px-10 py-6 font-mono text-[calc(var(--g-code-font-size)-1px)] leading-[1.5] break-words whitespace-pre-wrap text-fg';
@@ -397,12 +399,55 @@ export function EditDiff({ patch, path, named = true, covered = true }: { patch:
 }
 
 /** Body of one tool call in an expanded group: exact command, output, diff, or result text. */
-export function ToolCallBody({ call }: { call: ToolCall }) {
+/**
+ * The pictures a tool sent back that its details don't draw themselves (a
+ * render from Blender, a capture of Roblox Studio): each opens large.
+ */
+function ResultPictures({ call }: { call: ToolCall }) {
+  const [open, setOpen] = useState<ToolPicture | null>(null);
+  const pictures = picturesToDraw(call.result);
+  if (pictures.length === 0) return null;
+  const parts = callParts(call);
+  const title = [parts.verb, parts.target].filter(Boolean).join(' ') || call.name;
+  return (
+    <div className="flex flex-wrap gap-6">
+      {pictures.map((image, i) => {
+        const picture = { src: pictureSrc(image), name: pictureName(title, i, pictures.length) };
+        return (
+          <button
+            // Pictures of one result never move, so their place is their name.
+            key={i}
+            type="button"
+            aria-label={`Open ${picture.name}`}
+            onClick={() => setOpen(picture)}
+            className="graft-checker group cursor-zoom-in overflow-hidden rounded-sm border border-border-card transition-ui hover:border-border-strong"
+          >
+            <img src={picture.src} alt={picture.name} className="block max-h-[240px] w-auto max-w-full object-contain transition-transform duration-[var(--g-duration-base)] group-hover:scale-[1.015]" />
+          </button>
+        );
+      })}
+      <PictureViewer picture={open} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
+function CallOutput({ call }: { call: ToolCall }) {
   if (call.running) {
     return call.running.output ? <Output text={call.running.output} className={OUTPUT} /> : <p className="text-sm text-fg-muted">Running…</p>;
   }
   if (!call.result) return <p className="text-sm text-fg-muted">Waiting to run.</p>;
   if (call.result.display) return <DisplayBody display={call.result.display} result={call.result} />;
   const text = resultText(call.result);
-  return text ? <Output text={text} className={cn(OUTPUT, call.result.isError && 'text-danger')} /> : <p className="text-sm text-fg-muted">No output.</p>;
+  if (text) return <Output text={text} className={cn(OUTPUT, call.result.isError && 'text-danger')} />;
+  return picturesToDraw(call.result).length > 0 ? null : <p className="text-sm text-fg-muted">No output.</p>;
+}
+
+export function ToolCallBody({ call }: { call: ToolCall }) {
+  if (picturesToDraw(call.result).length === 0) return <CallOutput call={call} />;
+  return (
+    <div className="flex flex-col gap-8">
+      <CallOutput call={call} />
+      <ResultPictures call={call} />
+    </div>
+  );
 }

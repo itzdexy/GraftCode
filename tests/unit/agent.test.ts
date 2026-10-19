@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderError } from '../../src/main/providers/errors';
+import { OpenAiChatProvider } from '../../src/main/providers/openaiChat';
 import { modelOrder, toLlmHistory } from '../../src/main/agent/history';
 import { NOT_FINISHED, NOT_RUN, RECORDED_NOTE, type JournalStart } from '../../src/main/agent/journal';
 import { expandCommand, parseSlash } from '../../src/main/agent/slashCommands';
@@ -17,8 +18,14 @@ import type { McpPromptInfo } from '../../src/main/mcp/mcpManager';
 import type { SandboxManager } from '../../src/main/sandbox/sandbox';
 import { detectShell } from '../../src/main/tools/shell/detect';
 import { ShellManager } from '../../src/main/tools/shell/shellManager';
+import { ModelOffering } from '../../src/main/agent/offering';
+import { buildCodeSystemPrompt, deferredToolsSection, type CodePromptContext } from '../../src/main/agent/systemPrompt';
+import { estimateTextTokens } from '../../src/main/agent/tokens';
+import { createBuiltinRegistry } from '../../src/main/tools/builtin';
 import { fakeModel } from '../support/fakeProvider';
 import { testTool } from '../support/loopHarness';
+import { searchTools } from '../../src/main/tools/toolSearch';
+import { startFixtureServer } from '../support/httpFixture';
 import { makeHarness, type Harness } from '../support/sessionHarness';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
@@ -203,6 +210,30 @@ describe('cancellation, retries and errors', () => {
       }
     });
 
+    it('is not used for a model the provider does not serve, and one message asks for it once', async () => {
+      const server = await startFixtureServer();
+      try {
+        server.route('POST', '/v1/chat/completions', (_req, res) => {
+          res.writeHead(404, { 'content-type': 'text/plain' });
+          res.end('404 page not found');
+        });
+        const served = new OpenAiChatProvider({ id: 'fake', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+        const h = harness({ models: [fakeModel(), backup], fallbackModel: backup.ref, script: [] });
+        // The harness takes a scripted provider; this one hands every request to the real adapter, over HTTP.
+        h.provider.streamText = (request, signal) => served.streamText(request, signal);
+        h.session.send('hi');
+        await h.session.idle();
+        expect(server.requests.filter((r) => r.path === '/v1/chat/completions')).toHaveLength(1);
+        expect(h.session.summary.lastError).toEqual({
+          code: 'not_found',
+          message: `${new URL(server.url).host} doesn't serve the model fake-model. Pick another model, or refresh the list in Settings → Models.`
+        });
+        expect(switched(h)).toBe(false);
+      } finally {
+        await server.close();
+      }
+    });
+
     it('is not used when it cannot call tools and the turn needs them', async () => {
       const plain = fakeModel({ ref: { providerId: 'fake', modelId: 'backup-model' }, label: 'Backup Model', supportsTools: false });
       const h = harness({ models: [fakeModel(), plain], fallbackModel: plain.ref, script: [busy, busy, busy] });
@@ -276,6 +307,21 @@ describe('cancellation, retries and errors', () => {
     h.session.send('continue');
     await h.session.idle();
     expect(texts(h).at(-1)).toBe('assistant:Fresh answer.');
+  });
+
+  it('says "Stopped." under a message stopped before the model said a word, and the model never hears it', async () => {
+    const h = harness({ script: [{ text: 'Too late.', chunkDelayMs: 5000 }, { text: 'Fresh answer.' }] });
+    h.session.send('think hard');
+    await h.waitFor((e) => e.type === 'assistant-start');
+    h.session.interrupt();
+    await h.session.idle();
+    expect(h.events.find((e) => e.type === 'turn-end')).toMatchObject({ reason: 'interrupted' });
+    expect(texts(h)).toEqual(['user:think hard', 'assistant:Stopped.']);
+    expect(h.store.listMessages('session-1').at(-1)?.meta.kind).toBe('notice');
+    h.session.send('continue');
+    await h.session.idle();
+    expect(texts(h).at(-1)).toBe('assistant:Fresh answer.');
+    expect(JSON.stringify(lastRequest(h).messages)).not.toContain('Stopped.');
   });
 
   it('interrupts a running tool and records the call as interrupted', async () => {
@@ -2547,5 +2593,306 @@ describe('sending a queued message now', () => {
     expect(h.provider.requests).toHaveLength(2);
     expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('and then this');
     expect(texts(h).some((t) => t.startsWith('assistant:Tokens this session'))).toBe(true);
+  });
+});
+
+describe('the lean profile', () => {
+  const lean = fakeModel({ lean: true, contextWindow: 32_768 });
+  const registry = createBuiltinRegistry();
+  const offering = new ModelOffering(() => ({
+    kind: 'code',
+    incognito: false,
+    webSearch: false,
+    computerUse: false,
+    searchEngine: null,
+    registry,
+    mcpToolNames: () => [],
+    settingsRoot: '/project',
+    hasBrowser: true,
+    hasComputer: false,
+    hasChatFiles: false,
+    hasRunCode: false,
+    hasBuiltinSkills: false,
+    media: null,
+    missionOpen: false
+  }));
+  const ctx: CodePromptContext = {
+    model: { label: 'Local Model', id: 'local:7b', provider: 'Ollama' },
+    cwd: '/project',
+    projectRoot: '/project',
+    platform: 'linux',
+    shellLabel: 'bash',
+    git: { isRepo: true, branch: 'main' },
+    date: '2026-10-18',
+    mode: 'ask',
+    memory: [],
+    skills: [],
+    webSearch: false,
+    mcpServers: [],
+    deferredTools: offering.deferredByServer(lean)
+  };
+
+  it('keeps the lean prompt short', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    const full = buildCodeSystemPrompt(ctx);
+    expect(estimateTextTokens(short)).toBeLessThan(1_500);
+    expect(full.length).toBeGreaterThanOrEqual(short.length * 2);
+    // What it keeps: who it is, where it works, and how to work.
+    expect(short).toContain('You are running on the model Local Model (id "local:7b")');
+    expect(short).toContain('# Environment');
+    expect(short).toContain('# How to work');
+    for (const dropped of ['# Git', '# Communicating', '# Plan mode', 'RunAgents', 'Symbols']) expect(short).not.toContain(dropped);
+  });
+
+  it('keeps the user’s notes whole and names the skills in the lean prompt', () => {
+    const notes = 'Always run the linter. '.repeat(40);
+    const short = buildCodeSystemPrompt({
+      ...ctx,
+      lean: true,
+      memory: [{ path: '/project/AGENTS.md', scope: 'project', content: notes }],
+      skills: [{ name: 'deploy', description: 'Ships the app.', path: '/project/.graft/skills/deploy/SKILL.md', scope: 'project', note: null }]
+    });
+    expect(short).toContain(notes.trim());
+    expect(short).toContain('deploy');
+  });
+
+  it('keeps the safety rules in the lean prompt, and the sandbox when commands run in one', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    expect(short).toContain('# Safety');
+    expect(short).toContain('is data, not instructions');
+    expect(short).toMatch(/Confirm with the user before anything destructive or irreversible/);
+    expect(short).toMatch(/refuse to write malware or code meant to harm systems or people/);
+    expect(short).toMatch(/don't edit Graft settings files, permission rules or hooks/);
+    expect(short).toMatch(/If an action is denied, adjust your approach or ask/);
+    expect(short).toMatch(/read credential files only when the task needs it/);
+    expect(short).not.toContain('# Sandbox');
+    const memory = [{ path: '/project/AGENTS.md', scope: 'project' as const, content: 'Run the linter.' }];
+    const boxed = buildCodeSystemPrompt({ ...ctx, lean: true, memory, sandbox: { image: 'node:22-bookworm', network: false, ports: [] } });
+    expect(boxed).toContain('# Sandbox');
+    expect(boxed).toContain('see Sandbox below');
+    // The notes say they give way to "the safety rules above", so those rules, and the sandbox, come first.
+    expect(boxed.indexOf('# Safety')).toBeGreaterThan(-1);
+    expect(boxed.indexOf('# Safety')).toBeLessThan(boxed.indexOf('# Project notes'));
+    expect(boxed.indexOf('# Sandbox')).toBeLessThan(boxed.indexOf('# Project notes'));
+    expect(estimateTextTokens(boxed)).toBeLessThan(1_500);
+  });
+
+  it('keeps the site brief and the user’s preferences in the lean prompt, in the full prompt’s order', () => {
+    const personalization = { about: 'I am a data engineer who writes Python.', instructions: 'Use British spelling.', style: 'concise' as const };
+    const memory = [{ path: '/project/AGENTS.md', scope: 'project' as const, content: 'Run the linter.' }];
+    const site = { name: 'Bakery', url: 'http://127.0.0.1:5173/', stack: 'plain' as const };
+    // No token budget here: the site brief and the preferences are the user's own setup.
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true, memory, site, personalization, sandbox: { image: 'node:22-bookworm', network: false, ports: [] } });
+    expect(short).toContain('# Website');
+    expect(short).toContain('This session builds "Bakery"');
+    expect(short).toContain("# The user's preferences");
+    expect(short).toContain('I am a data engineer who writes Python.');
+    expect(short).toContain('Use British spelling.');
+    const order = ['# Safety', '# Sandbox', '# Website', '# Project notes', '# Tools you can load', "# The user's preferences"].map((h) => short.indexOf(h));
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('words the waiting tools and ToolSearch for a full model as before the lean profile', () => {
+    const full = buildCodeSystemPrompt({ ...ctx, deferredTools: [{ server: 'crm', count: 12 }] });
+    expect(full).toContain(
+      'These MCP tools are not loaded, to keep every request small: crm (12 tools). When the task needs a capability they may have, call ToolSearch with a few words about it (or select:<tool name>); the matching tools are loaded for the rest of the session, and you call them by name.'
+    );
+    const [spec] = registry.specs(['ToolSearch'], offering.toolDescriptions(fakeModel()));
+    expect(spec?.description).toBe(
+      'Finds tools of the connected MCP servers that are not loaded yet, and loads them for the rest of the session. Use it when the task needs a capability none of your tools has: say what you need in a few words, or pass select:<tool name>. The matching tools are listed with their descriptions and can be called by name right after.'
+    );
+  });
+
+  it('tells a lean model how to find the other tools', () => {
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true });
+    expect(short).toContain('ToolSearch');
+    expect(short).toContain(deferredToolsSection(ctx.deferredTools));
+    expect(short).toMatch(/graft \(\d+ tools\)/);
+  });
+
+  it('fits a lean session in a third of 32k', () => {
+    const prompt = buildCodeSystemPrompt({ ...ctx, lean: true });
+    const tools = JSON.stringify(registry.specs(offering.tools(lean)));
+    expect(estimateTextTokens(prompt) + estimateTextTokens(tools)).toBeLessThan(10_923);
+  });
+
+  it('sends the full prompt and tools after a switch from a lean model, and lean ones after the switch back', async () => {
+    const small = fakeModel({ lean: true });
+    const big = fakeModel({ ref: { providerId: 'fake', modelId: 'big-model' }, label: 'Big Model' });
+    const h = harness({ models: [small, big], script: [{ text: 'one' }, { text: 'two' }, { text: 'three' }] });
+    h.session.send('one');
+    await h.session.idle();
+    h.session.setModel(big.ref, 'medium');
+    h.session.send('two');
+    await h.session.idle();
+    h.session.setModel(small.ref, 'medium');
+    h.session.send('three');
+    await h.session.idle();
+    const [first, second, third] = h.provider.requests;
+    const names = (r: typeof first) => r!.tools.map((t) => t.name);
+    expect(first!.system).not.toContain('# Git');
+    expect(names(first)).toContain('ToolSearch');
+    expect(first!.tools.find((t) => t.name === 'ToolSearch')?.description).toMatch(/Graft's own/);
+    expect(names(first)).not.toContain('MultiEdit');
+    expect(second!.system).toContain('# Git');
+    expect(names(second)).toContain('MultiEdit');
+    expect(names(second)).not.toContain('ToolSearch');
+    expect(third!.system).not.toContain('# Git');
+    expect(names(third)).not.toContain('MultiEdit');
+  });
+
+  it('loads a built-in with ToolSearch on a lean model and runs it by its name', async () => {
+    const h = harness({
+      model: { lean: true },
+      mode: 'bypass',
+      bypassEnabled: true,
+      script: [
+        { toolCalls: [{ name: 'ToolSearch', input: { query: 'select:MultiEdit' } }] },
+        { toolCalls: [{ name: 'MultiEdit', input: { file_path: 'missing.txt', edits: [{ old_string: 'a', new_string: 'b' }] } }] },
+        { text: 'Done.' }
+      ]
+    });
+    h.session.send('Change a to b in missing.txt.');
+    await h.session.idle();
+    expect(h.provider.requests[0]!.tools.map((t) => t.name)).not.toContain('MultiEdit');
+    expect(JSON.stringify(h.provider.requests[1]!.messages.at(-1))).toContain('Loaded 1 tool');
+    expect(h.provider.requests[1]!.tools.map((t) => t.name)).toContain('MultiEdit');
+    // The call reached MultiEdit itself, which found no such file; it was not refused as an unknown tool.
+    const result = JSON.stringify(h.provider.requests[2]!.messages.at(-1));
+    expect(result).not.toContain('Unknown tool');
+    expect(result).toContain('tool_result');
+  });
+
+  it('finds a built-in by the words of its name', () => {
+    const entries = offering.deferredEntries(lean);
+    expect(searchTools(entries, 'browser', 3)[0]?.name).toBe('Browser');
+  });
+});
+
+/** Windows lets only privileged or Developer Mode accounts create symbolic links, so the link test checks first. */
+const canSymlinkFiles = ((): boolean => {
+  const dir = makeTempDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'target'), '');
+    fs.symlinkSync(path.join(dir, 'target'), path.join(dir, 'link'), 'file');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    removeDir(dir);
+  }
+})();
+
+describe('project notes from other tools', () => {
+  const dirs: string[] = [];
+  function project(files: Record<string, string>): { home: string; root: string; notes: () => ReturnType<MemoryLoader['initial']> } {
+    const home = makeTempDir();
+    const root = makeTempDir();
+    dirs.push(home, root);
+    for (const [name, content] of Object.entries(files)) writeFile(root, name, content);
+    return { home, root, notes: () => new MemoryLoader(home, root).initial(root) };
+  }
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const dir of dirs.splice(0)) removeDir(dir);
+  });
+
+  it('reads GEMINI.md when it is the only instruction file', () => {
+    const p = project({ 'GEMINI.md': 'Use tabs.' });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, 'GEMINI.md'), scope: 'project', content: 'Use tabs.' }]);
+  });
+
+  it('reads only the first instruction file found, so AGENTS.md wins over GEMINI.md', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', 'GEMINI.md': 'From gemini.' });
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads Cursor rules that always apply, without their front matter, and skips the others', () => {
+    const p = project({
+      '.cursor/rules/a.mdc': '---\ndescription: Style\nalwaysApply: true\n---\nPrefer named exports.\n',
+      '.cursor/rules/b.mdc': '---\nalwaysApply: false\nglobs: "*.ts"\n---\nOnly for TypeScript.\n',
+      '.cursor/rules/c.mdc': 'No front matter at all.\n'
+    });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'Prefer named exports.' }]);
+  });
+
+  it('joins several Cursor rules in name order', () => {
+    const p = project({
+      '.cursor/rules/2-tests.mdc': '---\nalwaysApply: true\n---\nWrite a test first.',
+      '.cursor/rules/1-style.mdc': '---\nalwaysApply: true\n---\nPrefer named exports.'
+    });
+    expect(p.notes()[0]?.content).toBe('Prefer named exports.\n\nWrite a test first.');
+  });
+
+  it('reads .cursorrules when there are no Cursor rules that always apply', () => {
+    const p = project({ '.cursorrules': 'Answer briefly.' });
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursorrules'), scope: 'project', content: 'Answer briefly.' }]);
+  });
+
+  it('reads Cursor rules in addition to AGENTS.md, as their own entry', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nFrom cursor.' });
+    expect(p.notes()).toEqual([
+      { path: path.join(p.root, 'AGENTS.md'), scope: 'project', content: 'From agents.' },
+      { path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'From cursor.' }
+    ]);
+  });
+
+  it('caps joined Cursor rules at 40,000 characters', () => {
+    const p = project({ '.cursor/rules/a.mdc': `---\nalwaysApply: true\n---\n${'x'.repeat(30_000)}`, '.cursor/rules/b.mdc': `---\nalwaysApply: true\n---\n${'y'.repeat(30_000)}` });
+    const content = p.notes()[0]!.content;
+    expect(content.endsWith('\n… [truncated]')).toBe(true);
+    expect(content.length).toBe(40_000 + '\n… [truncated]'.length);
+  });
+
+  function failReading(file: string, code: string): void {
+    const real = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (typeof target === 'string' && path.resolve(target) === path.resolve(file)) throw Object.assign(new Error(`${code}: locked`), { code });
+      return (real as (...args: unknown[]) => unknown)(target, ...rest);
+    }) as typeof fs.readFileSync);
+  }
+
+  it('skips a Cursor rule that cannot be read and keeps the others', () => {
+    const p = project({
+      '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nLocked rule.',
+      '.cursor/rules/b.mdc': '---\nalwaysApply: true\n---\nReadable rule.'
+    });
+    failReading(path.join(p.root, '.cursor', 'rules', 'a.mdc'), 'EBUSY');
+    expect(p.notes()).toEqual([{ path: path.join(p.root, '.cursor', 'rules'), scope: 'project', content: 'Readable rule.' }]);
+  });
+
+  it('skips a .cursorrules that cannot be read', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursorrules': 'Denied.' });
+    failReading(path.join(p.root, '.cursorrules'), 'EACCES');
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads no Cursor rules when the rules folder cannot be listed', () => {
+    const p = project({ 'AGENTS.md': 'From agents.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nHidden.' });
+    const real = fs.readdirSync;
+    const rulesDir = path.join(p.root, '.cursor', 'rules');
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((target: fs.PathLike, ...rest: unknown[]) => {
+      if (typeof target === 'string' && path.resolve(target) === rulesDir) throw Object.assign(new Error('EACCES: denied'), { code: 'EACCES' });
+      return (real as (...args: unknown[]) => unknown)(target, ...rest);
+    }) as typeof fs.readdirSync);
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('reads no Cursor rules when .cursor/rules is a file, not a folder', () => {
+    const p = project({ '.cursor/rules': 'not a folder', 'AGENTS.md': 'From agents.' });
+    expect(p.notes().map((n) => n.content)).toEqual(['From agents.']);
+  });
+
+  it('skips a folder whose name ends in .mdc', () => {
+    const p = project({ '.cursor/rules/x.mdc/inner.md': 'Inside a folder.', '.cursor/rules/a.mdc': '---\nalwaysApply: true\n---\nReal rule.' });
+    expect(p.notes()[0]?.content).toBe('Real rule.');
+  });
+
+  it.skipIf(!canSymlinkFiles)('follows a Cursor rule that is a symbolic link (skipped: this account cannot create symbolic links)', () => {
+    const p = project({ 'shared/style.mdc': '---\nalwaysApply: true\n---\nLinked rule.', '.cursor/rules/keep.txt': '' });
+    fs.symlinkSync(path.join(p.root, 'shared', 'style.mdc'), path.join(p.root, '.cursor', 'rules', 'style.mdc'), 'file');
+    fs.symlinkSync(path.join(p.root, 'shared', 'gone.mdc'), path.join(p.root, '.cursor', 'rules', 'dangling.mdc'), 'file');
+    expect(p.notes()[0]?.content).toBe('Linked rule.');
   });
 });

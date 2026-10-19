@@ -2,9 +2,10 @@ import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITheme } from '@xterm/xterm';
-import { Plus, SquareTerminal, X } from 'lucide-react';
+import { Eraser, EllipsisVertical, Plus, SquareTerminal, X } from 'lucide-react';
 import type { TerminalInfoView } from '@shared/schemas/panels';
 import { IconButton } from '../../components/Button';
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuSub, MenuSubContent, MenuSubTrigger, MenuSwitchItem, MenuTrigger } from '../../components/Menu';
 import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
@@ -13,6 +14,7 @@ import { useApp } from '../../stores/app';
 import { panelBus, usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { PanelFrame } from './PanelFrame';
+import { CURSOR_STYLES, SCROLLBACK_CHOICES, useTerminalPrefs } from './terminalPrefs';
 import { StreamJoiner } from './terminalStream';
 
 const DARK: ITheme = {
@@ -68,14 +70,17 @@ function themeNow(): ITheme {
 }
 
 /** One xterm.js view bound to a pty: input goes to main, output streams back. */
-function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; active: boolean; typed: number }) {
+function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInfoView; active: boolean; typed: number; cleared: number }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const fontSize = useApp((s) => s.settings?.appearance.codeFontSize ?? 13);
   const fontSizeRef = useRef(fontSize);
+  const prefs = useTerminalPrefs();
+  const prefsRef = useRef(prefs);
   useLayoutEffect(() => {
     fontSizeRef.current = fontSize;
+    prefsRef.current = prefs;
   });
 
   useEffect(() => {
@@ -85,8 +90,9 @@ function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; ac
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--g-font-mono') || 'monospace',
       fontSize: fontSizeRef.current,
       lineHeight: 1.2,
-      cursorBlink: true,
-      scrollback: 5000,
+      cursorStyle: prefsRef.current.cursorStyle,
+      cursorBlink: prefsRef.current.cursorBlink,
+      scrollback: prefsRef.current.scrollback,
       allowProposedApi: false,
       theme: themeNow()
     });
@@ -106,6 +112,11 @@ function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; ac
     const input = term.onData((data) => {
       invoke('pty:write', { id: terminal.id, data }).catch((error: unknown) => logError('Terminal input failed', error));
     });
+    // With "Copy on select", what is selected goes to the clipboard as the selection ends.
+    const selected = term.onSelectionChange(() => {
+      if (!prefsRef.current.copyOnSelect || !term.hasSelection()) return;
+      navigator.clipboard.writeText(term.getSelection()).catch((error: unknown) => logError('Could not copy the selection', error));
+    });
     const resized = term.onResize(({ cols, rows }) => {
       invoke('pty:resize', { id: terminal.id, cols, rows }).catch((error: unknown) => logError('Terminal resize failed', error));
     });
@@ -122,6 +133,7 @@ function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; ac
       observer.disconnect();
       themeObserver.disconnect();
       input.dispose();
+      selected.dispose();
       resized.dispose();
       offData();
       offExit();
@@ -138,6 +150,19 @@ function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; ac
     fitRef.current?.fit();
   }, [fontSize]);
 
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.cursorStyle = prefs.cursorStyle;
+    term.options.cursorBlink = prefs.cursorBlink;
+    term.options.scrollback = prefs.scrollback;
+  }, [prefs.cursorStyle, prefs.cursorBlink, prefs.scrollback]);
+
+  // `cleared` counts the Clear requests; the terminal in front clears its screen and what scrolled away.
+  useEffect(() => {
+    if (cleared > 0 && active) termRef.current?.clear();
+  }, [cleared, active]);
+
   // `typed` counts the lines typed in from outside: after each, the keyboard is here, so Enter runs the line.
   useEffect(() => {
     if (!active) return;
@@ -149,6 +174,53 @@ function XtermView({ terminal, active, typed }: { terminal: TerminalInfoView; ac
 }
 
 type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready' };
+
+/** How the terminals draw and behave: the cursor, copying a selection, how far back they keep, and clearing the one in front. */
+function TerminalOptions({ onClear }: { onClear: () => void }) {
+  const prefs = useTerminalPrefs();
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <IconButton label="Terminal options" size="xs">
+          <EllipsisVertical className="size-14" />
+        </IconButton>
+      </MenuTrigger>
+      <MenuContent align="end" className="w-[220px]">
+        <MenuSub>
+          <MenuSubTrigger>Cursor style</MenuSubTrigger>
+          <MenuSubContent className="w-[160px]">
+            {CURSOR_STYLES.map((style) => (
+              <MenuItem key={style.value} checked={prefs.cursorStyle === style.value} onSelect={() => prefs.set({ cursorStyle: style.value })}>
+                {style.label}
+              </MenuItem>
+            ))}
+          </MenuSubContent>
+        </MenuSub>
+        <MenuSwitchItem checked={prefs.cursorBlink} onCheckedChange={(cursorBlink) => prefs.set({ cursorBlink })}>
+          Blink cursor
+        </MenuSwitchItem>
+        <MenuSwitchItem checked={prefs.copyOnSelect} onCheckedChange={(copyOnSelect) => prefs.set({ copyOnSelect })} description="Selected text goes to the clipboard">
+          Copy on select
+        </MenuSwitchItem>
+        <MenuSub>
+          <MenuSubTrigger>Scrollback</MenuSubTrigger>
+          <MenuSubContent className="w-[180px]">
+            <MenuLabel>Lines kept above the screen</MenuLabel>
+            {SCROLLBACK_CHOICES.map((lines) => (
+              <MenuItem key={lines} checked={prefs.scrollback === lines} onSelect={() => prefs.set({ scrollback: lines })}>
+                {lines.toLocaleString('en-US')}
+              </MenuItem>
+            ))}
+          </MenuSubContent>
+        </MenuSub>
+        <MenuSeparator />
+        <MenuItem icon={<Eraser className="size-14" />} onSelect={onClear}>
+          Clear terminal
+        </MenuItem>
+      </MenuContent>
+    </Menu>
+  );
+}
 
 /** Terminal panel: real pty tabs in the session's folder. */
 export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
@@ -192,6 +264,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
   // A line asked for from outside the panel (a command in a reply) is typed into the terminal in front and never
   // run: it goes in without a line break. A session without a terminal gets one above, and the line waits for it.
   const [typed, setTyped] = useState(0);
+  const [cleared, setCleared] = useState(0);
   const wanted = usePanels((s) => (s.terminalInput?.sessionId === sessionId ? s.terminalInput.seq : null));
   useEffect(() => {
     if (wanted === null || activeId === null) return;
@@ -244,15 +317,18 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
         </div>
       }
       actions={
-        <IconButton label="New terminal" size="xs" onClick={() => void create()}>
-          <Plus className="size-14" />
-        </IconButton>
+        <>
+          <IconButton label="New terminal" size="xs" onClick={() => void create()}>
+            <Plus className="size-14" />
+          </IconButton>
+          <TerminalOptions onClear={() => setCleared((n) => n + 1)} />
+        </>
       }
     >
       {load.state === 'loading' ? <LoadingState label="Starting a shell…" /> : null}
       {load.state === 'error' ? <ErrorState title="Couldn't start a terminal" message={load.message} onRetry={() => void create()} /> : null}
       {terminals.map((t) => (
-        <XtermView key={t.id} terminal={t} active={t.id === activeId} typed={typed} />
+        <XtermView key={t.id} terminal={t} active={t.id === activeId} typed={typed} cleared={cleared} />
       ))}
     </PanelFrame>
   );

@@ -1,4 +1,5 @@
 import { LucideProvider } from 'lucide-react';
+import { useScrollingMarks } from './lib/scrollbars';
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ErrorState } from './components/States';
@@ -23,6 +24,7 @@ function Root() {
   const onSplashDone = useCallback(() => setSplashDone(true), []);
 
   useGraftEvents();
+  useScrollingMarks();
 
   useEffect(() => {
     applyPlatform(window.graft.platform);

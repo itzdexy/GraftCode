@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { launchGraft, makeTempDir, type LaunchedApp } from './support/launch';
@@ -255,6 +257,57 @@ test('settings: appearance, rebinding a shortcut, a second provider and permissi
   await w.getByRole('button', { name: 'Cancel' }).click();
   await expect(w.getByRole('switch', { name: 'Allow Bypass mode' })).toHaveAttribute('aria-checked', 'false');
   await expect(w.getByRole('radio', { name: 'Bypass' })).toHaveCount(0);
+});
+
+test('Settings → Providers finds a model server running on this computer and adds it', async () => {
+  // A stand-in for llama-server or vLLM: it lists one model on an address Graft is told to search.
+  const stub = http.createServer((req, res) => {
+    const found = req.method === 'GET' && req.url === '/v1/models';
+    res.writeHead(found ? 200 : 404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(found ? { object: 'list', data: [{ id: 'stub-coder', object: 'model' }] } : { error: 'not found' }));
+  });
+  await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve));
+  const { port } = stub.address() as AddressInfo;
+  try {
+    provider = await MockProvider.start();
+    graft = await launchGraft({ env: { GRAFT_LOCAL_PORTS: String(port) } });
+    const w = graft.window;
+    await completeOnboarding(graft, provider);
+    await openSettings(w, 'Providers');
+
+    await w.getByRole('button', { name: 'Find servers on this computer' }).click();
+    const found = w.getByRole('list', { name: 'Servers on this computer' });
+    const row = found.getByRole('listitem', { name: 'OpenAI-compatible server' });
+    await expect(row.getByText(`http://127.0.0.1:${port}/v1 · 1 model`)).toBeVisible();
+    await shot(w, 'settings-found-servers');
+    await row.getByRole('button', { name: 'Add OpenAI-compatible server' }).click();
+
+    const providers = w.getByRole('list', { name: 'Providers' });
+    await expect(providers.getByRole('listitem', { name: 'OpenAI-compatible server' })).toBeVisible();
+    await expect(providers.getByText(`http://127.0.0.1:${port}/v1`)).toBeVisible();
+    await expect(found).toBeHidden();
+    // Once added it is no longer offered, so a second search finds nothing new.
+    await w.getByRole('button', { name: 'Find servers on this computer' }).click();
+    await expect(w.getByText('No model server answered on this computer. Start Ollama, LM Studio or llama-server and try again.')).toBeVisible();
+
+    // The model it lists can be given the lean prompt, and the choice is still there when Settings is opened again.
+    await openSettings(w, 'Models');
+    const addModel = w.getByRole('form', { name: 'Add a custom model to OpenAI-compatible server' });
+    await addModel.getByLabel('Model ID').fill('stub-coder');
+    await addModel.getByRole('combobox', { name: 'Prompt', exact: true }).selectOption({ label: 'Lean' });
+    await expect(addModel.getByRole('combobox', { name: 'Tool calls', exact: true })).toHaveValue('');
+    await addModel.getByRole('button', { name: 'Add' }).click();
+    const custom = w.getByRole('list', { name: 'Custom models for OpenAI-compatible server' });
+    await expect(custom.getByRole('listitem').filter({ hasText: 'stub-coder' })).toContainText('lean prompt');
+    await closeSettings(w);
+    await openSettings(w, 'Models');
+    await expect(custom.getByRole('listitem').filter({ hasText: 'stub-coder' })).toContainText('lean prompt');
+    await expect(custom).not.toContainText('tools');
+    await addModel.scrollIntoViewIfNeeded();
+    await shot(w, 'settings-custom-model-lean');
+  } finally {
+    await new Promise<void>((resolve) => stub.close(() => resolve()));
+  }
 });
 
 test('data: export and clear history; with the tray on, closing the window keeps Graft running', async () => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DARK_CODE_THEME_IDS, DEFAULT_CODE_THEMES, LIGHT_CODE_THEME_IDS } from '../codeThemes';
 import { EffortLevelSchema, ModelRefSchema, PermissionModeSchema, RECOMMENDED_EFFORT } from './common';
 import { MODEL_ROLES, ModelRoleSchema, type ModelRoleId } from './agentRuns';
 
@@ -115,7 +116,10 @@ export const AppSettingsSchema = z.object({
     motionStyle: z.enum(MOTION_STYLES),
     /** Width of the transcript and composer column. */
     transcriptWidth: z.enum(['narrow', 'medium', 'wide']),
-    transcriptView: z.enum(TRANSCRIPT_VIEWS)
+    transcriptView: z.enum(TRANSCRIPT_VIEWS),
+    /** How code is colored in the dark theme and in the light one (shiki themes). */
+    codeThemeDark: z.enum(DARK_CODE_THEME_IDS),
+    codeThemeLight: z.enum(LIGHT_CODE_THEME_IDS)
   }),
   defaults: z.object({
     model: ModelRefSchema.nullable(),
@@ -220,7 +224,9 @@ export const AppSettingsSchema = z.object({
     comfyEnabled: z.boolean(),
     comfyUrl: z.url({ protocol: /^https?$/ }).max(500),
     /** Checkpoint for plain text-to-image; empty uses the first one installed. */
-    comfyCheckpoint: z.string().max(300)
+    comfyCheckpoint: z.string().max(300),
+    /** OpenRouter video model GenerateVideo uses; empty uses the default. */
+    videoModel: z.string().max(200)
   }),
   /** Read aloud: a natural voice from OpenRouter's speech models, or this computer's own voices. */
   voice: z.object({
@@ -251,7 +257,7 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', motionStyle: 'lively', transcriptWidth: 'narrow', transcriptView: 'normal' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', motionStyle: 'lively', transcriptWidth: 'narrow', transcriptView: 'normal', codeThemeDark: DEFAULT_CODE_THEMES.dark, codeThemeLight: DEFAULT_CODE_THEMES.light },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
   behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true },
@@ -263,7 +269,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   agents: { routing: 'session', roles: Object.fromEntries(MODEL_ROLES.map((role) => [role, null])) as Record<ModelRoleId, null>, maxParallel: 4, tokenBudget: null, retries: 1 },
-  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '' },
+  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '', videoModel: '' },
   personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }

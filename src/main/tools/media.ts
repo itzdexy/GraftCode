@@ -13,9 +13,10 @@ import { errorResult, type ToolContext, type ToolDefinition, type ToolResult } f
 
 /**
  * Generated media: GenerateImage makes one picture with the image model from
- * Settings → Images; ComfyUI works with the user's own ComfyUI (what is
- * installed, saved workflows, running one). Both save into the project in
- * code sessions and into the chat's files in chats, and never anywhere else.
+ * Settings → Images; GenerateVideo one clip with the video model from Settings →
+ * Models; ComfyUI works with the user's own ComfyUI (what is installed, saved
+ * workflows, running one). They save into the project in code sessions and into
+ * the chat's files in chats, and never anywhere else.
  */
 
 const EXTENSION: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg' };
@@ -139,6 +140,111 @@ export const generateImageTool: ToolDefinition<GenerateImageInput> = {
         ...preview(ctx, thumb)
       ],
       display: { kind: 'media', engine: made.engine, model: made.model, prompt: input.prompt, costUsd: made.costUsd, files: [{ path: shown, kind: 'image', bytes: made.data.length, thumb: thumb?.data ?? null }] }
+    };
+  }
+};
+
+export const VIDEO_ASPECTS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const;
+const VIDEO_EXTENSION: Record<string, string> = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
+/** Pictures a clip can start on, by extension. */
+const FRAME_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+const MAX_FRAME_BYTES = 10 * 1024 * 1024;
+
+export const GenerateVideoInput = z.object({
+  prompt: z
+    .string()
+    .min(1)
+    .max(4000)
+    .describe('What happens in the clip: the subject and its action, the camera’s movement, the style, the light, and the sound when there is any.'),
+  path: z.string().min(1).max(400).describe('Where to save it, relative to the project, e.g. "assets/intro.mp4". In a chat, a file name.'),
+  seconds: z.number().int().min(1).max(30).optional().describe('How long, in seconds. The nearest length the model makes is used; leave it out for the model’s own.'),
+  aspect: z.enum(VIDEO_ASPECTS).optional().describe('16:9 (landscape), 9:16 (vertical, for phones), 1:1, 4:3, 3:4 or 21:9. Leave it out for the model’s own.'),
+  first_frame: z.string().max(400).optional().describe('A picture in the project the clip starts on, to bring it to life, e.g. "assets/hero.png". Code sessions only.'),
+  audio: z.boolean().optional().describe('Sound with the picture, for models that make it. Leave it out for the model’s own.'),
+  overwrite: z.boolean().optional().describe('Replace the file if it already exists.')
+});
+export type GenerateVideoInput = z.infer<typeof GenerateVideoInput>;
+
+export const generateVideoTool: ToolDefinition<GenerateVideoInput> = {
+  name: 'GenerateVideo',
+  description: [
+    'Make one short video clip with a video model and save it as a file: a shot for a game trailer, a cutscene, an animated background or hero, a product clip.',
+    'Use it when the user asks for generated or AI-made video. A clip takes a minute or more, and every second of it costs money on their key, so make the ones the work needs.',
+    'Give first_frame to start the clip on a picture of the project.'
+  ].join(' '),
+  input: GenerateVideoInput,
+  // Network: it calls a provider with the user's key. The file it writes is declared, so Plan mode and the project boundary apply.
+  permissionClass: 'network',
+  concurrencySafe: () => true,
+  timeoutMs: 25 * 60_000,
+  describe(input, ctx) {
+    return Promise.resolve({
+      summary: `Generate ${path.basename(input.path)}`,
+      writes: [resolvePath(input.path, ctx.cwd)],
+      preview: { kind: 'generic', text: `Generate a video${input.seconds ? ` of about ${String(input.seconds)} seconds` : ''} and save it as ${input.path}\n\n${input.prompt}` }
+    });
+  },
+  async execute(input, ctx): Promise<ToolResult> {
+    const media = ctx.media;
+    const model = media?.videoModel() ?? null;
+    if (!media || !model) {
+      return errorResult('Making video needs OpenRouter as a provider with its key. The user can add it in Settings → Providers, and pick a video model in Settings → Models.');
+    }
+    const target = ctx.chatFiles ? null : resolvePath(input.path, ctx.cwd);
+    if (target) {
+      const problem = pathProblem(target, ctx);
+      if (problem) return errorResult(problem);
+      if (fs.existsSync(target) && input.overwrite !== true) {
+        return errorResult(`${input.path} already exists. Pick another name, or pass overwrite: true to replace it.`);
+      }
+    }
+    let firstFrame: { mediaType: string; data: string } | null = null;
+    if (input.first_frame) {
+      if (ctx.chatFiles) return errorResult('first_frame takes a picture of a project, so it works in code sessions only.');
+      const frame = resolvePath(input.first_frame, ctx.cwd);
+      if (!isInsideReal(ctx.projectRoot, frame, ctx.platform)) return errorResult('first_frame has to be a picture inside the project.');
+      const mediaType = FRAME_TYPES[path.extname(frame).toLowerCase()];
+      if (!mediaType) return errorResult('first_frame has to be a PNG, JPEG or WebP picture.');
+      let bytes: Buffer;
+      try {
+        bytes = fs.readFileSync(frame);
+      } catch {
+        return errorResult(`There is no picture at ${input.first_frame}.`);
+      }
+      if (bytes.length > MAX_FRAME_BYTES) return errorResult(`${input.first_frame} is larger than 10 MB; use a smaller picture.`);
+      firstFrame = { mediaType, data: bytes.toString('base64') };
+    }
+    let made;
+    try {
+      made = await media.generateVideo(
+        { prompt: input.prompt, seconds: input.seconds ?? null, aspect: input.aspect ?? null, firstFrame, audio: input.audio ?? null },
+        ctx.signal,
+        (text) => ctx.progress(text)
+      );
+    } catch (error) {
+      if (ctx.signal.aborted || isAbortError(error)) throw error;
+      return errorResult(`Couldn't generate the video: ${(error as Error).message}`);
+    }
+    const ext = VIDEO_EXTENSION[made.mediaType] ?? 'mp4';
+    let shown: string;
+    try {
+      if (ctx.chatFiles) {
+        shown = ctx.chatFiles.save(withExtension(path.basename(input.path), ext), made.data).name;
+      } else {
+        const wanted = withExtension(target!, ext);
+        const final = wanted === target || input.overwrite === true ? wanted : freePath(wanted);
+        fs.mkdirSync(path.dirname(final), { recursive: true });
+        fs.writeFileSync(final, made.data);
+        shown = displayPath(final, ctx.projectRoot, ctx.platform);
+      }
+    } catch (error) {
+      return errorResult(`The video was generated but couldn't be saved: ${(error as Error).message}`);
+    }
+    if (made.costUsd !== null && made.costUsd > 0) ctx.spend(made.costUsd);
+    return {
+      isError: false,
+      content: [{ type: 'text', text: `Saved ${shown} (${size(made.data.length)}, ${made.model}${costText(made.costUsd)}).` }],
+      display: { kind: 'media', engine: 'openrouter', model: made.model, prompt: input.prompt, costUsd: made.costUsd, files: [{ path: shown, kind: 'video', bytes: made.data.length, thumb: null }] }
     };
   }
 };

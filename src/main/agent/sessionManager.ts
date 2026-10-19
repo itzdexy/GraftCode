@@ -97,9 +97,12 @@ export class SessionManager {
 
   /** Sessions left running or waiting when the app last quit are idle now. */
   recoverStaleStatuses(): void {
-    for (const s of this.deps.repo.list({ includeArchived: true })) {
+    const sessions = this.deps.repo.list({ includeArchived: true });
+    for (const s of sessions) {
       if (s.status === 'running' || s.status === 'needs-input') this.deps.repo.updateSession(s.id, { status: 'idle' });
     }
+    // Index folders a delete couldn't remove, and those of incognito sessions, go now.
+    void this.deps.checkpoints.sweepIndexes(new Set(sessions.map((s) => s.id)));
     this.deps.repo.recoverAgentRuns();
     this.deps.repo.recoverMissions();
     // Tool calls that were running when the app stopped get a truthful answer now, so the note is there when the session is opened.
@@ -217,9 +220,9 @@ export class SessionManager {
         const info = await gitInfo(cwd);
         return { isRepo: info.isRepo, branch: info.branch };
       },
-      checkpoint: async (sessionId, cwd, messageId) => {
+      checkpoint: async (sessionId, cwd, messageId, signal) => {
         if (store === this.incognito) return null;
-        const record = await d.checkpoints.create(sessionId, cwd, messageId);
+        const record = await d.checkpoints.create(sessionId, cwd, messageId, signal);
         return record.id;
       },
       emit: (sessionId, event) => this.onEvent(sessionId, event),

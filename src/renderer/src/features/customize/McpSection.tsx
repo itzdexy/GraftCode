@@ -5,12 +5,14 @@ import type { McpServerInput, McpServerView } from '@shared/schemas/customize';
 import type { RuleLists } from '@shared/schemas/system';
 import { effectivePolicy, mcpServerRule, policyOf, withPolicy, type ToolPolicy } from '@shared/mcpPolicy';
 import { Badge } from '../../components/Badge';
+import { ConnectorIcon } from '../../components/ConnectorIcon';
 import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
 import { Dialog, DialogContent } from '../../components/Dialog';
 import { Checkbox, TextField } from '../../components/Field';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { onChanged } from '../../lib/bus';
+import { connectorName } from '../../lib/brands';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { useLoad, type Load } from '../../lib/useLoad';
@@ -51,11 +53,6 @@ function PolicySelect({ label, value, onChange }: { label: string; value: ToolPo
   );
 }
 
-function StateDot({ state }: { state: McpServerView['state'] }) {
-  if (state === 'connecting') return <Spinner size={10} label="Connecting" />;
-  const color = state === 'connected' ? 'bg-success' : state === 'failed' ? 'bg-danger' : state === 'needs-auth' ? 'bg-amber' : 'bg-fg-faint';
-  return <span className={cn('size-6 shrink-0 rounded-full', color)} aria-hidden="true" />;
-}
 
 function ServerEditor({ server, projectPath, onDone }: { server: McpServerView | null; projectPath: string | null; onDone: (saved: boolean) => void }) {
   const config = server?.config;
@@ -204,9 +201,11 @@ function ServerRow({ server, projectPath, policies, onEdit, onChange }: { server
   const expandable = server.tools.length > 0 || server.prompts.length > 0;
   return (
     <Row className="flex-wrap">
-      <StateDot state={server.state} />
+      <ConnectorIcon server={server} size={22} state={server.state} />
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-8 text-left" disabled={!expandable}>
-        <span className="text-base font-medium text-fg-strong">{server.name}</span>
+        <span className="text-base font-medium text-fg-strong">{connectorName(server)}</span>
+        {/* The name it has in the settings, which tools and permission rules go by, when the server calls itself otherwise. */}
+        {connectorName(server) !== server.name ? <span className="font-mono text-xs text-fg-faint">{server.name}</span> : null}
         <Badge>{SCOPE_TEXT[server.scope]}</Badge>
         <span className="min-w-0 truncate text-sm text-fg-muted">{summary}</span>
         {expandable ? <ChevronRight className={cn('size-12 shrink-0 text-icon-muted transition-transform', open && 'rotate-90')} aria-hidden="true" /> : null}

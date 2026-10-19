@@ -10,7 +10,9 @@ import { defaultLevels, EffortChoice } from '../models/EffortChoice';
 import { allModelsOf } from '../models/modelChoice';
 import { ModelListbox } from '../models/ModelListbox';
 import { AgentsSettings } from './AgentsSettings';
-import { Group, saveSettings, SettingRow, SwitchRow } from './common';
+import { Group, saveSettings, SelectField, SettingRow, SwitchRow } from './common';
+import { customModelSummary } from './customModelSummary';
+import { MediaModelsSections } from './MediaModelsSections';
 
 function parseCount(text: string, min: number, max: number): number | undefined | null {
   const t = text.trim().replace(/[_,\s]/g, '');
@@ -25,6 +27,9 @@ function CustomModels({ provider }: { provider: ProviderSummary }) {
   const [label, setLabel] = useState('');
   const [context, setContext] = useState('');
   const [vision, setVision] = useState(false);
+  // Empty is Automatic: no field is written, so the main process decides from where the model runs.
+  const [prompt, setPrompt] = useState<'' | 'full' | 'lean'>('');
+  const [toolFormat, setToolFormat] = useState<'' | 'native' | 'text'>('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -54,12 +59,14 @@ function CustomModels({ provider }: { provider: ProviderSummary }) {
       setError('Context window must be a whole number of tokens between 1,024 and 10,000,000.');
       return;
     }
-    const model: CustomModel = { id: modelId, ...(label.trim() ? { label: label.trim() } : {}), ...(contextWindow ? { contextWindow } : {}), ...(vision ? { vision } : {}) };
+    const model: CustomModel = { id: modelId, ...(label.trim() ? { label: label.trim() } : {}), ...(contextWindow ? { contextWindow } : {}), ...(vision ? { vision } : {}), ...(prompt ? { prompt } : {}), ...(toolFormat ? { toolFormat } : {}) };
     if (await save([...provider.customModels, model])) {
       setId('');
       setLabel('');
       setContext('');
       setVision(false);
+      setPrompt('');
+      setToolFormat('');
       setError(null);
     }
   };
@@ -73,7 +80,7 @@ function CustomModels({ provider }: { provider: ProviderSummary }) {
             <li key={m.id} className="flex items-center gap-8 rounded-md bg-surface px-10 py-4">
               <span className="selectable min-w-0 flex-1 truncate font-mono text-sm text-fg">{m.id}</span>
               <span className="truncate text-sm text-fg-muted">
-                {[m.label, m.contextWindow ? `${m.contextWindow.toLocaleString()} tokens` : null, m.vision ? 'images' : null].filter(Boolean).join(' · ')}
+                {customModelSummary(m)}
               </span>
               <IconButton label={`Remove ${m.id}`} size="xs" disabled={busy} onClick={() => void save(provider.customModels.filter((x) => x.id !== m.id))}>
                 <Trash2 className="size-12" />
@@ -83,6 +90,7 @@ function CustomModels({ provider }: { provider: ProviderSummary }) {
         </ul>
       ) : null}
       <form
+        aria-label={`Add a custom model to ${provider.label}`}
         className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto] items-end gap-8"
         onSubmit={(e) => {
           e.preventDefault();
@@ -96,6 +104,29 @@ function CustomModels({ provider }: { provider: ProviderSummary }) {
           Add
         </Button>
         <Checkbox label="Accepts images" checked={vision} onChange={(e) => setVision(e.target.checked)} className="col-span-4" />
+        <SelectField
+          label="Prompt"
+          value={prompt}
+          onChange={(v) => setPrompt(v as typeof prompt)}
+          options={[
+            { value: '', label: 'Automatic' },
+            { value: 'full', label: 'Full' },
+            { value: 'lean', label: 'Lean' }
+          ]}
+        />
+        <SelectField
+          label="Tool calls"
+          value={toolFormat}
+          onChange={(v) => setToolFormat(v as typeof toolFormat)}
+          options={[
+            { value: '', label: 'Automatic' },
+            { value: 'native', label: 'Native' },
+            { value: 'text', label: 'Written in text' }
+          ]}
+        />
+        <p className="col-span-4 text-sm text-fg-muted">
+          Lean sends a short prompt and the core tools, for models with a small window on this computer. Written in text is for models whose server has no tool support.
+        </p>
       </form>
       {error ? (
         <p role="alert" className="text-sm text-danger">
@@ -176,6 +207,8 @@ export function ModelsSection() {
           )}
         </div>
       </Group>
+
+      <MediaModelsSections />
 
       <Group title="Sessions">
         <SwitchRow

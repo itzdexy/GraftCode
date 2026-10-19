@@ -278,6 +278,16 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().appearance.motionStyle).toBe('calm');
     expect(() => settings.update({ appearance: { motionStyle: 'wild' as 'calm' } })).toThrow(/motionStyle/);
   });
+
+  it('colors code with Vitesse in a profile from before there was a choice, and keeps the themes picked', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ theme: 'light', motion: 'on', motionStyle: 'calm' }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance).toMatchObject({ theme: 'light', motionStyle: 'calm', codeThemeDark: 'vitesse-dark', codeThemeLight: 'vitesse-light' });
+    settings.update({ appearance: { codeThemeDark: 'night-owl', codeThemeLight: 'catppuccin-latte' } });
+    expect(new AppSettingsService(db).get().appearance).toMatchObject({ codeThemeDark: 'night-owl', codeThemeLight: 'catppuccin-latte' });
+    // A light theme can't be the dark one.
+    expect(() => settings.update({ appearance: { codeThemeDark: 'catppuccin-latte' as 'night-owl' } })).toThrow(/codeThemeDark/);
+  });
 });
 
 describe('key store', () => {

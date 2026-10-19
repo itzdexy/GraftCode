@@ -8,6 +8,7 @@ import { contextLimit, spendText, usageText } from '../../../src/renderer/src/fe
 import { partBars } from '../../../src/renderer/src/features/composer/contextModel';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
 import { fileGlyph } from '../../../src/renderer/src/features/session/fileCardModel';
+import { customModelSummary } from '../../../src/renderer/src/features/settings/customModelSummary';
 import {
   DEFAULT_FILTER,
   groupByProject,
@@ -288,5 +289,14 @@ describe('context and spend', () => {
     });
     expect(spendText(usage({ inputTokens: 900, outputTokens: 20 }, 0.004))).toEqual({ tokens: '900 input · 20 output', cost: 'Less than $0.01' });
     expect(spendText(usage({ inputTokens: 900 }, null))?.cost).toBe('No published prices for this model');
+  });
+});
+
+describe('custom model summary', () => {
+  it('names the window and any prompt or tool-call choice made for the model', () => {
+    expect(customModelSummary({ id: 'q', contextWindow: 16384, prompt: 'lean', toolFormat: 'text' })).toBe('16,384 tokens · lean prompt · tools in text');
+    expect(customModelSummary({ id: 'q', label: 'Qwen', vision: true, prompt: 'full', toolFormat: 'native' })).toBe('Qwen · images · full prompt · native tools');
+    // Nothing chosen means automatic, which the row leaves unsaid.
+    expect(customModelSummary({ id: 'q' })).toBe('');
   });
 });

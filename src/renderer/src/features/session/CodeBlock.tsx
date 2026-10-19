@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronUp, Code2, Copy, Eye, PenTool, SquareTermina
 import { IconButton } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
+import { useCodeThemes } from '../../lib/codeThemes';
 import { highlightLines, languageForPath, type Token } from '../../lib/highlight';
 import { logError } from '../../lib/log';
 import { useResolvedPath } from '../../stores/fileRefs';
@@ -31,11 +32,12 @@ export function useCopy(): [boolean, (text: string) => void] {
 
 /** Highlighted lines once available; plain text until then (and while streaming). */
 export function useHighlight(code: string, language: string | null, enabled: boolean): Token[][] | null {
+  const themes = useCodeThemes();
   const [result, setResult] = useState<{ code: string; language: string | null; lines: Token[][] | null } | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    highlightLines(code, language)
+    highlightLines(code, language, themes)
       .then((lines) => {
         if (!cancelled) setResult({ code, language, lines });
       })
@@ -43,7 +45,8 @@ export function useHighlight(code: string, language: string | null, enabled: boo
     return () => {
       cancelled = true;
     };
-  }, [code, language, enabled]);
+  }, [code, language, enabled, themes]);
+  // Lines colored with the themes chosen before stay until the new ones are in, so a change of theme doesn't flash plain text.
   return enabled && result && result.code === code && result.language === language ? result.lines : null;
 }
 

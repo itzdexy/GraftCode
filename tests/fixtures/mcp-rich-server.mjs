@@ -5,7 +5,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const server = new McpServer(
-  { name: 'graft-rich', version: '1.0.0' },
+  // Its name for people and its icon, as a server announces them in the handshake.
+  { name: 'graft-rich', version: '1.0.0', title: 'Graft Rich Notes', icons: [{ src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiI+PGNpcmNsZSBjeD0iOCIgY3k9IjgiIHI9IjciIGZpbGw9IiM3ZmJmNmEiLz48L3N2Zz4=', mimeType: 'image/svg+xml', sizes: ['any'] }] },
   { instructions: 'Call "count" before anything else. Notes live in the note:// resources.' }
 );
 
