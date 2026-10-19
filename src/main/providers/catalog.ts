@@ -70,10 +70,12 @@ export const LEAN_CONTEXT = 65_536;
 /**
  * Whether a model gets the lean profile when Settings says nothing: a model on this computer
  * with a small window, where the full prompt and every tool would take a third of it or more.
- * A hosted model's window is the provider's, so it always gets the full profile.
+ * A hosted model's window is the provider's, so it always gets the full profile. `known` says
+ * whether anything told Graft the window (the server, Settings, or a trained length that caps
+ * it): a size Graft only assumed says nothing about the model, so it keeps the full profile.
  */
-export function leanByDefault(local: boolean, contextWindow: number): boolean {
-  return local && contextWindow <= LEAN_CONTEXT;
+export function leanByDefault(local: boolean, contextWindow: number, known: boolean): boolean {
+  return local && known && contextWindow <= LEAN_CONTEXT;
 }
 
 /** One-line capability summary used as the model's menu description. */

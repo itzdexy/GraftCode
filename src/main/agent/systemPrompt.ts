@@ -268,9 +268,9 @@ function personalizationSection(p: Personalization | null | undefined, styles: R
 
 /**
  * The prompt of a lean model: who it is, where it works, the essentials of how to work with
- * the core tools, the safety rules in brief, the sandbox when commands run in one, and the
- * user's own notes, which stay whole because they are the user's instructions. Everything
- * else is left out so a small window has room for the work.
+ * the core tools, the safety rules in brief, the sandbox when commands run in one, and what
+ * the user set up: the site brief, their notes and their preferences, which stay whole because
+ * they are the user's instructions. Everything else is left out so a small window has room for the work.
  */
 function leanCodePrompt(ctx: CodePromptContext, env: string): string {
   const skills =
@@ -303,9 +303,11 @@ function leanCodePrompt(ctx: CodePromptContext, env: string): string {
       '- Help with defensive security work, and refuse to write malware or code meant to harm systems or people.'
     ),
     sandboxSection(ctx),
+    siteSection(ctx),
     notesSection(ctx.memory),
     skills,
-    deferredToolsSection(ctx.deferredTools)
+    deferredToolsSection(ctx.deferredTools),
+    personalizationSection(ctx.personalization, CODE_STYLE)
   ];
   return sections.filter((s) => s.length > 0).join('\n\n');
 }

@@ -2677,6 +2677,22 @@ describe('the lean profile', () => {
     expect(estimateTextTokens(boxed)).toBeLessThan(1_500);
   });
 
+  it('keeps the site brief and the user’s preferences in the lean prompt, in the full prompt’s order', () => {
+    const personalization = { about: 'I am a data engineer who writes Python.', instructions: 'Use British spelling.', style: 'concise' as const };
+    const memory = [{ path: '/project/AGENTS.md', scope: 'project' as const, content: 'Run the linter.' }];
+    const site = { name: 'Bakery', url: 'http://127.0.0.1:5173/', stack: 'plain' as const };
+    // No token budget here: the site brief and the preferences are the user's own setup.
+    const short = buildCodeSystemPrompt({ ...ctx, lean: true, memory, site, personalization, sandbox: { image: 'node:22-bookworm', network: false, ports: [] } });
+    expect(short).toContain('# Website');
+    expect(short).toContain('This session builds "Bakery"');
+    expect(short).toContain("# The user's preferences");
+    expect(short).toContain('I am a data engineer who writes Python.');
+    expect(short).toContain('Use British spelling.');
+    const order = ['# Safety', '# Sandbox', '# Website', '# Project notes', '# Tools you can load', "# The user's preferences"].map((h) => short.indexOf(h));
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
   it('words the waiting tools and ToolSearch for a full model as before the lean profile', () => {
     const full = buildCodeSystemPrompt({ ...ctx, deferredTools: [{ server: 'crm', count: 12 }] });
     expect(full).toContain(

@@ -181,7 +181,8 @@ export class OllamaProvider implements LLMProvider {
     const toolFormat = this.toolFormats.get(name) ?? (this.isLocalModel(name) && !caps.includes('tools') ? 'text' : undefined);
     const tools = toolFormat === 'text' || caps.includes('tools');
     const prompt = this.prompts.get(name);
-    const lean = prompt ? prompt === 'lean' : leanByDefault(this.isLocalModel(name), contextWindow);
+    // Graft sends this window as num_ctx itself, so it is always known.
+    const lean = prompt ? prompt === 'lean' : leanByDefault(this.isLocalModel(name), contextWindow, true);
     const vision = caps.includes('vision');
     const effort = caps.includes('thinking')
       ? effortSupport(LEVELED_THINKING.test(name) ? ['low', 'medium', 'high', 'taproot'] : ['low', 'high', 'taproot'])

@@ -1152,10 +1152,62 @@ describe('the lean profile for models with a small window on this computer', () 
     await server.close();
   });
 
-  it('is lean by default for a model on this computer with a window of up to 64K', () => {
-    expect(leanByDefault(true, LEAN_CONTEXT)).toBe(true);
-    expect(leanByDefault(true, LEAN_CONTEXT + 1)).toBe(false);
-    expect(leanByDefault(false, 8192)).toBe(false);
+  it('is lean by default for a model on this computer whose window is known to be up to 64K', () => {
+    expect(leanByDefault(true, LEAN_CONTEXT, true)).toBe(true);
+    expect(leanByDefault(true, LEAN_CONTEXT + 1, true)).toBe(false);
+    expect(leanByDefault(false, 8192, true)).toBe(false);
+    // A window Graft only assumed says nothing about the model, so it keeps the full profile.
+    expect(leanByDefault(true, 32768, false)).toBe(false);
+  });
+
+  describe('on an OpenAI-compatible server on this computer', () => {
+    const local = (customModels: Array<{ id: string; contextWindow?: number }> = []): OpenAiChatProvider =>
+      new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` }, customModels);
+    const llamaCpp = (meta: Record<string, number> = {}): void =>
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder', owned_by: 'llamacpp', ...(Object.keys(meta).length > 0 ? { meta } : {}) }] }));
+
+    it('keeps the full profile when the server says nothing of the window', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder' }] }));
+      const [model] = await local().listModels();
+      expect(model?.contextWindow).toBe(32768);
+      expect(model).not.toHaveProperty('lean');
+    });
+
+    it('is lean when llama.cpp says it loaded a small window', async () => {
+      llamaCpp();
+      server.route('GET', '/props', (_req, res) => json(res, 200, { default_generation_settings: { n_ctx: 16384 } }));
+      const [model] = await local().listModels();
+      expect(model).toMatchObject({ contextWindow: 16384, lean: true });
+    });
+
+    it('is lean when the trained length caps the window, even with no answer from /props', async () => {
+      llamaCpp({ n_ctx_train: 8192 });
+      server.route('GET', '/props', (_req, res) => json(res, 500, { error: { message: 'busy' } }));
+      const [model] = await local().listModels();
+      expect(model).toMatchObject({ contextWindow: 8192, lean: true });
+    });
+
+    it('keeps the full profile when the trained length is larger than the window assumed', async () => {
+      llamaCpp({ n_ctx_train: 262144 });
+      server.route('GET', '/props', (_req, res) => json(res, 500, { error: { message: 'busy' } }));
+      const [model] = await local().listModels();
+      expect(model?.contextWindow).toBe(32768);
+      expect(model).not.toHaveProperty('lean');
+    });
+
+    it('is lean when Settings gives the model a small window', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder' }] }));
+      const [model] = await local([{ id: 'coder', contextWindow: 16384 }]).listModels();
+      expect(model).toMatchObject({ contextWindow: 16384, lean: true });
+    });
+  });
+
+  it('keeps a local Ollama model at the default 32k lean, since Graft sets its window itself', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'coder:7b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': 131072 } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).toMatchObject({ contextWindow: 32768, lean: true });
   });
 
   it('marks a 32k local Ollama model lean and a 128k one full', async () => {

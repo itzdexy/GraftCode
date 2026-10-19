@@ -3,7 +3,7 @@ import type { ProviderKind, Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { isLocalUrl } from '@shared/privacy';
-import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId, leanByDefault } from './catalog';
+import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId, LEAN_CONTEXT, leanByDefault } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
 import { firstByteTimeout, flavorOf, loadedContexts } from './localServer';
@@ -484,7 +484,10 @@ export class OpenAiChatProvider implements LLMProvider {
     // A model on this computer without native tool calls is taught to write them as text.
     const toolFormat = custom?.toolFormat ?? (isLocalUrl(this.base) && !tools ? 'text' : undefined);
     if (toolFormat === 'text') tools = true;
-    const lean = custom?.prompt ? custom.prompt === 'lean' : leanByDefault(isLocalUrl(this.base), context);
+    // A model is lean by default only when something said how small its window is: the server, Settings, or a
+    // trained length so short that the window can't be larger. The size assumed when nothing said is only a guess.
+    const windowKnown = !size.assumed || custom?.contextWindow !== undefined || (trained !== null && trained <= LEAN_CONTEXT);
+    const lean = custom?.prompt ? custom.prompt === 'lean' : leanByDefault(isLocalUrl(this.base), context, windowKnown);
     // Plain OpenAI-compatible servers only get the levels the catalog says the model accepts.
     const effort = catalogEffort(meta, {
       reasoning,
