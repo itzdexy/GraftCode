@@ -194,6 +194,11 @@
     background: color-mix(in srgb, var(--g-blue) 45%, transparent);
   }
 
+  /*
+   * Scrollbars: a slim rounded thumb in a wider, invisible lane, so it is easy to grab and light to look
+   * at. It stays faint until its area is pointed at or scrolled (lib/scrollbars.ts marks a scrolled area
+   * for a moment), widens under the pointer, and takes on the accent while it is dragged.
+   */
   ::-webkit-scrollbar {
     width: var(--g-scrollbar-size);
     height: var(--g-scrollbar-size);
@@ -203,11 +208,24 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--g-scrollbar-thumb);
+    background-color: color-mix(in srgb, var(--g-scrollbar-thumb) 40%, transparent);
+    background-clip: padding-box;
+    border: 3px solid transparent;
     border-radius: var(--g-radius-full);
+    min-height: 40px;
+    min-width: 40px;
+  }
+  :hover::-webkit-scrollbar-thumb,
+  .graft-scrolling::-webkit-scrollbar-thumb {
+    background-color: var(--g-scrollbar-thumb);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--g-scrollbar-thumb-hover);
+    background-color: var(--g-scrollbar-thumb-hover);
+    border-width: 2px;
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in srgb, var(--g-accent) 55%, var(--g-scrollbar-thumb-hover));
+    border-width: 2px;
   }
 }
 

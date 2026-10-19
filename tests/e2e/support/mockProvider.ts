@@ -53,13 +53,17 @@ export class MockProvider {
   /** Resolves whenever a held stream is closed by the client. */
   private heldClosed: Array<() => void> = [];
 
-  private constructor(apiKey: string | null, models: readonly [string, string]) {
+  /** More ids the model list names: picture, video or voice models a server lists beside its chat models. */
+  private readonly extraModels: readonly string[];
+
+  private constructor(apiKey: string | null, models: readonly [string, string], extraModels: readonly string[]) {
     this.apiKey = apiKey;
     this.models = models;
+    this.extraModels = extraModels;
   }
 
-  static async start(options: { apiKey?: string; models?: readonly [string, string] } = {}): Promise<MockProvider> {
-    const mock = new MockProvider(options.apiKey ?? null, options.models ?? MOCK_MODELS);
+  static async start(options: { apiKey?: string; models?: readonly [string, string]; extraModels?: readonly string[] } = {}): Promise<MockProvider> {
+    const mock = new MockProvider(options.apiKey ?? null, options.models ?? MOCK_MODELS, options.extraModels ?? []);
     await mock.listen();
     return mock;
   }
@@ -134,7 +138,7 @@ export class MockProvider {
     }
     if (req.method === 'GET' && path === '/v1/models') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ object: 'list', data: this.models.map((id, i) => ({ id, object: 'model', created: 1_780_000_000 - i, owned_by: 'e2e' })) }));
+      res.end(JSON.stringify({ object: 'list', data: [...this.models, ...this.extraModels].map((id, i) => ({ id, object: 'model', created: 1_780_000_000 - i, owned_by: 'e2e' })) }));
       return;
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') {

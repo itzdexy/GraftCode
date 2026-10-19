@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase, type Db } from '../../src/main/db/database';
 import { CheckpointService } from '../../src/main/git/checkpoints';
 import { computeDiffStats, DiffStatsCache } from '../../src/main/git/diffStats';
@@ -281,6 +281,21 @@ describe('changes: stage, unstage, revert, commit', () => {
     expect((await listChanges(repo))[0]).toMatchObject({ path: 'f.txt', staged: null, unstaged: 'M' });
   });
 
+  it('leaves out changes of whitespace alone when asked, and only then', async () => {
+    const repo = track(makeRepo());
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    writeFile(repo, 'w.txt', `${lines.join('\n')}\n`);
+    gitSync(repo, 'add', 'w.txt');
+    gitSync(repo, 'commit', '-q', '-m', 'add w');
+    lines[1] = '    line 2';
+    lines[27] = 'line 28 CHANGED';
+    writeFile(repo, 'w.txt', `${lines.join('\n')}\n`);
+    expect((await fileDiff(repo, 'w.txt', false)).hunks).toHaveLength(2);
+    const quiet = await fileDiff(repo, 'w.txt', false, true);
+    expect(quiet.hunks).toHaveLength(1);
+    expect(quiet.hunks[0]!.lines.join('\n')).toContain('+line 28 CHANGED');
+  });
+
   it('reverts one hunk or whole files, deleting untracked files', async () => {
     const repo = track(makeRepo());
     twoHunks(repo);
@@ -420,6 +435,23 @@ describe('finding and running git', () => {
     await expect(runGit(['status'], { cwd: path.join(makeTempDir(), 'deleted-project') })).rejects.toMatchObject({ code: 'folder_missing' });
   });
 
+  it('ends at once when stopped, and on Windows the real git and what it started end too', async () => {
+    const dir = track(makeTempDir());
+    const marker = path.join(dir, 'still running.txt').replace(/\\/g, '/');
+    const controller = new AbortController();
+    const started = Date.now();
+    // A git that runs for three seconds and then leaves a mark: an alias that sleeps in git's own shell. On Windows
+    // the git.exe on PATH is a launcher, and the real git and the shell are its children.
+    const run = runGit(['-c', `alias.slow=!sleep 3 && echo late > '${marker}'`, 'slow'], { cwd: dir, signal: controller.signal });
+    setTimeout(() => controller.abort(new Error('stopped')), 300);
+    await expect(run).rejects.toThrow('stopped');
+    expect(Date.now() - started).toBeLessThan(2500);
+    if (process.platform === 'win32') {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      expect(fs.existsSync(marker)).toBe(false);
+    }
+  });
+
   it('finds git where its installer puts it when PATH has no git', () => {
     const exists = (p: string): boolean => p === 'C:\\Program Files\\Git\\cmd\\git.exe';
     resetGitBinary();
@@ -427,5 +459,30 @@ describe('finding and running git', () => {
     resetGitBinary();
     expect(gitBinary('darwin', { PATH: '/usr/bin' }, (p) => p === '/opt/homebrew/bin/git')).toBe('/opt/homebrew/bin/git');
     resetGitBinary();
+  });
+});
+
+describe('the private index folders of snapshots', () => {
+  it('never keep a session from being deleted: one still held is left, and the next start sweeps it', async () => {
+    const shadow = track(makeTempDir('graft shadow (tmp) '));
+    const indexRoot = track(makeTempDir('graft index (tmp) '));
+    const db = openDatabase(':memory:');
+    try {
+      const service = new CheckpointService(db, shadow, indexRoot);
+      writeFile(indexRoot, 's1/abc.index', 'x');
+      writeFile(indexRoot, 's2/abc.index', 'x');
+      // What Windows says while a git that is ending still has the index open.
+      const held = Object.assign(new Error('EPERM, Permission denied'), { code: 'EPERM' });
+      const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(held);
+      await expect(service.deleteForSession('s1')).resolves.toBeUndefined();
+      rm.mockRestore();
+      expect(fs.existsSync(path.join(indexRoot, 's1'))).toBe(true);
+
+      await service.sweepIndexes(new Set(['s2']));
+      expect(fs.existsSync(path.join(indexRoot, 's1'))).toBe(false);
+      expect(fs.existsSync(path.join(indexRoot, 's2', 'abc.index'))).toBe(true);
+    } finally {
+      db.close();
+    }
   });
 });

@@ -19,6 +19,270 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.35 local models that work (2026-10-18)
+
+The round came from an audit of 0.6.34 on 2026-10-18 and from what the user's installed 0.6.34
+logged. Graft claimed to run on small and local models; on a model served from this computer it
+took the wrong window, spent a third of a 32K window on tool schemas before the first message, lost
+tool calls written as text and timed out on long prompts. No new package, table or migration: the
+per-model choices live in the `custom_models` JSON through `CustomModelSchema`, and one channel was
+added (`providers:detectLocal`).
+
+- **The context a local server loaded** (`providers/localServer.ts`, `openaiChat.ts`). llama.cpp
+  lists `meta.n_ctx_train`, the trained length (262,144 for Qwen3-Coder), while llama-server often
+  runs with 4K to 32K. A model list that looks like llama.cpp (`owned_by: "llamacpp"` or a `meta`
+  object) or LM Studio (`owned_by: "organization_owner"`) is followed by one probe, `GET /props`
+  (`n_ctx`) or `GET /api/v0/models` (`loaded_context_length`), with a 2-second limit. The trained
+  length only caps that figure, a failed probe keeps the list's size, and a size set in Settings
+  still wins. Other servers get no extra request.
+- **Time to read a long prompt** (`localServer.ts` `firstByteTimeout`, `openaiChat.ts`, `ollama.ts`).
+  A local server gets 15 minutes to the first byte instead of 120 s (60 s for a ping), hosted ones
+  keep their limits; Ollama is sent `keep_alive: "30m"`, so a turn that waits on an approval doesn't
+  reload the model.
+- **Tool calls written as text** (`providers/textToolCalls.ts`, `openaiChat.ts`, `ollama.ts`). Hermes
+  `<tool_call>{…}</tool_call>`, Qwen3-Coder's `<function=…><parameter=…>` XML and Mistral's
+  `[TOOL_CALLS]` are read, only for names Graft offered and never inside a ``` fence; a value the
+  tool's schema calls a string stays a string. A model without native tools is told the tools in the
+  prompt, its earlier calls and results go back as the same markup, and a streaming filter holds
+  markup back and returns any text that turns out not to be a call. In native mode a local model's
+  text calls are recovered too. A server that answers "does not support tools" is asked again in
+  text, and that model stays in text while Graft runs. The turn loop does not change: a finished
+  reply's blocks, not its streamed deltas, are what is stored (`agent/loop.ts`).
+- **The lean profile** (`agent/offering.ts`, `tools/builtin.ts` `LEAN_TOOLS`, the code prompt). A local
+  model (by `isLocalUrl`, Ollama's hosted models excepted) whose window is known to be 65,536 tokens or
+  less gets a short code prompt. Known means its server reported the loaded window, the user set one,
+  its trained length is that small, or it runs in Ollama, where Graft sets `num_ctx` itself; a local
+  server that reports nothing gets the full profile. A lean model is offered AskUserQuestion, Edit,
+  ExitPlanMode, Glob, Grep, KillShell, Read, Shell, ShellOutput, TodoWrite, WebFetch and Write, plus
+  ToolSearch. The other built-ins wait behind
+  ToolSearch under the server name `graft`, with the session's MCP tools. The lean prompt keeps every
+  safety rule of the full one in fewer words, the Sandbox section when a sandbox is on, the site brief
+  and the user's personalization; a lean
+  model in a mission is sent MissionUpdate. Switching between a lean and a full model sends the
+  matching prompt and tools on the next request. Modelled on Cline's compact prompt for local models;
+  Roo Code's users, who never got one, hit 300 s timeouts. The 28 built-in schemas weigh about 8,750
+  tokens.
+- **Servers on this computer** (`localServer.ts` `detectLocalServers`, `providers/FoundServers.tsx`,
+  Settings → Providers and the onboarding's provider step). Ollama, LM Studio, llama.cpp, vLLM, Jan
+  and KoboldCpp are probed on their default ports; one found is added in a click. A server that never
+  finishes its answer can't stall the search.
+- **Per-model choices** (`settings/ModelsSection.tsx`). A custom model's Prompt (Automatic, Full,
+  Lean) and Tool calls (Automatic, Native, Written in text).
+- **A model a provider doesn't serve** (`openaiChat.ts`). NVIDIA NIM's bare `404 page not found`
+  reached the user nine times on 2026-10-17; the message now names the host and the model and says
+  to pick another or refresh the list. One message makes one chat request: the nine came from
+  parallel agents or resends.
+- **Notes from other tools** (`agent/memory.ts`). `GEMINI.md` joins the instruction files, last in
+  priority; at the project root the `.cursor/rules/*.mdc` files with `alwaysApply: true`, in name
+  order, or else `.cursorrules`, are added. Glob-scoped and model-chosen rules are skipped, since
+  Graft can't honour those conditions, and a rule that can't be read is skipped.
+
+Left out, and why:
+
+- An edit flow for custom models: the new Prompt and Tool calls choices are set when a model is
+  added; changing them means removing and adding the model again.
+- Servers on the local network: only this computer is probed, and `isLocalUrl` matches
+  `localhost`, `127.0.0.1` and `[::1]` only, so a model server on another machine gets the hosted
+  limits and the full profile.
+- Cursor rules in subfolders: only the project root's `.cursor/rules` and `.cursorrules` are read.
+- Deferred from the reviews: a call quoted in single-backtick inline code is still read (only
+  ``` fences are excluded); `keep_alive: "30m"` overrides a user's `OLLAMA_KEEP_ALIVE`; an
+  OpenRouter 404 other than its data-policy one is reworded as "doesn't serve the model", hiding
+  reasons such as "No endpoints found that support tool use"; a locked `GRAFT.md`, `AGENTS.md`,
+  `CLAUDE.md` or `GEMINI.md` still breaks the prompt build (pre-existing).
+
+### 0.6.34 media models, video, 54 integrations, and Delete that can't be locked (2026-10-17)
+
+Asked for as: "fix" with a screenshot of the delete dialog of 0.6.33 saying "EPERM, Permission
+denied: \\?\C:\Users\…\Graft\checkpoint-index\e0ba8b19-…"; "btw if a provider support image
+model,audio model or video model make it show on the model page and make it like different
+sections and make this good. do not add any "claude code" name on the app its graft code and make
+this good make this amazing for coders,ui,devs,game makers, and etc researchers and etc"; and
+"continue and also add alot more MCP's". No new package or table; one setting
+(`media.videoModel`), one channel (`models:media`), one tool (GenerateVideo).
+
+- **Delete that can't be locked** (`git/git.ts`, `git/checkpoints.ts`, `sessionManager.ts`). The
+  user's log showed "A turn did not end when its session was closed" and then the EPERM four
+  times; a `git add -A` of Graft's started 22:13 was still running ten minutes later with its
+  parent gone. Git for Windows' `cmd\git.exe` is a launcher whose child is the real git: the
+  stop killed the launcher only, and the real git held the private index and the pipes, so the
+  turn didn't end either. git is now stopped with `taskkill /T` on Windows and a stop ends the call
+  at once; the index folder is removed without blocking, retried briefly, and left for a sweep at
+  the next start when it is still held, so a delete never fails on it.
+- **The snapshot beside the reply** (`agent/session.ts`, `agent/loop.ts` `beforeChange`). A code
+  turn asked the model only after the snapshot; now they run together, a call that changes
+  something waits for the snapshot before it runs, a call that only looks doesn't, and the
+  snapshot ends with Stop and with the session.
+- **Media models on the Models page** (`media/mediaModels.ts`, `settings/MediaModelsSections.tsx`,
+  `settings/mediaModels.ts`). OpenRouter's lists by `output_modalities` (image, speech, audio,
+  transcription) and its video list (`/videos/models`, with durations, shapes, first frames and
+  per-second prices); OpenAI's and Google's model lists classified by name; OpenAI-compatible
+  servers by the names of well-known media models, which the chat list now leaves out.
+- **GenerateVideo** (`media/videos.ts`, `tools/media.ts`). OpenRouter's asynchronous video API:
+  submit with a length and a shape the model makes, poll, download; the key is only sent to the
+  provider's own origin, whatever address a response names.
+- **54 integrations** (`shared/integrations.ts`). Every launch checked on 2026-10-17 against npm,
+  PyPI or the live server (initialize answered, or a token or OAuth with dynamic client
+  registration asked for).
+
+Different from what was asked, and why:
+
+- Music and transcription models are listed, not used: nothing in Graft calls them yet (Read
+  aloud uses OpenRouter's voices, and there is no dictation). OpenAI's Sora and Google's Veo are
+  listed but made through OpenRouter only for now; their own APIs differ and were not built.
+- Remote integrations that only accept approved clients (Vercel, Slack, Canva) were left out:
+  their sign-in would fail. Unreal Engine has no official MCP server to point at yet.
+- "No Claude Code name in the app": the one place was the 0.6.33 What's new note, now reworded;
+  Graft's own name is unchanged. Claude stays where it names Anthropic's models.
+
+### 0.6.33 large folders, connectors with their own icons, a tour of the app (2026-10-17)
+
+Asked for as: "fix make it show their real icons and like make this better check twitter and
+the claude new videos to improve graft same check codex,cursor and etc", then "fix. it doesnt
+delete or sent a message also add a custom better looking scroll thing. and go into a full
+test. testing everything like absolute everything. settings,searching,coding and etc". One new
+package (`simple-icons` 16.33.0, CC0, a development dependency bundled into the renderer), no
+new table, setting, channel or shortcut.
+
+- **Sending and deleting in a large folder** (`agent/session.ts`, `git/checkpoints.ts`). The
+  user's screenshots showed a session stuck at "1m 22s · Pruning…" that could not be deleted,
+  and a new one at "1s · Thinking…" with no message: the turn snapshotted the folder (`git add
+  -A` into a private index) before storing the message, with nothing to stop it and a timeout
+  of ten minutes, and closing a session waited for the turn for ever. Now the message is stored
+  and shown first; the snapshot has a budget (`CHECKPOINT_BUDGET_MS`, 20 s) and the turn's
+  signal, so Stop ends it; a folder that runs past the budget gets a notice and no more
+  attempts until restart; and `dispose()` waits at most `DISPOSE_WAIT_MS` (8 s) for a turn
+  that doesn't hear the stop. A turn stopped before the model wrote anything stores a
+  "Stopped." notice (`kind: 'notice'`, never sent to the model), as a reply cut short shows one.
+- **Messages typed while one is being sent** (`composer/Composer.tsx`). The box was emptied when
+  the send came back, wiping what had been typed meanwhile, and an Enter before then did nothing:
+  in the Linux container two of three queued messages were lost. The box now empties at once,
+  sends wait for the one before them, and a message that is not sent comes back.
+- **Connectors with their own icons** (`lib/brands.ts`, `components/ConnectorIcon.tsx`,
+  `mcp/mcpManager.ts` `serverInfoOf`). 57 marks from Simple Icons, matched on the server's name,
+  then its host, then its command and arguments; white or black ink by luminance, as app icons
+  draw it. A server's own `title`, `version` and `icons` from its MCP `initialize` answer are
+  kept (icons only as `data:` images of at most 96 KB, SVG preferred) and passed in `mcp:list`.
+  The details column's Connectors card has the icons in its header and rows that open; Customize,
+  the Integrations gallery and a turn's steps (`mcp__server__tool`) show the same marks.
+- **The card chooser** (`components/Menu.tsx` context menu, `stores/details.ts` `hidden`). A
+  right-click on the details column, or the menu key, opens "Cards in this column".
+- **Scrollbars** (`styles/globals.css`, `lib/scrollbars.ts`). 10 px, a thumb inset 3 px and
+  rounded, 40% until the pointer is over its area or it scrolls (`graft-scrolling` for 0.9 s
+  after the last scroll event), tinted with the accent while dragged.
+- **Open a file** (`paletteModel.ts` `filesShown`). The palette listed the previous query's
+  files until the new answer came, and Enter opened the first of them; it now lists the last
+  answer narrowed to what is typed, with the search's own matcher.
+- **A tour of the app** (`tests/e2e/tour.spec.ts`). Every Settings page and its search, every
+  Customize tab, every view in both modes, the palettes, the scrollbars, a session that writes
+  code, every panel and composer menu, find, open a file, a symbol, Stop the moment a message is
+  sent, the card chooser, and Delete while a reply streams; it fails on any page error or console
+  error and on any part that fails to display. It found the "Stopped." gap and the palette bug;
+  the Linux run of the whole suite found the lost messages and a folder line that repeated the
+  folder's name for a short path (`nearPath`).
+
+What the research found (October 2026), and what Graft does with it:
+
+- Claude desktop (changelog, 2026-10-15): a session rail of cards, servers and background tasks
+  among them, chosen with a right-click on a card's header; a recap card with buttons for what to
+  do next; nested sessions; environments; compaction while idle. Graft has the column (0.6.32),
+  now with connector rows and the chooser; the recap card and idle compaction are open.
+- Claude Code 2.1.299–2.1.302: mods, idle compaction, Ctrl+F in the transcript (Graft has it).
+- Cursor: canvases for cloud agents (Oct 16), a marketplace (Oct 13), remote control (Oct 6).
+- Codex 0.162–0.163: searchable settings and steering (Graft has both), a daemon, parallel
+  read-only tools, managed worktrees, pinned tasks, clickable links, composer predictions.
+
+Sources, read on 2026-10-17: https://code.claude.com/docs/en/changelog,
+https://x.com/ClaudeDevs/status/2110445852905062457,
+https://aicatchup.com/news/claude-code-desktop-redesign,
+https://pasqualepillitteri.it/en/news/24032/claude-code-desktop-nested-sessions-environments,
+https://releasebot.io/updates/anthropic/claude-code, https://cursor.com/changelog,
+https://releasebot.io/updates/cursor, https://developers.openai.com/codex/changelog and
+https://releasebot.io/updates/openai/codex.
+
+Different from what was asked, and why:
+
+- No icon is fetched from the internet: an app's mark comes from the bundled set, and a
+  server's own icon is used only when it arrives inline as a `data:` image, so a server can't
+  make Graft load a remote picture or track when its list is opened.
+- The marks are of apps a server reaches; a server Graft doesn't know keeps its letter.
+- macOS packages were not built: they need a Mac or GitHub Actions, and Actions is blocked by
+  the account's billing lock.
+
+### 0.6.32 what two recordings of the Claude desktop app show (2026-10-17)
+
+Asked for as: "CHECK BOTH OF THE RECORDINGS IN C:\Recordings AND LIKE COPY THE STUFF SHOWN
+IN THE IMAGE AND ADD IT INTO GRAFT MAKE GOOD UI, ANIMATIONS AND ETC MAKE THIS GOOD AND WORKING
+FOR CODING,DEVS,MODELING,UI AND ETC". The two recordings (2 and 3½ minutes, 2026-10-17) walk
+the Claude desktop app's Code tab through several sessions: a design vault, a Roblox game built
+from FBX models, Blender work. Much of what they show Graft already had (the mode and model menus
+with their number keys, split diffs, terminal tabs, What's new, Settings as a window, long
+messages that fold). This round built what it lacked, in Graft's own look. One new package
+(`three` 0.186.1 and its types), no new table, no new shortcut; two settings, two channels.
+
+- **The details column** (`session/details/SessionDetails.tsx`, `detailsModel.ts`,
+  `stores/details.ts`). A code session's right-hand column of cards, as the recordings show in
+  nearly every frame: Environment, Context (a stacked bar and a row for each part, scaled to the
+  session's own count, the free space, "About 58K until Graft compacts" and Compact session),
+  Connectors (each MCP server in Customize's words, the one action it needs, Manage), Outputs (the
+  files its tools created, opening in the Files panel), Background tasks (background commands and
+  agents, live times, a pulse while running) and Changes (+/−, Review, the Create PR menu, shared
+  with the git bar as `GitActions`). It takes the panels' place and gives it back; opening it from
+  the header closes the panels, whose terminals keep running. The git bar under the transcript
+  gives way while the column holds the branch and the changes. The cards rise in one after
+  another and the context bar grows part by part. The compaction threshold moved to
+  `shared/compaction.ts` so the column and the agent read one number.
+- **The queue folds** (`QueueBar.tsx`, `queueModel.ts`). Two or more queued messages are one
+  line, "N messages queued · Next: …", that opens to the rows (clamped to two lines, each with
+  Send now, Edit, Remove) and Clear all behind an inline confirmation.
+- **A note at the deepest efforts** (`EffortNotice.tsx`, `effortNoticeModel.ts`). At Max and
+  Taproot, above the message box, until closed for that level.
+- **Pictures from tools** (`toolPictures.ts`, `ToolGroup.tsx`, `ToolDetail.tsx`,
+  `ImageViewer.tsx`). The image blocks of a tool's result, which reached the model and never the
+  screen for MCP tools, are thumbnails on the call's row and pictures in its details that open in
+  the picture viewer, whose frame and dialog are now shared with the generated-media viewer.
+- **3D models** (`models/`, `ModelsCard.tsx`, `modelRefs.ts`, `fileTree.ts`
+  `modelBytes`, channel `files:modelBytes`). A media kind `model` for .glb .gltf .obj .stl .fbx
+  .ply; the Files panel draws them with three.js (studio light, floor grid, contact shadow, orbit
+  with damping, turning by itself until touched, wireframe, reset, clips with play and pause,
+  triangles, meshes, materials and size), and a finished turn whose tools wrote, or whose reply
+  names in a code span, model files that exist ends with a card that draws up to four.
+- **Code colors** (`shared/codeThemes.ts`, `lib/highlight.ts`, `lib/codeThemes.ts`,
+  `AppearanceSection.tsx`). `appearance.codeThemeDark` and `appearance.codeThemeLight`, from
+  twelve dark and ten light shiki themes, previewed on their own backgrounds; code blocks, diffs
+  and the Files panel follow.
+- **Panel options** (`terminalPrefs.ts`, `diffPrefs.ts`). The terminal's cursor style and
+  blink, Copy on select, scrollback and Clear; the diff's Side by side, Word wrap and Hide
+  whitespace changes (`git diff -w`, an `ignoreWhitespace` input to `git:fileDiff`).
+
+Different from the recordings, and why:
+
+- Claude's column also has a Remote Control switch, and its Usage popover shows a subscription's
+  session and weekly limits. Graft has neither a remote session nor a subscription; its own limits
+  (0.6.31) are in Settings → Permissions, and a popover for them was not built.
+- The column is for code sessions only and needs about 1,000 pixels of window beside the
+  sidebar; below that its button says it needs a wider window. Claude's side chat, the tiled
+  two-column panels and its account menu were not copied: Graft has /btw, a panel column and
+  its own menu.
+- Outputs are the files a session's tools created, not every file it edited: those are
+  Changes. A model Blender exports through a script is only known by its name in the reply, so
+  the models card follows the reply's code spans; a model never named is not drawn.
+- The bytes of a model come over IPC from a reader that serves model files, and only the
+  buffers and textures a .gltf loads beside itself, inside the folder and at most 64 MB. The
+  window's CSP gained `blob:` and `data:` for connections, which three.js's loaders need for what
+  they unpack; nothing else changed in it, and WebAssembly stays off, so Draco and meshopt
+  models are refused with a sentence instead of a blank view.
+- A viewer draws only while on screen and hands its WebGL context back when it goes (a window has
+  a handful); a card far up the conversation waits until it is scrolled near. A computer without
+  WebGL is told so, with the model's stats left out.
+- Pictures of a tool's result are those a model that sees got: for a model that can't, an MCP
+  tool's picture is replaced by a line of text before it is stored, and the screen gets nothing
+  either. Keeping such pictures for the screen alone is open.
+- With whitespace changes hidden, the diff's hunks are not the file's, so changes are staged and
+  discarded whole meanwhile; staging a hunk of such a diff would stage a different one.
+- The note at Max and Taproot promises no multiplier: how many tokens a level costs depends on
+  the provider and the task, and the recording's "3.5×" is Claude's figure for Claude.
+
 ### 0.6.31 limits that hold and a replace request (2026-10-15)
 
 Asked for as "what do big AI apps like Claude, Codex, Cursor and OpenCode have that people
@@ -1428,3 +1692,20 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
    its diff. Next there: the check pressing keys (focus order, a focus that shows), the
    whole length of a page as one picture, and a picture compared with the one before a
    change.
+9. Done in 0.6.32: the details column, 3D models in the Files panel and the conversation,
+   pictures from tools, code colors, terminal and diff options. Next there: a Usage popover
+   for the limits of 0.6.31 (it needs a project's total over IPC), MCP pictures kept for the
+   screen when the model can't see them, Draco and meshopt models (they need WebAssembly in
+   the window, a CSP decision), a model's .mtl and textures beside an .obj, and a turntable
+   picture of a model for the agent to look at.
+10. Done in 0.6.33: messages that show at once and turns that stop in any folder, connectors
+    with their apps' icons, the card chooser, slim scrollbars, a tour of the whole app. Next
+    there, from the October research: a recap card with what to do next, compaction while a
+    session is idle, and nested sessions.
+11. Done in 0.6.34: media models by kind on the Models page, video the agent makes through
+    OpenRouter, 54 integrations, and a delete that a running git can't block. Next there: video
+    through OpenAI's and Google's own APIs, transcription for dictation, and music for games.
+12. Done in 0.6.35: local models with the window their server loaded, tool calls written as
+    text, a lean profile for small windows, servers found on this computer, per-model prompt and
+    tool-call choices. Next there: editing a custom model's choices, model servers on the local
+    network, Cursor rules in subfolders, and measuring the lean threshold on real setups.

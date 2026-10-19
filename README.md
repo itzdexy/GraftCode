@@ -130,6 +130,94 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### Media models, video, and 54 integrations (0.6.34)
+
+**Image, video and audio models.** Settings → Models lists, below the models you chat with, a
+section for each kind of media model your providers offer: **Image models**, **Video models**,
+**Voices**, **Music and sound** and **Transcription**. OpenRouter says which kind each of its models
+is; OpenAI's and Google's are known by their names, and so are the well-known ones on other
+OpenAI-compatible servers (which also leaves them out of the list of models to chat with). A
+video model shows the lengths and shapes it makes, whether it can start on a picture, and what a
+second costs. **Use** makes a model the one for images, for video or for Read aloud, where Graft
+can use it; one search narrows every section.
+
+**Video.** The agent's new **GenerateVideo** tool makes a clip with the video model chosen there
+(Veo 3.1 Lite unless you pick another), through OpenRouter's video API and your OpenRouter key: a
+trailer shot, a cutscene, an animated background, or a picture of your project brought to life.
+The clip is saved in the project (or in a chat's files), plays in the conversation, and what it
+cost is added to the session. Like a picture, it is asked about first in Ask mode.
+
+**Integrations.** Customize → Integrations has 54 MCP servers to add in one step, sorted by the
+kind of work, with a search: game engines and sound (Blender, Roblox Studio, Unity, Godot,
+ElevenLabs), design and front end (Figma, Figma files, shadcn/ui, Chrome DevTools, Playwright,
+Next.js DevTools, Svelte, Astro, Webflow), docs (Context7, DeepWiki, Microsoft Learn, AWS,
+Cloudflare, Shopify), developer tools (GitHub, Sentry, Semgrep, CircleCI, Kubernetes), cloud and
+payments (Cloudflare, Netlify, Render, Stripe, PostHog), data (Supabase, Neon, PostgreSQL,
+MongoDB, Redis, DuckDB), research (Hugging Face, arXiv, paper search, Wikipedia, Zotero,
+Perplexity, Exa, Brave Search, Firecrawl, Tavily), plans and notes (Linear, Notion, Jira and
+Confluence, Asana, Airtable), memory and reasoning, and reverse engineering (Ghidra).
+
+**Delete, fixed again.** On Windows the git on PATH is a launcher that starts the real git; a
+stopped snapshot used to stop only the launcher, so the real git kept the session's private index
+locked and Delete failed with "EPERM, Permission denied". Graft now stops both, a delete no longer
+fails on that folder (what is still held goes at the next start), and the snapshot is taken
+while the model starts answering instead of before.
+
+### Large folders, connectors with their own icons (0.6.33)
+
+**Sending in a large folder.** A code session snapshots its folder before each turn, so
+**Rewind** can put the files back. In a very large folder (a whole Downloads folder) that
+snapshot used to keep your message from showing, and Stop and Delete from working, for as long
+as it took. Now the message shows the moment you send it; the snapshot follows, and after 20
+seconds it is given up with a note ("No checkpoint for this turn: … took longer than 20 seconds
+to snapshot"), and Graft doesn't try that folder again until it restarts. Stop and Delete end
+the turn wherever it has got to, the snapshot included. A turn stopped before the model said a
+word says **Stopped.** under the message. The message box empties the moment you press Enter, so
+messages sent one after another while Graft works all queue, in order; on a slow computer the
+second and third used to be lost.
+
+**Connectors you recognize.** An MCP server is shown with the icon of the app it reaches, found
+by its name, its address or the command that starts it (Roblox Studio, Blender, Unity, Unreal,
+Godot, Figma, GitHub, GitLab, Linear, Notion, Jira, Sentry and others, 57 in all, from the
+Simple Icons set), and a server that gives itself a title and an icon over MCP is shown by
+those. The details column's **Connectors** card shows the icons of the first four; each row
+opens to where the server runs, its version, its tools, **Reconnect** and **Open in Customize**.
+Customize, the Integrations gallery and the steps of a turn use the same icons. A
+**right-click on the details column** chooses which cards it shows.
+
+The scrollbars are slim and rounded, faint until pointed at or scrolled, and tinted while
+dragged. **Open a file** (Ctrl+P) lists only files that match what is typed, so Enter at once
+opens the one you meant.
+
+### A details column, 3D models and code colors (0.6.32)
+
+A code session has a **details column** at its right, as the Claude desktop app has one:
+**Environment** (this computer, the folder, the worktree and the branch), **Context** (how
+much of the window is used, part by part — your messages, replies, tool results, tools, MCP
+tools, the system prompt — with the free space and how far automatic compaction is, and
+**Compact session**), **Connectors** (each MCP server with its state and **Reconnect** or
+**Sign in** when it needs one), **Outputs** (the files the session's tools made), **Background
+tasks** (commands and agents still running, with their time) and **Changes** (lines added and
+removed, **Review**, **Create PR**). It takes the place of the panels and comes back when they
+close; the first button at the top right, or the palette's **Show or hide session details**,
+shows and hides it, and it remembers which cards you folded.
+
+**3D models.** A `.glb`, `.gltf`, `.obj`, `.stl`, `.fbx` or `.ply` file opens in the Files
+panel as a model on a lit floor: drag to turn it, scroll to come closer, right-drag to move,
+switch to wireframe, and play its animations. When a reply names a model file of the folder —
+one Blender just exported, say — the turn ends with the model drawn in the conversation.
+Models are read from the session's folder only, and a model compressed with Draco or meshopt
+gets a sentence saying the preview can't unpack it yet. **Pictures a tool sends back** — a
+render from Blender, a capture of Roblox Studio — show as thumbnails on the tool's row and open
+large.
+
+Two or more messages typed while Graft works fold into one line, **3 messages queued · Next:
+…**, that opens to the list, with **Clear all**. At Max and Taproot a short note says what the
+level costs until you close it. **Settings → Appearance → Code colors** picks the theme code is
+colored in, one for dark and one for light, each previewed live. The Terminal panel's menu sets
+the cursor, **Copy on select** and the scrollback, and clears the terminal; the Changes panel's
+menu wraps long lines and can hide changes of whitespace alone.
+
 ### Limits that hold, and a replace request (0.6.31)
 
 **Settings → Permissions → Limits for a session, a project or a day** pauses a turn once
@@ -356,7 +444,7 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **A browser for developers:** the Browser panel has a console with an error badge, a check of the page (contrast, names, headings, crowded targets, a layout wider than its window), find in page, zoom, phone and tablet widths, developer tools, reload without cache and clearing site data. Pick an element (it comes with its picture), take a screenshot of the page as it is or at three sizes at once, or grab the console, and it lands in your message. With no page open, it lists dev servers running on your computer and in the session's sandbox.
 - **The agent tests in the browser:** the Browser tool opens a page, reads it as text plus numbered links, buttons and fields, clicks with real mouse events, types the way frameworks expect, waits for text, reads the console, checks the page for what is hard to read, unnamed or too wide, and takes screenshots, both at any width it asks for. Opening a local dev server needs no approval in Auto-edit; other sites ask.
 - **Computer use (Windows, opt-in):** with a model that can see images, the agent can take screenshots, use the mouse and keyboard, zoom in to read small text and open apps by name. Each action asks first unless you allow it for the session. A banner says what it is doing, a ring marks each click, each step shows its screenshot in the chat, and `Ctrl+Alt+Esc` stops it.
-- **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md` and `CLAUDE.md` for compatibility with other tools. Also custom slash commands, skills, hooks and MCP servers.
+- **Project memory:** `GRAFT.md` instruction files, plus `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` for compatibility with other tools (a folder's first one in that order is read), and the project's `.cursor/rules/*.mdc` files marked `alwaysApply` (or a `.cursorrules` file when there are none). Also custom slash commands, skills, hooks and MCP servers.
 - **Custom agents:** specialists such as a reviewer, a test writer or a debugger, written as Markdown in `~/.graft/agents` or a project's `.graft/agents` (or from templates in **Customize → Agents**). Graft hands them tasks with their own instructions and context. An agent's tool list can only narrow what the session allows.
 - **Shell commands from the message box:** start a message with `!` to run it in the session's shell, for example `!npm test`. The output shows as a terminal card, and Graft sees it with your next message.
 - **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/research`, `/test`, `/decompile` and `/init` send carefully written prompts; `/plan`, `/mission`, `/context`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session; `/btw` asks a side question that stays out of it. A command file with the same name replaces any of the prompt commands.
@@ -427,7 +515,9 @@ Graft uses what a server offers beyond tools. What a server says about using its
 ### Models and providers
 
 - A catalog generated from [models.dev](https://models.dev) with 200+ providers, plus Ollama and custom endpoints. Each model's context window, tool use, vision, effort levels and prices come from the catalog and the provider's own model list.
-- **Context sizes you can trust:** a provider added by typing its address is matched to its catalog entry, a server's own figure for a model wins, and a model on an unknown gateway gets the size most providers give for it. A size nothing vouches for says "(assumed)", and you can set a model's size yourself in Settings → Models. A model on Ollama is measured against the context Graft asks Ollama to hold (32K unless you set a size, shown as "32K of 128K context"), since that is all Ollama keeps; a model Ollama passes on to a hosted service gets its whole window.
+- **Context sizes you can trust:** a provider added by typing its address is matched to its catalog entry, a server's own figure for a model wins, and a model on an unknown gateway gets the size most providers give for it. A size nothing vouches for says "(assumed)", and you can set a model's size yourself in Settings → Models. A model on Ollama is measured against the context Graft asks Ollama to hold (32K unless you set a size, shown as "32K of 128K context"), since that is all Ollama keeps; a model Ollama passes on to a hosted service gets its whole window. A model on llama.cpp or LM Studio is measured against the context the server loaded (`n_ctx` from llama.cpp's `/props`, `loaded_context_length` from LM Studio), not the length the model was trained for.
+- **Local models that work:** **Settings → Providers → Find servers on this computer** (also offered in the first-run setup) finds Ollama, LM Studio, llama.cpp, vLLM, Jan and KoboldCpp on their usual ports on this computer and adds one in a click. Local servers get up to 15 minutes to read a long prompt, and Ollama keeps a model loaded for 30 minutes between turns. A model on this computer whose window is known to be 64K or less (its server reports it, you set it, or it runs in Ollama) gets a lean code prompt, with the same safety rules, your personalization and the site brief, and the core tools (Read, Write, Edit, Glob, Grep, Shell and the like); the rest are one ToolSearch away. A model whose server has no tool support is told about the tools in the prompt, and Graft reads the calls it writes as text (Hermes `<tool_call>`, Qwen's `<function=…>` form, Mistral's `[TOOL_CALLS]`); calls a local model writes as text in a normal reply are run too, and when a server refuses tools, Graft switches that model to text until it restarts. For a custom model, Settings → Models chooses the prompt (Automatic, Full or Lean) and the tool calls (Automatic, Native or Written in text).
+- A model a provider doesn't serve is named in the error, which says to pick another model or refresh the list in Settings → Models.
 - **OpenAI's Responses API** for the models only it serves (the `-pro` and Codex models and deep research): the summary of their reasoning is shown as they think, and the reasoning is kept across tool calls. Tested against recordings of the API, not a live account.
 - **Effort levels per model,** from *Off* to *Max*, with *Taproot* on top for code sessions. Each model shows the levels it has: Gemini 3 and later think by named level, as Google's API asks, and earlier Gemini models by a budget.
 - **A backup model:** choose one in Settings → Models. When a session's model is overloaded, rate limited or unreachable after its retries, and nothing of a reply has arrived, the turn continues on the backup and says so. A sub-agent, or an agent of a group, whose model fails is finished the same way, and its record names the model that took over. The next turn asks the session's own model first again. Never used in incognito chats.

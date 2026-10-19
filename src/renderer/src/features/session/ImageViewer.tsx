@@ -16,24 +16,10 @@ export function nextImageZoom(zoom: number | 'fit', direction: 1 | -1): number {
   return next ?? from;
 }
 
-function ViewerBody({ sessionId, folder, file, actions }: { sessionId: string; folder: string | null; file: MediaFile; actions: ReactNode }) {
-  const preview = file.thumb ? `data:image/jpeg;base64,${file.thumb}` : null;
-  // The preview shows at once; the file itself replaces it when the session has a folder to read it from.
-  const [full, setFull] = useState<string | null>(null);
+/** A picture, large, with its name, zoom and the caller's buttons above it. */
+function PictureFrame({ name, src, alt, actions }: { name: string; src: string | null; alt: string; actions: ReactNode }) {
   const [natural, setNatural] = useState<number | null>(null);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
-  useEffect(() => {
-    if (!folder) return;
-    let current = true;
-    invoke('files:previewUrl', { sessionId, path: file.path })
-      .then(({ url }) => current && setFull(url))
-      .catch((error: unknown) => logError(`Could not load ${file.path} at full size`, error));
-    return () => {
-      current = false;
-    };
-  }, [sessionId, folder, file.path]);
-  const src = full ?? preview;
-  const name = fileName(file.path);
   const step = (direction: 1 | -1): void => setZoom(nextImageZoom(zoom, direction));
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -74,7 +60,7 @@ function ViewerBody({ sessionId, folder, file, actions }: { sessionId: string; f
             <img
               key={src}
               src={src}
-              alt={`Generated: ${name}`}
+              alt={alt}
               onLoad={(event) => setNatural(event.currentTarget.naturalWidth)}
               style={zoom === 'fit' || natural === null ? undefined : { width: natural * zoom, maxWidth: 'none' }}
               className={zoom === 'fit' ? 'graft-reveal m-auto max-h-full max-w-full rounded-sm object-contain' : 'm-auto rounded-sm'}
@@ -88,23 +74,63 @@ function ViewerBody({ sessionId, folder, file, actions }: { sessionId: string; f
   );
 }
 
-/** A generated picture, large, with zoom. Open while `file` is given; `actions` are the card's own buttons for it. */
-export function ImageViewer({ sessionId, folder, file, actions, onClose }: { sessionId: string; folder: string | null; file: MediaFile | null; actions: (file: MediaFile) => ReactNode; onClose: () => void }) {
-  // The one last shown stays while the dialog leaves, so it does not empty before it has gone.
-  const [last, setLast] = useState(file);
-  if (file && file !== last) setLast(file);
-  const shown = file ?? last;
+function ViewerBody({ sessionId, folder, file, actions }: { sessionId: string; folder: string | null; file: MediaFile; actions: ReactNode }) {
+  const preview = file.thumb ? `data:image/jpeg;base64,${file.thumb}` : null;
+  // The preview shows at once; the file itself replaces it when the session has a folder to read it from.
+  const [full, setFull] = useState<string | null>(null);
+  useEffect(() => {
+    if (!folder) return;
+    let current = true;
+    invoke('files:previewUrl', { sessionId, path: file.path })
+      .then(({ url }) => current && setFull(url))
+      .catch((error: unknown) => logError(`Could not load ${file.path} at full size`, error));
+    return () => {
+      current = false;
+    };
+  }, [sessionId, folder, file.path]);
+  const name = fileName(file.path);
+  return <PictureFrame name={name} src={full ?? preview} alt={`Generated: ${name}`} actions={actions} />;
+}
+
+/** The dialog a large picture opens in; what was shown last stays while it leaves, so it doesn't empty before it has gone. */
+function PictureDialog<T>({ item, onClose, children }: { item: T | null; onClose: () => void; children: (item: T) => ReactNode }) {
+  const [last, setLast] = useState(item);
+  if (item && item !== last) setLast(item);
+  const shown = item ?? last;
   return (
-    <RD.Root open={file !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
+    <RD.Root open={item !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <RD.Portal>
         <RD.Overlay className="overlay-scrim fixed inset-0 z-[var(--g-z-dialog)] bg-overlay" />
         <RD.Content
           aria-describedby={undefined}
           className="overlay-dialog fixed top-1/2 left-1/2 z-[var(--g-z-dialog)] flex h-[88vh] w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface text-fg shadow-popover outline-none"
         >
-          {shown ? <ViewerBody key={shown.path} sessionId={sessionId} folder={folder} file={shown} actions={actions(shown)} /> : null}
+          {shown ? children(shown) : null}
         </RD.Content>
       </RD.Portal>
     </RD.Root>
+  );
+}
+
+/** A generated picture, large, with zoom. Open while `file` is given; `actions` are the card's own buttons for it. */
+export function ImageViewer({ sessionId, folder, file, actions, onClose }: { sessionId: string; folder: string | null; file: MediaFile | null; actions: (file: MediaFile) => ReactNode; onClose: () => void }) {
+  return (
+    <PictureDialog item={file} onClose={onClose}>
+      {(shown) => <ViewerBody key={shown.path} sessionId={sessionId} folder={folder} file={shown} actions={actions(shown)} />}
+    </PictureDialog>
+  );
+}
+
+/** A picture a tool sent back (a render from Blender, a capture of Roblox Studio), large, with zoom. */
+export interface ToolPicture {
+  src: string;
+  name: string;
+}
+
+export function PictureViewer({ picture, onClose }: { picture: ToolPicture | null; onClose: () => void }) {
+  return (
+    <PictureDialog item={picture} onClose={onClose}>
+      {(shown) => <PictureFrame key={shown.src} name={shown.name} src={shown.src} alt={shown.name} actions={null} />}
+    </PictureDialog>
   );
 }

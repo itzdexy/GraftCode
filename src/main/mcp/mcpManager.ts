@@ -81,6 +81,44 @@ export interface McpServerStatus {
   /** The prompts it publishes (slash commands), and whether it publishes resources. */
   prompts: McpPromptInfo[];
   resources: boolean;
+  /** What the server says about itself when it connects (see serverInfoOf). */
+  info: ServerInfo;
+}
+
+/** A server's own name for people, its version and its icon, from the handshake; null where it gives none. */
+export interface ServerInfo {
+  title: string | null;
+  version: string | null;
+  /** A data: address of a picture; an icon at an address elsewhere is not fetched. */
+  icon: string | null;
+}
+
+export const NO_SERVER_INFO: ServerInfo = { title: null, version: null, icon: null };
+
+/** Icons are taken as pictures already in the handshake, at most this long. */
+export const MAX_ICON_CHARS = 96 * 1024;
+const ICON_DATA = /^data:image\/(png|jpeg|webp|gif|svg\+xml)[;,]/i;
+
+/**
+ * What a server announced about itself (MCP's Implementation: name, title,
+ * version, icons). Only an icon given as a data: address is kept: following
+ * an address a server names would let any server make Graft fetch from
+ * anywhere. A vector icon is preferred, then the largest picture.
+ */
+export function serverInfoOf(implementation: unknown): ServerInfo {
+  if (!implementation || typeof implementation !== 'object') return NO_SERVER_INFO;
+  const impl = implementation as { title?: unknown; version?: unknown; icons?: unknown };
+  const text = (value: unknown, max: number): string | null => (typeof value === 'string' && value.trim().length > 0 ? value.trim().slice(0, max) : null);
+  const icons = Array.isArray(impl.icons) ? impl.icons : [];
+  const usable = icons
+    .map((icon: unknown) => (icon && typeof icon === 'object' ? (icon as { src?: unknown; sizes?: unknown }) : {}))
+    .filter((icon): icon is { src: string; sizes?: unknown } => typeof icon.src === 'string' && icon.src.length <= MAX_ICON_CHARS && ICON_DATA.test(icon.src));
+  const size = (icon: { sizes?: unknown }): number => {
+    const sizes = Array.isArray(icon.sizes) ? icon.sizes : [];
+    return Math.max(0, ...sizes.map((s) => (typeof s === 'string' ? Number(/^(\d+)x\d+$/.exec(s)?.[1] ?? 0) : 0)));
+  };
+  const best = usable.find((icon) => /^data:image\/svg\+xml/i.test(icon.src)) ?? [...usable].sort((a, b) => size(b) - size(a))[0];
+  return { title: text(impl.title, 80), version: text(impl.version, 40), icon: best?.src ?? null };
 }
 
 interface RemoteTool {
@@ -258,6 +296,7 @@ interface Connection {
   /** It publishes resources. */
   resources: boolean;
   prompts: McpPromptInfo[];
+  info: ServerInfo;
   /** Last lines a stdio server wrote to stderr (shown when it fails to start). */
   stderr: string;
   /** Re-asks a server that connected without tools. */
@@ -334,6 +373,7 @@ export class McpManager implements McpToolSource {
         instructions: null,
         resources: false,
         prompts: [],
+        info: NO_SERVER_INFO,
         stderr: '',
         poll: null,
         retry: null,
@@ -431,6 +471,7 @@ export class McpManager implements McpToolSource {
       conn.transport = transport;
       this.registerTools(conn, tools);
       conn.instructions = cleanInstructions(client.getInstructions());
+      conn.info = serverInfoOf(client.getServerVersion());
       conn.resources = client.getServerCapabilities()?.resources !== undefined;
       await this.loadPrompts(conn, client);
       conn.state = 'connected';
@@ -671,7 +712,8 @@ export class McpManager implements McpToolSource {
           : null,
       tools: c.tools.map((t) => ({ ...t })),
       prompts: c.prompts.map((p) => ({ ...p })),
-      resources: c.resources
+      resources: c.resources,
+      info: c.state === 'connected' ? c.info : NO_SERVER_INFO
     }));
   }
 

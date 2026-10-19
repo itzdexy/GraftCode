@@ -1,6 +1,6 @@
-# Try Graft 0.6.31
+# Try Graft 0.6.34
 
-1. Open **Settings → About** and confirm version **0.6.31**. In
+1. Open **Settings → About** and confirm version **0.6.34**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -171,6 +171,59 @@
 38. Ask Graft, in a session with a page open in the Browser panel, to "check the page at
     phone width". Its steps should read "Checked the page", and its answer should name
     what the check found. The panel is the size it was afterwards.
+39. Open a code session in a window wider than about 1,000 pixels: the **details column**
+    is at the right. Its cards: **Environment** (folder and branch; a click on the folder
+    shows it in Explorer), **Context** (open it: a bar part by part, the free space, "About …
+    until Graft compacts", **Compact session**), **Connectors** (your MCP servers; one that
+    failed offers **Reconnect**), and, once there is something to show, **Outputs**,
+    **Background tasks** and **Changes**. Open the Terminal: the column gives way, and comes
+    back when the Terminal closes. The first button at the top right hides it.
+40. While a long turn runs, send three more messages: they fold into **3 messages queued ·
+    Next: …**. Open it, then **Clear all** and confirm.
+41. Set a session's effort to **Max** (or **Taproot**): a note above the message box says
+    what it costs. Close it; it stays closed for that level.
+42. Put a model file in a project (`.glb` from Blender is the usual one; `.obj`, `.stl`,
+    `.fbx`, `.ply` and `.gltf` work too) and open it from the Files panel: it stands on a
+    lit floor and turns by itself. Drag to turn it, scroll to zoom, right-drag to move;
+    try **Wireframe** and **Reset the view**; a model with animations plays them, with a
+    list when it has several. Ask Graft, in a session where Blender's MCP server is
+    connected, to export something and name the file: the turn ends with the model drawn
+    in the conversation. A render the Blender connector sends back shows as a thumbnail on
+    its step.
+43. **Settings → Appearance → Code colors**: pick a dark and a light theme and watch their
+    previews; a reply's code, a diff and the Files panel follow.
+44. In the Terminal panel's **⋮** menu, try **Cursor style**, **Copy on select** (select
+    text, paste it elsewhere) and **Clear terminal**. In the Changes panel's **⋮** menu, try
+    **Word wrap** and **Hide whitespace changes** on a file whose indentation changed.
+45. Start a code session on a very large folder (your Downloads folder will do) and send a
+    message: it shows at once. When the folder takes longer than 20 seconds to snapshot, a
+    note says the turn has no checkpoint, and the turn goes on. Press **Stop** right after
+    sending: the turn ends and **Stopped.** appears under the message. Delete a session while
+    it replies: it goes at once. While it replies, type and send three messages quickly: all
+    three queue, in the order sent.
+46. Add an MCP server for an app Graft knows (Blender, Roblox Studio, Figma, GitHub, Linear,
+    …). Customize → Integrations, the **Connectors** card of the details column and the steps
+    of a turn that used it show the app's icon. Open its row in the card: where it runs, its
+    version, its tools, **Reconnect** and **Open in Customize**.
+47. Right-click the details column: uncheck a card and it leaves, check it and it comes back.
+    With every card taken out, the column says how to bring them back.
+48. Scroll a long conversation or a Settings page: the scrollbar brightens while it moves and
+    fades after. Point at it and drag it.
+49. In a code session press **Ctrl+P**, type part of a file's name and press Enter at once:
+    the file that opens matches what you typed.
+50. With OpenRouter as a provider, open **Settings → Models** and scroll past the backup
+    model: **Image models**, **Video models**, **Voices**, **Music and sound** and
+    **Transcription** list what OpenRouter has, with OpenAI's and Google's when you have those
+    keys. Type `veo` in the search: only the video section stays. Press **Use for images** on
+    one image model, and check **Settings → Images** names it.
+51. In a code session ask for "a 6-second clip of a sprout growing in a clay pot, saved as
+    assets/sprout.mp4". Allow GenerateVideo: after a minute or two the clip plays in the
+    conversation, the file is in the project, and the session's cost went up by what it cost.
+    Try it again with "start it on assets/hero.png".
+52. **Customize → Integrations** says 54 to choose from. Search `papers`, `postgres` or
+    `figma`; add **DeepWiki** (nothing to set up) and ask about a public repository.
+53. Start a turn in a very large folder, press **Stop**, then delete the session: it goes, with
+    no "EPERM" message. The reply of a turn there starts without waiting for the snapshot.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

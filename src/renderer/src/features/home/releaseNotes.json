@@ -1,5 +1,53 @@
 [
   {
+    "version": "0.6.35",
+    "date": "2026-10-18",
+    "items": [
+      "A model on your computer is measured against the context its server loaded, not the length it was trained for: llama.cpp and LM Studio are asked what they hold. Local servers get up to 15 minutes to read a long prompt, and Ollama keeps a model loaded for 30 minutes between turns, unless OLLAMA_KEEP_ALIVE sets another time.",
+      "Models whose server has no tool support can use tools: Graft describes the tools in the prompt and reads the calls the model writes as text, in the Hermes, Qwen and Mistral forms. A call a local model writes as text in a normal reply is run too, and when a server refuses tools, Graft switches that model to text until Graft restarts.",
+      "A local model whose window is known to be 64K or less (its server reports it, you set it in Settings, or it runs in Ollama) gets a lean code prompt, with the same safety rules, your personalization and the site brief, and the core tools (Read, Write, Edit, Glob, Grep, Shell and the like). The others are one ToolSearch away.",
+      "Settings → Providers → Find servers on this computer finds Ollama, LM Studio, llama.cpp, vLLM, Jan and KoboldCpp on their usual ports and adds one in a click. The first-run setup offers it too.",
+      "Settings → Models: a custom model can choose its prompt (Automatic, Full or Lean) and how it calls tools (Automatic, Native or Written in text).",
+      "A model a provider doesn’t serve is named in the message, which says to pick another model or refresh the list in Settings → Models.",
+      "A GEMINI.md file counts as project notes when a folder has no GRAFT.md, AGENTS.md or CLAUDE.md. The project’s .cursor/rules files marked alwaysApply are read too, or its .cursorrules file when there are none, and a rule that can’t be read is skipped."
+    ]
+  },
+  {
+    "version": "0.6.34",
+    "date": "2026-10-17",
+    "items": [
+      "Deleting a session works again after a large folder was being snapshotted: Graft now stops the whole git it started (on Windows the git on PATH starts a second one, which kept running and held the session’s files), and a delete never fails on that folder.",
+      "Replies start sooner in large folders: the snapshot Rewind needs is taken while the model starts answering, and only a change to a file waits for it.",
+      "Settings → Models has a section for each kind of media model your providers offer: images, video, voices, music and transcription. OpenRouter’s are listed by kind, OpenAI’s and Google’s too, and the well-known ones on other servers. Use makes one the model for images, video or Read aloud.",
+      "Graft makes video. GenerateVideo turns a prompt, or a picture of your project, into a clip with OpenRouter’s video models (Veo, Seedance, Kling, Wan, Hailuo and more) and saves it in the project. Pick the model in Settings → Models.",
+      "54 integrations to add in one step, 42 of them new: ElevenLabs for game sound; Figma files, shadcn/ui, Chrome DevTools, Next.js, Svelte, Astro and Webflow for interfaces; DeepWiki, Microsoft Learn, AWS and Cloudflare docs, Netlify, Render, Stripe, PostHog, Semgrep, CircleCI and Kubernetes for developers; Supabase, Neon, PostgreSQL, MongoDB, Redis and DuckDB for data; Hugging Face, arXiv, paper search, Wikipedia, Zotero, Perplexity, Exa, Brave Search, Firecrawl and Tavily for research; Jira and Confluence, Asana, Airtable, Memory and Sequential thinking. A search finds them."
+    ]
+  },
+  {
+    "version": "0.6.33",
+    "date": "2026-10-17",
+    "items": [
+      "Sending and deleting work in any folder again. Your message shows the moment you send it; the snapshot Rewind needs is taken after it, and is given up with a note when a folder (a whole Downloads folder, say) takes longer than 20 seconds. Stop and Delete end a turn at once, wherever it has got to, and messages sent one after another all arrive, in order, even while the one before is still on its way.",
+      "A turn stopped before the model said a word says \"Stopped.\" under your message, as a reply cut short does.",
+      "Slim scrollbars: rounded, faint until you point at them or scroll, brighter while you scroll and tinted while you drag.",
+      "Connectors show the apps they reach. Roblox Studio, Blender, Figma, GitHub, Linear, Notion and about fifty more get their own icon and name, and a server that names itself and sends an icon is shown by those. In the details column a connector opens to where it runs, its version, its tools, Reconnect and Open in Customize; Customize and the steps of a turn show the same icons.",
+      "A right-click on the details column chooses which of its cards it shows.",
+      "Open a file (Ctrl+P) opens a file that matches what you typed, however quickly you press Enter."
+    ]
+  },
+  {
+    "version": "0.6.32",
+    "date": "2026-10-17",
+    "items": [
+      "A code session has a details column at its right: where it runs (this computer, the folder, the worktree, the branch), what fills its context part by part with the free space and how far automatic compaction is, your MCP connectors with Reconnect and Sign in, the files it made, its background commands and agents with live times, and its changes with Review and Create PR. It takes the panels' place and comes back when they close; the button at the top right shows and hides it.",
+      "3D models open in Graft. A .glb, .gltf, .obj, .stl, .fbx or .ply file shows in the Files panel as a model you can turn, zoom and move, in wireframe or not, with its animations playing. When a reply names a model file, say one Blender just exported, the turn ends with the model drawn in the conversation.",
+      "Pictures a tool sends back, a render from Blender or a capture of Roblox Studio, show as thumbnails on its row and open large.",
+      "Several queued messages fold into one line, \"3 messages queued · Next: …\", that opens to the list, with Clear all. At Max and Taproot a short note above the message box says what the level costs, until you close it.",
+      "Settings → Appearance → Code colors: a theme for code while Graft is dark and one while it is light, among Vitesse, GitHub, Catppuccin, Night Owl, One, Tokyo Night, Dracula, Rosé Pine, Everforest, Gruvbox, Nord, Monokai, Solarized and Min, each previewed live.",
+      "The Terminal panel's menu sets the cursor, copy on select and how many lines are kept, and clears the terminal. The Changes panel's menu wraps long lines and can hide changes of whitespace alone."
+    ]
+  },
+  {
     "version": "0.6.31",
     "date": "2026-10-15",
     "items": [

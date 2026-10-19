@@ -78,7 +78,8 @@ export function Composer({
   const setDraft = useUi((s) => s.setDraft);
   const [images, setImages] = useState<ImageBlock[]>([]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
-  const [sending, setSending] = useState(false);
+  /** The send on its way, if any: messages go one after another, in the order they were sent. */
+  const inFlight = useRef<Promise<void>>(Promise.resolve());
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -169,26 +170,40 @@ export function Composer({
 
   const hasAttachments = images.length > 0 || files.length > 0;
   const hasContent = text.trim().length > 0 || hasAttachments;
-  const canSend = hasContent && !sending && blockedReason === null;
+  const canSend = hasContent && blockedReason === null;
 
-  const submit = async (override?: string): Promise<void> => {
-    const message = override ?? text;
-    if ((message.trim().length === 0 && !hasAttachments) || sending || blockedReason !== null) return;
-    setSending(true);
-    try {
-      const sent = await onSubmit(message, images, files);
-      if (sent) {
-        if (history) pushHistory(message);
-        setHistoryIndex(null);
-        setDraft(draftKey, '');
-        setImages([]);
-        setFiles([]);
+  /**
+   * Sends what is in the box. The box empties at once, so what is typed next is the next message: it used to be
+   * emptied when the send came back, which threw away whatever had been typed meanwhile, and an Enter pressed before
+   * then did nothing. A message sent while the one before is on its way waits for it. One that is not sent comes back,
+   * ahead of anything typed since.
+   */
+  const submit = (override?: string): Promise<void> => {
+    // Read from the store, not this render: a second Enter before the next render must find the box empty.
+    const message = override ?? useUi.getState().drafts[draftKey] ?? '';
+    if ((message.trim().length === 0 && !hasAttachments) || blockedReason !== null) return Promise.resolve();
+    const sentImages = images;
+    const sentFiles = files;
+    setDraft(draftKey, '');
+    setImages([]);
+    setFiles([]);
+    setHistoryIndex(null);
+    const run = inFlight.current.then(async () => {
+      try {
+        if (await onSubmit(message, sentImages, sentFiles)) {
+          if (history) pushHistory(message);
+          return;
+        }
+      } catch (error) {
+        reportError("Couldn't send the message", error);
       }
-    } catch (error) {
-      reportError("Couldn't send the message", error);
-    } finally {
-      setSending(false);
-    }
+      const typed = useUi.getState().drafts[draftKey] ?? '';
+      setDraft(draftKey, typed.trim().length === 0 ? message : `${message}\n\n${typed}`);
+      setImages((current) => [...sentImages, ...current].slice(0, MAX_IMAGES));
+      setFiles((current) => [...sentFiles, ...current].slice(0, MAX_TEXT_FILES));
+    });
+    inFlight.current = run;
+    return run;
   };
 
   const choose = (item: Suggestion, viaEnter: boolean): void => {

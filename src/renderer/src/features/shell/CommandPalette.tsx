@@ -18,7 +18,7 @@ import { useUi } from '../../stores/ui';
 import { loadWorkspaceLayout } from '../panels/workspaceLayout';
 import { lastTypedMessage } from '../session/sessionControls';
 import { paletteCommands, type PaletteCommand } from './paletteCommands';
-import { anchorFile, fileQuery, fileRow, latestOnly, paletteInput, symbolMessage, type PaletteMode } from './paletteModel';
+import { anchorFile, fileQuery, fileRow, filesShown, latestOnly, paletteInput, symbolMessage, type PaletteMode } from './paletteModel';
 import { highlight } from './SearchDialog';
 
 const RECENT_KEY = 'graft.palette.recent';
@@ -290,7 +290,7 @@ function FilesPanel({ sessionId, root, query, onQuery }: { sessionId: string; ro
     const timer = setTimeout(() => show(invoke('files:search', { root, query: text }).then((paths) => ({ text, paths }))), text.length === 0 ? 0 : FILES_AFTER_MS);
     return () => clearTimeout(timer);
   }, [root, text, show]);
-  const paths = text.length === 0 ? [...tabs, ...(found?.paths ?? []).filter((path) => !tabs.includes(path))].slice(0, 40) : (found?.paths ?? []);
+  const { paths, fresh } = filesShown(text, found, tabs);
   const rows = paths.map((path): PaletteRow => {
     const { name, folder } = fileRow(path);
     return { key: path, title: highlight(name, text), detail: folder };
@@ -305,7 +305,7 @@ function FilesPanel({ sessionId, root, query, onQuery }: { sessionId: string; ro
       query={query}
       onQuery={onQuery}
       rows={rows}
-      empty={found === null ? 'Searching…' : text.length > 0 ? `No file matches "${text}".` : 'This folder has no files to open.'}
+      empty={!fresh ? 'Searching…' : text.length > 0 ? `No file matches "${text}".` : 'This folder has no files to open.'}
       onPick={(index) => {
         const path = paths[index];
         if (path) openPlace(sessionId, path, line === null ? null : { line });

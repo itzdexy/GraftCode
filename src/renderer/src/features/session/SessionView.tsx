@@ -17,6 +17,7 @@ import { reportError } from '../../stores/toasts';
 import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
 import { contextLimit, ContextUsage } from '../composer/ContextUsage';
+import { EffortNotice } from '../composer/EffortNotice';
 import { EffortPopover } from '../composer/EffortPopover';
 import { ModelQuickMenu } from '../composer/ModelQuickMenu';
 import { PermissionModeMenu } from '../composer/PermissionModeMenu';
@@ -34,6 +35,7 @@ import { PlanBar } from './PlanBar';
 import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
+import { DetailsColumn, DetailsToggle, useDetailsShown } from './details/SessionDetails';
 import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
 import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
@@ -57,9 +59,10 @@ function PanelToggles({ sessionId, hasFolder, agentsWorking }: { sessionId: stri
   const toggle = usePanels((s) => s.toggle);
   const terminalKey = useShortcutLabel('toggleTerminal');
   const changesKey = useShortcutLabel('toggleChanges');
-  if (!hasFolder) return null;
+  if (!hasFolder) return <DetailsToggle sessionId={sessionId} />;
   return (
     <>
+      <DetailsToggle sessionId={sessionId} />
       <IconButton label="Terminal" shortcut={terminalKey} active={open.includes('terminal')} aria-pressed={open.includes('terminal')} onClick={() => toggle(sessionId, 'terminal')}>
         <SquareTerminal className="size-16" />
       </IconButton>
@@ -123,6 +126,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   const folder = summary.worktreePath ?? summary.cwd;
   const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}`;
   const agentsWorking = view.agentRuns.filter((r) => agentRunActive(r.status)).length;
+  const detailsOn = useDetailsShown(summary.id);
   useAutoOpenTasks(summary.id);
   useAutoOpenAgents(summary.id, agentsWorking > 0 && folder !== null);
   useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
@@ -167,12 +171,14 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             <MissionBar sessionId={summary.id} mission={view.mission} checking={view.checking !== null} />
             <PlanBar plan={plan} todos={view.todos} />
             <ReviewBar sessionId={summary.id} onSend={() => void send('', [], []).catch((e: unknown) => reportError("Couldn't send the comments", e))} />
-            <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />
+            {/* The details column holds the branch and the changes while it is shown. */}
+            {detailsOn ? null : <StatusBar summary={summary} stats={stats} onChanged={() => setStatsBump((n) => n + 1)} />}
             {missing ? (
               <p role="alert" className="text-sm text-amber-fg">
                 This session's model ({summary.model?.modelId}) is no longer available. Pick another one below.
               </p>
             ) : null}
+            <EffortNotice level={effort} />
             <Composer
               draftKey={summary.id}
               variant="code"
@@ -217,6 +223,18 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
           </div>
         </div>
         {folder ? <PanelColumn sessionId={summary.id} refreshKey={refreshKey} /> : null}
+        <DetailsColumn
+          summary={summary}
+          messages={view.messages}
+          runs={view.agentRuns}
+          limit={contextLimit(summary.usage.contextLimit, model)}
+          stats={stats}
+          busy={busy}
+          refreshKey={refreshKey}
+          shown={detailsOn}
+          onCompact={() => compact(summary.id)}
+          onStatsChanged={() => setStatsBump((n) => n + 1)}
+        />
       </div>
     </div>
   );
@@ -258,6 +276,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
           <AsideCards sessionId={summary.id} />
           <QueueBar sessionId={summary.id} queue={view.queue} />
+          <EffortNotice level={levels.length > 0 ? chatEffort(model, effort) : null} />
           <Composer
             draftKey={summary.id}
             variant="code"

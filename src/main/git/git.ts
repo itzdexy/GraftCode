@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { GraftError } from '@shared/errors';
@@ -60,8 +60,27 @@ export function gitBinary(platform: NodeJS.Platform = process.platform, env: Nod
 }
 
 /**
+ * Stops a git that was started, and on Windows what it started. The git.exe Git
+ * for Windows puts on PATH (`Git\cmd\git.exe`) is a launcher whose child is the
+ * real git: killing the launcher alone left that one running through a whole
+ * folder, holding a session's private index (Delete failed with EPERM on it) and
+ * the output pipes, so a stopped snapshot didn't end either.
+ */
+function stopGit(child: ChildProcess): void {
+  if (process.platform !== 'win32' || child.pid === undefined) {
+    child.kill();
+    return;
+  }
+  const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+  const killer = spawn(taskkill, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  // taskkill fails for a process that has already ended; one that can't run at all still stops the launcher.
+  killer.on('error', () => child.kill());
+}
+
+/**
  * Runs git with an argv array (never a shell). Failures throw a GraftError
- * that names the command and includes git's own message.
+ * that names the command and includes git's own message. A stop (the signal)
+ * ends the call at once, without waiting for git to be gone.
  */
 export function runGit(args: string[], options: GitOptions): Promise<GitResult> {
   return new Promise((resolve, reject) => {
@@ -81,9 +100,12 @@ export function runGit(args: string[], options: GitOptions): Promise<GitResult> 
     const err: Buffer[] = [];
     child.stdout.on('data', (c: Buffer) => out.push(c));
     child.stderr.on('data', (c: Buffer) => err.push(c));
-    const timer = setTimeout(() => child.kill(), options.timeoutMs ?? 120_000);
+    const timer = setTimeout(() => stopGit(child), options.timeoutMs ?? 120_000);
     const onAbort = (): void => {
-      child.kill();
+      clearTimeout(timer);
+      stopGit(child);
+      const reason: unknown = options.signal?.reason;
+      reject(reason instanceof Error ? reason : new GraftError('interrupted', 'Git was interrupted.', { cause: reason }));
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', (error) => {

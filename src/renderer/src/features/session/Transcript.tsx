@@ -26,6 +26,7 @@ import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
 import { ConversationContext, type Conversation } from './conversation';
 import { DiagramCard } from './DiagramCard';
+import { ModelsCard } from './ModelsCard';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
 import { FindBar, type FindBarHandle } from './FindBar';
@@ -292,6 +293,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <FilesCard sessionId={summary.id} files={item.files} />;
       case 'diagrams':
         return <DiagramCard sessionId={summary.id} diagrams={item.diagrams} />;
+      case 'models':
+        // Models are read from the session's folder; a chat has none.
+        return summary.kind === 'code' ? <ModelsCard sessionId={summary.id} paths={item.paths} /> : null;
       case 'sources':
         return <SourcesCard sources={item.sources} fresh={fresh(item.key)} />;
       case 'media':
@@ -344,7 +348,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     <div className="relative min-h-0 flex-1">
       {variant === 'code' ? <Timeline turns={turns} current={currentTurn} onJump={jumpTo} /> : null}
       {finding ? <FindBar ref={findBar} root={contentRef} scroller={scrollRef} onClose={() => setFinding(false)} /> : null}
-      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
+      {/* The scrollbar keeps its place: content as tall as the window would otherwise widen and narrow the column on and on as the bar comes and goes. */}
+      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
           <ConversationContext.Provider value={conversation}>
             <SourcesContext.Provider value={sources}>

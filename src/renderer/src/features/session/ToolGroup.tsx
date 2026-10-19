@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Collapse } from '../../components/Collapse';
+import { ConnectorIcon } from '../../components/ConnectorIcon';
 import { Ring } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { ToolCallBody } from './ToolDetail';
+import { pictureSrc, resultPictures } from './toolPictures';
 import { callParts, summarizeCalls, type ToolCall } from './transcriptModel';
 
 function callFailed(call: ToolCall): boolean {
@@ -44,6 +46,8 @@ export function CallRow({ call, variant = 'indented', defaultOpen = false }: { c
   const declined = call.result?.display?.kind === 'denied';
   const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
   const parts = callParts(call);
+  const pictures = resultPictures(call.result);
+  const mcpServer = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__resources__') ? (call.name.split('__')[1] ?? null) : null;
   return (
     <div className="flex flex-col">
       <button
@@ -54,6 +58,8 @@ export function CallRow({ call, variant = 'indented', defaultOpen = false }: { c
         className={cn('group/row flex items-center gap-6 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary', ROW[variant])}
       >
         {call.running ? <Ring value={0} size={10} spinning label="Running" /> : null}
+        {/* A connector's tool shows the mark of the app it reaches (Blender, Roblox Studio…). */}
+        {mcpServer ? <ConnectorIcon server={{ name: mcpServer }} size={14} /> : null}
         <span className="min-w-0 truncate">
           {parts.verb}
           {parts.verb && parts.target ? ' ' : ''}
@@ -64,6 +70,15 @@ export function CallRow({ call, variant = 'indented', defaultOpen = false }: { c
         {edit ? <DiffCount added={edit.added} removed={edit.removed} pill /> : null}
         {edit?.problems ? <span className="shrink-0 text-amber-fg">{edit.problems.total === 1 ? '1 problem' : `${String(edit.problems.total)} problems`}</span> : null}
         {failed ? <span className="shrink-0 text-danger">Failed</span> : declined ? <span className="shrink-0 text-amber-fg">Declined</span> : null}
+        {pictures.length > 0 ? (
+          // A glance at what came back; the pictures themselves open from the details.
+          <span role="img" aria-label={pictures.length === 1 ? 'Sent a picture' : `Sent ${String(pictures.length)} pictures`} className="flex shrink-0 items-center gap-2">
+            {pictures.slice(0, 3).map((image, i) => (
+              <img key={i} src={pictureSrc(image)} alt="" className="motion-pop h-18 w-28 rounded-[3px] border border-border-card object-cover" />
+            ))}
+            {pictures.length > 3 ? <span className="text-xs text-fg-muted tabular-nums">+{String(pictures.length - 3)}</span> : null}
+          </span>
+        ) : null}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
       <Collapse open={open} className={ROW_BODY[variant]}>
