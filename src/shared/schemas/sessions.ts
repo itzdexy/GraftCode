@@ -44,6 +44,14 @@ export type ContextReport = z.infer<typeof ContextReportSchema>;
 export const ErrorInfoSchema = z.object({ code: z.string(), message: z.string() });
 export type ErrorInfo = z.infer<typeof ErrorInfoSchema>;
 
+/** A named group the user files sessions under (sidebar → Move to group). Kept in the database. */
+export const SessionGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number().int()
+});
+export type SessionGroup = z.infer<typeof SessionGroupSchema>;
+
 export const SessionSummarySchema = z.object({
   id: z.string(),
   kind: SessionKindSchema,
@@ -53,6 +61,10 @@ export const SessionSummarySchema = z.object({
   archived: z.boolean(),
   unread: z.boolean(),
   incognito: z.boolean(),
+  /** The named group the session is filed under, or null. */
+  groupId: z.string().nullable(),
+  /** When the user marked the session as completed; null while it counts as work. */
+  completedAt: z.number().int().nullable(),
   projectId: z.string().nullable(),
   projectPath: z.string().nullable(),
   projectName: z.string().nullable(),

@@ -29,6 +29,8 @@ export const SHORTCUT_IDS = [
   'toggleFiles',
   'commandPalette',
   'findInTranscript',
+  'findNext',
+  'findPrevious',
   'quickOpen',
   'goToSymbol',
   'searchFiles'
@@ -49,6 +51,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   toggleFiles: 'Ctrl+Shift+F',
   commandPalette: 'Ctrl+Shift+P',
   findInTranscript: 'Ctrl+F',
+  findNext: 'F3',
+  findPrevious: 'Shift+F3',
   quickOpen: 'Ctrl+P',
   goToSymbol: 'Ctrl+T',
   searchFiles: 'Ctrl+Shift+H'

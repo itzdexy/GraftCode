@@ -7,6 +7,7 @@ import { SLIDE_EXIT_MS, useCrossFaded, usePresence } from '../../lib/motion';
 import { useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { pageUnder, useNav, type Route, type SettingsSection } from '../../stores/nav';
+import { usePanes } from '../../stores/panes';
 import { useSessions } from '../../stores/sessions';
 import { openSearch } from '../../stores/textSearch';
 import { useUi } from '../../stores/ui';
@@ -14,12 +15,12 @@ import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
 import { MissionDialog } from '../session/MissionDialog';
 import { RewindDialog } from '../session/RewindDialog';
-import { SessionView } from '../session/SessionView';
 import { SystemPromptDialog } from '../session/SystemPromptDialog';
 import { CommandPalette } from './CommandPalette';
 import { InfoDialogs } from './InfoDialogs';
 import { SearchDialog } from './SearchDialog';
 import { SessionDialogs } from './SessionDialogs';
+import { SessionSplit } from './SessionSplit';
 import { Sidebar } from './Sidebar';
 import { openSettings, startNew, toggleSidebar } from './shellActions';
 
@@ -43,7 +44,7 @@ function RouteView({ route }: { route: Route }) {
     case 'home':
       return mode === 'code' ? <CodeHome /> : <ChatHome />;
     case 'session':
-      return <SessionView key={route.id} sessionId={route.id} />;
+      return <SessionSplit key={route.id} id={route.id} />;
     case 'projects':
       return <Later>{<ProjectsView />}</Later>;
     case 'artifacts':
@@ -98,6 +99,7 @@ export function AppShell() {
 
   useEffect(() => {
     void useSessions.getState().loadList();
+    void useSessions.getState().loadGroups();
   }, []);
 
   const activeSession = route.name === 'session' ? route.id : null;
@@ -116,9 +118,11 @@ export function AppShell() {
     const session = activeSession ? s.summaries[activeSession] : undefined;
     return session?.kind === 'code' && (session.worktreePath ?? session.cwd) !== null;
   });
-  useShortcut('quickOpen', () => useUi.getState().setPaletteOpen(true, '', 'files'), inProject);
-  useShortcut('goToSymbol', () => useUi.getState().setPaletteOpen(true, '', 'symbols'), inProject);
-  useShortcut('searchFiles', () => (activeSession ? openSearch(activeSession) : undefined), inProject);
+  // The open session is the main pane of a split; its keys step aside while the keyboard is in the other one.
+  const mainFocused = usePanes((s) => s.side === null || s.focus === 'main');
+  useShortcut('quickOpen', () => useUi.getState().setPaletteOpen(true, '', 'files'), inProject && mainFocused);
+  useShortcut('goToSymbol', () => useUi.getState().setPaletteOpen(true, '', 'symbols'), inProject && mainFocused);
+  useShortcut('searchFiles', () => (activeSession ? openSearch(activeSession) : undefined), inProject && mainFocused);
 
   return (
     <div className="flex h-full bg-bg">

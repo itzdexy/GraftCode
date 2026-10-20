@@ -24,6 +24,10 @@ interface UiState {
   paletteOpened: number;
   moreOpen: boolean;
   chatListExpanded: boolean;
+  /** Named groups in the sidebar the user folded shut. */
+  collapsedGroups: Record<string, true>;
+  /** The Completed section in the sidebar: folded shut until asked for. */
+  completedOpen: boolean;
   /** The next chat started from Chat home is incognito (not saved). */
   incognito: boolean;
   filter: SessionFilter;
@@ -45,6 +49,8 @@ interface UiState {
   setPaletteOpen: (open: boolean, query?: string, mode?: PaletteMode) => void;
   setMoreOpen: (open: boolean) => void;
   setChatListExpanded: (expanded: boolean) => void;
+  toggleGroup: (id: string) => void;
+  setCompletedOpen: (open: boolean) => void;
   setIncognito: (incognito: boolean) => void;
   setFilter: (filter: Partial<SessionFilter>) => void;
   resetFilter: () => void;
@@ -83,6 +89,8 @@ export const useUi = create<UiState>((set, get) => ({
   paletteOpened: 0,
   moreOpen: false,
   chatListExpanded: false,
+  collapsedGroups: {},
+  completedOpen: false,
   incognito: false,
   filter: DEFAULT_FILTER,
   drafts: storedDrafts,
@@ -96,6 +104,13 @@ export const useUi = create<UiState>((set, get) => ({
     set(paletteOpen ? { paletteOpen, paletteQuery, paletteMode, paletteOpened: get().paletteOpened + 1, searchOpen: false } : { paletteOpen }),
   setMoreOpen: (moreOpen) => set({ moreOpen }),
   setChatListExpanded: (chatListExpanded) => set({ chatListExpanded }),
+  toggleGroup: (id) => {
+    const collapsedGroups = { ...get().collapsedGroups };
+    if (collapsedGroups[id]) delete collapsedGroups[id];
+    else collapsedGroups[id] = true;
+    set({ collapsedGroups });
+  },
+  setCompletedOpen: (completedOpen) => set({ completedOpen }),
   setIncognito: (incognito) => {
     // What is in the Chat home box when the switch goes on is for an incognito chat from now on.
     if (incognito) trackPrivate(privateDrafts, 'home:chat', get().drafts['home:chat'] ?? '', true);

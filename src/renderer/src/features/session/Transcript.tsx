@@ -10,6 +10,7 @@ import { useCrossFaded } from '../../lib/motion';
 import { overlayOpen, useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { useFileRefs } from '../../stores/fileRefs';
+import { usePaneActive } from '../../stores/panes';
 import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
 import {
@@ -69,6 +70,8 @@ interface TranscriptProps {
   onSend: (text: string) => void;
   /** Bottom padding so the last message clears overlays. */
   className?: string;
+  /** Which half of a split this transcript is; keys (Ctrl+F, F3) only act on the focused one. */
+  pane?: 'main' | 'side';
 }
 
 function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text: string }>; current: number; onJump: (index: number) => void }) {
@@ -98,7 +101,7 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 }
 
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
-export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, onSend, className }: TranscriptProps) {
+export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, onSend, className, pane = 'main' }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
   // What a piece of a reply needs to act on its conversation. It changes with the session only: the newest
   // onSend is reached through a ref, so a reply that streams does not draw every code span again on each word.
@@ -149,6 +152,10 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   // Find in the conversation: the shortcut opens the bar, and selects the text of one that is open.
   const [finding, setFinding] = useState(false);
   const findBar = useRef<FindBarHandle>(null);
+  const focused = usePaneActive(pane);
+  // A dialog covers the conversation, an editor and a terminal have a find of their own while the keyboard
+  // is in them, and with two sessions side by side only the focused one answers.
+  const findKey = (): boolean => focused && !overlayOpen() && !document.activeElement?.closest('.monaco-editor, .xterm');
   useShortcut(
     'findInTranscript',
     () => {
@@ -156,9 +163,26 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
       else setFinding(true);
     },
     true,
-    // An editor and a terminal have a find of their own while the keyboard is in them, and a dialog covers the conversation.
-    () => !overlayOpen() && !document.activeElement?.closest('.monaco-editor, .xterm')
+    findKey
   );
+  // F3 and Shift+F3 step the current match from anywhere in the window; with no bar open they open it, like Ctrl+F.
+  useShortcut('findNext', () => (finding ? findBar.current?.step(1) : setFinding(true)), true, findKey);
+  useShortcut('findPrevious', () => (finding ? findBar.current?.step(-1) : setFinding(true)), true, findKey);
+  // Escape closes the find bar from wherever the keyboard is: F3 can step the matches while the
+  // keyboard is somewhere else, and the bar would not hear the key then. The key is taken before
+  // the window's own Escape (stopping a running turn) gets it.
+  useEffect(() => {
+    if (!finding) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || overlayOpen()) return;
+      if (document.activeElement?.closest('.monaco-editor, .xterm')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFinding(false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [finding]);
 
   const turns = useMemo(
     () => items.filter((i): i is Extract<TranscriptItem, { kind: 'user' }> => i.kind === 'user').map((i) => ({ key: i.key, text: i.text })),

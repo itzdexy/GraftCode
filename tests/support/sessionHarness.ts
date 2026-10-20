@@ -122,6 +122,8 @@ export function makeHarness(options: HarnessOptions): Harness {
     archived: false,
     unread: false,
     incognito: options.incognito ?? false,
+    groupId: null,
+    completedAt: null,
     projectId: null,
     projectPath: options.kind === 'chat' ? null : projectDir,
     projectName: 'project',

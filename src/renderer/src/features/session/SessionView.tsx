@@ -11,6 +11,7 @@ import { invoke } from '../../lib/ipc';
 import { useShortcut, useShortcutLabel } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { panelBus, panelsOf, usePanels } from '../../stores/panels';
+import { usePaneActive, usePanes } from '../../stores/panes';
 import { commentsOf, useReview } from '../../stores/review';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
@@ -113,7 +114,22 @@ function useAutoOpenAgents(sessionId: string, working: boolean): void {
   }, [sessionId, working]);
 }
 
-function CodeSession({ summary, view }: { summary: SessionSummary; view: SessionViewState }) {
+function CodeSession({
+  summary,
+  view,
+  pane,
+  onClose,
+  atRightEdge,
+  atLeftEdge
+}: {
+  summary: SessionSummary;
+  view: SessionViewState;
+  pane: 'main' | 'side';
+  onClose: (() => void) | null;
+  atRightEdge: boolean;
+  atLeftEdge: boolean;
+}) {
+  const focused = usePaneActive(pane);
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [statsBump, setStatsBump] = useState(0);
@@ -129,9 +145,9 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   const detailsOn = useDetailsShown(summary.id);
   useAutoOpenTasks(summary.id);
   useAutoOpenAgents(summary.id, agentsWorking > 0 && folder !== null);
-  useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null);
-  useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null);
-  useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null);
+  useShortcut('toggleTerminal', () => usePanels.getState().toggle(summary.id, 'terminal'), folder !== null && focused);
+  useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null && focused);
+  useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null && focused);
 
   // The comments that wait on lines of code go with an ordinary message, and are gone once it has. A command leaves them waiting.
   const send = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
@@ -151,6 +167,9 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
         onShowTasks={() => usePanels.getState().show(summary.id, 'tasks')}
         onToggleFiles={() => usePanels.getState().toggleFiles(summary.id)}
         panels={<PanelToggles sessionId={summary.id} hasFolder={folder !== null} agentsWorking={agentsWorking} />}
+        onClose={onClose}
+        atRightEdge={atRightEdge}
+        atLeftEdge={atLeftEdge}
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
@@ -162,6 +181,7 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
             onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
             onRegenerate={null}
             onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
+            pane={pane}
           />
           <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
@@ -240,7 +260,21 @@ function CodeSession({ summary, view }: { summary: SessionSummary; view: Session
   );
 }
 
-function ChatSession({ summary, view }: { summary: SessionSummary; view: SessionViewState }) {
+function ChatSession({
+  summary,
+  view,
+  pane,
+  onClose,
+  atRightEdge,
+  atLeftEdge
+}: {
+  summary: SessionSummary;
+  view: SessionViewState;
+  pane: 'main' | 'side';
+  onClose: (() => void) | null;
+  atRightEdge: boolean;
+  atLeftEdge: boolean;
+}) {
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
@@ -255,7 +289,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ChatSessionHeader summary={summary} />
+      <ChatSessionHeader summary={summary} onClose={onClose} atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
       <div className="flex min-h-0 flex-1 flex-col">
         <Transcript
           summary={summary}
@@ -265,6 +299,7 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
           onRetry={() => invoke('sessions:retry', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
           onRegenerate={() => invoke('sessions:regenerate', { id: summary.id }).catch((e: unknown) => reportError("Couldn't retry", e))}
           onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
+          pane={pane}
         />
         <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
           {missing ? (
@@ -310,20 +345,26 @@ function ChatSession({ summary, view }: { summary: SessionSummary; view: Session
 }
 
 /** A chat or code session: transcript, cards and composer. */
-export function SessionView({ sessionId }: { sessionId: string }) {
+export function SessionView({ sessionId, pane = 'main', onClose = null }: { sessionId: string; pane?: 'main' | 'side'; onClose?: (() => void) | null }) {
   const summary = useSessions((s) => s.summaries[sessionId]);
   const view = useSessions((s) => viewOf(s, sessionId));
+  const focused = usePaneActive(pane);
+  // The native window controls sit over the right edge of the window. In a split view that edge belongs
+  // to the pane beside the open one, so the open session's own header does not keep clear of them.
+  const split = usePanes((s) => s.side !== null);
+  const atRightEdge = pane === 'side' || !split;
+  const atLeftEdge = pane === 'main';
 
   useEffect(() => {
     void useSessions.getState().open(sessionId);
   }, [sessionId]);
 
-  useShortcut('interrupt', () => interrupt(sessionId), view.turnActive);
+  useShortcut('interrupt', () => interrupt(sessionId), view.turnActive && focused);
 
   if (!summary) {
     return (
       <div className="flex h-full flex-col">
-        <ViewHeader />
+        <ViewHeader atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
         <ErrorState title="Session not found" message="It may have been deleted." />
       </div>
     );
@@ -331,7 +372,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   if (view.error && view.messages.length === 0) {
     return (
       <div className="flex h-full flex-col">
-        <ViewHeader />
+        <ViewHeader atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
         <ErrorState title="Couldn't open this session" message={view.error} onRetry={() => void useSessions.getState().open(sessionId)} />
       </div>
     );
@@ -339,10 +380,14 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   if (view.loading && view.messages.length === 0) {
     return (
       <div className="flex h-full flex-col">
-        <ViewHeader />
+        <ViewHeader atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
         <LoadingState label="Opening session…" className="flex-1" />
       </div>
     );
   }
-  return summary.kind === 'chat' ? <ChatSession summary={summary} view={view} /> : <CodeSession summary={summary} view={view} />;
+  return summary.kind === 'chat' ? (
+    <ChatSession summary={summary} view={view} pane={pane} onClose={onClose} atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
+  ) : (
+    <CodeSession summary={summary} view={view} pane={pane} onClose={onClose} atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
+  );
 }

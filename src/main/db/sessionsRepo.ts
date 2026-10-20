@@ -11,6 +11,7 @@ import {
 } from '@shared/schemas/messages';
 import type {
   ErrorInfo,
+  SessionGroup,
   SessionKind,
   SessionStatus,
   SessionSummary,
@@ -51,6 +52,10 @@ export interface SessionPatch {
   pinned?: boolean;
   archived?: boolean;
   unread?: boolean;
+  /** The named group the session is filed under; null takes it out of every group. */
+  groupId?: string | null;
+  /** When the user marked the session as completed; null marks it as in progress again. */
+  completedAt?: number | null;
   lastError?: ErrorInfo | null;
   usage?: SessionUsage;
   todos?: TodoItem[];
@@ -102,6 +107,14 @@ export interface SessionStore {
   usageSince(fromDay: string): UsageDay[];
   /** What the sessions of one project have used, summed from their saved totals. */
   projectUsage(projectPath: string): { totals: Usage; costUsd: number };
+  /** The named groups sessions are filed under, oldest first. */
+  listGroups(): SessionGroup[];
+  /** A new named group. */
+  createGroup(name: string): SessionGroup;
+  /** Renames a group; throws when it is not there. */
+  renameGroup(id: string, name: string): SessionGroup;
+  /** Removes a group; the sessions in it are kept and left ungrouped. */
+  deleteGroup(id: string): void;
   /** Writes down that a tool call is about to run. Called before it starts, so it is on record if the app stops while it runs. */
   journalStart(entry: JournalStart): void;
   /** Writes down what a started call returned. */
@@ -131,6 +144,8 @@ interface SessionRow {
   pinned: number;
   archived: number;
   unread: number;
+  group_id: string | null;
+  completed_at: number | null;
   last_error: string | null;
   usage: string;
   created_at: number;
@@ -161,6 +176,8 @@ function toSummary(row: SessionRow): SessionSummary {
     archived: row.archived === 1,
     unread: row.unread === 1,
     incognito: false,
+    groupId: row.group_id,
+    completedAt: row.completed_at,
     projectId: row.project_id,
     projectPath: row.project_path,
     projectName: row.project_name,
@@ -282,6 +299,8 @@ export class SessionsRepo implements SessionStore {
     if (patch.pinned !== undefined) set('pinned', patch.pinned ? 1 : 0);
     if (patch.archived !== undefined) set('archived', patch.archived ? 1 : 0);
     if (patch.unread !== undefined) set('unread', patch.unread ? 1 : 0);
+    if (patch.groupId !== undefined) set('group_id', patch.groupId);
+    if (patch.completedAt !== undefined) set('completed_at', patch.completedAt);
     if (patch.lastError !== undefined) set('last_error', patch.lastError ? JSON.stringify(patch.lastError) : null);
     if (patch.usage !== undefined) set('usage', JSON.stringify(patch.usage));
     if (patch.todos !== undefined) set('todos', JSON.stringify(patch.todos));
@@ -297,8 +316,8 @@ export class SessionsRepo implements SessionStore {
     if (patch.baseBranch !== undefined) set('base_branch', patch.baseBranch);
     if (patch.projectId !== undefined) set('project_id', patch.projectId);
     if (sets.length === 0) return this.getSummary(id);
-    // Status and read-state flips are not "activity"; they must not reorder the list.
-    const touches = Object.keys(patch).some((k) => !['status', 'unread', 'pinned', 'usage', 'lastError'].includes(k));
+    // Status, read-state flips, filing and completion are not "activity"; they must not reorder the list.
+    const touches = Object.keys(patch).some((k) => !['status', 'unread', 'pinned', 'usage', 'lastError', 'groupId', 'completedAt'].includes(k));
     if (touches) set('updated_at', Date.now());
     const result = this.db.prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = @id`).run(params);
     if (result.changes === 0) throw new GraftError('session_not_found', `Session ${id} does not exist.`);
@@ -320,6 +339,39 @@ export class SessionsRepo implements SessionStore {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM search_index WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    });
+    tx();
+  }
+
+  listGroups(): SessionGroup[] {
+    const rows = this.db.prepare('SELECT id, name, created_at FROM session_groups ORDER BY created_at ASC, name ASC').all() as Array<{
+      id: string;
+      name: string;
+      created_at: number;
+    }>;
+    return rows.map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+  }
+
+  createGroup(name: string): SessionGroup {
+    const group: SessionGroup = { id: randomUUID(), name, createdAt: Date.now() };
+    this.db.prepare('INSERT INTO session_groups (id, name, created_at) VALUES (@id, @name, @createdAt)').run(group);
+    return group;
+  }
+
+  renameGroup(id: string, name: string): SessionGroup {
+    const result = this.db.prepare('UPDATE session_groups SET name = ? WHERE id = ?').run(name, id);
+    if (result.changes === 0) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    const group = this.listGroups().find((g) => g.id === id);
+    if (!group) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    return group;
+  }
+
+  /** The group's sessions are kept: they leave it. An explicit update, so it holds with foreign keys off as well. */
+  deleteGroup(id: string): void {
+    const tx = this.db.transaction(() => {
+      const result = this.db.prepare('DELETE FROM session_groups WHERE id = ?').run(id);
+      if (result.changes === 0) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+      this.db.prepare('UPDATE sessions SET group_id = NULL WHERE group_id = ?').run(id);
     });
     tx();
   }
