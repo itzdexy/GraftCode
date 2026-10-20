@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.6.36",
+    "date": "2026-10-20",
+    "items": [
+      "Two sessions at once. Open beside, from a session's menu, puts another session next to the open one, with a handle between them to drag the width. The pane you last clicked or typed in is the one the keyboard belongs to, so Ctrl+F and Esc act on that session only. A button closes the conversation beside.",
+      "Sessions you file away. Move to group files a session under a name of your own; the groups are sections in the sidebar, and they can be renamed or removed without losing the sessions in them. Mark as completed takes a session out of the working lists and puts it under Completed, where the same filters apply. Writing to it again marks it in progress and it comes back where it was.",
+      "Find steps through the matches with F3 and Shift+F3, from anywhere in the window, and Copy as Markdown from a session's menu puts the conversation on the clipboard without a save dialog."
+    ]
+  },
+  {
     "version": "0.6.35",
     "date": "2026-10-18",
     "items": [
