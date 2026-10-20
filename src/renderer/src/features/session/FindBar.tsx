@@ -193,6 +193,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
     <div
       role="search"
       aria-label="Find in the conversation"
+      data-find-bar
       onKeyDown={onKeyDown}
       className="motion-menu-down absolute top-8 right-20 z-[var(--g-z-sticky)] flex h-32 max-w-[calc(100%-40px)] items-center gap-2 rounded-md border border-border bg-surface pr-4 pl-8 shadow-popover"
     >
