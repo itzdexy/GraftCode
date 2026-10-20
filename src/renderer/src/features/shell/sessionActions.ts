@@ -23,6 +23,29 @@ export async function setPinned(session: SessionSummary, pinned: boolean): Promi
   }
 }
 
+/** Marks a session as completed, so it leaves the working lists, or as in progress again. Undo is one click. */
+export async function setCompleted(session: SessionSummary, completed: boolean): Promise<void> {
+  try {
+    await invoke('sessions:setCompleted', { id: session.id, completed });
+    useToasts.getState().push({
+      tone: 'success',
+      title: completed ? 'Marked as completed' : 'Marked as in progress',
+      action: { label: 'Undo', run: () => void setCompleted(session, !completed) }
+    });
+  } catch (error) {
+    reportError(completed ? "Couldn't mark the session as completed" : "Couldn't mark the session as in progress", error);
+  }
+}
+
+/** Files a session under a group; null takes it out of every group. */
+export async function setSessionGroup(session: SessionSummary, groupId: string | null): Promise<void> {
+  try {
+    await invoke('sessions:setGroup', { id: session.id, groupId });
+  } catch (error) {
+    reportError(groupId === null ? "Couldn't take the session out of its group" : "Couldn't move the session into that group", error);
+  }
+}
+
 export async function duplicateSession(session: SessionSummary): Promise<void> {
   try {
     const copy = await invoke('sessions:duplicate', { id: session.id });

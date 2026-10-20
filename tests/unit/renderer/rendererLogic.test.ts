@@ -11,10 +11,12 @@ import { fileGlyph } from '../../../src/renderer/src/features/session/fileCardMo
 import { customModelSummary } from '../../../src/renderer/src/features/settings/customModelSummary';
 import {
   DEFAULT_FILTER,
+  completedSessions,
   groupByProject,
   homeSessions,
   matchesFilter,
   needsYou,
+  splitGroups,
   visibleSessions,
   withoutThose
 } from '../../../src/renderer/src/features/shell/sessionLists';
@@ -32,6 +34,8 @@ function session(partial: Partial<SessionSummary> & { id: string }): SessionSumm
     archived: false,
     unread: false,
     incognito: false,
+    groupId: null,
+    completedAt: null,
     projectId: null,
     projectPath: null,
     projectName: null,
@@ -104,6 +108,47 @@ describe('session lists', () => {
     // Nothing waits: the lists below are returned as they are.
     const calm = [session({ id: 'a' })];
     expect(withoutThose(calm, [])).toBe(calm);
+  });
+
+  it('leaves completed sessions out of what waits, out of home, and lists them apart, newest completion first', () => {
+    const all = [
+      session({ id: 'done-new', completedAt: NOW - MIN }),
+      session({ id: 'done-old', completedAt: NOW - DAY, updatedAt: NOW - 10 * DAY, status: 'error' }),
+      session({ id: 'open' }),
+      session({ id: 'done-archived', completedAt: NOW, archived: true }),
+      session({ id: 'done-chat', kind: 'chat', completedAt: NOW })
+    ];
+    expect(completedSessions(all, 'code', DEFAULT_FILTER, NOW).map((s) => s.id)).toEqual(['done-new', 'done-old']);
+    expect(completedSessions(all, 'chat', DEFAULT_FILTER, NOW).map((s) => s.id)).toEqual(['done-chat']);
+    // The filter is the same one every other list answers to: a filtered Completed shows what matches, not nothing.
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'idle' }, NOW).map((s) => s.id)).toEqual(['done-new']);
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, date: 'day' }, NOW).map((s) => s.id)).toEqual(['done-new']);
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'attention' }, NOW).map((s) => s.id)).toEqual(['done-old']);
+    // An archived session is raised by the archived filter, not by Completed.
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'archived' }, NOW)).toEqual([]);
+    // A completed error is not something that waits for the user; home is recent work, and this is filed away.
+    expect(needsYou(all, 'code', DEFAULT_FILTER).map((s) => s.id)).toEqual([]);
+    expect(homeSessions(all, 'code', 10).map((s) => s.id)).toEqual(['open']);
+  });
+
+  it('takes grouped sessions out of their project or chat list, and leaves empty groups out', () => {
+    const work = { id: 'g-work', name: 'Work', createdAt: NOW - DAY };
+    const empty = { id: 'g-empty', name: 'Empty', createdAt: NOW - 2 * DAY };
+    const filed = splitGroups(
+      [work, empty],
+      [
+        session({ id: 'a', groupId: work.id }),
+        session({ id: 'b', groupId: work.id, pinned: true, updatedAt: NOW - 2 * DAY }),
+        session({ id: 'c' }),
+        // A group that is no longer there: the session falls back to its ordinary list, it is not lost.
+        session({ id: 'd', groupId: 'g-gone' })
+      ]
+    );
+    expect(filed.sections.map((s) => [s.group.name, s.sessions.map((x) => x.id)])).toEqual([['Work', ['b', 'a']]]);
+    expect(filed.rest.map((s) => s.id).sort()).toEqual(['c', 'd']);
+    // No groups at all: the list is returned as it is.
+    const plain = [session({ id: 'a' })];
+    expect(splitGroups([], plain)).toEqual({ sections: [], rest: plain });
   });
 
   it('filters by attention, project and date', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Box, ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FileText, FolderOpen, History, Laptop, ListChecks, Settings2, Shrink } from 'lucide-react';
+import { Box, ChevronDown, Clipboard, Coffee, EllipsisVertical, FileDown, Files, FileText, FolderOpen, History, Laptop, ListChecks, PanelRightClose, Settings2, Shrink } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { Badge } from '../../components/Badge';
 import { IconButton } from '../../components/Button';
@@ -145,6 +145,14 @@ function copyText(text: string, what: string): void {
   );
 }
 
+/** The conversation as Markdown, for pasting elsewhere: the same text as an export, without a save dialog. */
+function copyConversation(summary: SessionSummary): void {
+  invoke('sessions:exportText', { id: summary.id, format: 'markdown' }).then(
+    (text) => copyText(text, 'Conversation'),
+    (error: unknown) => reportError("Couldn't copy the conversation", error)
+  );
+}
+
 interface CodeHeaderProps {
   summary: SessionSummary;
   onCompact: () => void;
@@ -154,19 +162,43 @@ interface CodeHeaderProps {
   busy: boolean;
   /** Panel toggles (terminal, changes, browser) placed before the menu. */
   panels?: ReactNode;
+  /** Closes the split when this session is the one beside the open one; null in the main pane. */
+  onClose?: (() => void) | null;
+  /** False when this header is not at the window's right edge (the pane beside the open one). */
+  atRightEdge?: boolean;
+  /** False when this header is not at the window's left edge (the pane beside the open one). */
+  atLeftEdge?: boolean;
 }
 
 /** Code session header in the titlebar row: environment, title menu, project chip, panels and more. */
-export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, onToggleFiles, busy, panels }: CodeHeaderProps) {
+export function CodeSessionHeader({
+  summary,
+  onCompact,
+  onRewind,
+  onShowTasks,
+  onToggleFiles,
+  busy,
+  panels,
+  onClose = null,
+  atRightEdge = true,
+  atLeftEdge = true
+}: CodeHeaderProps) {
   const folder = summary.worktreePath ?? summary.cwd;
   const filesLabel = useShortcutLabel('toggleFiles');
   const keepAwake = usePower((s) => s.keepAwake?.includes(summary.id) ?? false);
   useEffect(() => usePower.getState().load(), []);
   return (
     <ViewHeader
+      atRightEdge={atRightEdge}
+      atLeftEdge={atLeftEdge}
       actions={
         <>
           {panels}
+          {onClose ? (
+            <IconButton label="Close the split" onClick={onClose}>
+              <PanelRightClose className="size-16" />
+            </IconButton>
+          ) : null}
           <Menu>
             <MenuTrigger asChild>
               <IconButton label="More actions">
@@ -219,6 +251,9 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, o
               <MenuItem icon={<FileDown className="size-14" />} onSelect={() => void exportSession(summary, 'markdown')}>
                 Export as Markdown…
               </MenuItem>
+              <MenuItem icon={<Clipboard className="size-14" />} onSelect={() => copyConversation(summary)}>
+                Copy as Markdown
+              </MenuItem>
               <MenuItem icon={<FileText className="size-14" />} onSelect={() => useSystemPrompt.getState().open(summary.id)}>
                 View system prompt
               </MenuItem>
@@ -230,7 +265,8 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, o
       <EnvironmentMenu summary={summary} />
       <TitleMenu summary={summary} />
       {summary.projectName ? (
-        <Badge className="h-20 max-w-[200px] truncate bg-control px-6 text-xs text-fg-secondary">
+        // In a narrow pane (a split view) the project chip steps aside: the title is what is needed there.
+        <Badge className="h-20 max-w-[200px] shrink-0 truncate bg-control px-6 text-xs text-fg-secondary @max-[260px]:hidden">
           {summary.projectName}
           {summary.worktreePath && summary.branch ? <span className="text-fg-muted"> · {summary.branch}</span> : null}
         </Badge>
@@ -240,14 +276,29 @@ export function CodeSessionHeader({ summary, onCompact, onRewind, onShowTasks, o
 }
 
 /** Chat header: drag strip, then the title row with export. */
-export function ChatSessionHeader({ summary }: { summary: SessionSummary }) {
+export function ChatSessionHeader({
+  summary,
+  onClose = null,
+  atRightEdge = true,
+  atLeftEdge = true
+}: {
+  summary: SessionSummary;
+  onClose?: (() => void) | null;
+  atRightEdge?: boolean;
+  atLeftEdge?: boolean;
+}) {
   return (
     <>
-      <ViewHeader />
+      <ViewHeader atRightEdge={atRightEdge} atLeftEdge={atLeftEdge} />
       <div className="flex h-36 shrink-0 items-center gap-8 pr-16 pl-12">
         <TitleMenu summary={summary} size="lg" />
         {summary.incognito ? <IncognitoBadge providerId={summary.model?.providerId ?? null} /> : null}
         <div className="flex-1" />
+        {onClose ? (
+          <IconButton label="Close the split" onClick={onClose}>
+            <PanelRightClose className="size-16" />
+          </IconButton>
+        ) : null}
         <Menu>
           <MenuTrigger asChild>
             <IconButton label="Export chat">
@@ -255,6 +306,9 @@ export function ChatSessionHeader({ summary }: { summary: SessionSummary }) {
             </IconButton>
           </MenuTrigger>
           <MenuContent align="end">
+            <MenuItem icon={<Clipboard className="size-14" />} onSelect={() => copyConversation(summary)}>
+              Copy as Markdown
+            </MenuItem>
             <MenuItem onSelect={() => void exportSession(summary, 'markdown')}>Export as Markdown…</MenuItem>
             <MenuItem onSelect={() => void exportSession(summary, 'json')}>Export as JSON…</MenuItem>
             <MenuSeparator />

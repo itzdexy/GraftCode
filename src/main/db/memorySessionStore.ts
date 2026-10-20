@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { GraftError } from '@shared/errors';
 import type { ContentBlock, MessageMeta, StoredMessage, ToolResultBlock } from '@shared/schemas/messages';
-import type { SessionSummary } from '@shared/schemas/sessions';
+import type { SessionGroup, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
@@ -23,6 +23,7 @@ export class MemorySessionStore implements SessionStore {
   private readonly pruneCutoffs = new Map<string, number>();
   private readonly usage: UsageDay[] = [];
   private readonly journal = new Map<string, JournalEntry[]>();
+  private readonly groups = new Map<string, SessionGroup>();
 
   getPruneBeforeSeq(sessionId: string): number {
     this.getSummary(sessionId);
@@ -210,6 +211,29 @@ export class MemorySessionStore implements SessionStore {
       costUsd += session.usage.costUsd ?? 0;
     }
     return { totals, costUsd };
+  }
+
+  listGroups(): SessionGroup[] {
+    return [...this.groups.values()].sort((a, b) => a.createdAt - b.createdAt || a.name.localeCompare(b.name));
+  }
+
+  createGroup(name: string): SessionGroup {
+    const group: SessionGroup = { id: randomUUID(), name, createdAt: Date.now() };
+    this.groups.set(group.id, group);
+    return group;
+  }
+
+  renameGroup(id: string, name: string): SessionGroup {
+    const group = this.groups.get(id);
+    if (!group) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    const next = { ...group, name };
+    this.groups.set(id, next);
+    return next;
+  }
+
+  deleteGroup(id: string): void {
+    if (!this.groups.delete(id)) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    for (const [sessionId, session] of this.sessions) if (session.groupId === id) this.sessions.set(sessionId, { ...session, groupId: null });
   }
 
   private list_(sessionId: string): StoredMessage[] {

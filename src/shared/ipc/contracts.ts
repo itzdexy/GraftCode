@@ -48,7 +48,7 @@ import { MISSION_LIMITS, MissionStartSchema } from '../schemas/missions';
 import { CustomModelSchema, DetectedServerSchema, ModelInfoSchema, ProviderPresetSchema, ProviderSummarySchema, VerifyResultSchema } from '../schemas/models';
 import { PermissionResponseSchema, QuestionResponseSchema } from '../schemas/permissions';
 import { RewindModeSchema, RewindPreviewSchema, RewindResultSchema } from '../schemas/rewind';
-import { ContextReportSchema, SessionDetailSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
+import { ContextReportSchema, SessionDetailSchema, SessionGroupSchema, SessionKindSchema, SessionSummarySchema } from '../schemas/sessions';
 import { ClearHistoryResultSchema, RuleListsSchema, SandboxStatusSchema, ScopedRulesSchema, UpdateStateSchema } from '../schemas/system';
 import { TextSearchQuerySchema, TextSearchResultSchema } from '../schemas/textSearch';
 import { UsageDaySchema } from '../usage';
@@ -333,6 +333,16 @@ export const contracts = {
   'sessions:setModel': channel(z.object({ id: IdSchema, model: ModelRefSchema, effort: EffortLevelSchema.nullable() }), Ok),
   'sessions:rename': channel(z.object({ id: IdSchema, title: z.string().trim().min(1).max(200) }), Ok),
   'sessions:setPinned': channel(z.object({ id: IdSchema, pinned: z.boolean() }), Ok),
+  /** Marks a session as completed, so it leaves the working lists; false marks it as in progress again. */
+  'sessions:setCompleted': channel(z.object({ id: IdSchema, completed: z.boolean() }), Ok),
+  /** The named groups sessions are filed under, oldest first. */
+  'sessions:groups': channel(Void, z.array(SessionGroupSchema)),
+  'sessions:createGroup': channel(z.object({ name: z.string().trim().min(1).max(80) }), SessionGroupSchema),
+  'sessions:renameGroup': channel(z.object({ id: IdSchema, name: z.string().trim().min(1).max(80) }), SessionGroupSchema),
+  /** Removes a group; its sessions are kept and left ungrouped. */
+  'sessions:deleteGroup': channel(z.object({ id: IdSchema }), Ok),
+  /** Files a session under a group, or takes it out of every group with null. */
+  'sessions:setGroup': channel(z.object({ id: IdSchema, groupId: IdSchema.nullable() }), Ok),
   'sessions:archive': channel(
     z.object({ id: IdSchema, archived: z.boolean(), removeWorktree: z.boolean(), force: z.boolean() }),
     z.object({ branchKeptReason: z.string().nullable() })
@@ -340,6 +350,8 @@ export const contracts = {
   'sessions:delete': channel(z.object({ id: IdSchema, force: z.boolean() }), Ok),
   'sessions:duplicate': channel(z.object({ id: IdSchema }), SessionSummarySchema),
   'sessions:export': channel(z.object({ id: IdSchema, format: z.enum(['markdown', 'json']) }), z.string().nullable()),
+  /** The conversation as text (the same text as an export), for the clipboard: no save dialog. */
+  'sessions:exportText': channel(z.object({ id: IdSchema, format: z.enum(['markdown', 'json']) }), z.string()),
   /** Files a chat made: save a copy (null when cancelled), open it in its viewer, or show it in its folder. */
   'chatFiles:save': channel(z.object({ sessionId: IdSchema, name: z.string().min(1).max(200) }), z.string().nullable()),
   'chatFiles:open': channel(z.object({ sessionId: IdSchema, name: z.string().min(1).max(200) }), Void),

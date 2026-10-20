@@ -24,6 +24,8 @@ export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
   toggleFiles: 'Show or hide the files panel',
   commandPalette: 'Open the command palette',
   findInTranscript: 'Find in the conversation',
+  findNext: 'Find the next match in the conversation',
+  findPrevious: 'Find the previous match in the conversation',
   quickOpen: 'Open a file by name',
   goToSymbol: 'Go to a symbol by name',
   searchFiles: 'Search in the files of the project'
@@ -174,7 +176,12 @@ export function useShortcut(id: ShortcutId, handler: (event: KeyboardEvent) => v
   }, [accelText, enabled]);
 }
 
-/** True while a Radix menu, popover or dialog is open. */
+/**
+ * True while a Radix menu, popover or dialog is open. A menu that is closing is still in the
+ * DOM for its exit animation; it is closed, and the keys are the window's again.
+ */
 export function overlayOpen(): boolean {
-  return document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]') !== null;
+  return (
+    document.querySelector('[data-radix-popper-content-wrapper] [data-state="open"], [role="dialog"][data-state="open"]') !== null
+  );
 }

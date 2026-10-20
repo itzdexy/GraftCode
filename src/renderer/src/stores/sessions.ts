@@ -4,7 +4,7 @@ import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { Mission } from '@shared/schemas/missions';
 import type { PermissionRequest, QuestionRequest } from '@shared/schemas/permissions';
-import type { QueuedInput, SessionDetail, SessionSummary } from '@shared/schemas/sessions';
+import type { QueuedInput, SessionDetail, SessionGroup, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { errorText, invoke } from '../lib/ipc';
 import { createDeltaBuffer } from './deltaBuffer';
@@ -79,6 +79,8 @@ export function evictViews(views: Record<string, SessionView>, order: string[], 
 
 interface SessionsState {
   summaries: Record<string, SessionSummary>;
+  /** The named groups sessions are filed under, oldest first. */
+  groups: SessionGroup[];
   loaded: boolean;
   /** Why the session list could not be loaded, so the view can offer a retry. */
   loadError: string | null;
@@ -86,6 +88,8 @@ interface SessionsState {
   /** Opened session ids, least recent first (for evicting cached views). */
   viewOrder: string[];
   loadList: () => Promise<void>;
+  /** Reloads the group list (after a group is made, renamed or removed). */
+  loadGroups: () => Promise<void>;
   /** Loads a session's detail. `reset` discards the local view first (after a rewind removed messages). */
   open: (id: string, options?: { reset?: boolean }) => Promise<void>;
   applySummary: (summary: SessionSummary) => void;
@@ -238,6 +242,7 @@ export const useSessions = create<SessionsState>((set, get) => {
   };
   return {
   summaries: {},
+  groups: [],
   loaded: false,
   loadError: null,
   views: {},
@@ -249,6 +254,14 @@ export const useSessions = create<SessionsState>((set, get) => {
     try {
       const list = await invoke('sessions:list', { includeArchived: true });
       set({ summaries: Object.fromEntries(list.map((s) => [s.id, s])), loaded: true, loadError: null });
+    } catch (error) {
+      set({ loadError: errorText(error) });
+    }
+  },
+
+  async loadGroups() {
+    try {
+      set({ groups: await invoke('sessions:groups') });
     } catch (error) {
       set({ loadError: errorText(error) });
     }

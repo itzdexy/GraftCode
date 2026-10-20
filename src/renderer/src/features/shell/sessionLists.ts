@@ -1,4 +1,4 @@
-import type { SessionKind, SessionSummary } from '@shared/schemas/sessions';
+import type { SessionGroup, SessionKind, SessionSummary } from '@shared/schemas/sessions';
 
 /** Pure list logic for the sidebar and home screens (kept free of stores for testing). */
 
@@ -100,7 +100,7 @@ export function attentionRank(s: SessionSummary): number {
 
 export function homeSessions(all: SessionSummary[], kind: SessionKind, limit: number): SessionSummary[] {
   return all
-    .filter((s) => s.kind === kind && !s.archived)
+    .filter((s) => s.kind === kind && !s.archived && s.completedAt === null)
     .sort((a, b) => attentionRank(a) - attentionRank(b) || b.updatedAt - a.updatedAt)
     .slice(0, limit);
 }
@@ -119,7 +119,7 @@ export function filterActive(filter: SessionFilter): boolean {
 export function needsYou(all: SessionSummary[], kind: SessionKind, filter: SessionFilter, openId: string | null = null): SessionSummary[] {
   if (filterActive(filter)) return [];
   return all
-    .filter((s) => s.kind === kind && !s.archived && s.id !== openId && (s.status === 'needs-input' || s.status === 'error'))
+    .filter((s) => s.kind === kind && !s.archived && s.completedAt === null && s.id !== openId && (s.status === 'needs-input' || s.status === 'error'))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -128,4 +128,47 @@ export function withoutThose(sessions: SessionSummary[], listed: SessionSummary[
   if (listed.length === 0) return sessions;
   const ids = new Set(listed.map((s) => s.id));
   return sessions.filter((s) => !ids.has(s.id));
+}
+
+/**
+ * Sessions the user marked as completed: they left the working lists and wait under
+ * Completed, most recently completed first. The same filter rules as every other list
+ * apply, so a filter finds them where they are rather than not at all.
+ */
+export function completedSessions(all: SessionSummary[], kind: SessionKind, filter: SessionFilter, now: number): SessionSummary[] {
+  return all
+    .filter((s) => s.kind === kind && !s.archived && s.completedAt !== null && matchesFilter(s, filter, now))
+    .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+}
+
+export interface GroupSection {
+  group: SessionGroup;
+  sessions: SessionSummary[];
+}
+
+/**
+ * The sessions filed under named groups, and the rest — the ordinary lists go without
+ * what is under a group. Groups keep their stored order; a group without sessions of
+ * this kind is left out, so switching modes does not show empty folders.
+ */
+export function splitGroups(groups: SessionGroup[], sessions: SessionSummary[]): { sections: GroupSection[]; rest: SessionSummary[] } {
+  if (groups.length === 0) return { sections: [], rest: sessions };
+  const known = new Set(groups.map((g) => g.id));
+  const byGroup = new Map<string, SessionSummary[]>();
+  const rest: SessionSummary[] = [];
+  for (const s of sessions) {
+    if (s.groupId !== null && known.has(s.groupId)) {
+      const list = byGroup.get(s.groupId);
+      if (list) list.push(s);
+      else byGroup.set(s.groupId, [s]);
+    } else {
+      rest.push(s);
+    }
+  }
+  const sections: GroupSection[] = [];
+  for (const group of groups) {
+    const inGroup = byGroup.get(group.id);
+    if (inGroup && inGroup.length > 0) sections.push({ group, sessions: inGroup.sort(byPinThenRecency) });
+  }
+  return { sections, rest };
 }
