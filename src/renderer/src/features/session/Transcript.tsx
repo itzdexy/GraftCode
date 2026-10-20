@@ -170,12 +170,14 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   useShortcut('findPrevious', () => (finding ? findBar.current?.step(-1) : setFinding(true)), true, findKey);
   // Escape closes the find bar from wherever the keyboard is: F3 can step the matches while the
   // keyboard is somewhere else, and the bar would not hear the key then. The key is taken before
-  // the window's own Escape (stopping a running turn) gets it.
+  // the window's own Escape (stopping a running turn) gets it. The bar keeps it when it has the
+  // keyboard, so that closing it puts the keyboard back where it came from.
   useEffect(() => {
     if (!finding) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || overlayOpen()) return;
       if (document.activeElement?.closest('.monaco-editor, .xterm')) return;
+      if ((event.target as HTMLElement | null)?.closest('[data-find-bar]')) return;
       event.preventDefault();
       event.stopPropagation();
       setFinding(false);
