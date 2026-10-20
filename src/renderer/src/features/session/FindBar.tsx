@@ -55,6 +55,8 @@ function firstInView(ranges: Range[], scroller: HTMLElement): number {
 export interface FindBarHandle {
   /** Puts the keyboard in the box with its text selected: what the shortcut does to a bar that is already open. */
   focus: () => void;
+  /** Goes to the next (1) or previous (-1) match; what F3 does from outside the bar. */
+  step: (direction: 1 | -1) => void;
 }
 
 interface FindBarProps {
@@ -83,7 +85,6 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
   /** The match last brought into view, so finding it again does not pull the transcript back to it. */
   const revealed = useRef('');
 
-  useImperativeHandle(ref, () => ({ focus: () => input.current?.select() }), []);
   useEffect(() => input.current?.focus(), []);
 
   const search = useCallback((): void => {
@@ -173,7 +174,9 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
     onClose();
     if (cameFrom?.isConnected) cameFrom.focus();
   };
-  const step = (direction: 1 | -1): void => setCurrent(stepMatch(shown, total, direction));
+  const step = useCallback((direction: 1 | -1): void => setCurrent(stepMatch(shown, total, direction)), [shown, total]);
+  // The bar answers F3/Shift+F3 from anywhere in the window while it is open, and Ctrl+F brings the keyboard here.
+  useImperativeHandle(ref, () => ({ focus: () => input.current?.select(), step }), [step]);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       // Escape closes the bar and nothing else: the page would also take it for "stop the running session".
@@ -190,6 +193,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
     <div
       role="search"
       aria-label="Find in the conversation"
+      data-find-bar
       onKeyDown={onKeyDown}
       className="motion-menu-down absolute top-8 right-20 z-[var(--g-z-sticky)] flex h-32 max-w-[calc(100%-40px)] items-center gap-2 rounded-md border border-border bg-surface pr-4 pl-8 shadow-popover"
     >

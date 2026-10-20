@@ -450,6 +450,9 @@ You can add more providers at any time in **Settings → Providers**, and connec
 - **Commands for everyday work:** `/commit`, `/pr`, `/review`, `/security-review`, `/explain`, `/research`, `/test`, `/decompile` and `/init` send carefully written prompts; `/plan`, `/mission`, `/context`, `/export`, `/system`, `/compact`, `/rewind` and `/new` act on the session; `/btw` asks a side question that stays out of it. A command file with the same name replaces any of the prompt commands.
 - **Decompilation:** `/decompile` rebuilds compiled code as source one function at a time: a fresh agent per function, the project's own match check as the judge, a limit on attempts, and no editing of the target or the comparison tools. With the Ghidra integration connected, the agent imports binaries, decompiles functions and follows cross-references there.
 - **See what the model sees:** *View system prompt* (session menu or `/system`) shows the exact instructions and tools the next turn sends.
+- **Two sessions at once:** *Open beside* from a session's menu puts a second session next to the open one, with a handle between them to drag the width. The pane you last clicked or typed in is the one the keyboard belongs to: `Ctrl+F`, `Esc` and the other window keys act on that session only. The conversation beside is a full session of its own, with its own transcript, panels and message box, and a button closes it.
+- **Sessions you file away:** *Move to group* files a session under a name of your own — the groups you make are sections in the sidebar, which can be renamed or removed (the sessions in them are kept). *Mark as completed* takes a session out of the working lists and puts it under **Completed**, where the same filters apply; writing to it again marks it in progress and it comes back where it was. A chat that is not saved cannot be filed in a group.
+- **Find and copy:** `Ctrl+F` finds in the conversation, `F3` and `Shift+F3` step through the matches from anywhere in the window, and *Copy as Markdown* from a session's menu puts the conversation on the clipboard without a save dialog.
 
 ### Sites
 
@@ -574,6 +577,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Search in files | `Ctrl+Shift+H` |
 | Focus the message box | `Ctrl+L` |
 | Find in the conversation | `Ctrl+F` |
+| Next / previous match | `F3`, `Shift+F3` |
 | Open a file by name | `Ctrl+P` |
 | Go to a symbol by name | `Ctrl+T` |
 | Comment for the agent (in the editor) | `Ctrl+Alt+M` |

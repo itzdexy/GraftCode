@@ -32,7 +32,7 @@ function inMemory(): { store: MemorySessionStore; id: string } {
   const store = new MemorySessionStore();
   const summary: SessionSummary = {
     id: 'memory-1', kind: 'code', title: 'A session', projectId: null, projectPath: null, projectName: null, cwd: dir, worktreePath: null, branch: null, baseBranch: null,
-    model: { providerId: 'p1', modelId: 'm1' }, effort: 'medium', permissionMode: 'ask', status: 'idle', pinned: false, archived: false, unread: false, incognito: false, lastError: null,
+    model: { providerId: 'p1', modelId: 'm1' }, effort: 'medium', permissionMode: 'ask', status: 'idle', pinned: false, archived: false, unread: false, incognito: false, groupId: null, completedAt: null, lastError: null,
     usage: EMPTY_SESSION_USAGE, createdAt: 1, updatedAt: 1
   };
   store.add(summary);

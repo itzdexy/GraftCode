@@ -641,6 +641,21 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).setPinned(id, pinned);
       return { ok: true as const };
     },
+    'sessions:setCompleted': async ({ id, completed }) => {
+      (await ctx.sessions()).setCompleted(id, completed);
+      return { ok: true as const };
+    },
+    'sessions:groups': async () => (await ctx.sessions()).groups(),
+    'sessions:createGroup': async ({ name }) => (await ctx.sessions()).createGroup(name),
+    'sessions:renameGroup': async ({ id, name }) => (await ctx.sessions()).renameGroup(id, name),
+    'sessions:deleteGroup': async ({ id }) => {
+      (await ctx.sessions()).deleteGroup(id);
+      return { ok: true as const };
+    },
+    'sessions:setGroup': async ({ id, groupId }) => {
+      (await ctx.sessions()).setGroup(id, groupId);
+      return { ok: true as const };
+    },
     'sessions:archive': async ({ id, archived, removeWorktree, force }) => {
       const result = await (await ctx.sessions()).archive(id, archived, removeWorktree, force);
       if (archived) await (await ctx.ptys()).disposeSession(id);
@@ -664,6 +679,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       fs.writeFileSync(result.filePath, manager.exportText(id, format), 'utf8');
       return result.filePath;
     },
+    'sessions:exportText': async ({ id, format }) => (await ctx.sessions()).exportText(id, format),
     'chatFiles:save': async ({ sessionId, name }) => {
       const file = chatFile(await ctx.services(), sessionId, name);
       const win = ctx.window();

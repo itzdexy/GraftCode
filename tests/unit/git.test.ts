@@ -393,6 +393,7 @@ describe('rewind (files, conversation, both)', () => {
     const store = new MemorySessionStore();
     store.add({
       id: 's1', kind: 'code', title: 't', status: 'idle', pinned: false, archived: false, unread: false, incognito: true,
+      groupId: null, completedAt: null,
       projectId: null, projectPath: repo, projectName: 'r', cwd: repo, worktreePath: null, branch: null, baseBranch: null,
       model: null, effort: null, permissionMode: 'ask', lastError: null, usage: EMPTY_SESSION_USAGE, createdAt: 0, updatedAt: 0
     });

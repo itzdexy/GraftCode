@@ -244,5 +244,21 @@ CREATE INDEX idx_missions_session ON missions (session_id, created_at);
       result TEXT,
       PRIMARY KEY (session_id, tool_use_id)
     ) STRICT;`
+  },
+  {
+    // Named groups the user files sessions under (sidebar → Move to group), and the mark that a
+    // session is completed: it leaves the working lists and waits under Completed until it is
+    // marked as in progress or someone writes to it again.
+    version: 10,
+    name: 'session groups and completed sessions',
+    sql: `
+CREATE TABLE session_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+ALTER TABLE sessions ADD COLUMN group_id TEXT REFERENCES session_groups(id) ON DELETE SET NULL;
+ALTER TABLE sessions ADD COLUMN completed_at INTEGER;
+CREATE INDEX idx_sessions_group ON sessions (group_id);`
   }
 ];

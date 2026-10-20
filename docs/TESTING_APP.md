@@ -1,6 +1,6 @@
-# Try Graft 0.6.34
+# Try Graft 0.6.36
 
-1. Open **Settings → About** and confirm version **0.6.34**. In
+1. Open **Settings → About** and confirm version **0.6.36**. In
    **Appearance → Motion**, choose **On** to see the animations. Choose Reduced
    to verify that controls appear immediately without staggered delays.
 2. Select a provider/model and send a simple greeting. A coherent answer checks
@@ -224,6 +224,28 @@
     `figma`; add **DeepWiki** (nothing to set up) and ask about a public repository.
 53. Start a turn in a very large folder, press **Stop**, then delete the session: it goes, with
     no "EPERM" message. The reply of a turn there starts without waiting for the snapshot.
+54. In a code session, open the session's **⋮** menu and choose **Move to group → New
+    group…**: name the group and press **Create**. The session leaves its project list and
+    is listed under the group. Open the group's own **⋮** menu: **Rename…** changes the
+    name and **Remove group…** takes the group away — the session is kept and is back
+    under its project. **Move to group → No group** takes a session out of its group.
+55. Choose **Mark as completed** in a session's **⋮** menu: the session leaves the working
+    lists and a **Completed** section appears at the bottom of the sidebar, folded shut.
+    Open it: the session is there, and the filters apply to it as they do to every list.
+    Write to the session (or press **Undo** in the toast): it is in progress again, it is
+    back where it was, and **Completed** is gone.
+56. Choose **Open beside** in a session's **⋮** menu: the session opens beside the open
+    one, with a handle between them. Drag the handle: the pane beside is wider or
+    narrower. Each side has its own conversation and its own message box. Click into one
+    side and press **Ctrl+F**: the find bar opens in that side only. Press the button in
+    the side's header to close the split: the session that stays is left.
+57. Press **Ctrl+F** in a session and type a word the conversation has: the count reads
+    "1 of N" and every match is marked. Click into the message box, so that the keyboard
+    is not in the find bar, and press **F3**: the count steps to "2 of N". **Shift+F3**
+    steps back. With no bar open, **F3** opens it.
+58. Choose **Copy as Markdown** in a session's **⋮** menu: the conversation is on the
+    clipboard as Markdown and no file dialog appears. The same menu in a chat copies that
+    conversation. **Export as Markdown…** still writes a file.
 
 The tests use isolated profiles and a local mock model endpoint. To run them from
 the repository:

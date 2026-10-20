@@ -9,7 +9,7 @@ import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from
 import type { MissionStart } from '@shared/schemas/missions';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { RewindMode, RewindPreview, RewindResult } from '@shared/schemas/rewind';
-import type { ContextReport, SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
+import type { ContextReport, SessionDetail, SessionGroup, SessionKind, SessionSummary } from '@shared/schemas/sessions';
 import type { CreateSessionInput } from '@shared/ipc/contracts';
 import { MemorySessionStore } from '../db/memorySessionStore';
 import type { ProjectsRepo } from '../db/projectsRepo';
@@ -331,6 +331,8 @@ export class SessionManager {
         archived: false,
         unread: false,
         incognito: true,
+        groupId: null,
+        completedAt: null,
         projectId: null,
         projectPath: null,
         projectName: null,
@@ -404,6 +406,7 @@ export class SessionManager {
   }
 
   send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = []): { queued: boolean } {
+    this.clearCompleted(id);
     return this.get(id).send(text, images, files);
   }
 
@@ -416,6 +419,7 @@ export class SessionManager {
   }
 
   startMission(id: string, input: MissionStart): { queued: boolean } {
+    this.clearCompleted(id);
     return this.get(id).startMission(input);
   }
 
@@ -480,6 +484,44 @@ export class SessionManager {
 
   setPinned(id: string, pinned: boolean): void {
     this.update(id, { pinned });
+  }
+
+  /** Marks a session as completed, so it leaves the working lists; false marks it as in progress again. */
+  setCompleted(id: string, completed: boolean): void {
+    this.update(id, { completedAt: completed ? Date.now() : null });
+  }
+
+  /** The named groups sessions are filed under, oldest first. */
+  groups(): SessionGroup[] {
+    return this.deps.repo.listGroups();
+  }
+
+  createGroup(name: string): SessionGroup {
+    return this.deps.repo.createGroup(name);
+  }
+
+  renameGroup(id: string, name: string): SessionGroup {
+    return this.deps.repo.renameGroup(id, name);
+  }
+
+  /** A group is removed; its sessions are kept and left ungrouped, and their rows are told so they move. */
+  deleteGroup(id: string): void {
+    const affected = this.deps.repo.list({ includeArchived: true }).filter((s) => s.groupId === id);
+    this.deps.repo.deleteGroup(id);
+    for (const summary of affected) this.deps.emitSummary(this.summaryOf(summary.id));
+  }
+
+  /** Files a session under a group, or takes it out of every group with null. */
+  setGroup(id: string, groupId: string | null): void {
+    if (groupId !== null && !this.deps.repo.listGroups().some((g) => g.id === groupId)) {
+      throw new GraftError('group_not_found', 'That group does not exist.');
+    }
+    this.update(id, { groupId });
+  }
+
+  /** The user asked for work again: a completed session goes back to the working lists. */
+  private clearCompleted(id: string): void {
+    if (this.storeFor(id).getSummary(id).completedAt !== null) this.update(id, { completedAt: null });
   }
 
   markRead(id: string): void {
@@ -586,10 +628,12 @@ export class SessionManager {
   }
 
   retry(id: string): void {
+    this.clearCompleted(id);
     this.get(id).retry();
   }
 
   regenerate(id: string): void {
+    this.clearCompleted(id);
     this.get(id).regenerate();
   }
 
@@ -599,6 +643,7 @@ export class SessionManager {
 
   /** Runs a "!" command from the message box in the session's shell. */
   runShell(id: string, command: string): void {
+    this.clearCompleted(id);
     this.get(id).runShell(command);
   }
 
