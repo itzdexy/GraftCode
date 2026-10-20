@@ -19,6 +19,76 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.36 groups, completed sessions, a split view and find that steps (2026-10-20)
+
+The rest of the list from the comparison with what the big AI apps have that people like
+them for. The five gaps that were still open are closed here: named groups for the
+sidebar, a session that can be marked completed, two sessions at once, F3 and Shift+F3 to
+step through what find found, and Copy as Markdown without a save dialog. One new table,
+two new columns, two new shortcuts and seven new channels.
+
+- **Named groups** (`db/migrations.ts` migration 10, `db/sessionsRepo.ts`,
+  `features/shell/SessionMenu.tsx`, `features/shell/Sidebar.tsx`). A group is a name you
+  choose: *Move to group* in a session's menu files the session under one, or takes it out
+  of the one it is in (*No group*, *New group…*). The groups are sections in the sidebar,
+  in the order they were made, and a group's own header renames it or removes it. A
+  removed group keeps its sessions — they go back to their project — and a group with no
+  sessions in it is not shown. A session in a group is not in its project list as well, so
+  every session is listed once. The table is `session_groups`; `sessions.group_id` points
+  at it with `ON DELETE SET NULL`, so a group removed in the database cannot leave a
+  session pointing at nothing.
+- **Marked as completed** (`sessions.completed_at`, `agent/sessionManager.ts`). The menu
+  says *Mark as completed*; the session leaves every working list (its project, Needs you,
+  home) and waits under **Completed**, a section of its own that is folded shut until it
+  is opened. The filters are the ones every list answers to, so a filter shows what
+  matches under Completed as well. Writing to the session again — a message, a `!` command,
+  a retry, a regeneration, a mission — marks it in progress and it comes back where it
+  was. The toast undoes the mark.
+- **Two sessions at once** (`stores/panes.ts`, `features/shell/SessionSplit.tsx`). *Open
+  beside* in a session's menu puts it beside the open one, with a handle between them to
+  drag the width and a button to close it. Each side is a whole session of its own: its
+  transcript, panels and message box. The pane the keyboard belongs to is the one last
+  clicked or typed in, and the window's keys (Ctrl+F, F3, Esc, Ctrl+`) act on that pane
+  only. Nothing is stored: the split is of the moment.
+- **Find that steps** (`shared/schemas/appSettings.ts`, `features/session/FindBar.tsx`).
+  F3 and Shift+F3 step through the matches, and open the bar when it is closed, so the
+  key works from anywhere in the window and not only with the keyboard in the box.
+- **Copy as Markdown** (`shared/ipc/contracts.ts`, `main/ipc/handlers.ts`). The session's
+  menu puts the conversation on the clipboard as Markdown, in a code session and in a chat,
+  with no save dialog; the export to a file is still there under *Export as Markdown…*.
+
+Different from what one might expect, and why:
+
+- A completed session is not deleted and not archived. It is still there, still openable,
+  and still counted in the usage; only the working lists stop showing it. Archiving is the
+  stronger of the two filings: an archived session is raised by the archived filter, not
+  by Completed, so it is never in two places at once.
+- A session is in one group or in none. There are no groups inside groups: the sidebar has
+  one level of sections already, and a second one would make the list harder to read than
+  it is to file things.
+- The split is not remembered between runs. A window that opened two sessions would have
+  to choose which one is the open one, and it would be wrong half the time; the sessions
+  themselves are of course still there.
+- An incognito chat cannot be filed in a group: it is not saved, and a group is a saved
+  name.
+- F3 opens the find bar when it is closed and steps when it is open. One key for both, so
+  it does the same thing wherever the keyboard is.
+
+Found on the way, and fixed:
+
+- The header of a narrow pane (a split view) painted the project chip over the buttons on
+  the right: the row of the header's own controls was squeezed to nothing, and what was in
+  it was drawn over the buttons beside it. The row is clipped now, the chip steps aside
+  when the row is too narrow for it, and only the pane at the window's edge keeps clear of
+  the native controls — in a split view they are over the pane beside the open one.
+- A menu that is closing was counted as an open overlay, so a key pressed right after it
+  was swallowed. An overlay is open now only while its content says so.
+- Escape closed the find bar only when the bar had the keyboard, which F3 (which steps
+  the matches from anywhere) made a trap: the bar now closes on Escape from wherever the
+  keyboard is, and the keyboard goes back where it came from when the bar had it.
+
+Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.36.
+
 ### 0.6.35 local models that work (2026-10-18)
 
 The round came from an audit of 0.6.34 on 2026-10-18 and from what the user's installed 0.6.34
@@ -1396,6 +1466,17 @@ Verification: `UPGRADE_TEST_REPORT.md`, section 0.6.16.
 - Find looks at what the transcript shows: a folded step or a folded code block is searched
   only once it is opened. It has no whole-word, case or pattern search, and no replace.
   On a very long conversation every search walks all of its text.
+- A split view is of the moment: it is not remembered between runs, and a session opened
+  beside the open one is closed again when the window is closed. The side pane's width is
+  kept for the run, not for the next start. Only two sessions fit beside each other; a
+  third would need a different layout.
+- A session is in one group or in none, and a group holds no sessions of its own: there
+  are no groups inside groups and no group of groups. A chat that is not saved cannot be
+  filed in a group.
+- A session marked as completed leaves the working lists but is not archived and not
+  deleted: it is still counted in the usage and still openable, and only the lists stop
+  showing it. There is no list of completed sessions of its own beyond the section in the
+  sidebar, and no way to complete a session from the keyboard.
 - A command of several lines can't be typed into the terminal, and neither can one in a
   language the list of shells does not name (`console`, `shell-session`).
 - Single-dollar math needs a mark of math in it, so `$abcd$` stays text, and `$a=$b` in a
@@ -1682,10 +1763,12 @@ research (0.6.10), plans that last (0.6.11), long sessions (0.6.12), attention a
 7. The four rounds planned in October 2026 are done: diagrams (0.6.23), code in the
    conversation (0.6.25), review and navigation (0.6.26), windows and motion (0.6.27).
    Done in 0.6.28: a side question that stays out of the context (`/btw`), and motion in
-   the lively style that was chosen and not yet built. Still open from the larger
-   request: split view and session groups, rename and call hierarchy from the language
-   server, a VS Code extension, moving a session between computers; and for the side
-   question, an answer that streams the reply being written and one that can use tools.
+   the lively style that was chosen and not yet built. Done (2026-10-20): split view and
+   session groups, with a session that can be marked completed, and find that steps
+   through the matches with F3. Still open from the larger request: rename and call
+   hierarchy from the language server, a VS Code extension, moving a session between
+   computers; and for the side question, an answer that streams the reply being written
+   and one that can use tools.
 8. Done in 0.6.30: text search for the person, a check of the page for the person and
    the agent, pictures of a page at a width. Done (2026-10-15): a replacement composed for
    the agent from the Search tab — the change is made as a turn, with its checkpoint and
