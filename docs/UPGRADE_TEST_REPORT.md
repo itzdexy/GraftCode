@@ -1304,3 +1304,102 @@ Not run:
   downloaded, and a download is the user's call. The adapters were tested against stub servers that
   answer as Ollama, llama.cpp, LM Studio and vLLM do.
 - macOS.
+
+## 0.6.36 round (2026-10-20)
+
+Branch `feat/rest-of-the-list`, local at the time of writing: nothing had been pushed and
+no release was made. The rest of the list from the comparison with the big AI apps: named
+groups for the sidebar, a session that can be marked completed, two sessions at once,
+F3 and Shift+F3 to step through what find found, and Copy as Markdown without a save
+dialog. One system: Windows 11 (Node 26.7.0, npm 11.19.0, Electron 44.5.1). Nothing ran
+in the Linux container, on macOS, on GitHub's runners, or against a paid provider. No
+package was built and nothing was installed.
+
+The round was written against 0.6.31 and rebased onto 0.6.35, which took the version
+numbers 0.6.32 to 0.6.35 for the local-model rounds; this one is 0.6.36. The schema is
+10: a new table `session_groups`, two new columns on `sessions` (`group_id`,
+`completed_at`), and an index on the group. An installation from 0.6.31 (schema 9) is
+upgraded by the migration, and the test says so: the session it held is still there, its
+message is still there, and the two new columns start empty.
+
+Four commits: `b0845f1` (the five gaps), `8dd3556` (the version, what's new, the README,
+the roadmap and the guide to trying it), `d2df2a8` (the keyboard going back where it came
+from when the find bar closes) and this report.
+
+The whole of it was run with `npm run verify` (typecheck, lint, the unit suite, the
+build, the desktop suite one after another, each into its own log under `out/verify`) at
+`d2df2a8`.
+
+| Command | Commit | Result |
+| --- | --- | --- |
+| `npm run verify` | `d2df2a8` | exit 0; typecheck 5 s, lint 24 s, unit 22 s, build 11 s, e2e 499 s; unit 140 files passed, 3 skipped (1706 tests passed, 73 skipped); desktop 87 passed, 6 skipped |
+
+What the tests of this round show, and with what:
+
+- Unit, 15 new cases (1764 before, 1779 now). The groups and the completed mark
+  (`sessionGroups.test.ts`, 9 cases): a group keeps its order and can be renamed; a
+  group that is not there is reported for renaming and for removing alike; removing a
+  group keeps the sessions in it and leaves them ungrouped; the same is true of the
+  in-memory store, so an incognito chat behaves as a saved one does. Filing a session
+  and marking it completed write both down and move neither the session up its list
+  (`updated_at` is not touched); both survive a restart; an installation from 0.6.31 is
+  upgraded with what it held. The lists (`rendererLogic.test.ts`, 2 cases): a completed
+  session is out of Needs you and out of home, and under Completed it answers to the
+  same filters as every other list (an archived one is not there, but the archived
+  filter still raises it). Grouped sessions leave their project list, an empty group is
+  not shown, and a session whose group is gone falls back to its ordinary list. The
+  panes (`panes.test.ts`, 3 cases): opening a session beside sets the keyboard there,
+  closing puts it back, and the side pane is never narrower than it can be worked in.
+  The shortcuts (`shortcuts.test.ts`, 1 case): F3 and Shift+F3 are bare function keys,
+  which typing never needs, and they clash with nothing.
+- Desktop: three new cases in `session.spec.ts`. A session is filed under a group and
+  marked completed, and writing to it brings it back: the group is made from the
+  session's own menu, the session leaves its project list, marking it completed empties
+  the group and folds the **Completed** section shut until it is opened, writing to it
+  marks it in progress and it comes back to its group, and the group is renamed and
+  removed with the session kept. Find steps through matches with F3 and Shift+F3 from
+  anywhere in the window: the count walks from "1 of 3" to "2 of 3" and "3 of 3" and
+  back, with the keyboard in the message box rather than in the find bar. A session
+  opens beside the open one: two transcripts, one keyboard, and the split closes — the
+  pane that was clicked answers Ctrl+F alone, the conversation beside goes on the
+  clipboard as Markdown with no save dialog, and the button in its header closes it.
+
+Desktop tests that were changed, and why. `session.spec.ts`: the new cases above. The
+first draft of the groups case looked for the home screen's composer ("Describe a task
+or ask a question") while inside a session, where the box names itself "Ask anything ·
+/ commands · @ files · ! shell"; the fault was in the test, and it now matches the
+session's box. The split case looked for the conversation's title in the header of the
+pane beside, and found the buttons of the header instead: the header of a session sits
+inside the page's `<main>`, so it is not a `banner`, and the panes are now named groups
+("Open session", "Session beside") that a test can address. The copy case looked for
+"Copy as Markdown" in the title menu, where it is not: it is under **More actions**.
+
+Found on the way, and fixed: the header of a narrow pane (a split view) painted the
+project chip over the buttons on its right — the row of the header's own controls was
+squeezed to nothing and what was in it was drawn over the buttons beside it. The row is
+clipped now, the chip steps aside when the row is too narrow for it, and only the pane at
+the window's edge keeps clear of the native controls: in a split view they are over the
+pane beside the open one. A menu that is closing was counted as an open overlay, so the
+key pressed right after it was swallowed; an overlay is open now only while its content
+says so. Escape closed the find bar only when the bar had the keyboard, which F3 (which
+steps the matches from anywhere) made a trap: the bar now closes on Escape from wherever
+the keyboard is. The window-level Escape took the key before the bar's own, so the
+keyboard was not put back where it came from; the bar keeps the key when it has it.
+
+What the new parts say, for whoever tests them by hand: the menu reads `Mark as
+completed` and, once marked, `Mark as in progress`; the toast reads "Marked as
+completed" with an **Undo**. A group is a name of your own: **Move to group → New
+group…** asks for it, and the group's header carries **Rename…** and **Remove group…**.
+The find bar counts "1 of 3" and F3 walks it. Copying says "Conversation copied".
+
+Not verified:
+
+- Linux and macOS, at all. The schema is the same everywhere, but the split view and
+  the header beside the window's native controls are the kind of thing that differs by
+  system: the strip reserved for the window controls is 138 px on Windows and is 0 on
+  the other systems.
+- The split view with three or more sessions, with the panels open in both panes, and
+  with the native controls on the left (macOS): the header keeps clear of them only
+  when the sidebar is collapsed.
+- A real model in a split view: every turn in the desktop suite is scripted.
+- The push to GitHub and the pull request: this report was written before them.

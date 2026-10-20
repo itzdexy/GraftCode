@@ -367,6 +367,23 @@ its own class (`agent/offering.ts`), the first seam the roadmap's Next list name
 Commands, commits, what the suite found on the way, skips and what was not verified:
 `UPGRADE_TEST_REPORT.md`, section 0.6.31.
 
+### Local 0.6.36 round
+
+On `feat/rest-of-the-list`, local and not pushed: the rest of the list from the
+comparison with the big AI apps — named groups for the sidebar, a session that can be
+marked completed, two sessions at once, F3 and Shift+F3 to step through what find found,
+and Copy as Markdown without a save dialog. Typecheck, lint, the unit suite and the
+desktop suite pass on Windows with `npm run verify`, each step's log and exit code in
+`out/verify`: 1706 unit tests passed of 1779 (73 skipped, 140 files passed of 143) and
+87 desktop tests passed of 93 (6 skipped). No package was built and nothing was
+installed; nothing ran on Linux or macOS. The schema is 10: a new table
+`session_groups`, two new columns on `sessions` (`group_id`, `completed_at`) and an
+index on the group; an installation from 0.6.31 is upgraded by the migration and keeps
+what it held. Two new shortcuts (`findNext` F3, `findPrevious` Shift+F3) with defaults,
+so an older profile loads with them. The split view is of the window and is not stored.
+Commands, commits, what the suite found on the way, skips and what was not verified:
+`UPGRADE_TEST_REPORT.md`, section 0.6.36.
+
 ## Research record and application
 
 Reviewed primary/public documentation and source; public documentation is not proof
