@@ -1,4 +1,4 @@
-import { isAbortError, ProviderError } from './errors';
+import { errorFromNetwork, isAbortError, ProviderError } from './errors';
 import type { LLMProvider, StreamEvent, StreamRequest } from './types';
 
 export interface RetryPolicy {
@@ -51,6 +51,8 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
 function normalize(error: unknown): ProviderError {
   if (error instanceof ProviderError) return error;
   if (isAbortError(error)) return new ProviderError('aborted', 'Request cancelled.', { cause: error });
+  // fetch throws a TypeError when the connection fails or the server drops it mid-reply ("terminated").
+  if (error instanceof TypeError && /^(terminated|fetch failed)$/i.test(error.message)) return errorFromNetwork(error, 'the provider');
   const message = error instanceof Error ? error.message : String(error);
   return new ProviderError('unknown', message, { cause: error, retryable: false });
 }

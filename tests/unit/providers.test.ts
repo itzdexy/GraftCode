@@ -86,6 +86,13 @@ describe('SSE and NDJSON parsing', () => {
 describe('error normalization and retry', () => {
   const headers = (h: Record<string, string>) => ({ get: (k: string) => h[k.toLowerCase()] ?? null });
 
+  it('reads the reason out of problem documents and relayed provider errors instead of showing their JSON', () => {
+    expect(errorFromHttp(429, '{"status":429,"title":"Too Many Requests"}', undefined, 'x').message).toBe('Rate limited (429): Too Many Requests');
+    const relayed = '{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3 is temporarily rate-limited upstream.","provider_name":"Chutes"}}}';
+    expect(errorFromHttp(429, relayed, undefined, 'x').message).toBe('Rate limited (429): Chutes: qwen/qwen3 is temporarily rate-limited upstream.');
+    expect(errorFromHttp(400, '{"errors":[{"message":"model is required"}]}', undefined, 'x').message).toBe('The provider rejected the request (400): model is required');
+  });
+
   it('maps status codes to specific error codes', () => {
     expect(errorFromHttp(401, '{"error":{"message":"invalid x-api-key"}}', undefined, 'api.test').code).toBe('auth');
     expect(errorFromHttp(403, '', undefined, 'api.test').code).toBe('auth');
@@ -128,6 +135,18 @@ describe('error normalization and retry', () => {
     const events = await collect(streamWithRetry(provider, request(), new AbortController().signal, (i) => retries.push(i.attempt), fast));
     expect(retries).toEqual([1, 2]);
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('retries a connection the server dropped ("terminated") as a network failure, not an unknown one', async () => {
+    const socket = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' });
+    const provider = new FakeProvider([{ error: new TypeError('terminated', { cause: socket }) }, { text: 'done' }]);
+    const retries: string[] = [];
+    const events = await collect(streamWithRetry(provider, request(), new AbortController().signal, (i) => retries.push(i.error.code), fast));
+    expect(retries).toEqual(['network']);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+
+    const midStream = new FakeProvider([{ error: new TypeError('terminated', { cause: socket }), partialText: 'Hel' }]);
+    await expect(collect(streamWithRetry(midStream, request(), new AbortController().signal, () => undefined, fast))).rejects.toMatchObject({ code: 'network' });
   });
 
   it('does not retry after output was streamed, nor on auth errors', async () => {

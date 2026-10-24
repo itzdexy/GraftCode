@@ -86,6 +86,49 @@ animation still running while a turn streams, a panel opens and Settings opens f
 Motion on it found the expected ones), the light theme, the Browser panel's empty state and the
 Customize pages.
 
+### 0.6.37 faults from the log, and less work in the background (2026-10-24)
+
+Picked from what the installed 0.6.36 wrote to its own log on the user's machine, not
+from a feature list: every warning and error of the last week was grouped and the ones
+that were Graft's fault were fixed. No migration, setting, channel or shortcut.
+
+- **Write on a drive without hard links** (`tools/fs/write.ts`). Creating a file links
+  the finished temporary file into place so that a file created meanwhile is never
+  overwritten. exFAT and FAT32 have no hard links, and Windows answers the link with
+  `EISDIR`: on 2026-10-21 every new file the agent wrote on the user's `E:` drive failed.
+  A refused link now falls back to an exclusive copy (`COPYFILE_EXCL`), which refuses a
+  file created meanwhile just the same.
+- **A dropped connection is a network failure** (`providers/retry.ts`). fetch throws a
+  bare `TypeError: terminated` when the server closes the connection, and `fetch failed`
+  when it can't connect; both were classed `unknown`, which is never retried and never
+  moves to the backup model. They are `network` now, through `errorFromNetwork`.
+- **Retry after a model left the list** (`providers/registry.ts`). A model the provider's
+  last list left out is kept, marked unselectable, for ten minutes of cache, so Retry was
+  refused with the same message for ten minutes. A turn now asks the provider again once
+  before refusing; a list that fails to come keeps the refusal as it was, and confirmed
+  retirement is never asked about again.
+- **Errors as sentences** (`providers/errors.ts`). Problem documents (`title`), a list of
+  `errors`, and OpenRouter's relayed failure (`error.metadata.raw` with
+  `provider_name`) are read; the JSON body is no longer shown as the message.
+- **Background work** (`session/StatusBar.tsx`, `panels/BrowserPanel.tsx`,
+  `session/Transcript.tsx`). The diff stats under the composer ran `git diff` every 15 s
+  for each open session while Graft was minimized; they wait for the window now (focus
+  reads them again), and stop once Git is reported missing, which logged an error every
+  poll. The Browser panel's dev-server probe skips hidden windows the same way. The
+  transcript's scroll handler read the position of every turn marker on every scroll
+  event; it does it once a frame, only in code sessions (the only ones with a timeline),
+  and stops at the first marker below the line. The Files panel no longer logs an error
+  for the git marks of a folder that was deleted or a machine without Git.
+
+Looked at and left: `content-visibility` on transcript rows (it would make a saved
+scroll position land somewhere else, since rows not yet drawn are measured by an
+estimate), caching rendered rows (the transcript's callbacks are new on every render, so
+a cache would have to list everything a row depends on by hand), and the remaining log
+entries, which were the provider's (credits, rate limits, a 404 from a model endpoint) or
+from versions before 0.6.30. The intervals, listeners, observers and object URLs in the
+renderer and the per-session terminals and browser views in the main process were
+checked for leaks; none was found.
+
 ### 0.6.36 groups, completed sessions, a split view and find that steps (2026-10-20)
 
 The rest of the list from the comparison with what the big AI apps have that people like

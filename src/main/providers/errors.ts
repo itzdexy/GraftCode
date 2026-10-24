@@ -52,10 +52,21 @@ export function extractProviderMessage(body: string): string | null {
       if (typeof err === 'string') return err;
       if (err && typeof err === 'object') {
         const message = (err as Record<string, unknown>).message;
+        // A router (OpenRouter) relays the upstream provider's own reason in metadata.raw.
+        const metadata = (err as Record<string, unknown>).metadata as Record<string, unknown> | undefined;
+        const raw = metadata && typeof metadata.raw === 'string' ? metadata.raw.trim() : '';
+        if (raw && !raw.startsWith('{') && !raw.startsWith('<')) {
+          const from = typeof metadata?.provider_name === 'string' ? `${metadata.provider_name}: ` : '';
+          return `${from}${raw}`.slice(0, 300);
+        }
         if (typeof message === 'string') return message;
       }
       if (typeof obj.message === 'string') return obj.message;
       if (typeof obj.detail === 'string') return obj.detail;
+      // A problem document (RFC 9457) without a detail still has a title.
+      if (typeof obj.title === 'string') return obj.title;
+      const first = Array.isArray(obj.errors) ? (obj.errors[0] as Record<string, unknown> | undefined) : undefined;
+      if (first && typeof first.message === 'string') return first.message;
     }
   } catch {
     // Not JSON: fall through to the raw text.
