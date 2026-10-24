@@ -1403,3 +1403,49 @@ Not verified:
   when the sidebar is collapsed.
 - A real model in a split view: every turn in the desktop suite is scripted.
 - The push to GitHub and the pull request: this report was written before them.
+
+## 0.6.37 round (2026-10-24)
+
+Branch `feat/polish-pass` (worktree `.claude/worktrees/polish`, cut from `origin/main` at
+`a4bf011`, 0.6.36), local: nothing pushed, no pull request, no release. Faults taken from
+the installed 0.6.36's own log, a leak scan, and less work in the background; what each
+change does is in the roadmap's 0.6.37 entry. No migration, setting, channel, shortcut or
+package. One system: Windows 11 (Node 26.7.0, Electron 44.5.1).
+
+Commits: `801b524` (the fixes, the version and what's new), `d9dcd52` (the Files panel's
+git marks and the roadmap), `ef7959d` (the re-ask limited to once every 10 s per
+provider) and this report.
+
+What ran, and on which commit:
+
+- Before any change, on `a4bf011`: typecheck and lint clean, unit suite 1706 passed and
+  73 skipped.
+- On `801b524`: typecheck, lint, unit suite 1709 passed (three new tests: a new file on a
+  drive without hard links, a dropped connection retried as a network failure, the reason
+  read out of problem documents and relayed provider errors).
+- On `d9dcd52`: `npm run dist:win` (122 packages in `app.asar`, no log files, version
+  0.6.37), `tests/e2e/packaged.spec.ts` against `dist/win-unpacked/Graft.exe` 3 passed,
+  then the whole desktop suite on the same build: 87 passed, 6 skipped, none failed
+  (14.3 min). `tests/e2e/tour.spec.ts` had also passed alone on `801b524`'s build.
+- On `ef7959d`: typecheck and lint clean; the unit suite had 2 failures, both the
+  temporary-folder `EPERM` on Windows cleanup (`languageServers.test.ts` and the real
+  shell test in `panels.test.ts`), neither in a file this round touched; the two files
+  then passed alone twice. The registry tests passed (9).
+
+The installer is `dist/Graft-Setup-0.6.37.exe` in the worktree (SHA-256 `fc98dd86d46ce479…`),
+built from `d9dcd52`: it does not have `ef7959d`'s 10-second limit. Two attempts to
+package `ef7959d` stalled in electron-builder at "searching for node modules", with no
+child process, no CPU and nothing written, for over eight minutes each, a step the first
+two packages passed in seconds; both were stopped. The cause was not found.
+
+Not verified:
+
+- Linux and macOS, and the Linux container: nothing ran there.
+- `ef7959d` in a package, and the desktop suite on it (the suite ran on `d9dcd52`).
+- A real exFAT or FAT32 drive: the test makes `linkSync` throw `EISDIR` the way Windows
+  did on the user's E: drive; the copy that replaces it was not run on such a drive.
+- A real provider dropping a connection: the test throws the `TypeError` fetch throws.
+- A visual pass: the renderer preview harness could not load sessions (its stub predates
+  0.6.36's groups), so nothing in this round was looked at on screen; none of the changes
+  alters what is drawn.
+
