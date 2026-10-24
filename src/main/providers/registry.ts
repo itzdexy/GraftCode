@@ -37,6 +37,8 @@ export const createProvider: ProviderFactory = (connection, record, catalog) => 
 };
 
 const MODEL_CACHE_MS = 10 * 60_000;
+/** How often a provider is asked again about a model its last list left out (see resolveModel). */
+const REASK_MS = 10_000;
 
 export interface ProviderModels {
   providerId: string;
@@ -70,6 +72,8 @@ export class ProviderRegistry {
   private readonly cache = new Map<string, { at: number; models: ModelInfo[] }>();
   private catalogRevision = -1;
   private readonly previous = new Map<string, ModelSnapshot>();
+  /** When each provider was last asked again about a left-out model; one entry per provider. */
+  private readonly reasked = new Map<string, number>();
   private readonly versions = new Map<string, number>();
 
   private checkCatalog(): void {
@@ -216,7 +220,10 @@ export class ProviderRegistry {
     let found = models.find((m) => m.ref.modelId === ref.modelId);
     // A model the last list left out may be back (a provider's list can come back short for a while): ask again once
     // before refusing the turn, so Retry can work. A list that fails to come keeps the refusal as it was.
-    if (!found || (found.availability?.selectable === false && found.availability.source === 'cache')) {
+    const missing = !found || (found.availability?.selectable === false && found.availability.source === 'cache');
+    // The context card resolves the model too: a gone model costs one list request per provider every 10 s at most.
+    if (missing && Date.now() - (this.reasked.get(ref.providerId) ?? 0) >= REASK_MS) {
+      this.reasked.set(ref.providerId, Date.now());
       const again = await this.listModels(ref.providerId, { refresh: true, ...(signal ? { signal } : {}) }).catch((error: unknown) => {
         if (signal?.aborted) throw error;
         return null;

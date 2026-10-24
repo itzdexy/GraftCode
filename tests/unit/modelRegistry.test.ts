@@ -49,7 +49,14 @@ describe('provider metadata recovery', () => {
     // A turn asks the provider again before refusing: still left out, it is refused; back, the turn goes ahead.
     h.list.mockResolvedValueOnce([]);
     await expect(h.registry.resolveModel(before[0]!.ref)).rejects.toMatchObject({ code: 'model_unavailable' });
+    // Asked again at most every 10 s, however often the model is looked up.
+    const calls = h.list.mock.calls.length;
+    await expect(h.registry.resolveModel(before[0]!.ref)).rejects.toMatchObject({ code: 'model_unavailable' });
+    expect(h.list.mock.calls.length).toBe(calls);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11_000);
     await expect(h.registry.resolveModel(before[0]!.ref)).resolves.toMatchObject({ availability: { state: 'available' } });
+    clock.mockRestore();
     expect((await h.registry.listModels(h.record.id, { refresh: true }))[0]?.availability?.state).toBe('available');
   });
 
