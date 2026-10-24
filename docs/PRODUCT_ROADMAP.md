@@ -29,7 +29,7 @@ adds no longer leaves the preview short. Then home, a code session (a transcript
 for approval, an error, a running turn, a reply streaming and finished), the Files, Changes and
 Browser panels, Settings and Customize were looked at in dark and light at 1280×800 and at the
 smallest window, 900×640, and each defect below was fixed and shot again. Cut from `origin/main`
-at 0.6.36 (`a4bf011`); 0.6.37 and 0.6.38 are other rounds' and are not on this branch. No
+at 0.6.36 (`cbe7c4e`); 0.6.37 and 0.6.38 are other rounds' and are not on this branch. No
 migration, setting, channel, shortcut or package.
 
 - **The column under a transcript lines up with it** (`styles/globals.css` `.transcript-column`,
@@ -74,7 +74,12 @@ migration, setting, channel, shortcut or package.
 
 Verification on Windows: `npm run typecheck`, `npx eslint . --max-warnings 0`, `npx vitest run`
 (1706 passed, 73 skipped), `npm run build`, then `npx playwright test`: 83 passed, 6 skipped and the
-four timeouts above, which pass after the helper fix (the four specs again: 14 passed).
+four timeouts above, which pass after the helper fix (the four specs again: 14 passed). On the
+release commit `4d60345`: the whole desktop suite, 87 passed and 6 skipped in 8.8 minutes;
+`npm run dist:win` from a worktree with a copied (not linked) `node_modules` packed 122 top-level
+packages and only `out/main`, `out/preload` and `out/renderer`; `packaged.spec.ts` against
+`dist/win-unpacked/Graft.exe` passed 3 of 3. Installer `dist/Graft-Setup-0.6.39.exe`, SHA-256
+`ff06d8a8a4eace165bae5663f50283238eb9b82b8f43ab6a6b254a1f8eb0d5c7`.
 
 Looked at and left as they are: reduced motion (with Motion set to Reduced, a probe that lists every
 animation still running while a turn streams, a panel opens and Settings opens found none; with
