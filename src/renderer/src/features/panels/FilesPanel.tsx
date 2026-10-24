@@ -8,7 +8,7 @@ import { Dialog, DialogContent } from '../../components/Dialog';
 import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { languageForPath } from '../../lib/highlight';
-import { errorText, invoke } from '../../lib/ipc';
+import { errorText, invoke, RequestError } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { useLoad } from '../../lib/useLoad';
 import { usePanels } from '../../stores/panels';
@@ -50,7 +50,11 @@ function useGitMarks(sessionId: string, refreshKey: unknown): { files: Map<strin
         }
         setMarks({ files, dirs });
       })
-      .catch((error: unknown) => logError('Could not read git status for the file tree', error));
+      .catch((error: unknown) => {
+        // A deleted folder or a machine without Git has no marks to show; neither is a fault worth logging.
+        if (error instanceof RequestError && (error.code === 'folder_missing' || error.code === 'git_missing')) return;
+        logError('Could not read git status for the file tree', error);
+      });
     return () => {
       cancelled = true;
     };
