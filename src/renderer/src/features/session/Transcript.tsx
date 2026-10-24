@@ -77,7 +77,8 @@ interface TranscriptProps {
 function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text: string }>; current: number; onJump: (index: number) => void }) {
   if (turns.length < 2) return null;
   return (
-    <nav aria-label="Turns" className="absolute top-12 left-12 z-[var(--g-z-sticky)] flex max-h-[60%] flex-col overflow-hidden">
+    // In the transcript's 24px side padding, so the ticks never sit on the text when the column is full width.
+    <nav aria-label="Turns" className="absolute top-12 left-2 z-[var(--g-z-sticky)] flex max-h-[60%] flex-col overflow-hidden">
       {turns.map((turn, i) => (
         <Tooltip key={turn.key} content={turn.text.slice(0, 120) || 'Message'} side="right">
           <button
@@ -85,7 +86,7 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
             aria-label={`Turn ${i + 1}: ${turn.text.slice(0, 60)}`}
             aria-current={i === current ? 'true' : undefined}
             onClick={() => onJump(i)}
-            className="group flex h-[calc(var(--g-timeline-tick-height)+var(--g-timeline-tick-gap))] w-[calc(var(--g-timeline-tick-width)+8px)] items-center"
+            className="group flex h-[calc(var(--g-timeline-tick-height)+var(--g-timeline-tick-gap))] w-[calc(var(--g-timeline-tick-width)+8px)] items-center justify-center"
           >
             <span
               className={cn(

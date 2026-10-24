@@ -70,7 +70,7 @@ function ItemBody({ icon, description, checked, shortcut, trailing, children }: 
         {description ? <span className="truncate text-sm text-fg-muted">{description}</span> : null}
       </span>
       {trailing ? <span className="flex shrink-0 items-center gap-4 text-fg-muted">{trailing}</span> : null}
-      {checked ? <Check className="size-16 shrink-0 text-blue" aria-hidden="true" /> : null}
+      {checked ? <Check className="size-16 shrink-0 text-accent" aria-hidden="true" /> : null}
       {shortcut !== undefined ? <span className="shrink-0 text-sm text-fg-muted">{shortcut}</span> : null}
     </>
   );
@@ -197,7 +197,7 @@ export const ContextMenuCheckItem = forwardRef<
     >
       <span className="min-w-0 flex-1 truncate">{children}</span>
       <CM.ItemIndicator>
-        <Check className="size-16 shrink-0 text-blue" aria-hidden="true" />
+        <Check className="size-16 shrink-0 text-accent" aria-hidden="true" />
       </CM.ItemIndicator>
     </CM.CheckboxItem>
   );

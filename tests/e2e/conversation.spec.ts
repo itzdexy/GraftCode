@@ -9,10 +9,13 @@ const SHOTS = path.join(__dirname, '..', '..', 'test-results', 'shots');
 /** The message box of a code session with a project folder, by its label. */
 const SESSION_BOX = /^Ask anything/;
 
-/** A picture of the window once what is arriving has arrived: a frame taken mid-entrance shows things half faded. */
+/**
+ * A picture of the window once what is arriving has arrived: a frame taken mid-entrance shows things half faded.
+ * Only animations that run in time: a scroll-linked edge fade never finishes.
+ */
 async function shot(w: Page, name: string): Promise<void> {
   fs.mkdirSync(SHOTS, { recursive: true });
-  await w.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
+  await w.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
   await w.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 }
 

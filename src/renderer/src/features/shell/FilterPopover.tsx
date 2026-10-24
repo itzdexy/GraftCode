@@ -33,7 +33,7 @@ function Option({ selected, label, onSelect }: { selected: boolean; label: strin
       className="flex h-[var(--g-menu-row-height)] w-full items-center gap-8 rounded-md px-8 text-left text-base text-fg outline-none hover:bg-hover focus-visible:bg-hover"
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {selected ? <Check className="size-14 shrink-0 text-blue" aria-hidden="true" /> : null}
+      {selected ? <Check className="size-14 shrink-0 text-accent" aria-hidden="true" /> : null}
     </button>
   );
 }

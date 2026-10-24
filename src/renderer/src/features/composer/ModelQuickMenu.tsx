@@ -63,7 +63,7 @@ export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel
               onSelect={() => onSelect(m)}
               trailing={
                 selected ? (
-                  <Check className="size-16 text-blue" aria-label="Selected" />
+                  <Check className="size-16 text-accent" aria-label="Selected" />
                 ) : (
                   <span className={cn('w-16 text-center text-sm text-fg-muted')} aria-hidden="true">
                     {i + 1}

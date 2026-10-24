@@ -408,7 +408,8 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
       label="Changes"
       onClose={onClose}
       title={
-        <div role="tablist" aria-label="Changes, files, search or problems" className="flex items-center gap-2">
+        // A narrow panel scrolls its tabs instead of running them under the close button; the 3px pad keeps focus rings in view.
+        <div role="tablist" aria-label="Changes, files, search or problems" className="scroll-fade-x -mx-3 flex min-w-0 items-center gap-2 overflow-x-auto p-3 [scrollbar-width:none]">
           {TABS.map((t) => (
             <button
               key={t}
@@ -420,7 +421,7 @@ export function ChangesPanel({ sessionId, refreshKey, onClose }: { sessionId: st
                 // Choosing the Search tab is asking to search: the keyboard goes to its box.
                 if (t === 'search') useTextSearch.getState().open(sessionId, null);
               }}
-              className={cn('h-24 rounded-sm px-8 text-sm', tab === t ? 'bg-hover text-fg' : 'text-fg-muted hover:text-fg-secondary')}
+              className={cn('h-24 shrink-0 rounded-sm px-8 text-sm', tab === t ? 'bg-hover text-fg' : 'text-fg-muted hover:text-fg-secondary')}
             >
               {t === 'changes' ? 'Changes' : t === 'files' ? 'Files' : t === 'search' ? 'Search' : problemsTab(problems)}
             </button>

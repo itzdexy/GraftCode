@@ -33,8 +33,8 @@ async function shot(w: Page, name: string): Promise<void> {
   // A frame taken mid-entrance shows things half faded.
   await w.evaluate(() =>
     document.getAnimations().forEach((a) => {
-      // A spinner or a pulse runs for ever and can't be finished.
-      if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish();
+      // A spinner or a pulse runs for ever and can't be finished; a scroll-linked edge fade follows scrolling, not time.
+      if (a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity) a.finish();
     })
   );
   await w.screenshot({ path: path.join(SHOTS, `${name}.png`) });

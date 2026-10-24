@@ -154,7 +154,7 @@ export function AskUserCard({ sessionId, request }: { sessionId: string; request
                     <span className="block text-base text-fg">{option.label}</span>
                     {option.description ? <span className="mt-2 block text-sm text-fg-muted">{option.description}</span> : null}
                   </span>
-                  {selected ? <Check className="mt-1 size-14 shrink-0 text-blue" aria-hidden="true" /> : null}
+                  {selected ? <Check className="mt-1 size-14 shrink-0 text-accent" aria-hidden="true" /> : null}
                   {i < 9 ? <Kbd className="mt-1">{i + 1}</Kbd> : null}
                 </button>
               );

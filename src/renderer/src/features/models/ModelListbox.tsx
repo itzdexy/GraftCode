@@ -76,7 +76,7 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
             setActive(0);
           }}
           onKeyDown={onKeyDown}
-          placeholder={`Filter ${models.length} models`}
+          placeholder={models.length === 1 ? 'Filter 1 model' : `Filter ${String(models.length)} models`}
           spellCheck={false}
           className="h-32 min-w-0 flex-1 bg-transparent text-base text-fg outline-none"
         />
@@ -112,7 +112,7 @@ export function ModelListbox({ models, value, onChange, label, autoFocus, classN
                 <p className="truncate text-sm text-fg-muted">{[providerLabel(m.ref.providerId), m.description,
                   m.availability && m.availability.state !== 'available' ? m.availability.state.replaceAll('-', ' ') : null].filter(Boolean).join(' · ')}</p>
               </div>
-              {selected ? <Check className="size-16 shrink-0 text-blue" aria-hidden="true" /> : null}
+              {selected ? <Check className="size-16 shrink-0 text-accent" aria-hidden="true" /> : null}
             </div>
           );
         })}

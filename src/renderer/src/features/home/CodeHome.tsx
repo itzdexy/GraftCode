@@ -83,13 +83,14 @@ function HomeSessionRow({ session }: { session: SessionSummary }) {
         onClick={() => useNav.getState().go({ name: 'session', id: session.id })}
         className="flex h-[var(--g-session-row-height)] w-full items-center gap-10 rounded-md bg-raised px-10 text-left transition-ui hover:bg-hover"
       >
+        <span className="min-w-0 flex-1 truncate text-base font-medium text-fg-strong">{session.title}</span>
+        {/* After the title, so every title starts at the same place whatever the session's state. */}
         {showStatus ? (
-          <span className={cn('flex shrink-0 items-center gap-6 text-base', STATUS_TONE[status])}>
+          <span className={cn('flex shrink-0 items-center gap-6 text-sm', STATUS_TONE[status])}>
             <span className="size-4 rounded-full bg-current" aria-hidden="true" />
             {status}
           </span>
         ) : null}
-        <span className="min-w-0 flex-1 truncate text-base font-medium text-fg-strong">{session.title}</span>
         {session.projectName ? <span className="max-w-[30%] shrink truncate text-sm text-fg-muted">{session.projectName}</span> : null}
         <span className="shrink-0 text-sm text-fg-muted">{relativeTime(session.updatedAt)}</span>
         <ChevronRight className="size-16 shrink-0 text-icon-muted" aria-hidden="true" />
@@ -174,7 +175,7 @@ export function CodeHome() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ViewHeader actions={<WhatsNewLink />} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div className="motion-stagger mx-auto w-full max-w-[calc(var(--g-content-width)+48px)] px-24 pt-16 pb-24">
           <h1 className="flex items-center gap-10 text-xl font-medium text-fg-strong">
             <Mark size={20} motion="idle" interactive />
@@ -205,7 +206,7 @@ export function CodeHome() {
           />
         </div>
       </div>
-      <div className="mx-auto w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 px-24 pb-8">
+      <div className="transcript-column shrink-0 px-24 pb-8">
         {context ? (
           <div className="mb-8 flex items-end gap-8">
             <ContextChips context={context} branches={branches} className="flex-1" />

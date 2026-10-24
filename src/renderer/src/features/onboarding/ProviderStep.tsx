@@ -146,7 +146,7 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
                 {k === 'ollama' ? <Badge>Local</Badge> : null}
               </span>
               <span className="text-sm text-fg-muted">{info.description}</span>
-              {selected ? <Check className="absolute top-10 right-10 size-14 text-blue" aria-hidden="true" /> : null}
+              {selected ? <Check className="absolute top-10 right-10 size-14 text-accent" aria-hidden="true" /> : null}
             </button>
           );
         })}
