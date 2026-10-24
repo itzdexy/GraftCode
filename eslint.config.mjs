@@ -16,7 +16,9 @@ export default defineConfig(
       'build/**',
       'resources/**',
       // A working copy may hold the launch film here: a package of its own, kept out of this repository.
-      'video/**'
+      'video/**',
+      // Local tool state, never committed. It can hold whole worktrees of this repository that someone is still editing.
+      '.claude/**'
     ]
   },
   js.configs.recommended,

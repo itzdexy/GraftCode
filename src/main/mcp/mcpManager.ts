@@ -16,7 +16,7 @@ import {
   type Progress
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type { McpServerConfig, SettingsScope } from '@shared/schemas/config';
+import type { McpInherit, McpServerConfig, SettingsScope } from '@shared/schemas/config';
 import type { ImageBlock, ToolResultContent } from '@shared/schemas/messages';
 import { GraftError } from '@shared/errors';
 import { INTEGRATIONS } from '@shared/integrations';
@@ -81,6 +81,44 @@ export interface McpServerStatus {
   /** The prompts it publishes (slash commands), and whether it publishes resources. */
   prompts: McpPromptInfo[];
   resources: boolean;
+  /** What the server says about itself when it connects (see serverInfoOf). */
+  info: ServerInfo;
+}
+
+/** A server's own name for people, its version and its icon, from the handshake; null where it gives none. */
+export interface ServerInfo {
+  title: string | null;
+  version: string | null;
+  /** A data: address of a picture; an icon at an address elsewhere is not fetched. */
+  icon: string | null;
+}
+
+export const NO_SERVER_INFO: ServerInfo = { title: null, version: null, icon: null };
+
+/** Icons are taken as pictures already in the handshake, at most this long. */
+export const MAX_ICON_CHARS = 96 * 1024;
+const ICON_DATA = /^data:image\/(png|jpeg|webp|gif|svg\+xml)[;,]/i;
+
+/**
+ * What a server announced about itself (MCP's Implementation: name, title,
+ * version, icons). Only an icon given as a data: address is kept: following
+ * an address a server names would let any server make Graft fetch from
+ * anywhere. A vector icon is preferred, then the largest picture.
+ */
+export function serverInfoOf(implementation: unknown): ServerInfo {
+  if (!implementation || typeof implementation !== 'object') return NO_SERVER_INFO;
+  const impl = implementation as { title?: unknown; version?: unknown; icons?: unknown };
+  const text = (value: unknown, max: number): string | null => (typeof value === 'string' && value.trim().length > 0 ? value.trim().slice(0, max) : null);
+  const icons = Array.isArray(impl.icons) ? impl.icons : [];
+  const usable = icons
+    .map((icon: unknown) => (icon && typeof icon === 'object' ? (icon as { src?: unknown; sizes?: unknown }) : {}))
+    .filter((icon): icon is { src: string; sizes?: unknown } => typeof icon.src === 'string' && icon.src.length <= MAX_ICON_CHARS && ICON_DATA.test(icon.src));
+  const size = (icon: { sizes?: unknown }): number => {
+    const sizes = Array.isArray(icon.sizes) ? icon.sizes : [];
+    return Math.max(0, ...sizes.map((s) => (typeof s === 'string' ? Number(/^(\d+)x\d+$/.exec(s)?.[1] ?? 0) : 0)));
+  };
+  const best = usable.find((icon) => /^data:image\/svg\+xml/i.test(icon.src)) ?? [...usable].sort((a, b) => size(b) - size(a))[0];
+  return { title: text(impl.title, 80), version: text(impl.version, 40), icon: best?.src ?? null };
 }
 
 interface RemoteTool {
@@ -192,14 +230,46 @@ export function troubleshootFor(name: string): string | null {
 }
 
 /**
+ * Names that hold a key, a token or a password, read as words between underscores:
+ * GITHUB_TOKEN, OPENAI_API_KEY, AWS_SECRET_ACCESS_KEY, DB_PASSWORD, PGPASSWORD. Not names
+ * that merely contain such letters (TOKENIZERS_PARALLELISM, KEYBOARD) and not a public key.
+ */
+const SECRET_NAME = /(?:^|_)(?:TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PASS|CREDENTIAL|CREDENTIALS|APIKEY|KEY|KEYS|AUTH|AUTHORIZATION|COOKIE|SESSION_ID|PGPASSWORD)(?:_|$)/i;
+const NOT_SECRET = /(?:^|_)PUBLIC_KEYS?$|^SSH_AUTH_SOCK$/i;
+/** user:password@ inside a value (a database address); a proxy is how the network is reached, so it stays. */
+const PASSWORD_IN_URL = /:\/\/[^\s/:@]+:[^\s/@]+@/;
+const PROXY_NAME = /^(?:https?|all|no|ftp)_proxy$/i;
+
+/** What a program needs to start: the MCP SDK's own default list for each system, and what resolves commands, temporary files and text encoding. */
+const NEEDED: Record<'win32' | 'posix', string[]> = {
+  win32: ['APPDATA', 'HOMEDRIVE', 'HOMEPATH', 'LOCALAPPDATA', 'PATH', 'PROCESSOR_ARCHITECTURE', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERNAME', 'USERPROFILE', 'PROGRAMFILES', 'PATHEXT', 'COMSPEC', 'TMP', 'WINDIR', 'PROGRAMDATA', 'PROGRAMFILES(X86)', 'PROGRAMW6432'],
+  posix: ['HOME', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR']
+};
+
+/** Whether a variable of this computer goes to a server that inherits `inherit`. */
+function inherited(name: string, value: string, inherit: McpInherit, platform: NodeJS.Platform): boolean {
+  // An exported shell function: code, not a setting.
+  if (value.startsWith('()')) return inherit === 'all';
+  if (inherit === 'all') return true;
+  if (inherit === 'minimal') {
+    const needed = NEEDED[platform === 'win32' ? 'win32' : 'posix'];
+    return platform === 'win32' ? needed.includes(name.toUpperCase()) : needed.includes(name);
+  }
+  if (PROXY_NAME.test(name)) return true;
+  if (SECRET_NAME.test(name) && !NOT_SECRET.test(name)) return false;
+  return !PASSWORD_IN_URL.test(value);
+}
+
+/**
  * The environment for a stdio server: this computer's, so `npx`, `uvx` and the
  * programs they start behave as in a terminal, with the folders runtimes
  * usually install into added to PATH (apps opened from the macOS Finder get a
- * short one), then the server's own variables.
+ * short one), then the server's own variables. `inherit` narrows what comes
+ * from this computer; the server's own variables always arrive.
  */
-export function stdioEnv(base: NodeJS.ProcessEnv, extra: Record<string, string>, platform: NodeJS.Platform): Record<string, string> {
+export function stdioEnv(base: NodeJS.ProcessEnv, extra: Record<string, string>, platform: NodeJS.Platform, inherit: McpInherit = 'all'): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(base)) if (typeof v === 'string') env[k] = v;
+  for (const [k, v] of Object.entries(base)) if (typeof v === 'string' && inherited(k, v, inherit, platform)) env[k] = v;
   const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
   const sep = platform === 'win32' ? ';' : ':';
   const current = (env[key] ?? '').split(sep).filter((d) => d.length > 0);
@@ -226,6 +296,7 @@ interface Connection {
   /** It publishes resources. */
   resources: boolean;
   prompts: McpPromptInfo[];
+  info: ServerInfo;
   /** Last lines a stdio server wrote to stderr (shown when it fails to start). */
   stderr: string;
   /** Re-asks a server that connected without tools. */
@@ -302,6 +373,7 @@ export class McpManager implements McpToolSource {
         instructions: null,
         resources: false,
         prompts: [],
+        info: NO_SERVER_INFO,
         stderr: '',
         poll: null,
         retry: null,
@@ -337,7 +409,7 @@ export class McpManager implements McpToolSource {
       return new StdioClientTransport({
         command,
         args: c.args,
-        env: stdioEnv(process.env, resolveSecrets(c.env, this.serverKey(conn), secret), process.platform),
+        env: stdioEnv(process.env, resolveSecrets(c.env, this.serverKey(conn), secret), process.platform, c.inherit ?? 'all'),
         ...(c.cwd ? { cwd: c.cwd } : conn.projectRoot ? { cwd: conn.projectRoot } : {}),
         stderr: 'pipe'
       });
@@ -399,6 +471,7 @@ export class McpManager implements McpToolSource {
       conn.transport = transport;
       this.registerTools(conn, tools);
       conn.instructions = cleanInstructions(client.getInstructions());
+      conn.info = serverInfoOf(client.getServerVersion());
       conn.resources = client.getServerCapabilities()?.resources !== undefined;
       await this.loadPrompts(conn, client);
       conn.state = 'connected';
@@ -639,7 +712,8 @@ export class McpManager implements McpToolSource {
           : null,
       tools: c.tools.map((t) => ({ ...t })),
       prompts: c.prompts.map((p) => ({ ...p })),
-      resources: c.resources
+      resources: c.resources,
+      info: c.state === 'connected' ? c.info : NO_SERVER_INFO
     }));
   }
 

@@ -17,6 +17,36 @@ import { ProjectPicker } from './ProjectPicker';
 
 /** Choices for Steps per turn (besides no limit). */
 const STEP_LIMITS = [100, 250, 500, 1000, 2500] as const;
+/** Choices for the limits of one turn (besides no limit): tokens, US dollars, minutes. */
+const TOKEN_LIMITS = [250_000, 1_000_000, 5_000_000, 20_000_000] as const;
+const COST_LIMITS = [1, 5, 10, 25, 100] as const;
+const MINUTE_LIMITS = [10, 30, 60, 180] as const;
+const TOOL_CALL_LIMITS = [50, 100, 250, 500, 1000] as const;
+const RETRY_LIMITS = [0, 1, 3, 5, 10, 25] as const;
+
+const dollars = (n: number): string => `$${Number.isInteger(n) ? String(n) : n.toFixed(2)}`;
+const duration = (minutes: number): string =>
+  minutes % 60 !== 0 ? `${String(minutes)} minutes` : minutes === 60 ? '1 hour' : `${String(minutes / 60)} hours`;
+
+/** A limit picked from a few values, or none. A stored value that isn't one of them is listed too, so it is never shown as something else. */
+function LimitSelect({ label, value, choices, format, onChange }: { label: string; value: number | null; choices: readonly number[]; format: (n: number) => string; onChange: (value: number | null) => void }) {
+  const listed = value === null || choices.includes(value) ? choices : [...choices, value].sort((a, b) => a - b);
+  return (
+    <select
+      aria-label={label}
+      className="h-28 rounded-md border border-input-border bg-input px-8 text-base text-fg outline-none focus:border-border-strong"
+      value={value === null ? 'none' : String(value)}
+      onChange={(e) => onChange(e.target.value === 'none' ? null : Number(e.target.value))}
+    >
+      <option value="none">No limit</option>
+      {listed.map((n) => (
+        <option key={n} value={String(n)}>
+          {format(n)}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 const KINDS: Array<{ kind: keyof RuleLists; title: string; help: string }> = [
   { kind: 'allow', title: 'Allow', help: 'Runs without asking.' },
@@ -197,23 +227,97 @@ export function PermissionsSection() {
             }
           />
         ) : null}
+      </Group>
+
+      <Group title="Limits for one turn" description="Reaching one pauses the turn and offers to continue. All but the steps count the sub-agents and groups the turn starts as well. None is set until you set one.">
         <SettingRow
           label="Steps per turn"
           description="How many steps the agent may take before it pauses and offers to continue. With no limit it works until the task is done; it still stops if it repeats the same actions."
           control={
-            <select
-              aria-label="Steps per turn"
-              className="h-28 rounded-md border border-input-border bg-input px-8 text-base text-fg outline-none focus:border-border-strong"
-              value={settings.behavior.maxSteps === null ? 'none' : String(settings.behavior.maxSteps)}
-              onChange={(e) => saveSettings({ behavior: { maxSteps: e.target.value === 'none' ? null : Number(e.target.value) } })}
-            >
-              <option value="none">No limit</option>
-              {STEP_LIMITS.map((n) => (
-                <option key={n} value={String(n)}>
-                  {n.toLocaleString()} steps
-                </option>
-              ))}
-            </select>
+            <LimitSelect label="Steps per turn" value={settings.behavior.maxSteps} choices={STEP_LIMITS} format={(n) => `${n.toLocaleString()} steps`} onChange={(maxSteps) => saveSettings({ behavior: { maxSteps } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens per turn"
+          description="Pause a turn once it has used about this many tokens, with the agents it started. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens per turn" value={settings.behavior.turnTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(turnTokens) => saveSettings({ behavior: { turnTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost per turn"
+          description="Pause a turn at about this much. The amount is worked out from published prices, so your bill can differ, and a model with no published price can't be followed: Graft says so when one answers."
+          control={
+            <LimitSelect label="Cost per turn" value={settings.behavior.turnCostUsd} choices={COST_LIMITS} format={dollars} onChange={(turnCostUsd) => saveSettings({ behavior: { turnCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Time per turn"
+          description="Pause a turn after it has worked this long. The time it waits for your answer doesn't count."
+          control={
+            <LimitSelect label="Time per turn" value={settings.behavior.turnMinutes} choices={MINUTE_LIMITS} format={duration} onChange={(turnMinutes) => saveSettings({ behavior: { turnMinutes } })} />
+          }
+        />
+        <SettingRow
+          label="Tool calls per turn"
+          description="Pause a turn once it has started this many tool calls. A reply that asks for several at once runs them all first."
+          control={
+            <LimitSelect label="Tool calls per turn" value={settings.behavior.turnToolCalls} choices={TOOL_CALL_LIMITS} format={(n) => `${n.toLocaleString()} calls`} onChange={(turnToolCalls) => saveSettings({ behavior: { turnToolCalls } })} />
+          }
+        />
+        <SettingRow
+          label="Retries per turn"
+          description="How often a failed request may be sent again in one turn. At the limit the turn pauses and says what failed, instead of trying on or switching to the backup model."
+          control={
+            <LimitSelect label="Retries per turn" value={settings.behavior.turnRetries} choices={RETRY_LIMITS} format={(n) => (n === 0 ? 'No retries' : n === 1 ? '1 retry' : `${String(n)} retries`)} onChange={(turnRetries) => saveSettings({ behavior: { turnRetries } })} />
+          }
+        />
+      </Group>
+
+      <Group
+        title="Limits for a session, a project or a day"
+        description="Like the limits above, reaching one pauses and offers to continue; unlike them, a session, a project or a day keeps counting across turns. A session's total is everything it has used, a project's is everything its sessions have used, the day's is everything used on this computer today. None is set until you set one."
+      >
+        <SettingRow
+          label="Tokens in a session"
+          description="Pause once this session has used about this many tokens across its turns, with the agents and groups they started. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens in a session" value={settings.behavior.sessionTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(sessionTokens) => saveSettings({ behavior: { sessionTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a session"
+          description="Pause once this session has cost about this much across its turns. Worked out from published prices, so your bill can differ; a model with no published price can't be followed."
+          control={
+            <LimitSelect label="Cost of a session" value={settings.behavior.sessionCostUsd} choices={COST_LIMITS} format={dollars} onChange={(sessionCostUsd) => saveSettings({ behavior: { sessionCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens in a project"
+          description="Pause once this project's sessions have used about this many tokens together, this one and every other session in the folder. Tokens read from a provider's cache count at a tenth, as they are billed."
+          control={
+            <LimitSelect label="Tokens in a project" value={settings.behavior.projectTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(projectTokens) => saveSettings({ behavior: { projectTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a project"
+          description="Pause once this project's sessions have cost about this much together, this one and every other session in the folder. Worked out from published prices, so your bill can differ; a model with no published price can't be followed."
+          control={
+            <LimitSelect label="Cost of a project" value={settings.behavior.projectCostUsd} choices={COST_LIMITS} format={dollars} onChange={(projectCostUsd) => saveSettings({ behavior: { projectCostUsd } })} />
+          }
+        />
+        <SettingRow
+          label="Tokens in a day"
+          description="Pause once everything used on this computer today adds up to about this many tokens, this session and every other. Yesterday's use is not counted."
+          control={
+            <LimitSelect label="Tokens in a day" value={settings.behavior.dayTokens} choices={TOKEN_LIMITS} format={(n) => `${n.toLocaleString()} tokens`} onChange={(dayTokens) => saveSettings({ behavior: { dayTokens } })} />
+          }
+        />
+        <SettingRow
+          label="Cost of a day"
+          description="Pause once everything used on this computer today has cost about this much. Worked out from published prices, so your bill can differ; requests with no published price are counted and named."
+          control={
+            <LimitSelect label="Cost of a day" value={settings.behavior.dayCostUsd} choices={COST_LIMITS} format={dollars} onChange={(dayCostUsd) => saveSettings({ behavior: { dayCostUsd } })} />
           }
         />
       </Group>

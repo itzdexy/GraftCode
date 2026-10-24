@@ -9,7 +9,7 @@ import { textOf, type FileAttachment, type ImageBlock, type StoredMessage } from
 import type { MissionStart } from '@shared/schemas/missions';
 import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { RewindMode, RewindPreview, RewindResult } from '@shared/schemas/rewind';
-import type { ContextReport, SessionDetail, SessionKind, SessionSummary } from '@shared/schemas/sessions';
+import type { ContextReport, SessionDetail, SessionGroup, SessionKind, SessionSummary } from '@shared/schemas/sessions';
 import type { CreateSessionInput } from '@shared/ipc/contracts';
 import { MemorySessionStore } from '../db/memorySessionStore';
 import type { ProjectsRepo } from '../db/projectsRepo';
@@ -26,6 +26,7 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { GraftPaths } from '../app/paths';
 import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
+import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
 import { generateTitle, titleModel } from './title';
@@ -67,6 +68,8 @@ export interface SessionManagerDeps {
   /** Sites from the Sites tab, for the prompt of a session that builds one. */
   site?: SessionDeps['site'];
   revealBrowser?: SessionDeps['revealBrowser'];
+  /** The local language server's errors for an edited file; absent where there is no server. */
+  problems?: SessionDeps['problems'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -94,11 +97,22 @@ export class SessionManager {
 
   /** Sessions left running or waiting when the app last quit are idle now. */
   recoverStaleStatuses(): void {
-    for (const s of this.deps.repo.list({ includeArchived: true })) {
+    const sessions = this.deps.repo.list({ includeArchived: true });
+    for (const s of sessions) {
       if (s.status === 'running' || s.status === 'needs-input') this.deps.repo.updateSession(s.id, { status: 'idle' });
     }
+    // Index folders a delete couldn't remove, and those of incognito sessions, go now.
+    void this.deps.checkpoints.sweepIndexes(new Set(sessions.map((s) => s.id)));
     this.deps.repo.recoverAgentRuns();
     this.deps.repo.recoverMissions();
+    // Tool calls that were running when the app stopped get a truthful answer now, so the note is there when the session is opened.
+    for (const id of this.deps.repo.journalSessions()) {
+      try {
+        reconcileInterrupted(this.deps.repo, id);
+      } catch (error) {
+        this.deps.log('error', 'Could not reconcile the tool journal', { session: id, message: (error as Error).message });
+      }
+    }
   }
 
   setActive(id: string | null): void {
@@ -154,6 +168,7 @@ export class SessionManager {
       ...(d.browser ? { browser: d.browser } : {}),
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
+      ...(d.problems ? { problems: d.problems } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -171,6 +186,7 @@ export class SessionManager {
       hooks: (root, trusted) => new HookRunner(() => d.settingsFiles.hooks(root, trusted), d.shell, () => root ?? process.cwd()),
       rgPath: d.rgPath,
       graftHome: d.paths.graftHome,
+      builtinSkills: d.paths.builtinSkills,
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),
@@ -194,16 +210,19 @@ export class SessionManager {
           computerUse: s.behavior.computerUse,
           personalization: s.personalization,
           maxSteps: s.behavior.maxSteps,
-          agents: s.agents
+          turnBudget: { tokens: s.behavior.turnTokens, costUsd: s.behavior.turnCostUsd, minutes: s.behavior.turnMinutes, toolCalls: s.behavior.turnToolCalls, retries: s.behavior.turnRetries },
+          spendBudget: { sessionTokens: s.behavior.sessionTokens, sessionCostUsd: s.behavior.sessionCostUsd, projectTokens: s.behavior.projectTokens, projectCostUsd: s.behavior.projectCostUsd, dayTokens: s.behavior.dayTokens, dayCostUsd: s.behavior.dayCostUsd },
+          agents: s.agents,
+          checkEdits: s.behavior.checkEdits
         };
       },
       gitInfo: async (cwd) => {
         const info = await gitInfo(cwd);
         return { isRepo: info.isRepo, branch: info.branch };
       },
-      checkpoint: async (sessionId, cwd, messageId) => {
+      checkpoint: async (sessionId, cwd, messageId, signal) => {
         if (store === this.incognito) return null;
-        const record = await d.checkpoints.create(sessionId, cwd, messageId);
+        const record = await d.checkpoints.create(sessionId, cwd, messageId, signal);
         return record.id;
       },
       emit: (sessionId, event) => this.onEvent(sessionId, event),
@@ -312,6 +331,8 @@ export class SessionManager {
         archived: false,
         unread: false,
         incognito: true,
+        groupId: null,
+        completedAt: null,
         projectId: null,
         projectPath: null,
         projectName: null,
@@ -385,6 +406,7 @@ export class SessionManager {
   }
 
   send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = []): { queued: boolean } {
+    this.clearCompleted(id);
     return this.get(id).send(text, images, files);
   }
 
@@ -397,6 +419,7 @@ export class SessionManager {
   }
 
   startMission(id: string, input: MissionStart): { queued: boolean } {
+    this.clearCompleted(id);
     return this.get(id).startMission(input);
   }
 
@@ -461,6 +484,44 @@ export class SessionManager {
 
   setPinned(id: string, pinned: boolean): void {
     this.update(id, { pinned });
+  }
+
+  /** Marks a session as completed, so it leaves the working lists; false marks it as in progress again. */
+  setCompleted(id: string, completed: boolean): void {
+    this.update(id, { completedAt: completed ? Date.now() : null });
+  }
+
+  /** The named groups sessions are filed under, oldest first. */
+  groups(): SessionGroup[] {
+    return this.deps.repo.listGroups();
+  }
+
+  createGroup(name: string): SessionGroup {
+    return this.deps.repo.createGroup(name);
+  }
+
+  renameGroup(id: string, name: string): SessionGroup {
+    return this.deps.repo.renameGroup(id, name);
+  }
+
+  /** A group is removed; its sessions are kept and left ungrouped, and their rows are told so they move. */
+  deleteGroup(id: string): void {
+    const affected = this.deps.repo.list({ includeArchived: true }).filter((s) => s.groupId === id);
+    this.deps.repo.deleteGroup(id);
+    for (const summary of affected) this.deps.emitSummary(this.summaryOf(summary.id));
+  }
+
+  /** Files a session under a group, or takes it out of every group with null. */
+  setGroup(id: string, groupId: string | null): void {
+    if (groupId !== null && !this.deps.repo.listGroups().some((g) => g.id === groupId)) {
+      throw new GraftError('group_not_found', 'That group does not exist.');
+    }
+    this.update(id, { groupId });
+  }
+
+  /** The user asked for work again: a completed session goes back to the working lists. */
+  private clearCompleted(id: string): void {
+    if (this.storeFor(id).getSummary(id).completedAt !== null) this.update(id, { completedAt: null });
   }
 
   markRead(id: string): void {
@@ -567,10 +628,12 @@ export class SessionManager {
   }
 
   retry(id: string): void {
+    this.clearCompleted(id);
     this.get(id).retry();
   }
 
   regenerate(id: string): void {
+    this.clearCompleted(id);
     this.get(id).regenerate();
   }
 
@@ -580,6 +643,7 @@ export class SessionManager {
 
   /** Runs a "!" command from the message box in the session's shell. */
   runShell(id: string, command: string): void {
+    this.clearCompleted(id);
     this.get(id).runShell(command);
   }
 
@@ -599,6 +663,14 @@ export class SessionManager {
 
   steer(id: string, queueId: string): void {
     this.get(id).steer(queueId);
+  }
+
+  aside(id: string, askId: string, question: string): Promise<string> {
+    return this.get(id).aside(askId, question);
+  }
+
+  cancelAside(id: string, askId: string): void {
+    this.live.get(id)?.cancelAside(askId);
   }
 
   feedback(sessionId: string, messageId: string, value: -1 | 0 | 1): void {

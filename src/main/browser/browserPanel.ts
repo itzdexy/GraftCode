@@ -1,14 +1,17 @@
-import { session, WebContentsView, type BrowserWindow, type WebContents } from 'electron';
+import { nativeImage, session, WebContentsView, type BrowserWindow, type WebContents } from 'electron';
+import { PAGE_SIZES, type PageSize } from '@shared/schemas/panels';
 import { log } from '../app/log';
 import { openExternalSafely } from '../app/security';
-import { CANCEL_PICK, fill, GRAFT_WORLD, hasText, locate, PICK_ELEMENT, scrollBy, SNAPSHOT } from './pageScripts';
+import { checkPage, type PageCheck, type PageFacts } from './pageCheck';
+import { CANCEL_PICK, fill, GRAFT_WORLD, hasText, highlight, locate, PAGE_FACTS, PICK_ELEMENT, scrollBy, SNAPSHOT } from './pageScripts';
 import { registerBrowserPanel } from './registry';
 
 /**
  * The Browser panel: one isolated WebContentsView laid over the panel area.
  * No preload, sandboxed, its own in-memory partition, http(s) only, every
  * permission denied, downloads refused, new windows opened externally. Graft's
- * own page scripts (element picker, agent snapshots) run in an isolated world.
+ * own page scripts (element picker, agent snapshots, the page check) run in an
+ * isolated world.
  */
 
 export const BROWSER_PARTITION = 'graft-browser';
@@ -47,6 +50,8 @@ export interface PickedElement {
   text: string;
   size: { width: number; height: number };
   styles: Record<string, string>;
+  /** The part of the page the element takes, as it looked when it was picked; null when it could not be drawn. */
+  image: PageShot | null;
 }
 
 export interface PageSnapshot {
@@ -62,6 +67,26 @@ export interface Bounds {
   y: number;
   width: number;
   height: number;
+}
+
+export interface PageShot {
+  mediaType: 'image/png' | 'image/jpeg';
+  data: string;
+  width: number;
+  height: number;
+}
+
+/** A page that is not on screen is drawn at this size. */
+const HIDDEN_SIZE: PageSize = { width: 1280, height: 800 };
+/** A picture that has not come after this long is not coming (the page stopped drawing). */
+const DRAW_TIMEOUT_MS = 8000;
+
+function within<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 const MAX_CONSOLE = 500;
@@ -122,6 +147,10 @@ export class BrowserPanel {
   private problems = 0;
   private find: BrowserState['find'] = null;
   private picking = false;
+  /** The page is laid out at a size of its own for a picture or a check; the panel's bounds wait until it is back. */
+  private measuring = false;
+  /** The bounds asked for while measuring: undefined when none were. */
+  private wanted: Bounds | null | undefined;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -292,6 +321,10 @@ export class BrowserPanel {
   setBounds(bounds: Bounds | null): void {
     const view = this.view;
     if (!view) return;
+    if (this.measuring) {
+      this.wanted = bounds;
+      return;
+    }
     if (!bounds || bounds.width < 1 || bounds.height < 1) {
       if (this.visible) {
         this.window.contentView.removeChildView(view);
@@ -375,18 +408,108 @@ export class BrowserPanel {
     this.contents()?.reload();
   }
 
-  /** The page as an image, scaled down for a chat. JPEG when PNG would be heavy. */
-  async capture(): Promise<{ mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }> {
+  /**
+   * Runs `look` while the page is laid out at `size`, whatever size the panel is, and puts everything back.
+   * A page is only drawn while it is in the window, so one that is hidden is put there as a single pixel in
+   * a corner for the moment (measured in Electron 44: a view that is not in the window is never drawn, and one
+   * placed outside its area only now and then; one pixel inside it, always). The layout is set through the
+   * DevTools protocol, as a browser's device toolbar does.
+   */
+  private async atSize<T>(size: PageSize, look: (contents: WebContents) => Promise<T>): Promise<T> {
+    const view = this.view;
+    const contents = this.contents();
+    if (!view || !contents || contents.getURL() === '') throw new Error('No page is open in the browser.');
+    if (this.measuring) throw new Error('The page is being looked at already. Try again in a moment.');
+    this.measuring = true;
+    this.wanted = undefined;
+    const hidden = !this.visible;
+    const zoom = contents.getZoomFactor();
+    const protocol = contents.debugger;
+    try {
+      if (hidden) {
+        const area = this.window.getContentBounds();
+        view.setBounds({ x: Math.max(0, area.width - 1), y: Math.max(0, area.height - 1), width: 1, height: 1 });
+        this.window.contentView.addChildView(view);
+      }
+      // A zoomed page counts its width in larger pixels: at 100% the width asked for is the width it gets.
+      if (zoom !== 1) contents.setZoomFactor(1);
+      try {
+        protocol.attach('1.3');
+      } catch (error) {
+        throw new Error(`The page can't be laid out at another size right now (${(error as Error).message}). If its developer tools are open, close them and try again.`, { cause: error });
+      }
+      await protocol.sendCommand('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false });
+      // Two frames for the new layout, and a moment for what follows it (a font, a query that swaps a picture).
+      await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => done(true), 120))))' }], true);
+      return await look(contents);
+    } finally {
+      try {
+        if (protocol.isAttached()) {
+          await protocol.sendCommand('Emulation.clearDeviceMetricsOverride').catch(() => undefined);
+          protocol.detach();
+        }
+        if (!contents.isDestroyed() && zoom !== 1) contents.setZoomFactor(zoom);
+        if (hidden && this.view === view) {
+          this.window.contentView.removeChildView(view);
+          view.setBounds({ x: 0, y: 0, ...HIDDEN_SIZE });
+        }
+      } catch (error) {
+        // The page was closed while it was looked at: there is nothing left to put back.
+        log.info('browser', 'Could not restore the page after looking at it', { message: (error as Error).message });
+      }
+      this.measuring = false;
+      const wanted = this.wanted;
+      this.wanted = undefined;
+      if (wanted !== undefined) this.setBounds(wanted);
+    }
+  }
+
+  /**
+   * The page as an image for a chat: as the panel shows it, or laid out at `size`. A page that is not on
+   * screen is drawn at the size of a desktop. Wider than 1600 px it is scaled down; JPEG when PNG would be heavy.
+   */
+  async capture(size?: PageSize): Promise<PageShot> {
     const contents = this.contents();
     if (!contents || contents.getURL() === '') throw new Error('No page is open in the browser.');
-    let image = await contents.capturePage();
-    if (image.isEmpty()) throw new Error('The page has nothing to show yet (it may be hidden or still loading).');
-    const size = image.getSize();
-    if (size.width > 1600) image = image.resize({ width: 1600, quality: 'good' });
+    const late = 'The page did not draw in time. Reload it and try again.';
+    let image =
+      size || !this.visible
+        ? await this.atSize(size ?? HIDDEN_SIZE, async (page) => {
+            const shot = (await within(page.debugger.sendCommand('Page.captureScreenshot', { format: 'png' }), DRAW_TIMEOUT_MS, late)) as { data: string };
+            return nativeImage.createFromBuffer(Buffer.from(shot.data, 'base64'));
+          })
+        : await within(contents.capturePage(), DRAW_TIMEOUT_MS, late);
+    if (image.isEmpty()) throw new Error('The page has nothing to show yet (it may still be loading).');
+    if (image.getSize().width > 1600) image = image.resize({ width: 1600, quality: 'good' });
     const png = image.toPNG();
     const { width, height } = image.getSize();
     if (png.length <= 1_500_000) return { mediaType: 'image/png', data: png.toString('base64'), width, height };
     return { mediaType: 'image/jpeg', data: image.toJPEG(85).toString('base64'), width, height };
+  }
+
+  /** The page as a phone, a tablet and a desktop lay it out, one after the other. */
+  async captureSizes(): Promise<Array<{ id: (typeof PAGE_SIZES)[number]['id']; label: string; shot: PageShot }>> {
+    const shots: Array<{ id: (typeof PAGE_SIZES)[number]['id']; label: string; shot: PageShot }> = [];
+    for (const size of PAGE_SIZES) shots.push({ id: size.id, label: `${size.label} (${String(size.width)} px)`, shot: await this.capture({ width: size.width, height: size.height }) });
+    return shots;
+  }
+
+  /**
+   * What is wrong with the page as it is laid out now, or at `size`: contrast, names, headings, a layout wider
+   * than its window. It reads the page and changes nothing in it.
+   */
+  async check(size?: PageSize): Promise<PageCheck> {
+    const contents = this.contents();
+    if (!contents || contents.getURL() === '') throw new Error('No page is open in the browser.');
+    const gather = async (page: WebContents): Promise<PageCheck> => checkPage((await page.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: PAGE_FACTS }], true)) as PageFacts);
+    return size ? this.atSize(size, gather) : gather(contents);
+  }
+
+  /** Brings what a selector finds into view and marks it for a moment; false when it finds nothing. */
+  async highlight(selector: string): Promise<boolean> {
+    const contents = this.contents();
+    if (!contents) return false;
+    return (await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: highlight(selector) }], true).catch(() => false)) === true;
   }
 
   /** Lets the user click an element in the page; null when they press Escape or leave the page. */
@@ -396,8 +519,10 @@ export class BrowserPanel {
     this.picking = true;
     this.publish();
     try {
-      const picked = (await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: PICK_ELEMENT }], true)) as Omit<PickedElement, 'url'> | null;
-      return picked ? { ...picked, url: contents.getURL() } : null;
+      const picked = (await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: PICK_ELEMENT }], true)) as (Omit<PickedElement, 'url' | 'image'> & { rect: Bounds }) | null;
+      if (!picked) return null;
+      const { rect, ...element } = picked;
+      return { ...element, url: contents.getURL(), image: await this.pictureOf(rect) };
     } catch (error) {
       // The page navigated away or crashed mid-pick.
       log.info('browser', 'Element picking ended', { message: (error as Error).message });
@@ -405,6 +530,37 @@ export class BrowserPanel {
     } finally {
       this.picking = false;
       this.publish();
+    }
+  }
+
+  /**
+   * The part of the page a box takes (in the page's own pixels), with a few pixels around it. Null when it
+   * cannot be drawn: the page is not on screen, or the box lies outside what the panel shows.
+   */
+  private async pictureOf(box: Bounds): Promise<PageShot | null> {
+    const view = this.view;
+    const contents = this.contents();
+    if (!view || !contents || !this.visible) return null;
+    const zoom = contents.getZoomFactor();
+    const shown = view.getBounds();
+    const around = 4;
+    const left = Math.max(0, Math.floor((box.x - around) * zoom));
+    const top = Math.max(0, Math.floor((box.y - around) * zoom));
+    const right = Math.min(shown.width, Math.ceil((box.x + box.width + around) * zoom));
+    const bottom = Math.min(shown.height, Math.ceil((box.y + box.height + around) * zoom));
+    if (right - left < 2 || bottom - top < 2) return null;
+    try {
+      // Two frames, so the picker's own box is gone from the page before it is pictured.
+      await contents.executeJavaScriptInIsolatedWorld(GRAFT_WORLD, [{ code: 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))))' }], true);
+      let image = await within(contents.capturePage({ x: left, y: top, width: right - left, height: bottom - top }), DRAW_TIMEOUT_MS, 'The page did not draw in time.');
+      if (image.isEmpty()) return null;
+      if (image.getSize().width > 1600) image = image.resize({ width: 1600, quality: 'good' });
+      const { width, height } = image.getSize();
+      return { mediaType: 'image/png', data: image.toPNG().toString('base64'), width, height };
+    } catch (error) {
+      // The element is still what was asked for: it goes without its picture.
+      log.info('browser', 'Could not picture the picked element', { message: (error as Error).message });
+      return null;
     }
   }
 
@@ -522,6 +678,7 @@ export class BrowserPanel {
     this.problems = 0;
     this.find = null;
     this.picking = false;
+    this.wanted = undefined;
     view.webContents.close();
   }
 }

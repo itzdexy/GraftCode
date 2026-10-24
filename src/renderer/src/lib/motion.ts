@@ -1,8 +1,11 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import type { MotionSetting } from '@shared/schemas/appSettings';
 
 /** Matches --g-duration-exit: how long something that leaves stays in the page. */
 export const EXIT_MS = 110;
+/** Matches --g-duration-base: how long a column takes to slide shut (.graft-slide-x). */
+export const SLIDE_EXIT_MS = 180;
 
 /** Whether motion is reduced under a Motion setting, given what the operating system asks for. */
 export function motionReduced(setting: MotionSetting, systemReduced: boolean): boolean {
@@ -139,4 +142,90 @@ export function usePresence(open: boolean, exitMs = EXIT_MS): boolean {
     return () => clearTimeout(timer);
   }, [leaving, exitMs]);
   return open || leaving;
+}
+
+/** What to keep showing while something that just emptied slides away: the last list that had anything in it. */
+export function lastShown<T>(current: readonly T[], previous: readonly T[]): readonly T[] {
+  return current.length > 0 ? current : previous;
+}
+
+/** Whether a change of view may cross-fade right now. */
+export function viewTransitionAllowed(state: { reduced: boolean; hidden: boolean; supported: boolean; running: boolean }): boolean {
+  return state.supported && !state.reduced && !state.hidden && !state.running;
+}
+
+/** True from the start of a cross-fade until it has finished. */
+let fading = false;
+/** The change a cross-fade is for, until it has been made: the browser takes its picture of the page first. */
+let waiting: (() => void) | null = null;
+
+function makeWaiting(): void {
+  const change = waiting;
+  waiting = null;
+  change?.();
+}
+
+/**
+ * Makes a change that swaps a whole view, inside a cross-fade when that is
+ * allowed. The browser takes its picture of the page before the change, so in
+ * a fade the change is made a frame later; that is why this is for what is
+ * drawn (see useCrossFaded) and for the page's own marks, never for a store
+ * that something reads right after. With motion reduced, the window hidden or
+ * no page at all, the change is made at once. So is a change that comes while
+ * another is fading, after the one that fade is for. Each change is made
+ * exactly once, in the order they came, and none is dropped.
+ *
+ * A change of `kind` "page" marks the window (data-view-change) for as long
+ * as it takes: the stylesheet then lets the page give way in its own frame,
+ * and what is beside it holds still.
+ */
+export function withViewTransition(update: () => void, kind?: 'page'): void {
+  if (typeof document === 'undefined') {
+    update();
+    return;
+  }
+  if (!viewTransitionAllowed({ reduced: reducedMotion(), hidden: document.hidden, supported: typeof document.startViewTransition === 'function', running: fading })) {
+    makeWaiting();
+    update();
+    return;
+  }
+  fading = true;
+  waiting = update;
+  // Marked before the browser takes its picture of the page as it was: the page is in a frame of its own in both pictures.
+  const root = document.documentElement;
+  if (kind) root.dataset.viewChange = kind;
+  const settle = (): void => {
+    fading = false;
+    delete root.dataset.viewChange;
+  };
+  try {
+    // React draws the change before the callback returns: that is the page the browser fades to.
+    const transition = document.startViewTransition(() => flushSync(makeWaiting));
+    transition.finished.then(settle, settle);
+    // A fade that is skipped (the window was hidden meanwhile) rejects these; the change was still made.
+    transition.ready.catch(() => undefined);
+    transition.updateCallbackDone.catch(() => undefined);
+  } catch {
+    settle();
+    makeWaiting();
+  }
+}
+
+/**
+ * A value as the page draws it. It is `value`, except that when `key` changes
+ * the page cross-fades from what the old value drew to what the new one draws:
+ * until the browser has its picture of the old page (a frame), the old value
+ * is still the one drawn. The stores change at once; only the drawing follows.
+ * `kind` says what gives way (see withViewTransition).
+ */
+export function useCrossFaded<T>(value: T, key: string, kind?: 'page'): T {
+  const [drawn, setDrawn] = useState({ key, value });
+  const latest = useRef({ key, value });
+  useLayoutEffect(() => {
+    latest.current = { key, value };
+  });
+  useLayoutEffect(() => {
+    if (drawn.key !== key) withViewTransition(() => setDrawn(latest.current), kind);
+  }, [key, drawn.key, kind]);
+  return drawn.key === key ? value : drawn.value;
 }

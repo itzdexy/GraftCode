@@ -20,6 +20,8 @@ export interface GraftPaths {
   chatFiles: string;
   /** Websites from the Sites tab, one folder each (Graft Sites in the home folder). */
   sites: string;
+  /** The skills that ship with Graft (resources/skills); null when the app has no such folder. */
+  builtinSkills: string | null;
 }
 
 export function resolveGraftHome(): string {
@@ -41,7 +43,14 @@ export function sitesDir(graftHome: string, documents: string, home: string = os
   return fs.existsSync(earlier) ? earlier : path.join(home, 'Graft Sites');
 }
 
-export function buildPaths(userData: string, graftHome: string = resolveGraftHome(), documents: string = path.join(os.homedir(), 'Documents')): GraftPaths {
+export function buildPaths(
+  userData: string,
+  graftHome: string = resolveGraftHome(),
+  documents: string = path.join(os.homedir(), 'Documents'),
+  /** The folder of bundled resources (icons, catalog, skills); null where there is none, as in tests. */
+  resources: string | null = null
+): GraftPaths {
+  const skills = resources ? path.join(resources, 'skills') : null;
   return {
     userData,
     graftHome,
@@ -51,6 +60,7 @@ export function buildPaths(userData: string, graftHome: string = resolveGraftHom
     shellLogs: path.join(userData, 'shell-logs'),
     checkpointsShadow: path.join(userData, 'shadow-repos'),
     chatFiles: path.join(userData, 'chat-files'),
-    sites: sitesDir(graftHome, documents)
+    sites: sitesDir(graftHome, documents),
+    builtinSkills: skills && fs.existsSync(skills) ? skills : null
   };
 }

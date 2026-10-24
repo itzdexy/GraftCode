@@ -1,5 +1,207 @@
 [
   {
+    "version": "0.6.36",
+    "date": "2026-10-20",
+    "items": [
+      "Two sessions at once. Open beside, from a session's menu, puts another session next to the open one, with a handle between them to drag the width. The pane you last clicked or typed in is the one the keyboard belongs to, so Ctrl+F and Esc act on that session only. A button closes the conversation beside.",
+      "Sessions you file away. Move to group files a session under a name of your own; the groups are sections in the sidebar, and they can be renamed or removed without losing the sessions in them. Mark as completed takes a session out of the working lists and puts it under Completed, where the same filters apply. Writing to it again marks it in progress and it comes back where it was.",
+      "Find steps through the matches with F3 and Shift+F3, from anywhere in the window, and Copy as Markdown from a session's menu puts the conversation on the clipboard without a save dialog."
+    ]
+  },
+  {
+    "version": "0.6.35",
+    "date": "2026-10-18",
+    "items": [
+      "A model on your computer is measured against the context its server loaded, not the length it was trained for: llama.cpp and LM Studio are asked what they hold. Local servers get up to 15 minutes to read a long prompt, and Ollama keeps a model loaded for 30 minutes between turns, unless OLLAMA_KEEP_ALIVE sets another time.",
+      "Models whose server has no tool support can use tools: Graft describes the tools in the prompt and reads the calls the model writes as text, in the Hermes, Qwen and Mistral forms. A call a local model writes as text in a normal reply is run too, and when a server refuses tools, Graft switches that model to text until Graft restarts.",
+      "A local model whose window is known to be 64K or less (its server reports it, you set it in Settings, or it runs in Ollama) gets a lean code prompt, with the same safety rules, your personalization and the site brief, and the core tools (Read, Write, Edit, Glob, Grep, Shell and the like). The others are one ToolSearch away.",
+      "Settings → Providers → Find servers on this computer finds Ollama, LM Studio, llama.cpp, vLLM, Jan and KoboldCpp on their usual ports and adds one in a click. The first-run setup offers it too.",
+      "Settings → Models: a custom model can choose its prompt (Automatic, Full or Lean) and how it calls tools (Automatic, Native or Written in text).",
+      "A model a provider doesn’t serve is named in the message, which says to pick another model or refresh the list in Settings → Models.",
+      "A GEMINI.md file counts as project notes when a folder has no GRAFT.md, AGENTS.md or CLAUDE.md. The project’s .cursor/rules files marked alwaysApply are read too, or its .cursorrules file when there are none, and a rule that can’t be read is skipped."
+    ]
+  },
+  {
+    "version": "0.6.34",
+    "date": "2026-10-17",
+    "items": [
+      "Deleting a session works again after a large folder was being snapshotted: Graft now stops the whole git it started (on Windows the git on PATH starts a second one, which kept running and held the session’s files), and a delete never fails on that folder.",
+      "Replies start sooner in large folders: the snapshot Rewind needs is taken while the model starts answering, and only a change to a file waits for it.",
+      "Settings → Models has a section for each kind of media model your providers offer: images, video, voices, music and transcription. OpenRouter’s are listed by kind, OpenAI’s and Google’s too, and the well-known ones on other servers. Use makes one the model for images, video or Read aloud.",
+      "Graft makes video. GenerateVideo turns a prompt, or a picture of your project, into a clip with OpenRouter’s video models (Veo, Seedance, Kling, Wan, Hailuo and more) and saves it in the project. Pick the model in Settings → Models.",
+      "54 integrations to add in one step, 42 of them new: ElevenLabs for game sound; Figma files, shadcn/ui, Chrome DevTools, Next.js, Svelte, Astro and Webflow for interfaces; DeepWiki, Microsoft Learn, AWS and Cloudflare docs, Netlify, Render, Stripe, PostHog, Semgrep, CircleCI and Kubernetes for developers; Supabase, Neon, PostgreSQL, MongoDB, Redis and DuckDB for data; Hugging Face, arXiv, paper search, Wikipedia, Zotero, Perplexity, Exa, Brave Search, Firecrawl and Tavily for research; Jira and Confluence, Asana, Airtable, Memory and Sequential thinking. A search finds them."
+    ]
+  },
+  {
+    "version": "0.6.33",
+    "date": "2026-10-17",
+    "items": [
+      "Sending and deleting work in any folder again. Your message shows the moment you send it; the snapshot Rewind needs is taken after it, and is given up with a note when a folder (a whole Downloads folder, say) takes longer than 20 seconds. Stop and Delete end a turn at once, wherever it has got to, and messages sent one after another all arrive, in order, even while the one before is still on its way.",
+      "A turn stopped before the model said a word says \"Stopped.\" under your message, as a reply cut short does.",
+      "Slim scrollbars: rounded, faint until you point at them or scroll, brighter while you scroll and tinted while you drag.",
+      "Connectors show the apps they reach. Roblox Studio, Blender, Figma, GitHub, Linear, Notion and about fifty more get their own icon and name, and a server that names itself and sends an icon is shown by those. In the details column a connector opens to where it runs, its version, its tools, Reconnect and Open in Customize; Customize and the steps of a turn show the same icons.",
+      "A right-click on the details column chooses which of its cards it shows.",
+      "Open a file (Ctrl+P) opens a file that matches what you typed, however quickly you press Enter."
+    ]
+  },
+  {
+    "version": "0.6.32",
+    "date": "2026-10-17",
+    "items": [
+      "A code session has a details column at its right: where it runs (this computer, the folder, the worktree, the branch), what fills its context part by part with the free space and how far automatic compaction is, your MCP connectors with Reconnect and Sign in, the files it made, its background commands and agents with live times, and its changes with Review and Create PR. It takes the panels' place and comes back when they close; the button at the top right shows and hides it.",
+      "3D models open in Graft. A .glb, .gltf, .obj, .stl, .fbx or .ply file shows in the Files panel as a model you can turn, zoom and move, in wireframe or not, with its animations playing. When a reply names a model file, say one Blender just exported, the turn ends with the model drawn in the conversation.",
+      "Pictures a tool sends back, a render from Blender or a capture of Roblox Studio, show as thumbnails on its row and open large.",
+      "Several queued messages fold into one line, \"3 messages queued · Next: …\", that opens to the list, with Clear all. At Max and Taproot a short note above the message box says what the level costs, until you close it.",
+      "Settings → Appearance → Code colors: a theme for code while Graft is dark and one while it is light, among Vitesse, GitHub, Catppuccin, Night Owl, One, Tokyo Night, Dracula, Rosé Pine, Everforest, Gruvbox, Nord, Monokai, Solarized and Min, each previewed live.",
+      "The Terminal panel's menu sets the cursor, copy on select and how many lines are kept, and clears the terminal. The Changes panel's menu wraps long lines and can hide changes of whitespace alone."
+    ]
+  },
+  {
+    "version": "0.6.31",
+    "date": "2026-10-15",
+    "items": [
+      "Settings → Permissions gains limits that hold across turns: tokens and cost for a whole session, for a whole project (every session in its folder) and for a day (everything used on this computer today). Reaching one pauses the turn with the number it reached and a Continue button, like the limits for one turn.",
+      "The Changes panel's Search tab can compose a replace: press Ask Graft to replace the matches, type what they should become, and press it again. The request is written into your message box with the search as it ran and what it found. Nothing is sent and nothing is replaced by the tab: the turn that follows makes the change, with its checkpoint and its diff.",
+      "Tokens read from a provider's cache count at a tenth, as they are billed, and a model with no published price is named once and counted in tokens only. A chat belongs to no folder, so it is not counted against a project."
+    ]
+  },
+  {
+    "version": "0.6.30",
+    "date": "2026-10-13",
+    "items": [
+      "The Changes panel has a Search tab: every line of the project that holds what you type, under its file, with the matches marked. Ctrl+Shift+H opens it with the text you had selected in the box. Match case, whole words or a regular expression, and say which files to look in or leave out. A line opens its file in the editor at the match, and the results can go to your message.",
+      "The Browser panel checks a page. Check the page lists text that is hard to read with its contrast, pictures, buttons and fields without a name, headings out of order, small targets crowded together, and a layout wider than its window. Press a finding to see it in the page. Ask Graft to fix these writes the request for you to send.",
+      "One press sends the page as a phone, a tablet and a desktop lay it out to your message, whatever size the panel is. An element you pick arrives with a picture of itself, for a model that can see.",
+      "Graft checks its own pages the same way. When it builds a site or tests an app in the browser it runs the check at a phone's and a desktop's width, and it can take its screenshots at any width.",
+      "Fixed: Esc in the Settings search emptied the box and closed Settings with it. It now empties the box, and the next Esc closes Settings. A screenshot Graft took while the Browser panel was shut no longer hangs."
+    ]
+  },
+  {
+    "version": "0.6.29",
+    "date": "2026-10-12",
+    "items": [
+      "Sites can be real projects. Choose React + TypeScript beside a new site's name and Graft starts it as one: components in .tsx files, strict types, styles in modules, built with Vite. It is what a new site starts on when Node.js is installed.",
+      "Graft asks before it installs a site's packages and before a build, as it does for any command. The preview shows what the build made, reloads after every build, and keeps the last good page when a build fails. The type check is the project's check.",
+      "Plain HTML is still there for a site with no build and nothing to install, and the sites you already have stay as they are. The gallery says which kind each site is."
+    ]
+  },
+  {
+    "version": "0.6.28",
+    "date": "2026-10-12",
+    "items": [
+      "Type /btw and a question to ask something on the side, also while Graft is working. The answer appears above the message box, written from the conversation so far. Neither the question nor the answer is added to the conversation: Graft does not see them, now or later.",
+      "Graft moves more. A page you open rises into place while the sidebar holds still, windows and menus spring open, and a message you send travels up from the message box. A panel comes in from its edge, also when it joins others.",
+      "Settings → Appearance → Motion style chooses between Lively and Calm. Calm is the short fades of 0.6.27. With Motion on Reduced, or a system that asks for less motion, nothing moves in either."
+    ]
+  },
+  {
+    "version": "0.6.27",
+    "date": "2026-10-12",
+    "items": [
+      "Settings opens as a window over what you were doing, and Esc puts you back there. The session underneath keeps working.",
+      "Changing page, session, theme or transcript view cross-fades instead of cutting.",
+      "The panel column slides open and shut, and the conversation moves aside with it.",
+      "A session that moves in the sidebar, into Needs you or to the top after a reply, travels to its new place.",
+      "A task that finishes shows it as it happens.",
+      "A menu opened inside a dialog is drawn over it, not behind it.",
+      "If Graft looks still, Windows may have animations turned off: Settings → Appearance → Motion → On animates Graft anyway."
+    ]
+  },
+  {
+    "version": "0.6.26",
+    "date": "2026-10-12",
+    "items": [
+      "Comment on any line of a diff, in the Changes panel or under an edit in the conversation, or on a line or selection in the editor (Ctrl+Alt+M, or the button above it). Your comments wait above the message box and go to Graft with your next message, each with its file, its line and the code it is about.",
+      "Ctrl+P opens a file by typing part of its name; add :42 to land on a line. Ctrl+T finds a function, class or type by name in a trusted TypeScript or JavaScript project.",
+      "The Changes panel has a Problems tab: the errors and warnings in the files you have changed, from the built-in language server, each opening at its place. Ask Graft to fix these writes the request into the message box for you to send."
+    ]
+  },
+  {
+    "version": "0.6.25",
+    "date": "2026-10-12",
+    "items": [
+      "A file named in a reply opens that file. Click src/app.ts:42 and the Files panel shows it in the editor at that line. Each file on the edited-files card has Open as well.",
+      "Code blocks say which file they are for and how long they are. A block of more than 40 lines shows its first 20 until you open it, and Wrap lines wraps it. Copy still copies all of the code.",
+      "A one-line shell command has a button that types it into the terminal. Graft never runs it: you press Enter.",
+      "Ctrl+F finds text in the conversation you are in. Enter and Shift+Enter step through the matches, and Esc closes it.",
+      "Equations are set as equations. Prices and shell variables are left as they are.",
+      "A Mermaid block has Draw this, which asks Graft to redraw it as a proper diagram."
+    ]
+  },
+  {
+    "version": "0.6.24",
+    "date": "2026-10-11",
+    "items": [
+      "While a picture is being made, a grid of dots stands in for it: a line of bright dots walks the grid from one green dot to the next, and the corner shows the time so far or what the engine last said. The line above reads \u201cCreating image\u201d.",
+      "A picture that has just been made comes into focus instead of popping in. One picture shows large, at its own shape. Click any generated picture to see it in a viewer with zoom (+, \u2212, 0 to fit).",
+      "An SVG the model writes shows as the drawing once its code is complete. The button beside Copy switches between the drawing and its code.",
+      "While Graft searches the web, the line above the steps counts what it has found: \u201cSearching 12 websites\u201d.",
+      "Sources show the picture a page offers for itself, when a page that was read has one. Graft fetches it the way it fetches site icons: from public https addresses, without cookies, and re-encoded before it is shown. Pages read before this version have none.",
+      "In a chat, a quoted block in a reply is a card of its own, so a key fact or a caveat in a report stands out."
+    ]
+  },
+  {
+    "version": "0.6.23",
+    "date": "2026-10-11",
+    "items": [
+      "Ask for a diagram, or type /diagram and what to draw, and Graft draws it with the built-in diagram-design skill: architecture, flows, sequences, data models and forty more kinds, laid out by hand rather than by a layout engine. The diagram appears in the conversation when the turn ends.",
+      "A diagram opens large with zoom, copies to the clipboard as a picture, and saves as PNG or SVG. The file itself is an ordinary .html page in your project that any browser opens.",
+      "Chats draw diagrams too, and keep them with the chat’s files.",
+      "Customize → Skills shows the skills that come with Graft. A skill of your own with the same name replaces one.",
+      "Reading a skill’s own files no longer asks for permission.",
+      "Previews of pages have Geist, Geist Mono and Instrument Serif without a network.",
+      "This build holds three rounds of work in one: the session view and checked edits of 0.6.17, the tool journal and MCP permissions of 0.6.22, and diagrams. Their notes are below."
+    ]
+  },
+  {
+    "version": "0.6.22",
+    "date": "2026-10-11",
+    "items": [
+      "After a crash, a forced quit or a power cut, the agent is told the truth about what it was doing. A command that had started has an unknown outcome and is checked before it is repeated; one that had finished keeps its result; one that never started is said not to have run. A note in the session says what was cut off. Before, all of it was reported as \"not run\".",
+      "A reply that arrives damaged no longer has its commands run. When part of a model's reply is lost on the way, what is left of a command can still look complete and mean something else, so the agent is asked again and the reply is marked as possibly incomplete.",
+      "Stop works even when a tool ignores it: after two seconds the turn goes on without it and says the tool may still be finishing.",
+      "Quitting can no longer hang. Each part of shutting down has a time limit, and one that fails no longer leaves your commands running.",
+      "Integrations: every tool of an MCP server has a permission of its own (Default, Always ask, Allow, Never), and so does the server as a whole. A tool's \"read-only\" label is the server's own word; your choice is not.",
+      "Integrations: choose what a local MCP server gets from your computer's environment. New servers start without your keys, tokens and passwords; servers you already have keep what they had until you change it.",
+      "Limits for one turn: two more, tool calls and retries, and all six now have a group of their own in Settings → Permissions.",
+      "The agent can ask what a change to a file can reach: every file that imports it, directly or through others, and the tests among them, the nearest first.",
+      "A turn that changed files in a project with no checks says so once, and names the checks the project could have."
+    ]
+  },
+  {
+    "version": "0.6.17",
+    "date": "2026-10-10",
+    "items": [
+      "Code sessions keep what Graft says in view. The steps between fold into one line that opens into a list, such as “Read 2 files” or “Created a file, edited 5 files +185 −9”, and a running turn shows the step in progress with the time so far. Your messages sit on the right. Pick Normal, Thinking, Verbose or the earlier one-line Summary from the eye under the message box, or in Settings → Appearance.",
+      "Commands read in the tense that fits: “Running the unit tests” while they run, “Ran the unit tests” afterwards.",
+      "Diffs mark the words that changed inside a line and take syntax colours, in the transcript and in the Changes panel. An edit’s diff names its file.",
+      "In a trusted TypeScript or JavaScript project Graft finds a declaration by its name alone, then every use of it, the classes that implement an interface, and where the type of a value is declared, all from the built-in language server instead of by searching text. The transcript says what it looked up.",
+      "After Graft edits a TypeScript or JavaScript file in a trusted project with its packages installed, the built-in language server checks that file and Graft sees its errors with the edit’s result, so it fixes them in its next step. The transcript lists them under the diff. An edit waits at most five seconds for its check. Settings → Models → Check edits for errors turns this off.",
+      "API keys, tokens and passwords in command output, tool output and diffs are covered until you press the eye beside them. What is stored, and what the model reads, is unchanged. A change you are asked to approve is shown as it is.",
+      "The “Edited files” card of the last turn has Undo. It opens the rewind dialog on Files only, with the files that would change.",
+      "Settings has a search box. Type a word and it finds the setting on whichever page it is, and says which; Enter opens the first one, and the setting shows itself on its page. The pages are listed under headings: You, Models, Agent, App and Data.",
+      "What you were typing survives a restart (never for incognito chats). A session opens where you left it scrolled. The permission-mode menu takes number keys.",
+      "Fixed: a long line in a diff or in command output could stretch the transcript sideways. It now scrolls inside its own box."
+    ]
+  },
+  {
+    "version": "0.6.16",
+    "date": "2026-10-10",
+    "items": [
+      "A stopped or timed-out command no longer leaves processes behind. On Windows, what Git Bash started is ended even when its own parent had already exited, and if that list can't be read the command itself is still stopped. On macOS and Linux, a child that ignores the first signal is ended two seconds later.",
+      "A reply from Claude or Gemini that breaks off mid-stream is reported as an error instead of passing for a finished reply, and its tool calls are not run. What had already arrived stays on screen.",
+      "Pages that Graft shows but did not write are granted no permissions. The hidden window that takes pictures of your sites could be granted location or notifications without asking; every such window now starts with everything refused.",
+      "Editor: Ctrl+S pressed right after typing always saves, and saves everything you typed. Before, that save could be skipped without a word, or write a draft a few letters short.",
+      "Usage: Settings → Usage shows what Graft used on each day and with each model: requests, tokens sent and written, and what it cost. Counting starts with this version. A model with no published price is counted without a cost, and incognito chats are not counted.",
+      "Limits for one turn: Settings → Permissions can pause a turn after a number of tokens, an estimated cost, or minutes of work, counting the agents the turn starts. The pause says which limit was reached and offers to continue. The cost is worked out from published prices, so your bill can differ, and a model with no published price is named when it answers. No limit is set until you set one.",
+      "The backup model also finishes the work of a sub-agent, or of an agent in a group, when that agent's model keeps failing. The agent's record says which model took over and why.",
+      "Gemini 3 and later are told how hard to think by level, as Google's API asks, and the effort menu shows the levels each model has. Earlier Gemini models keep their thinking budget.",
+      "Chats have the / menu: /research, /context, /clear, /compact and the other commands a chat can use. /model opens the chat's model menu. Commands that work on a project, such as /plan, /commit and /review, say so in a chat instead of being sent to the model.",
+      "With only / typed, the menu lists every command instead of the twelve with the shortest names, and the list follows the arrow keys as you move through it.",
+      "A project whose only session is listed under Needs you keeps its header in the sidebar, with the button to start another session there."
+    ]
+  },
+  {
     "version": "0.6.15",
     "date": "2026-10-09",
     "items": [

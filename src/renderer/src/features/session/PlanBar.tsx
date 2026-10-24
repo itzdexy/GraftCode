@@ -42,7 +42,7 @@ export function PlanBar({ plan, todos }: { plan: ApprovedPlan | null; todos: Tod
           className="w-[min(720px,calc(100vw-48px))]"
           footer={
             <Button size="sm" variant="secondary" onClick={copy} leading={<Copy className="size-12" />}>
-              Copy
+              Copy as Markdown
             </Button>
           }
         >

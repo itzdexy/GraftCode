@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChecksConfigSchema, HooksConfigSchema, McpServerNameSchema, SettingsScopeSchema } from './config';
+import { ChecksConfigSchema, HooksConfigSchema, McpInheritSchema, McpServerNameSchema, SettingsScopeSchema } from './config';
 
 /** Customize screen: commands, skills, memory files, hooks and MCP servers. */
 
@@ -30,7 +30,8 @@ export type AgentFileView = z.infer<typeof AgentFileSchema>;
 export const SkillFileSchema = z.object({
   name: z.string(),
   description: z.string(),
-  scope: CustomScopeSchema,
+  /** `builtin`: ships with Graft. Saving a skill takes CustomScopeSchema, which has no such choice. */
+  scope: z.enum(['user', 'project', 'builtin']),
   path: z.string(),
   body: z.string()
 });
@@ -70,7 +71,7 @@ export type McpStateView = z.infer<typeof McpStateSchema>;
 
 /** Server config as shown in the UI: environment and header values never leave main. */
 export const McpConfigViewSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('stdio'), command: z.string(), args: z.array(z.string()), envKeys: z.array(z.string()), cwd: z.string().nullable(), enabled: z.boolean() }),
+  z.object({ type: z.literal('stdio'), command: z.string(), args: z.array(z.string()), envKeys: z.array(z.string()), cwd: z.string().nullable(), inherit: McpInheritSchema, enabled: z.boolean() }),
   z.object({ type: z.literal('http'), url: z.string(), headerKeys: z.array(z.string()), enabled: z.boolean() })
 ]);
 
@@ -83,11 +84,16 @@ export const McpServerViewSchema = z.object({
   error: z.string().nullable(),
   /** What to do when the server is connected but offers no tools yet. */
   hint: z.string().nullable(),
-  tools: z.array(z.object({ name: z.string(), description: z.string(), readOnly: z.boolean() })),
+  /** `registeredAs` is the name the agent calls the tool by, and the name a permission rule for it uses. */
+  tools: z.array(z.object({ name: z.string(), registeredAs: z.string(), description: z.string(), readOnly: z.boolean() })),
   /** Prompts the server publishes, as the slash commands they appear as. */
   prompts: z.array(z.object({ command: z.string(), description: z.string(), argumentHint: z.string().nullable() })),
   /** The server publishes resources the agent can read. */
-  resources: z.boolean()
+  resources: z.boolean(),
+  /** What a connected server says about itself: its name for people, its version, its icon (a data: address). */
+  title: z.string().nullable().optional(),
+  version: z.string().nullable().optional(),
+  icon: z.string().nullable().optional()
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;
 
@@ -102,6 +108,8 @@ export const McpServerInputSchema = z.discriminatedUnion('type', [
     env: SecretMap,
     keepEnv: z.array(z.string().max(200)).max(200),
     cwd: z.string().max(4096).nullable(),
+    /** A server saved without saying so does not get this computer's keys and tokens. */
+    inherit: McpInheritSchema.default('no-secrets'),
     enabled: z.boolean()
   }),
   z.object({

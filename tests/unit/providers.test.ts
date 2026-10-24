@@ -1,16 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseNdjson, parseSse } from '../../src/main/providers/sse';
 import { errorFromHttp, parseRetryAfter, ProviderError } from '../../src/main/providers/errors';
 import { backoffDelay, DEFAULT_RETRY_POLICY, streamWithRetry } from '../../src/main/providers/retry';
 import { AnthropicProvider, toAnthropicMessages } from '../../src/main/providers/anthropic';
 import { OpenAiChatProvider, toChatMessages } from '../../src/main/providers/openaiChat';
 import { GeminiProvider, toGeminiContents } from '../../src/main/providers/gemini';
-import { OllamaProvider } from '../../src/main/providers/ollama';
-import { arrangeModels, familyOf, formatTokens } from '../../src/main/providers/catalog';
+import { readResponsesStream } from '../../src/main/providers/openaiResponses';
+import { ProviderCatalog } from '../../src/main/providers/presets';
+import { OllamaProvider, toOllamaMessages } from '../../src/main/providers/ollama';
+import { arrangeModels, familyOf, formatTokens, LEAN_CONTEXT, leanByDefault } from '../../src/main/providers/catalog';
 import type { StreamEvent, StreamRequest } from '../../src/main/providers/types';
 import type { LlmMessage } from '../../src/shared/schemas/messages';
 import { FakeProvider, fakeModel } from '../support/fakeProvider';
 import { json, ndjson, sse, startFixtureServer, type FixtureServer } from '../support/httpFixture';
+import { makeTempDir, removeDir } from '../support/tmp';
 
 function streamOf(text: string, split = 3): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text);
@@ -262,6 +267,58 @@ describe('Anthropic adapter', () => {
     expect(String(sent?.headers['anthropic-beta'])).toContain('thinking-display-updates');
   });
 
+  it('rejects a stream that ends before the model said it was done: what arrived stays, its tool call is never offered, nothing is retried', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // Everything up to the closed tool call, then the connection ends: no message_delta with a stop reason, no message_stop.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 13)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const seen: StreamEvent[] = [];
+    const retries: number[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+    };
+    const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+    expect(seen.filter((e) => e.type === 'text-delta')).toEqual([
+      { type: 'text-delta', text: 'Reading ' },
+      { type: 'text-delta', text: 'it now.' }
+    ]);
+    expect(seen.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text']);
+    expect(seen.some((e) => e.type === 'finish')).toBe(false);
+    expect(retries).toEqual([]);
+    expect(server.requests.filter((r) => r.path.startsWith('/v1/messages'))).toHaveLength(1);
+  });
+
+  it('takes the stop reason as the end of the reply when the closing event is lost, and keeps the order of what the model wrote', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    // message_delta arrived with stop_reason tool_use; only message_stop is missing.
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 14)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    expect(events.filter((e) => e.type === 'block').map((e) => (e.type === 'block' ? e.block.type : ''))).toEqual(['thinking', 'text', 'tool_use']);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+  });
+
+  it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
+    server.route('POST', '/v1/messages', (_req, res) => sse(res, streamEvents().slice(0, 8)));
+    const provider = new AnthropicProvider({ id: 'a', kind: 'anthropic', preset: null, apiKey: 'sk-test', baseUrl: server.url });
+    const [model] = await provider.listModels();
+    const controller = new AbortController();
+    const run = async (): Promise<void> => {
+      for await (const event of streamWithRetry(provider, request({ model: model! }), controller.signal, () => undefined)) {
+        if (event.type === 'text-delta') controller.abort();
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+  });
+
   it('falls back to summarized thinking when a model rejects progress-update display', async () => {
     server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [modelJson], has_more: false }));
     let calls = 0;
@@ -377,6 +434,42 @@ describe('OpenAI-style chat adapter', () => {
     const events = await collect(provider.streamText(request({ model: fakeModel({ effort: null }) }), new AbortController().signal));
     expect(calls).toBe(2);
     expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('names the model when the provider does not serve it', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('404 page not found');
+    });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'stepfun-ai/step-5-preview' }, effort: null });
+    const host = new URL(server.url).host;
+    await expect(collect(streamWithRetry(provider, request({ model }), new AbortController().signal, () => undefined))).rejects.toMatchObject({
+      code: 'not_found',
+      retryable: false,
+      message: `${host} doesn't serve the model stepfun-ai/step-5-preview. Pick another model, or refresh the list in Settings → Models.`
+    });
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it.each(['', 'Not Found'])('names the model when the 404 says nothing more (%j)', async (body) => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end(body);
+    });
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'gone' }, effort: null });
+    await expect(collect(provider.streamText(request({ model }), new AbortController().signal))).rejects.toThrow(/doesn't serve the model gone\./);
+  });
+
+  it("keeps the provider's own reason for a 404", async () => {
+    server.route('POST', '/api/v1/chat/completions', (_req, res) => json(res, 404, { error: { message: 'No endpoints found that support tool use.' } }));
+    const provider = new OpenAiChatProvider({ id: 'o', kind: 'openrouter', preset: null, apiKey: 'k', baseUrl: `${server.url}/api/v1` });
+    const model = fakeModel({ ref: { providerId: 'o', modelId: 'vendor/model' }, effort: null });
+    await expect(collect(provider.streamText(request({ model }), new AbortController().signal))).rejects.toMatchObject({
+      code: 'not_found',
+      message: `Not found at ${new URL(server.url).host} (404): No endpoints found that support tool use.`
+    });
   });
 
   it.each([
@@ -531,6 +624,165 @@ describe('Gemini adapter', () => {
     expect(contents[1]?.parts[0]).toEqual({ functionResponse: { name: 'Grep', response: { output: '3 matches' } } });
   });
 
+  describe('how hard a model thinks', () => {
+    let dirs: string[] = [];
+    afterEach(() => {
+      for (const dir of dirs) removeDir(dir);
+      dirs = [];
+    });
+
+    /** The catalog as Graft ships it, cut down to what these models need: the named levels each one takes, or a budget. */
+    function catalog(): ProviderCatalog {
+      const dir = makeTempDir();
+      dirs.push(dir);
+      const file = path.join(dir, 'catalog.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          providers: [
+            {
+              id: 'google',
+              name: 'Google',
+              kind: 'gemini',
+              api: null,
+              env: [],
+              doc: null,
+              key: 'required',
+              models: [
+                { id: 'gemini-3.6-flash', n: 'Gemini 3.6 Flash', t: 1, v: 1, r: 1, e: ['minimal', 'low', 'medium', 'high'] },
+                { id: 'gemini-3-pro-preview', n: 'Gemini 3 Pro', t: 1, v: 1, r: 1, e: ['low', 'high'] },
+                { id: 'gemini-2.5-pro', n: 'Gemini 2.5 Pro', t: 1, v: 1, r: 1, b: [128, 32768] }
+              ]
+            }
+          ]
+        })
+      );
+      return new ProviderCatalog(file);
+    }
+
+    const listed = (id: string, thinking = true) => ({ name: `models/${id}`, inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking });
+    beforeEach(() => {
+      server.route('GET', '/v1beta/models', (_req, res) =>
+        json(res, 200, { models: [listed('gemini-3.6-flash'), listed('gemini-3-pro-preview'), listed('gemini-2.5-pro'), listed('gemini-4-ultra'), listed('gemini-3.9-flash', false)] })
+      );
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] } }]));
+    });
+
+    const connect = (known: boolean): GeminiProvider =>
+      new GeminiProvider({ id: 'g', kind: 'gemini', preset: 'google', apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` }, known ? catalog() : null);
+
+    async function efforts(known = true): Promise<Record<string, StreamRequest['model']['effort']>> {
+      return Object.fromEntries((await connect(known).listModels()).map((m) => [m.ref.modelId, m.effort]));
+    }
+
+    /** What a request for `id` at `effort` carries as its thinking settings. */
+    async function thinkingSent(id: string, effort: StreamRequest['effort'], known = true): Promise<unknown> {
+      const provider = connect(known);
+      const model = (await provider.listModels()).find((m) => m.ref.modelId === id);
+      if (!model) throw new Error(`${id} is not listed`);
+      await collect(provider.streamText(request({ model, effort }), new AbortController().signal));
+      return (server.requests.at(-1)?.json() as { generationConfig: { thinkingConfig?: unknown } }).generationConfig.thinkingConfig;
+    }
+
+    it('offers a Gemini 3 model the levels it takes, and asks by level', async () => {
+      const models = await efforts();
+      expect(models['gemini-3.6-flash']).toMatchObject({ levels: ['minimal', 'low', 'medium', 'high', 'taproot'], default: 'medium' });
+      expect(models['gemini-3-pro-preview']).toMatchObject({ levels: ['low', 'high', 'taproot'], default: 'high' });
+
+      expect(await thinkingSent('gemini-3.6-flash', 'medium')).toEqual({ includeThoughts: true, thinkingLevel: 'MEDIUM' });
+      expect(await thinkingSent('gemini-3.6-flash', 'minimal')).toEqual({ includeThoughts: true, thinkingLevel: 'MINIMAL' });
+      // Taproot thinks at the model's strongest level; a budget is never sent beside a level (the API refuses the pair).
+      expect(await thinkingSent('gemini-3-pro-preview', 'taproot')).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+      // Asked at a level the model doesn't have (Graft asks for summaries at "low", titles at a model's lightest): the nearest one it does.
+      expect(await thinkingSent('gemini-3-pro-preview', 'medium')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      expect(await thinkingSent('gemini-3-pro-preview', 'minimal')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      expect(await thinkingSent('gemini-3.6-flash', 'max')).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+    });
+
+    it('keeps the token budget for a model from before Gemini 3, which refuses a level', async () => {
+      expect((await efforts())['gemini-2.5-pro']).toMatchObject({ levels: ['low', 'medium', 'high', 'extra', 'max', 'taproot'] });
+      expect(await thinkingSent('gemini-2.5-pro', 'high')).toEqual({ includeThoughts: true, thinkingBudget: 10_000 });
+      expect(await thinkingSent('gemini-2.5-pro', 'taproot')).toEqual({ includeThoughts: true, thinkingBudget: 24_576 });
+    });
+
+    it('gives a Gemini 3 model the catalog has not heard of the two levels every one of them takes', async () => {
+      const models = await efforts();
+      expect(models['gemini-4-ultra']).toMatchObject({ levels: ['low', 'high', 'taproot'] });
+      // The provider says this one does not think, and nothing says otherwise: no effort control.
+      expect(models['gemini-3.9-flash']).toBeNull();
+      expect(await thinkingSent('gemini-4-ultra', 'low')).toEqual({ includeThoughts: true, thinkingLevel: 'LOW' });
+      // Without a catalog at all, a Gemini 3 model is still asked by level.
+      expect((await efforts(false))['gemini-3.6-flash']).toMatchObject({ levels: ['low', 'high', 'taproot'] });
+      expect(await thinkingSent('gemini-3.6-flash', 'high', false)).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
+    });
+  });
+
+  describe('a reply that is not finished', () => {
+    const listed = { name: 'models/gen-pro-3', displayName: 'Gen Pro 3', inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking: true };
+    const connect = async (): Promise<{ provider: GeminiProvider; model: StreamRequest['model'] }> => {
+      server.route('GET', '/v1beta/models', (_req, res) => json(res, 200, { models: [listed] }));
+      const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+      const [model] = await provider.listModels();
+      return { provider, model: model! };
+    };
+
+    it('rejects EOF without a finish reason: partial text stays, the function call is never offered, nothing is retried', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Looking for it.' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'Grep', args: { pattern: 'x' } } }] } }] } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const seen: StreamEvent[] = [];
+      const retries: number[] = [];
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), new AbortController().signal, ({ attempt }) => retries.push(attempt))) seen.push(event);
+      };
+      const failure = await run().then(
+      () => null,
+      (error: Error & { code?: string }) => error
+    );
+    expect(failure?.code).toBe('network');
+    expect(failure?.message).toContain('stopped before it was complete');
+      expect(seen).toEqual([{ type: 'text-delta', text: 'Looking for it.' }]);
+      expect(retries).toEqual([]);
+      expect(server.requests.filter((r) => r.path.includes(':streamGenerateContent'))).toHaveLength(1);
+    });
+
+    it('accepts a reply whose last chunk carries the finish reason, whatever came in the chunks before', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) =>
+        sse(res, [
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Done ' }] } }] } },
+          { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'here.' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 3 } } }
+        ])
+      );
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events).toContainEqual({ type: 'block', block: { type: 'text', text: 'Done here.' } });
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+    });
+
+    it('takes a blocked prompt as an answer: a refusal, with no candidate and no finish reason', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { promptFeedback: { blockReason: 'SAFETY' } } }]));
+      const { provider, model } = await connect();
+      const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+      expect(events.at(-1)).toEqual({ type: 'finish', reason: 'refusal' });
+    });
+
+    it('reports a stopped request as stopped, not as a reply that broke off', async () => {
+      server.route('POST', /:streamGenerateContent/, (_req, res) => sse(res, [{ data: { candidates: [{ content: { role: 'model', parts: [{ text: 'Partial' }] } }] } }]));
+      const { provider, model } = await connect();
+      const controller = new AbortController();
+      const run = async (): Promise<void> => {
+        for await (const event of streamWithRetry(provider, request({ model }), controller.signal, () => undefined)) {
+          if (event.type === 'text-delta') controller.abort();
+        }
+      };
+      await expect(run()).rejects.toMatchObject({ code: 'aborted' });
+    });
+  });
+
   it('reports an invalid key as an auth error', async () => {
     server.route('GET', '/v1beta/models', (_req, res) => json(res, 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }));
     const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'bad', baseUrl: `${server.url}/v1beta` });
@@ -638,6 +890,32 @@ describe('Ollama adapter', () => {
     }
   });
 
+  it('keeps the Ollama model loaded between turns', async () => {
+    // As on a computer where OLLAMA_KEEP_ALIVE isn't set, whatever this one has.
+    vi.stubEnv('OLLAMA_KEEP_ALIVE', '');
+    try {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
+      const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+      await collect(provider.streamText(request(), new AbortController().signal));
+      const body = server.requests.at(-1)?.json() as Record<string, unknown>;
+      expect(body.keep_alive).toBe('30m');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('leaves keep_alive to OLLAMA_KEEP_ALIVE when it is set', async () => {
+    vi.stubEnv('OLLAMA_KEEP_ALIVE', '-1');
+    try {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [{ message: { role: 'assistant', content: 'ok' }, done: true }]));
+      const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+      await collect(provider.streamText(request(), new AbortController().signal));
+      expect(server.requests.at(-1)?.json()).not.toHaveProperty('keep_alive');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('explains when Ollama is not running', async () => {
     const closed = await startFixtureServer();
     const url = closed.url;
@@ -651,3 +929,399 @@ describe('Ollama adapter', () => {
     await expect(provider.listModels()).rejects.toMatchObject({ code: 'bad_base_url', retryable: false });
   });
 });
+
+describe('tool calls written as text', () => {
+  const call = '<tool_call>{"name":"Read","arguments":{"path":"a"}}</tool_call>';
+  const readCall = { type: 'block', block: { type: 'tool_use', id: expect.stringMatching(/^call_/) as unknown, name: 'Read', input: { path: 'a' } } };
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await server.close();
+  });
+
+  const blocksOf = (events: StreamEvent[]): StreamEvent[] => events.filter((e) => e.type === 'block');
+  const deltasOf = (events: StreamEvent[]): string[] => events.flatMap((e) => (e.type === 'text-delta' ? [e.text] : []));
+
+  it('offers tools in the prompt to an Ollama model without native tools', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'plain:7b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'llama.context_length': 32768 } }));
+    server.route('POST', '/api/chat', (_req, res) => ndjson(res, [
+      { message: { role: 'assistant', content: 'Reading it. <tool' }, done: false },
+      { message: { role: 'assistant', content: call.slice(5) }, done: false },
+      { message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' }
+    ]));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).toMatchObject({ supportsTools: true, toolFormat: 'text' });
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    const body = server.requests.at(-1)?.json() as { messages: Array<{ role: string; content: string }> };
+    expect(body).not.toHaveProperty('tools');
+    expect(body.messages[0]?.content).toMatch(/^You are a test\.\n\n# Calling tools\n[\s\S]*\n### Read\nRead a file\nArguments \(JSON Schema\): \{.*\}$/);
+    expect(blocksOf(events)).toEqual([{ type: 'block', block: { type: 'text', text: 'Reading it.' } }, readCall]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+    expect(deltasOf(events).some((d) => d.includes('<tool'))).toBe(false);
+    expect(deltasOf(events).join('')).toBe('Reading it. ');
+  });
+
+  it('recovers a text tool call from a local OpenAI-compatible server in native mode', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+      { data: { choices: [{ index: 0, delta: { role: 'assistant', content: call } }] } },
+      { data: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } },
+      { data: '[DONE]' }
+    ]));
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null });
+    const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests[0]?.json()).toHaveProperty('tools');
+    expect(blocksOf(events)).toEqual([readCall]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'tool_use' });
+    expect(deltasOf(events).some((d) => d.includes('<tool'))).toBe(false);
+  });
+
+  it('leaves text tool markup alone on a hosted server', async () => {
+    const stream = [
+      { choices: [{ index: 0, delta: { role: 'assistant', content: call } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
+    ].map((data) => `data: ${JSON.stringify(data)}\n\n`).join('') + 'data: [DONE]\n\n';
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream' } }))));
+    const provider = new OpenAiChatProvider({ id: 'h', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: 'https://api.example.com/v1' });
+    const model = fakeModel({ ref: { providerId: 'h', modelId: 'hosted-model' }, effort: null });
+    const events = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(blocksOf(events)).toEqual([{ type: 'block', block: { type: 'text', text: call } }]);
+    expect(events.at(-1)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  const vllm = '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set';
+  const llamaCpp = 'tools param requires --jinja flag';
+  it.each([
+    { adapter: 'Ollama', path: '/api/chat', status: 400, refusal: { error: 'registry.ollama.ai/library/x does not support tools' } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 400, refusal: { error: { message: 'x does not support tools' } } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 400, refusal: { error: { message: vllm } } },
+    { adapter: 'OpenAI-compatible', path: '/v1/chat/completions', status: 500, refusal: { error: { code: 500, message: llamaCpp, type: 'server_error' } } },
+    { adapter: 'Ollama', path: '/api/chat', status: 500, refusal: { error: llamaCpp } }
+  ])('switches to text tools when the server refuses the tools parameter ($adapter, $status)', async ({ adapter, path, status, refusal }) => {
+    server.route('POST', path, async (req, res) => {
+      if ((req.json() as Record<string, unknown>).tools) return json(res, status, refusal);
+      if (adapter === 'Ollama') return ndjson(res, [{ message: { role: 'assistant', content: call }, done: true, done_reason: 'stop' }]);
+      await sse(res, [{ data: { choices: [{ index: 0, delta: { content: call }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]);
+    });
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null });
+    const first = await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[0]?.json()).toHaveProperty('tools');
+    const retried = server.requests[1]?.json() as { messages: Array<{ content: string }> };
+    expect(retried).not.toHaveProperty('tools');
+    expect(retried.messages[0]?.content).toContain('### Read');
+    expect(blocksOf(first)).toEqual([readCall]);
+    // The model is remembered: the next request goes straight to text tools.
+    await collect(provider.streamText(request({ model }), new AbortController().signal));
+    expect(server.requests).toHaveLength(3);
+    expect(server.requests[2]?.json()).not.toHaveProperty('tools');
+  });
+
+  it.each(['Ollama', 'OpenAI-compatible'])('keeps the text it held back in the deltas when the reply from %s breaks off after a marker', async (adapter) => {
+    const parts = ['Reading. <tool_', 'call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, parts.map((content) => ({ message: { role: 'assistant', content }, done: false }))));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, parts.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } }))));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const seen: StreamEvent[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of provider.streamText(request({ model }), new AbortController().signal)) seen.push(event);
+    };
+    await expect(run()).rejects.toMatchObject({ code: 'network' });
+    // The deltas are all the loop keeps of a reply that broke off, so nothing the filter held is lost.
+    expect(deltasOf(seen).join('')).toBe(parts.join(''));
+    expect(blocksOf(seen)).toEqual([]);
+  });
+
+  it.each(['Ollama', 'OpenAI-compatible'])('retries a reply from %s that broke off while all of it was held back', async (adapter) => {
+    let calls = 0;
+    const broken = ['<tool_', 'call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, ++calls === 1
+        ? broken.map((content) => ({ message: { role: 'assistant', content }, done: false }))
+        : [{ message: { role: 'assistant', content: call }, done: true, done_reason: 'stop' }]));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, ++calls === 1
+        ? broken.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } }))
+        : [{ data: { choices: [{ index: 0, delta: { content: call }, finish_reason: 'stop' }] } }, { data: '[DONE]' }]));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const retries: number[] = [];
+    const policy = { ...DEFAULT_RETRY_POLICY, maxRetries: 1, baseDelayMs: 0 };
+    const events = await collect(streamWithRetry(provider, request({ model }), new AbortController().signal, ({ attempt }) => retries.push(attempt), policy));
+    // Nothing was shown, so the broken reply left no trace and could be asked for again.
+    expect(retries).toEqual([1]);
+    expect(deltasOf(events)).toEqual([]);
+    expect(blocksOf(events)).toEqual([readCall]);
+  });
+
+  it.each(['Ollama', 'OpenAI-compatible'])('keeps the held text when %s sends an error after showing some', async (adapter) => {
+    const parts = ['Reading. ', '<tool_call>{"name":"Re'];
+    if (adapter === 'Ollama') {
+      server.route('POST', '/api/chat', (_req, res) => ndjson(res, [
+        ...parts.map((content) => ({ message: { role: 'assistant', content }, done: false })),
+        { error: 'the model stopped' }
+      ]));
+    } else {
+      server.route('POST', '/v1/chat/completions', (_req, res) => sse(res, [
+        ...parts.map((content) => ({ data: { choices: [{ index: 0, delta: { content } }] } })),
+        { data: { error: { message: 'the model stopped', code: 500 } } }
+      ]));
+    }
+    const provider = adapter === 'Ollama'
+      ? new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url })
+      : new OpenAiChatProvider({ id: 'l', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const model = fakeModel({ ref: { providerId: 'l', modelId: 'x' }, effort: null, toolFormat: 'text' });
+    const seen: StreamEvent[] = [];
+    const run = async (): Promise<void> => {
+      for await (const event of provider.streamText(request({ model }), new AbortController().signal)) seen.push(event);
+    };
+    await expect(run()).rejects.toThrow(/the model stopped/);
+    expect(deltasOf(seen).join('')).toBe(parts.join(''));
+  });
+
+  it('keeps native tools for an Ollama hosted model', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'gpt-oss:120b-cloud' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion'], model_info: { 'gptoss.context_length': 131072 } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).not.toHaveProperty('toolFormat');
+    expect(model?.supportsTools).toBe(false);
+  });
+
+  it('lets Settings force native tool calls', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'plain:7b' }, { name: 'coder:7b' }] }));
+    server.route('POST', '/api/show', (req, res) =>
+      json(res, 200, { capabilities: (req.json() as { model: string }).model === 'coder:7b' ? ['completion', 'tools'] : ['completion'] }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [
+      { id: 'plain:7b', toolFormat: 'native' },
+      { id: 'coder:7b', toolFormat: 'text' }
+    ]);
+    const models = Object.fromEntries((await provider.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['plain:7b']).not.toHaveProperty('toolFormat');
+    expect(models['plain:7b']?.supportsTools).toBe(false);
+    // And the other way: a model with native tools can be told to write them as text.
+    expect(models['coder:7b']).toMatchObject({ toolFormat: 'text', supportsTools: true });
+  });
+
+  it('writes earlier calls and their results into the transcript as text', () => {
+    const history: LlmMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Read a' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Reading.' }, { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a' } }] },
+      { role: 'user', content: [{ type: 'tool_result', toolUseId: 't1', content: [{ type: 'text', text: 'hello' }], isError: false }] }
+    ];
+    const assistant = 'Reading.\n\n<tool_call>\n{"name":"Read","arguments":{"path":"a"}}\n</tool_call>';
+    const result = '<tool_response name="Read">\nhello\n</tool_response>';
+    expect(toOllamaMessages('sys', history, false, true)).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Read a' },
+      { role: 'assistant', content: assistant },
+      { role: 'user', content: result }
+    ]);
+    expect(toChatMessages('sys', history, false, undefined, { textTools: true })).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Read a' },
+      { role: 'assistant', content: assistant },
+      { role: 'user', content: result }
+    ]);
+  });
+});
+
+describe('the lean profile for models with a small window on this computer', () => {
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('is lean by default for a model on this computer whose window is known to be up to 64K', () => {
+    expect(leanByDefault(true, LEAN_CONTEXT, true)).toBe(true);
+    expect(leanByDefault(true, LEAN_CONTEXT + 1, true)).toBe(false);
+    expect(leanByDefault(false, 8192, true)).toBe(false);
+    // A window Graft only assumed says nothing about the model, so it keeps the full profile.
+    expect(leanByDefault(true, 32768, false)).toBe(false);
+  });
+
+  describe('on an OpenAI-compatible server on this computer', () => {
+    const local = (customModels: Array<{ id: string; contextWindow?: number }> = []): OpenAiChatProvider =>
+      new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` }, customModels);
+    const llamaCpp = (meta: Record<string, number> = {}): void =>
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder', owned_by: 'llamacpp', ...(Object.keys(meta).length > 0 ? { meta } : {}) }] }));
+
+    it('keeps the full profile when the server says nothing of the window', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder' }] }));
+      const [model] = await local().listModels();
+      expect(model?.contextWindow).toBe(32768);
+      expect(model).not.toHaveProperty('lean');
+    });
+
+    it('is lean when llama.cpp says it loaded a small window', async () => {
+      llamaCpp();
+      server.route('GET', '/props', (_req, res) => json(res, 200, { default_generation_settings: { n_ctx: 16384 } }));
+      const [model] = await local().listModels();
+      expect(model).toMatchObject({ contextWindow: 16384, lean: true });
+    });
+
+    it('is lean when the trained length caps the window, even with no answer from /props', async () => {
+      llamaCpp({ n_ctx_train: 8192 });
+      server.route('GET', '/props', (_req, res) => json(res, 500, { error: { message: 'busy' } }));
+      const [model] = await local().listModels();
+      expect(model).toMatchObject({ contextWindow: 8192, lean: true });
+    });
+
+    it('keeps the full profile when the trained length is larger than the window assumed', async () => {
+      llamaCpp({ n_ctx_train: 262144 });
+      server.route('GET', '/props', (_req, res) => json(res, 500, { error: { message: 'busy' } }));
+      const [model] = await local().listModels();
+      expect(model?.contextWindow).toBe(32768);
+      expect(model).not.toHaveProperty('lean');
+    });
+
+    it('is lean when Settings gives the model a small window', async () => {
+      server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [{ id: 'coder' }] }));
+      const [model] = await local([{ id: 'coder', contextWindow: 16384 }]).listModels();
+      expect(model).toMatchObject({ contextWindow: 16384, lean: true });
+    });
+  });
+
+  it('keeps a local Ollama model at the default 32k lean, since Graft sets its window itself', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'coder:7b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': 131072 } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url });
+    const [model] = await provider.listModels();
+    expect(model).toMatchObject({ contextWindow: 32768, lean: true });
+  });
+
+  it('marks a 32k local Ollama model lean and a 128k one full', async () => {
+    const trained: Record<string, number> = { 'coder:7b': 32768, 'big:70b': 131072, 'giant:480b-cloud': 32768 };
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: Object.keys(trained).map((name) => ({ name })) }));
+    server.route('POST', '/api/show', (req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': trained[(req.json() as { model: string }).model] } }));
+    const provider = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [{ id: 'big:70b', contextWindow: 131072 }]);
+    const models = Object.fromEntries((await provider.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['coder:7b']).toMatchObject({ contextWindow: 32768, lean: true });
+    expect(models['big:70b']?.contextWindow).toBe(131072);
+    expect(models['big:70b']).not.toHaveProperty('lean');
+    // A hosted model costs this computer nothing and is never lean by default, whatever its window.
+    expect(models['giant:480b-cloud']).not.toHaveProperty('lean');
+  });
+
+  it('lets Settings force the full prompt', async () => {
+    server.route('GET', '/api/tags', (_req, res) => json(res, 200, { models: [{ name: 'coder:7b' }, { name: 'big:70b' }] }));
+    server.route('POST', '/api/show', (_req, res) => json(res, 200, { capabilities: ['completion', 'tools'], model_info: { 'llama.context_length': 131072 } }));
+    const ollama = new OllamaProvider({ id: 'l', kind: 'ollama', preset: null, apiKey: null, baseUrl: server.url }, [
+      { id: 'coder:7b', prompt: 'full' },
+      { id: 'big:70b', contextWindow: 131072, prompt: 'lean' }
+    ]);
+    const models = Object.fromEntries((await ollama.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(models['coder:7b']?.contextWindow).toBe(32768);
+    expect(models['coder:7b']).not.toHaveProperty('lean');
+    expect(models['big:70b']).toMatchObject({ contextWindow: 131072, lean: true });
+
+    // An OpenAI-compatible server on this computer follows the same rule, and the same setting.
+    server.route('GET', '/v1/models', (_req, res) => json(res, 200, { data: [] }));
+    const local = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` }, [
+      { id: 'small', contextWindow: 32768 },
+      { id: 'wide', contextWindow: 131072 },
+      { id: 'forced', contextWindow: 16384, prompt: 'full' }
+    ]);
+    const listed = Object.fromEntries((await local.listModels()).map((m) => [m.ref.modelId, m]));
+    expect(listed['small']).toMatchObject({ lean: true });
+    expect(listed['wide']).not.toHaveProperty('lean');
+    expect(listed['forced']).not.toHaveProperty('lean');
+  });
+});
+
+describe('an event of a stream that cannot be read', () => {
+  let server: FixtureServer;
+  beforeEach(async () => {
+    server = await startFixtureServer();
+  });
+  afterEach(async () => {
+    await server.close();
+  });
+  const finish = (events: StreamEvent[]): StreamEvent | undefined => events.findLast((e) => e.type === 'finish');
+
+  it('is reported by the OpenAI-style adapter, where what is left of a tool call can parse and mean something else', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) =>
+      sse(res, [
+        { data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'Shell', arguments: '{"command":"rm -rf ./build' } }] } }] } },
+        // Cut off in the middle: this piece carried "/cache".
+        { data: '{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"/cac' },
+        { data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"}' } }] } }] } },
+        { data: { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] } },
+        { data: '[DONE]' }
+      ])
+    );
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const events = await collect(provider.streamText(request({ model: fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null }) }), new AbortController().signal));
+    // The call still arrives, whole-looking and wrong, which is why the count has to travel with it.
+    expect(events.filter((e) => e.type === 'block')).toEqual([{ type: 'block', block: { type: 'tool_use', id: 'call_1', name: 'Shell', input: { command: 'rm -rf ./build' } } }]);
+    expect(finish(events)).toEqual({ type: 'finish', reason: 'tool_use', damaged: 1 });
+  });
+
+  it('is not what a keep-alive is: a line that is not an event at all is passed over as before', async () => {
+    server.route('POST', '/v1/chat/completions', (_req, res) =>
+      sse(res, [
+        { data: 'ping' },
+        { data: { choices: [{ index: 0, delta: { content: 'ok' } }] } },
+        { data: '' },
+        { data: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } },
+        { data: '[DONE]' }
+      ])
+    );
+    const provider = new OpenAiChatProvider({ id: 'c', kind: 'openai-compatible', preset: null, apiKey: null, baseUrl: `${server.url}/v1` });
+    const events = await collect(provider.streamText(request({ model: fakeModel({ ref: { providerId: 'c', modelId: 'local-model' }, effort: null }) }), new AbortController().signal));
+    expect(finish(events)).toEqual({ type: 'finish', reason: 'stop' });
+  });
+
+  it('is reported by the Gemini adapter', async () => {
+    const listed = { name: 'models/gen-pro-3', displayName: 'Gen Pro 3', inputTokenLimit: 1_048_576, outputTokenLimit: 65_536, supportedGenerationMethods: ['generateContent'], thinking: true };
+    server.route('GET', '/v1beta/models', (_req, res) => json(res, 200, { models: [listed] }));
+    server.route('POST', /:streamGenerateContent/, (_req, res) =>
+      sse(res, [
+        { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'First, ' }] } }] } },
+        { data: '{"candidates":[{"content":{"role":"model","parts":[{"text":"the part that was lo' },
+        { data: { candidates: [{ content: { role: 'model', parts: [{ text: 'and the end.' }] }, finishReason: 'STOP' }] } }
+      ])
+    );
+    const provider = new GeminiProvider({ id: 'g', kind: 'gemini', preset: null, apiKey: 'AIza-test', baseUrl: `${server.url}/v1beta` });
+    const [model] = await provider.listModels();
+    const events = await collect(provider.streamText(request({ model: model! }), new AbortController().signal));
+    expect(finish(events)).toMatchObject({ type: 'finish', reason: 'stop', damaged: 1 });
+  });
+
+  it('is reported by the OpenAI Responses reader', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const lines = [
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'Half ' })}`,
+          'data: {"type":"response.output_text.delta","delta":"of th',
+          `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Half ' }] }], usage: { input_tokens: 1, output_tokens: 1 } } })}`
+        ];
+        controller.enqueue(new TextEncoder().encode(lines.map((line) => `${line}\n\n`).join('')));
+        controller.close();
+      }
+    });
+    const events = await collect(readResponsesStream(body, new AbortController().signal, 'gpt-test'));
+    expect(finish(events)).toMatchObject({ type: 'finish', damaged: 1 });
+  });
+});
+

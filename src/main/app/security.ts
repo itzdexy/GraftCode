@@ -20,6 +20,16 @@ export async function openExternalSafely(raw: string): Promise<void> {
   await shell.openExternal(raw);
 }
 
+/**
+ * Refuses every permission a page asks for or checks. Electron grants them all to a session
+ * that has no handler: camera, microphone, location, the clipboard. This is the rule for a
+ * session that shows pages Graft did not write.
+ */
+export function denyAllPermissions(target: Pick<Session, 'setPermissionRequestHandler' | 'setPermissionCheckHandler'>): void {
+  target.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  target.setPermissionCheckHandler(() => false);
+}
+
 export interface PermissionPolicy {
   /** Microphone access for dictation; granted only while a transcription provider is configured. */
   allowMicrophone: () => boolean;
@@ -44,10 +54,15 @@ function applyPermissionPolicy(target: Session, policy: PermissionPolicy): void 
 
 /**
  * App-wide hardening: no navigation away from the app, no new windows (links
- * open in the default browser), no <webview>, and deny-by-default permissions.
+ * open in the default browser), no <webview>, and deny-by-default permissions
+ * in the app's own session and in every session created later.
  */
 export function installSecurityPolicy(policy: PermissionPolicy): void {
   applyPermissionPolicy(session.defaultSession, policy);
+  // Every session made from here on starts out refusing everything, whichever part of Graft makes
+  // it and whether or not that part remembers to. The ones with rules of their own (the Browser
+  // panel) set them after the session exists, which replaces this.
+  app.on('session-created', (created) => denyAllPermissions(created));
 
   app.on('web-contents-created', (_event, contents: WebContents) => {
     contents.on('will-attach-webview', (event) => event.preventDefault());

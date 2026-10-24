@@ -55,6 +55,7 @@ describe('agents in the session view', () => {
 function summary(extra: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: 's', kind: 'chat', title: 'Before', status: 'idle', pinned: false, archived: false, unread: false, incognito: false,
+    groupId: null, completedAt: null,
     projectId: null, projectPath: null, projectName: null, cwd: null, worktreePath: null, branch: null, baseBranch: null,
     model: null, effort: null, permissionMode: 'ask', lastError: null,
     usage: { totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, contextTokens: 0, contextLimit: 0, costUsd: null },

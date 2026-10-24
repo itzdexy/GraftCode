@@ -85,3 +85,45 @@ GitHub main was fast-forwarded to the verified upgrade. New CI run `38003950510`
 also failed before any steps started, with the account billing-lock annotation;
 local checks provide the current execution evidence. See `TESTING_APP.md` to try it.
 The larger milestones listed in `UPGRADE_MASTER_PLAN.md` remain incomplete.
+
+## 0.6.16 round (2026-10-10)
+
+Branch `feat/reliability-security-upgrade`, 0.6.16, on top of `main` at `5f586fc`.
+Not merged, not released.
+
+Done, each with a test that failed first: commands stopped on every path (a failed
+process listing, a child that ignores SIGTERM, a session closing, the app shutting
+down); a cut-off Anthropic or Gemini stream is an error; a new browser session
+grants no permissions; a save pressed right after typing is never dropped; limits
+for one turn (tokens, estimated cost, minutes) shared by the turn and the agents it
+starts; usage by day; a backup model for sub-agents and groups; Gemini thinking
+levels; the `/` menu in chats; `session.ts` split; workflows hardened; the unit and
+desktop suites green in a Linux container as well as on Windows.
+
+Not done from the master brief: a durable execution journal with replay, persistent
+indexing, best-of-N, narrowing what a stdio MCP server inherits, a UI pass,
+start-up and memory measurements, macOS, signing, hosted CI, a published release.
+Results and their commits: `UPGRADE_TEST_REPORT.md`, section 0.6.16. What is left
+open and why: `PRODUCT_ROADMAP.md`, Known weaknesses.
+
+## 0.6.22 round (2026-10-11)
+
+Branch `feat/durable-agent-and-isolation`, 0.6.22, on top of `main` at `84a2269`.
+Not merged, not released. Numbered after 0.6.17 to 0.6.21, which other local branches
+hold.
+
+Done, each with a test that failed first: a journal of tool calls, so that a turn the
+app stops in the middle of is answered with what is known instead of "not run"; Stop
+for a tool that ignores it; no tool calls from a reply that lost an event; quitting in
+stages with time limits; a permission for each MCP tool and for a server; a choice of
+what a local server inherits; limits on tool calls and retries; `Symbols` "impact"; a
+note when nothing checked a turn's changes; a script that times startup and quit.
+
+Measured before deciding, and not built: a persistent index for the code lookups, which
+answer in 1 to 69 ms on this repository without one.
+
+Not done from the master brief: finding and ending a command that outlived the app,
+best-of-N, a limit for a session or a day, a UI pass, memory measurements, macOS,
+signing, hosted CI, a published release. Results and their commits:
+`UPGRADE_TEST_REPORT.md`, section 0.6.22.
+

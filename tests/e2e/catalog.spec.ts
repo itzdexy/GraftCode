@@ -65,10 +65,13 @@ test('native shutdown evidence disables a retired model without silently replaci
     };
   });
   const selected = await graft.window.evaluate(async () => {
-    const bridge = (window as unknown as { graft: { invoke(channel: string, input?: unknown): Promise<{ ok: boolean; value: unknown }> } }).graft;
+    const bridge = (window as unknown as { graft: { invoke(channel: string, input?: unknown): Promise<{ ok: boolean; value: unknown; error?: { message: string } }> } }).graft;
     const before = (await bridge.invoke('settings:get')).value as { defaults: { model: unknown } };
+    // Without an OS keyring (Linux containers), a key is stored only after the opt-in a user there has to give.
+    const keyring = (await bridge.invoke('secrets:status')).value as { encryptionAvailable: boolean; plaintextAllowed: boolean };
+    if (!keyring.encryptionAvailable && !keyring.plaintextAllowed) await bridge.invoke('settings:update', { security: { allowPlaintextKeys: true } });
     const added = await bridge.invoke('providers:add', { kind: 'openai', preset: null, label: 'Lifecycle fixture', baseUrl: null, apiKey: 'fixture-key' });
-    if (!added.ok) throw new Error('Could not add lifecycle fixture');
+    if (!added.ok) throw new Error(`Could not add lifecycle fixture: ${added.error?.message ?? 'no reason given'}`);
     const listed = await bridge.invoke('models:list', { refresh: true });
     if (!listed.ok) throw new Error('Could not discover lifecycle fixture');
     return before.defaults.model;

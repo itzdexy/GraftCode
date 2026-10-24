@@ -208,5 +208,57 @@ CREATE INDEX idx_missions_session ON missions (session_id, created_at);
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (session_id, path)
     ) STRICT;`
+  },
+  {
+    version: 8,
+    name: 'usage by day',
+    sql: `CREATE TABLE usage_days (
+      day TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      requests INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      unpriced INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, provider_id, model_id)
+    ) STRICT;`
+  },
+  {
+    // Tool calls from the moment they start until their results are in the conversation
+    // (agent/journal.ts). Rows are few: a call is forgotten as soon as its result is stored.
+    version: 9,
+    name: 'tool journal',
+    sql: `CREATE TABLE tool_journal (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      tool_use_id TEXT NOT NULL,
+      root_id TEXT NOT NULL,
+      agent TEXT,
+      name TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      effect TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      result TEXT,
+      PRIMARY KEY (session_id, tool_use_id)
+    ) STRICT;`
+  },
+  {
+    // Named groups the user files sessions under (sidebar → Move to group), and the mark that a
+    // session is completed: it leaves the working lists and waits under Completed until it is
+    // marked as in progress or someone writes to it again.
+    version: 10,
+    name: 'session groups and completed sessions',
+    sql: `
+CREATE TABLE session_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+ALTER TABLE sessions ADD COLUMN group_id TEXT REFERENCES session_groups(id) ON DELETE SET NULL;
+ALTER TABLE sessions ADD COLUMN completed_at INTEGER;
+CREATE INDEX idx_sessions_group ON sessions (group_id);`
   }
 ];

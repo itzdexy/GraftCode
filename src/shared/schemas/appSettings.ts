@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DARK_CODE_THEME_IDS, DEFAULT_CODE_THEMES, LIGHT_CODE_THEME_IDS } from '../codeThemes';
 import { EffortLevelSchema, ModelRefSchema, PermissionModeSchema, RECOMMENDED_EFFORT } from './common';
 import { MODEL_ROLES, ModelRoleSchema, type ModelRoleId } from './agentRuns';
 
@@ -26,7 +27,13 @@ export const SHORTCUT_IDS = [
   'cyclePermissionMode',
   'openSettings',
   'toggleFiles',
-  'commandPalette'
+  'commandPalette',
+  'findInTranscript',
+  'findNext',
+  'findPrevious',
+  'quickOpen',
+  'goToSymbol',
+  'searchFiles'
 ] as const;
 export const ShortcutIdSchema = z.enum(SHORTCUT_IDS);
 export type ShortcutId = z.infer<typeof ShortcutIdSchema>;
@@ -42,7 +49,13 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
   cyclePermissionMode: 'Shift+Tab',
   openSettings: 'Ctrl+,',
   toggleFiles: 'Ctrl+Shift+F',
-  commandPalette: 'Ctrl+Shift+P'
+  commandPalette: 'Ctrl+Shift+P',
+  findInTranscript: 'Ctrl+F',
+  findNext: 'F3',
+  findPrevious: 'Shift+F3',
+  quickOpen: 'Ctrl+P',
+  goToSymbol: 'Ctrl+T',
+  searchFiles: 'Ctrl+Shift+H'
 };
 
 /** Settings → Appearance: colour palettes (generated in styles/palettes.css) and accent colours. */
@@ -53,6 +66,17 @@ export type AccentId = (typeof ACCENT_IDS)[number];
 /** Settings → Appearance → Motion. */
 export const MOTION_SETTINGS = ['system', 'on', 'reduced'] as const;
 export type MotionSetting = (typeof MOTION_SETTINGS)[number];
+/** Settings → Appearance → Motion style: how much moves when motion is on. */
+export const MOTION_STYLES = ['lively', 'calm'] as const;
+export type MotionStyle = (typeof MOTION_STYLES)[number];
+
+/**
+ * How a code session's transcript shows a turn's work. "normal": what the agent says stays in view and
+ * the tool steps between fold into groups. "thinking" also shows its thoughts, "verbose" opens every
+ * step, and "summary" folds a whole turn into one line above its answer.
+ */
+export const TRANSCRIPT_VIEWS = ['normal', 'thinking', 'verbose', 'summary'] as const;
+export type TranscriptView = (typeof TRANSCRIPT_VIEWS)[number];
 
 /** Settings → Personalization: how answers are written, in chats and code sessions. */
 export const RESPONSE_STYLES = ['default', 'concise', 'explanatory', 'learning'] as const;
@@ -92,8 +116,14 @@ export const AppSettingsSchema = z.object({
     codeFontSize: z.number().int().min(10).max(20),
     /** "system" follows the operating system's animation setting; "on" animates even when it asks for less. */
     motion: z.enum(MOTION_SETTINGS),
+    /** "lively": pages rise in, windows spring open, a sent message travels. "calm": short fades and a few pixels. */
+    motionStyle: z.enum(MOTION_STYLES),
     /** Width of the transcript and composer column. */
-    transcriptWidth: z.enum(['narrow', 'medium', 'wide'])
+    transcriptWidth: z.enum(['narrow', 'medium', 'wide']),
+    transcriptView: z.enum(TRANSCRIPT_VIEWS),
+    /** How code is colored in the dark theme and in the light one (shiki themes). */
+    codeThemeDark: z.enum(DARK_CODE_THEME_IDS),
+    codeThemeLight: z.enum(LIGHT_CODE_THEME_IDS)
   }),
   defaults: z.object({
     model: ModelRefSchema.nullable(),
@@ -122,7 +152,32 @@ export const AppSettingsSchema = z.object({
     /** Code sessions may see the screen and use the mouse and keyboard (asks before each action). */
     computerUse: z.boolean(),
     /** Pause a turn after this many model steps; null lets turns run until the work is done. */
-    maxSteps: z.number().int().min(10).max(10_000).nullable()
+    maxSteps: z.number().int().min(10).max(10_000).nullable(),
+    /**
+     * Limits for one turn, with every sub-agent and group it starts: the tokens that cost money, the
+     * estimated cost in US dollars, and the minutes it works (waiting for the user doesn't count).
+     * null sets none. Reaching one pauses the turn and offers to continue.
+     */
+    turnTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    /** Also for one turn and what it starts: tool calls started, and failed requests sent again. */
+    turnToolCalls: z.number().int().min(1).max(1_000_000).nullable(),
+    turnRetries: z.number().int().min(0).max(10_000).nullable(),
+    turnCostUsd: z.number().min(0.01).max(100_000).nullable(),
+    turnMinutes: z.number().int().min(1).max(10_080).nullable(),
+    /**
+     * Limits that hold across turns: everything the session has used, everything the sessions of its
+     * project have used, and everything used today on this computer (every session). Tokens are the
+     * ones that cost money and cost is estimated in US dollars; null sets none. Reaching one pauses
+     * the turn and offers to continue.
+     */
+    sessionTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    sessionCostUsd: z.number().min(0.01).max(100_000).nullable(),
+    projectTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    projectCostUsd: z.number().min(0.01).max(100_000).nullable(),
+    dayTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
+    dayCostUsd: z.number().min(0.01).max(100_000).nullable(),
+    /** After an edit, ask the built-in language server for the errors in the edited file (trusted projects whose packages are installed on this computer). */
+    checkEdits: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -173,7 +228,9 @@ export const AppSettingsSchema = z.object({
     comfyEnabled: z.boolean(),
     comfyUrl: z.url({ protocol: /^https?$/ }).max(500),
     /** Checkpoint for plain text-to-image; empty uses the first one installed. */
-    comfyCheckpoint: z.string().max(300)
+    comfyCheckpoint: z.string().max(300),
+    /** OpenRouter video model GenerateVideo uses; empty uses the default. */
+    videoModel: z.string().max(200)
   }),
   /** Read aloud: a natural voice from OpenRouter's speech models, or this computer's own voices. */
   voice: z.object({
@@ -204,10 +261,10 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: '', avatar: null },
   onboarding: { step: 'name', providerKind: null, providerPreset: null, providerId: null },
-  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', transcriptWidth: 'narrow' },
+  appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', motionStyle: 'lively', transcriptWidth: 'narrow', transcriptView: 'normal', codeThemeDark: DEFAULT_CODE_THEMES.dark, codeThemeLight: DEFAULT_CODE_THEMES.light },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },
@@ -216,7 +273,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   search: { engine: 'auto', searxngUrl: null },
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   agents: { routing: 'session', roles: Object.fromEntries(MODEL_ROLES.map((role) => [role, null])) as Record<ModelRoleId, null>, maxParallel: 4, tokenBudget: null, retries: 1 },
-  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '' },
+  media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '', videoModel: '' },
   personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }

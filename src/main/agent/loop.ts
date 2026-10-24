@@ -10,6 +10,8 @@ import { streamWithRetry, type RetryPolicy } from '../providers/retry';
 import type { FinishReason, LLMProvider, RequestPrivacy, StreamRequest } from '../providers/types';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import { classifyCommand } from '../permissions/commandRisk';
+import { NOT_RUN } from './history';
+import type { LoopJournal } from './journal';
 import type { Decision, PermissionQuery } from '../permissions/engine';
 import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
@@ -58,6 +60,11 @@ const FALLBACK_REASONS: Partial<Record<ProviderErrorCode, string>> = {
   network: 'unreachable'
 };
 
+/** What a failure that another model may not have is called ("overloaded"); undefined for one that would follow the turn anywhere. */
+export function backupReason(error: ProviderError): string | undefined {
+  return FALLBACK_REASONS[error.code];
+}
+
 /** Everything the loop needs from its surroundings (session, UI, storage). */
 export interface LoopHost {
   append(role: 'user' | 'assistant', content: ContentBlock[], meta: MessageMeta, id?: string): StoredMessage;
@@ -90,10 +97,27 @@ export interface LoopHost {
    */
   takeSteering?(signal: AbortSignal): Promise<ContentBlock[][]>;
   /**
+   * What has to be done before anything changes: the snapshot Rewind goes back to, which is taken while the model
+   * starts answering. Awaited before each call that may change something; a call that only looks doesn't wait.
+   */
+  beforeChange?(): Promise<void>;
+  /**
    * Another model to finish the turn with, after `error` ended a request before any
    * output and after its retries; null when there is none. Asked at most once a turn.
    */
-  fallback?(error: ProviderError): Promise<LoopModel | null>;
+  fallback?(error: ProviderError, signal: AbortSignal): Promise<LoopModel | null>;
+  /**
+   * Why the turn has to pause before its next request (a limit on tokens, cost or time was
+   * passed), or null. The same answer goes to every loop of a turn: the limits are the turn's.
+   */
+  overBudget?(): string | null;
+  /** A failed request is about to be sent again (counted against the turn's limit on retries). */
+  onRetry?(): void;
+  /**
+   * Where tool calls are written down as they start and end, so that a turn the app stops in
+   * the middle of can be answered truthfully afterwards (agent/journal.ts).
+   */
+  journal?: LoopJournal;
   log(level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, string | number | boolean>): void;
 }
 
@@ -102,6 +126,8 @@ export interface LoopConfig {
   model: ModelInfo;
   registry: ToolRegistry;
   toolNames: string[];
+  /** What a tool is in this session, where that differs from its own description (RunAgents in a chat). */
+  toolDescriptions?: Partial<Record<string, string>>;
   system: string;
   effort: EffortLevel | null;
   webSearch: boolean;
@@ -111,6 +137,8 @@ export interface LoopConfig {
   /** Model steps before the turn pauses; null runs until the work is done (the repeat guard still applies). */
   maxIterations: number | null;
   retryPolicy?: RetryPolicy;
+  /** How long a tool may take to return once the turn is stopped, before it is no longer waited for (default 2 s). */
+  stopGraceMs?: number;
   /** Label shown on permission prompts raised by a sub-agent. */
   agentLabel: string | null;
   /** Taproot: one forced verification pass before the turn may end. */
@@ -121,6 +149,9 @@ export interface LoopConfig {
   stripThinking: boolean;
   sessionId: string;
 }
+
+/** How long a tool is waited for after the turn was stopped, when the config says nothing. */
+const STOP_GRACE_MS = 2_000;
 
 export interface LoopResult {
   reason: 'completed' | 'interrupted' | 'error' | 'guard';
@@ -168,18 +199,37 @@ function resultBlock(toolUseId: string, result: ToolResult, extra: string[]): To
   };
 }
 
-async function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Promise<T | 'timeout'> {
-  let timer: NodeJS.Timeout | undefined;
+/**
+ * Waits for a tool: until it returns, until its time is up, or, once the turn is stopped,
+ * for `graceMs` more. A tool is asked to stop through its own signal and most return what
+ * they have; one that ignores it is no longer waited for ('ignored'), so that Stop works
+ * whatever a tool does. Its late answer, if one comes, is dropped.
+ */
+async function waitForTool<T>(work: Promise<T>, timeoutMs: number, onTimeout: () => void, stopped: AbortSignal, graceMs: number): Promise<T | 'timeout' | 'ignored'> {
+  let limit: NodeJS.Timeout | undefined;
+  let grace: NodeJS.Timeout | undefined;
+  let arm: (() => void) | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => {
+    limit = setTimeout(() => {
       onTimeout();
       resolve('timeout');
-    }, ms);
+    }, timeoutMs);
+  });
+  const ignored = new Promise<'ignored'>((resolve) => {
+    arm = () => {
+      grace = setTimeout(() => resolve('ignored'), graceMs);
+    };
+    if (stopped.aborted) arm();
+    else stopped.addEventListener('abort', arm, { once: true });
   });
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race([work, timeout, ignored]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(limit);
+    clearTimeout(grace);
+    if (arm) stopped.removeEventListener('abort', arm);
+    // Whatever the tool does after this is nobody's to handle.
+    work.catch(() => undefined);
   }
 }
 
@@ -189,6 +239,9 @@ async function prepareCall(call: ToolUseBlock, config: LoopConfig, host: LoopHos
   if (!tool) return { ...base, error: `Unknown tool "${call.name}". Available tools: ${config.toolNames.join(', ')}.` };
   if (call.meta?.invalidJson === 'true') {
     return { ...base, tool, error: 'The tool input was not valid JSON (the response may have been cut off). Call the tool again with complete arguments.' };
+  }
+  if (call.meta?.damaged === 'true') {
+    return { ...base, tool, error: 'Not run: part of the reply that asked for this was damaged on the way and left out, so what it asks for may not be what was meant. Ask for it again.' };
   }
   const parsed = (tool.input as z.ZodType).safeParse(call.input);
   if (!parsed.success) return { ...base, tool, error: `Invalid input for ${tool.name}: ${zodMessage(parsed.error)}` };
@@ -234,28 +287,42 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
       },
       signal
     );
-    if (signal.aborted) return errorBlock(call.id, 'Not run: the turn was interrupted.');
+    if (signal.aborted) return errorBlock(call.id, NOT_RUN);
     if (answer.decision === 'deny') {
       const feedback = answer.feedback?.trim();
       return errorBlock(call.id, `The user denied this action.${feedback ? ` Their feedback: ${feedback}` : ' Choose a different approach or ask what they want.'}`, true);
     }
   }
 
+  if (host.beforeChange && changesSomething(call)) {
+    await host.beforeChange();
+    if (signal.aborted) return errorBlock(call.id, NOT_RUN);
+  }
+
+  // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.
+  host.journal?.started({ id: call.id, name: tool.name, summary: p.descriptor.summary, effect: effectOf(call) }, config.agentLabel);
+  /** How the call ended, written down before anything else is done with it. */
+  const ended = (block: ToolResultBlock): ToolResultBlock => {
+    host.journal?.finished(call.id, block);
+    return block;
+  };
   host.emit({ type: 'tool-start', toolUseId: call.id, name: tool.name, summary: p.descriptor.summary });
   const controller = new AbortController();
   const forward = (): void => controller.abort();
   signal.addEventListener('abort', forward, { once: true });
-  let result: ToolResult | 'timeout';
+  let result: ToolResult | 'timeout' | 'ignored';
   try {
-    result = await withTimeout(tool.execute(p.input as never, host.toolContext(call.id, controller.signal)), tool.timeoutMs, () => controller.abort());
+    result = await waitForTool(tool.execute(p.input as never, host.toolContext(call.id, controller.signal)), tool.timeoutMs, () => controller.abort(), signal, config.stopGraceMs ?? STOP_GRACE_MS);
   } catch (error) {
     signal.removeEventListener('abort', forward);
-    if (signal.aborted || isAbortError(error)) return errorBlock(call.id, 'Interrupted by the user.');
+    if (signal.aborted || isAbortError(error)) return ended(errorBlock(call.id, 'Interrupted by the user.'));
     host.log('error', `Tool ${tool.name} failed`, { message: (error as Error).message });
-    return errorBlock(call.id, `${tool.name} failed: ${(error as Error).message}`);
+    return ended(errorBlock(call.id, `${tool.name} failed: ${(error as Error).message}`));
   }
   signal.removeEventListener('abort', forward);
-  if (result === 'timeout') return errorBlock(call.id, `${tool.name} timed out after ${Math.round(tool.timeoutMs / 1000)}s and was stopped.`);
+  if (result === 'timeout') return ended(errorBlock(call.id, `${tool.name} timed out after ${Math.round(tool.timeoutMs / 1000)}s and was stopped.`));
+  if (result === 'ignored') return ended(errorBlock(call.id, 'Interrupted by the user. The tool did not stop when asked and may still be finishing.'));
+  ended(resultBlock(call.id, result, []));
 
   const extra: string[] = [];
   if (host.hooks?.has('PostToolUse')) {
@@ -298,7 +365,7 @@ async function executeCalls(calls: ToolUseBlock[], config: LoopConfig, host: Loo
   const results: ToolResultBlock[] = [];
   for (const batch of toBatches(prepared, overlaps)) {
     if (signal.aborted) {
-      results.push(...batch.map((p) => errorBlock(p.call.id, 'Not run: the turn was interrupted.')));
+      results.push(...batch.map((p) => errorBlock(p.call.id, NOT_RUN)));
       continue;
     }
     results.push(...(await Promise.all(batch.map((p) => runCall(p, config, host, signal)))));
@@ -325,6 +392,14 @@ function changesSomething(call: ToolUseBlock): boolean {
   // Looking at what ComfyUI has installed changes nothing; running a workflow saves files.
   if (call.name === 'ComfyUI') return (call.input as { action?: unknown } | null)?.action === 'run';
   return !LOOKING_TOOLS.has(call.name);
+}
+
+/**
+ * Whether running a call again could do harm, for the journal. A call that starts agents
+ * changes nothing itself: what its agents did decides, and that is written down under it.
+ */
+function effectOf(call: ToolUseBlock): 'read' | 'change' {
+  return call.name === 'RunAgents' || !changesSomething(call) ? 'read' : 'change';
 }
 
 /**
@@ -366,6 +441,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       });
       return done('guard');
     }
+    const over = host.overBudget?.() ?? null;
+    if (over !== null) {
+      // An agent the turn started just stops; the turn itself says why, once, and offers to continue.
+      if (config.agentLabel === null) host.emit({ type: 'notice', level: 'warning', text: over, action: 'continue' });
+      return done('guard');
+    }
 
     const estimate = lastContext > 0 ? lastContext : estimateMessagesTokens(history) + estimateTextTokens(config.system);
     try {
@@ -389,6 +470,10 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     let pendingText = '';
     let pendingThinking = '';
     let finish: FinishReason = 'other';
+    /** Whether the stream said the reply was complete; only then are its blocks the whole record. */
+    let finished = false;
+    /** Events of this reply that arrived unreadable (see StreamEvent 'finish'). */
+    let damaged = 0;
     let responseUsage: Usage | null = null;
     let responseCost: number | null = null;
     const request: StreamRequest = {
@@ -396,7 +481,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       system: config.system,
       // Thinking belongs to the model that did it: another model gets the history without.
       messages: config.stripThinking || switched ? withoutThinking(history) : history,
-      tools: config.registry.specs(config.toolNames),
+      tools: config.registry.specs(config.toolNames, config.toolDescriptions),
       effort: active.effort,
       webSearch: config.webSearch && active.model.supportsWebSearch,
       cacheKey: config.cacheKey,
@@ -409,7 +494,13 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
         active.provider,
         request,
         signal,
-        (info) => host.emit({ type: 'retrying', attempt: info.attempt, delayMs: info.delayMs, reason: info.error.message }),
+        (info) => {
+          host.onRetry?.();
+          // The turn's limit on retries: this one is not made. What failed is reported below, as a pause.
+          if ((host.overBudget?.() ?? null) !== null) return false;
+          host.emit({ type: 'retrying', attempt: info.attempt, delayMs: info.delayMs, reason: info.error.message });
+          return true;
+        },
         config.retryPolicy
       )) {
         switch (event.type) {
@@ -431,7 +522,9 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
             responseCost = event.costUsd ?? null;
             break;
           case 'finish':
+            finished = true;
             finish = event.reason;
+            damaged = event.damaged ?? 0;
             break;
         }
       }
@@ -440,8 +533,12 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
     // A failed or cancelled stream may never emit its final blocks. Retain the
     // summaries already visible in the UI, without inventing provider signatures.
-    if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
-    if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    // A finished reply's blocks are its record: an adapter may have streamed text
+    // it then left out, such as a tool call the model wrote as text.
+    if (failure || !finished) {
+      if (pendingThinking.length > 0) blocks.push({ type: 'thinking', text: pendingThinking, display: 'summary', origin: active.provider.kind });
+      if (pendingText.length > 0) blocks.push({ type: 'text', text: pendingText });
+    }
 
     // Some servers send no usage at all, or zeros (an OpenAI-compatible endpoint that
     // rejects stream_options reports nothing). Counting that as a real reading would
@@ -453,7 +550,18 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
     }
 
     const aborted = signal.aborted || failure?.code === 'aborted';
-    const content = blocks.filter((b) => !(b.type === 'text' && b.text.length === 0));
+    // A reply that lost a piece on the way: a tool call put together from what was left can parse and
+    // still not be what the model wrote, so none of its calls is run (see prepareCall).
+    const kept = damaged > 0 ? blocks.map((b): ContentBlock => (b.type === 'tool_use' ? { ...b, meta: { ...b.meta, damaged: 'true' } } : b)) : blocks;
+    const content = kept.filter((b) => !(b.type === 'text' && b.text.length === 0));
+    if (damaged > 0 && !failure && !aborted) {
+      const asked = content.some((b) => b.type === 'tool_use');
+      host.emit({
+        type: 'notice',
+        level: 'warning',
+        text: `Part of this reply arrived damaged and was left out (${String(damaged)} ${damaged === 1 ? 'piece' : 'pieces'} of the stream could not be read). Its text may have gaps${asked ? ', and nothing it asked for was run' : ''}.`
+      });
+    }
     if (content.length > 0) {
       const meta: MessageMeta = { turnId: config.turnId, model: active.model.ref, ...(responseUsage ? { usage: responseUsage } : {}) };
       if (aborted) meta.interrupted = true;
@@ -473,13 +581,20 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       iteration--;
       continue;
     }
+    // The turn's own limit ended the retries (see onRetry above): a pause that says why and what failed,
+    // not an error and not another model.
+    const limit = failure && content.length === 0 ? (host.overBudget?.() ?? null) : null;
+    if (failure && limit !== null) {
+      if (config.agentLabel === null) host.emit({ type: 'notice', level: 'warning', text: `${limit} The request that failed: ${failure.message}`, action: 'continue' });
+      return done('guard');
+    }
     // The model kept failing through its retries and nothing of a reply arrived, so nothing would be
     // said twice: another model may finish the turn. Once, so two failing models can't trade it forever.
-    const reason = failure ? FALLBACK_REASONS[failure.code] : undefined;
+    const reason = failure ? backupReason(failure) : undefined;
     if (failure && reason && content.length === 0 && !switched && host.fallback) {
       let next: LoopModel | null = null;
       try {
-        next = await host.fallback(failure);
+        next = await host.fallback(failure, signal);
       } catch (error) {
         host.log('warn', 'No backup model', { message: (error as Error).message });
       }
@@ -582,6 +697,7 @@ export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, ho
       });
     }
     const stored = host.append('user', userContent, { turnId: config.turnId });
+    host.journal?.settled(results.map((r) => r.toolUseId));
     host.emit({ type: 'message', message: stored });
     // Display metadata is for the UI only; keep it out of what the model is sent.
     history.push({

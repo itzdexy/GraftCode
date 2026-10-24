@@ -1,4 +1,5 @@
-import type { HighlighterCore, LanguageInput } from 'shiki/core';
+import type { HighlighterCore, LanguageInput, ThemeRegistrationAny } from 'shiki/core';
+import { DEFAULT_CODE_THEMES, type CodeTheme, type CodeThemePair } from '@shared/codeThemes';
 
 /**
  * Syntax highlighting with shiki's JavaScript regex engine (no WebAssembly,
@@ -97,13 +98,39 @@ export interface Token {
   style: Record<string, string>;
 }
 
+/** Each theme is loaded the first time code is shown in it. */
+const THEMES: Record<CodeTheme, () => Promise<{ default: ThemeRegistrationAny }>> = {
+  'vitesse-dark': () => import('shiki/themes/vitesse-dark.mjs'),
+  'github-dark': () => import('shiki/themes/github-dark.mjs'),
+  'catppuccin-mocha': () => import('shiki/themes/catppuccin-mocha.mjs'),
+  'night-owl': () => import('shiki/themes/night-owl.mjs'),
+  'one-dark-pro': () => import('shiki/themes/one-dark-pro.mjs'),
+  'tokyo-night': () => import('shiki/themes/tokyo-night.mjs'),
+  'dracula': () => import('shiki/themes/dracula.mjs'),
+  'rose-pine': () => import('shiki/themes/rose-pine.mjs'),
+  'everforest-dark': () => import('shiki/themes/everforest-dark.mjs'),
+  'gruvbox-dark-medium': () => import('shiki/themes/gruvbox-dark-medium.mjs'),
+  'nord': () => import('shiki/themes/nord.mjs'),
+  'monokai': () => import('shiki/themes/monokai.mjs'),
+  'vitesse-light': () => import('shiki/themes/vitesse-light.mjs'),
+  'github-light': () => import('shiki/themes/github-light.mjs'),
+  'catppuccin-latte': () => import('shiki/themes/catppuccin-latte.mjs'),
+  'night-owl-light': () => import('shiki/themes/night-owl-light.mjs'),
+  'one-light': () => import('shiki/themes/one-light.mjs'),
+  'rose-pine-dawn': () => import('shiki/themes/rose-pine-dawn.mjs'),
+  'everforest-light': () => import('shiki/themes/everforest-light.mjs'),
+  'gruvbox-light-medium': () => import('shiki/themes/gruvbox-light-medium.mjs'),
+  'solarized-light': () => import('shiki/themes/solarized-light.mjs'),
+  'min-light': () => import('shiki/themes/min-light.mjs')
+};
+
 let highlighter: Promise<HighlighterCore> | null = null;
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= (async () => {
     const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([import('shiki/core'), import('shiki/engine/javascript')]);
     return createHighlighterCore({
-      themes: [import('shiki/themes/vitesse-dark.mjs'), import('shiki/themes/vitesse-light.mjs')],
+      themes: [THEMES[DEFAULT_CODE_THEMES.dark](), THEMES[DEFAULT_CODE_THEMES.light]()],
       langs: [],
       engine: createJavaScriptRegexEngine()
     });
@@ -115,20 +142,29 @@ const cache = new Map<string, Token[][]>();
 const CACHE_LIMIT = 300;
 const MAX_HIGHLIGHT_CHARS = 200_000;
 
-/** Tokenized lines for dual-theme rendering, or null when the language is unsupported or the text too large. */
-export async function highlightLines(code: string, language: string | null): Promise<Token[][] | null> {
+async function withThemes(h: HighlighterCore, themes: CodeTheme[]): Promise<void> {
+  const loaded = h.getLoadedThemes();
+  for (const theme of themes) if (!loaded.includes(theme)) await h.loadTheme((await THEMES[theme]()).default);
+}
+
+/**
+ * Tokenized lines for dual-theme rendering, or null when the language is
+ * unsupported or the text too large. `themes` is the pair Settings chose.
+ */
+export async function highlightLines(code: string, language: string | null, themes: CodeThemePair = DEFAULT_CODE_THEMES): Promise<Token[][] | null> {
   const id = resolveLanguage(language);
   if (!id || code.length > MAX_HIGHLIGHT_CHARS) return null;
-  const key = `${id}\u0000${code}`;
+  const key = `${themes.dark}\u0000${themes.light}\u0000${id}\u0000${code}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const h = await getHighlighter();
+  await withThemes(h, [themes.dark, themes.light]);
   if (!h.getLoadedLanguages().includes(id)) {
     const loader = LANGS[id];
     if (!loader) return null;
     await h.loadLanguage((await loader()).default);
   }
-  const result = h.codeToTokens(code, { lang: id, themes: { dark: 'vitesse-dark', light: 'vitesse-light' }, defaultColor: false });
+  const result = h.codeToTokens(code, { lang: id, themes: { dark: themes.dark, light: themes.light }, defaultColor: false });
   const lines = result.tokens.map((line) =>
     line.map((t) => ({ content: t.content, style: t.htmlStyle ?? {} }))
   );
@@ -138,4 +174,30 @@ export async function highlightLines(code: string, language: string | null): Pro
   }
   cache.set(key, lines);
   return lines;
+}
+
+/** A piece of code as one theme alone draws it, with the theme's own background: what Settings shows for a theme. */
+export interface ThemePreview {
+  background: string;
+  foreground: string;
+  lines: Array<Array<{ content: string; color: string | undefined; italic: boolean }>>;
+}
+
+export async function themePreview(code: string, language: string, theme: CodeTheme): Promise<ThemePreview | null> {
+  const id = resolveLanguage(language);
+  if (!id) return null;
+  const h = await getHighlighter();
+  await withThemes(h, [theme]);
+  if (!h.getLoadedLanguages().includes(id)) {
+    const loader = LANGS[id];
+    if (!loader) return null;
+    await h.loadLanguage((await loader()).default);
+  }
+  const result = h.codeToTokens(code, { lang: id, theme });
+  return {
+    background: result.bg ?? 'transparent',
+    foreground: result.fg ?? 'inherit',
+    // fontStyle is a bit set; 1 is italic.
+    lines: result.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color, italic: ((t.fontStyle ?? 0) & 1) === 1 })))
+  };
 }

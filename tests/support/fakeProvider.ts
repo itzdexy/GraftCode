@@ -12,7 +12,11 @@ export interface FakeReply {
   thinking?: string;
   toolCalls?: Array<{ id?: string; name: string; input: unknown }>;
   usage?: Partial<Usage>;
+  /** What the provider says this reply cost (powers the spend-limit tests). */
+  costUsd?: number;
   finish?: FinishReason;
+  /** Events of this reply that arrived unreadable and were left out (as an adapter reports them). */
+  damaged?: number;
   /** Delay between streamed chunks, to test interrupts mid-stream. */
   chunkDelayMs?: number;
 }
@@ -113,8 +117,9 @@ export class FakeProvider implements LLMProvider {
     }
     yield {
       type: 'usage',
-      usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, ...step.usage }
+      usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, ...step.usage },
+      ...(step.costUsd !== undefined ? { costUsd: step.costUsd } : {})
     };
-    yield { type: 'finish', reason: step.finish ?? ((step.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'stop') };
+    yield { type: 'finish', reason: step.finish ?? ((step.toolCalls?.length ?? 0) > 0 ? 'tool_use' : 'stop'), ...(step.damaged ? { damaged: step.damaged } : {}) };
   }
 }

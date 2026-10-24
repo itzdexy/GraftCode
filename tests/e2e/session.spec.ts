@@ -62,7 +62,7 @@ test('an edit turn asks for approval, applies the change and shows it in the tra
   await expect(w.getByRole('button', { name: /^Edited notes\.txt(?!,)/ })).toBeVisible();
   await expect(w.getByRole('button', { name: /^Read notes\.txt/ })).toBeVisible();
 
-  // The status bar shows the branch and the diff counts.
+  // The diff counts and Create PR: in the details column while it is open, in the status bar under the transcript otherwise.
   await expect(w.getByRole('img', { name: '1 line added, 1 removed' })).toBeVisible();
   await expect(w.getByRole('button', { name: 'Create PR' })).toBeVisible();
 
@@ -311,4 +311,156 @@ test('what fills the context is shown, and a session that waits is listed under 
   await expect(w.getByText('Done.', { exact: true })).toBeVisible();
   await expect(needsYou).toHaveCount(0);
   await expect(w.getByRole('navigation', { name: 'Main' }).getByText('Scripted title', { exact: true })).toBeVisible();
+});
+
+test('a session is filed under a group and marked completed, and writing to it brings it back', async () => {
+  const w = graft.window;
+  provider.script({ text: 'First answer.' }, { text: 'Second answer.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('first task');
+  await composer.press('Enter');
+  await expect(w.getByText('First answer.', { exact: true })).toBeVisible();
+
+  const sidebar = w.getByRole('navigation', { name: 'Main' });
+  await expect(sidebar.getByText('Scripted title', { exact: true })).toBeVisible();
+
+  // File it under a new group: the row leaves its project list for the group.
+  await sidebar.getByRole('button', { name: 'Options for Scripted title' }).click();
+  const move = w.getByRole('menuitem', { name: /^Move to group/ });
+  await move.hover();
+  await move.click();
+  await w.getByRole('menuitem', { name: /^New group/ }).click();
+  const create = w.getByRole('dialog', { name: 'New group' });
+  await create.getByRole('textbox', { name: 'Name' }).fill('Work');
+  await create.getByRole('button', { name: 'Create' }).click();
+
+  const work = w.getByRole('region', { name: 'Work' });
+  await expect(work.getByText('Scripted title', { exact: true })).toBeVisible();
+  await shot(w, 'session-groups');
+
+  // Mark as completed: the group empties and the session waits under Completed, folded shut.
+  await work.getByRole('button', { name: 'Options for Scripted title' }).click();
+  await w.getByRole('menuitem', { name: 'Mark as completed' }).click();
+  await expect(w.getByRole('region', { name: 'Work' })).toHaveCount(0);
+  const completed = w.getByRole('region', { name: 'Completed' });
+  const fold = completed.getByRole('button', { name: /^Completed/ });
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(completed.getByText('Scripted title', { exact: true })).toHaveCount(0);
+  await shot(w, 'session-completed');
+  await fold.click();
+  await expect(completed.getByText('Scripted title', { exact: true })).toBeVisible();
+
+  // Writing to it again marks it in progress: it returns to its group and Completed is gone.
+  await completed.getByText('Scripted title', { exact: true }).click();
+  const box = w.getByRole('textbox', { name: SESSION_BOX });
+  await box.fill('one more look');
+  await box.press('Enter');
+  await expect(w.getByText('Second answer.', { exact: true })).toBeVisible();
+  await expect(w.getByRole('region', { name: 'Completed' })).toHaveCount(0);
+  await expect(work.getByText('Scripted title', { exact: true })).toBeVisible();
+
+  // Rename the group from its header, then remove it: the session is kept and returns to its project.
+  await work.getByRole('button', { name: 'Actions for Work' }).click();
+  await w.getByRole('menuitem', { name: /^Rename/ }).click();
+  const rename = w.getByRole('dialog', { name: /^Rename/ });
+  await rename.getByRole('textbox', { name: 'Name' }).fill('Deep work');
+  await rename.getByRole('button', { name: 'Rename' }).click();
+  const renamed = w.getByRole('region', { name: 'Deep work' });
+  await expect(renamed.getByText('Scripted title', { exact: true })).toBeVisible();
+
+  await renamed.getByRole('button', { name: 'Actions for Deep work' }).click();
+  await w.getByRole('menuitem', { name: /^Remove group/ }).click();
+  await w.getByRole('dialog', { name: /Remove the group/ }).getByRole('button', { name: 'Remove group' }).click();
+  await expect(w.getByRole('region', { name: 'Deep work' })).toHaveCount(0);
+  await expect(sidebar.getByText('Scripted title', { exact: true })).toBeVisible();
+});
+
+test('find steps through matches with F3 and Shift+F3 from anywhere in the window', async () => {
+  const w = graft.window;
+  provider.script({ text: 'alpha graft, beta graft, gamma graft.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('start here');
+  await composer.press('Enter');
+  await expect(w.getByText('alpha graft, beta graft, gamma graft.')).toBeVisible();
+
+  await w.keyboard.press('Control+f');
+  const bar = w.getByRole('search', { name: 'Find in the conversation' });
+  await bar.getByRole('textbox', { name: 'Find in the conversation' }).fill('graft');
+  await expect(bar.getByText('1 of 3')).toBeVisible();
+
+  // The bar is not where the key must be pressed: with the keyboard back in the message box, F3 steps on.
+  const box = w.getByRole('textbox', { name: SESSION_BOX });
+  await box.click();
+  await w.keyboard.press('F3');
+  await expect(bar.getByText('2 of 3')).toBeVisible();
+  await w.keyboard.press('F3');
+  await expect(bar.getByText('3 of 3')).toBeVisible();
+  await w.keyboard.press('Shift+F3');
+  await expect(bar.getByText('2 of 3')).toBeVisible();
+  await shot(w, 'session-find-f3');
+
+  // Escape closes the bar and nothing else.
+  await w.keyboard.press('Escape');
+  await expect(bar).toHaveCount(0);
+});
+
+test('a session opens beside the open one: two transcripts, one keyboard, and the split closes', async () => {
+  const w = graft.window;
+  provider.script({ text: 'First answer.' }, { text: 'Second answer.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('first task');
+  await composer.press('Enter');
+  await expect(w.getByText('First answer.', { exact: true })).toBeVisible();
+
+  // A name of its own, so the two rows can be told apart (the scripted title is the same for both).
+  const sidebar = w.getByRole('navigation', { name: 'Main' });
+  await sidebar.getByRole('button', { name: 'Options for Scripted title' }).click();
+  await w.getByRole('menuitem', { name: /^Rename/ }).click();
+  const nameBox = w.getByRole('textbox', { name: 'Session title' });
+  await nameBox.fill('First session');
+  await nameBox.press('Enter');
+  await expect(sidebar.getByText('First session', { exact: true })).toBeVisible();
+
+  // A second session, then back to the first.
+  await sidebar.getByRole('button', { name: 'New', exact: true }).click();
+  const fresh = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await fresh.fill('second task');
+  await fresh.press('Enter');
+  await expect(w.getByText('Second answer.', { exact: true })).toBeVisible();
+  await sidebar.getByText('First session', { exact: true }).click();
+  await expect(w.getByText('First answer.', { exact: true })).toBeVisible();
+
+  // Open the second beside the first: two transcripts, side by side.
+  await sidebar.getByRole('button', { name: 'Options for Scripted title' }).click();
+  await w.getByRole('menuitem', { name: 'Open beside' }).click();
+  const logs = w.getByRole('log', { name: 'Conversation' });
+  await expect(logs).toHaveCount(2);
+  await expect(logs.filter({ hasText: 'First answer.' })).toHaveCount(1);
+  await expect(logs.filter({ hasText: 'Second answer.' })).toHaveCount(1);
+  await shot(w, 'session-split');
+
+  // The session already open has nothing to open beside; Ctrl+F finds in the focused pane only.
+  const first = w.getByRole('group', { name: 'Open session' });
+  await first.getByRole('button', { name: 'First session' }).click();
+  await expect(w.getByRole('menuitem', { name: 'Open beside' })).toHaveCount(0);
+  await w.keyboard.press('Escape');
+  await w.keyboard.press('Control+f');
+  const bar = w.getByRole('search', { name: 'Find in the conversation' });
+  await expect(bar).toHaveCount(1);
+  await bar.getByRole('textbox', { name: 'Find in the conversation' }).fill('First answer');
+  await expect(bar.getByText('1 of 1')).toBeVisible();
+  await w.keyboard.press('Escape');
+
+  // The conversation beside goes on the clipboard as Markdown, without a save dialog.
+  const second = w.getByRole('group', { name: 'Session beside' });
+  await second.getByRole('button', { name: 'More actions' }).click();
+  await w.getByRole('menuitem', { name: 'Copy as Markdown' }).click();
+  await expect(w.getByText('Conversation copied')).toBeVisible();
+  await expect.poll(() => graft.app.evaluate(({ clipboard }) => clipboard.readText())).toContain('Second answer.');
+
+  // Closing the split leaves the session that stays.
+  await w.getByRole('button', { name: 'Close the split' }).click();
+  await expect(logs).toHaveCount(1);
+  await expect(w.getByRole('button', { name: 'Close the split' })).toHaveCount(0);
+  await expect(w.getByText('First answer.', { exact: true })).toBeVisible();
 });

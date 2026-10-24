@@ -3,12 +3,15 @@ import type { ProviderKind, Usage } from '@shared/schemas/common';
 import type { ContentBlock, LlmMessage } from '@shared/schemas/messages';
 import type { CustomModel, ModelInfo } from '@shared/schemas/models';
 import { isLocalUrl } from '@shared/privacy';
-import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId } from './catalog';
+import { arrangeModels, describeCapabilities, familyOf, isFastTier, labelFromId, LEAN_CONTEXT, leanByDefault } from './catalog';
 import { ProviderError } from './errors';
 import { hostOf, joinUrl, request, requestJson } from './http';
+import { firstByteTimeout, flavorOf, loadedContexts } from './localServer';
+import { mediaKindOf } from '../media/mediaModels';
 import { onlyInResponses, readResponsesStream, responsesBody, usesResponses } from './openaiResponses';
 import { catalogEffort, modelPricing, NATIVE_PRESET, type CatalogModel, type ProviderCatalog } from './presets';
-import { parseSse } from './sse';
+import { isDamagedEvent, parseSse } from './sse';
+import { extractTextToolCalls, refusesTools, textToolPrompt, toolCallMarkup, ToolMarkupFilter, toolResponseMarkup, type TextToolCall } from './textToolCalls';
 import { isOfficialOpenAiModels, openAiShutdownDate, withModelLifecycle } from './modelLifecycle';
 import type { FinishReason, LLMProvider, ProviderConnection, RequestPrivacy, StreamEvent, StreamRequest } from './types';
 
@@ -30,6 +33,11 @@ const NON_CHAT_LIGHT = /(embed|whisper|tts|dall-e|moderation|rerank|transcri|tex
  * a tool loop reads the prefix the previous step wrote.
  */
 const BREAKPOINT_CACHING = /^~?anthropic\//;
+/**
+ * The end of a 404 error whose body gave no reason: it was empty, a web page (both leave the
+ * message ending at the status), or only said "Not Found" or "404 page not found".
+ */
+const BARE_404 = /\(404\)(?:\.|: (?:404 )?(?:page )?not found\.?)$/i;
 
 /**
  * Size hints for OpenAI models the catalog doesn't know, keyed by id prefix;
@@ -61,7 +69,6 @@ const CONTEXT_PATHS = [
   ['n_ctx'],
   ['top_provider', 'context_length'],
   ['metadata', 'context_length'],
-  ['meta', 'n_ctx_train'],
   ['limits', 'max_input_tokens'],
   ['capabilities', 'limits', 'max_context_window_tokens'],
   ['model_spec', 'availableContextTokens'],
@@ -137,6 +144,9 @@ interface OpenAiModel {
   name?: string;
   description?: string;
   context_length?: number;
+  owned_by?: unknown;
+  /** llama.cpp's facts about the model file, among them the length it was trained for (`n_ctx_train`). */
+  meta?: unknown;
   architecture?: { input_modalities?: string[] };
   supported_parameters?: string[];
   top_provider?: { max_completion_tokens?: number | null };
@@ -179,27 +189,41 @@ function startsTurn(message: LlmMessage): boolean {
  * role "tool"). With `replay`, reasoning saved from the same provider and model
  * goes back on assistant messages: `reasoning_details` always (OpenRouter keeps
  * reasoning valid across tool calls that way), `reasoning_content` only within
- * the current turn's tool loop, as interleaved-thinking APIs expect.
+ * the current turn's tool loop, as interleaved-thinking APIs expect. With
+ * `textTools`, for a model that writes its tool calls as text, earlier calls go
+ * back as the markup it was taught and their results as user messages, and no
+ * tool role or `tool_calls` field is sent.
  */
-export function toChatMessages(system: string, messages: LlmMessage[], vision: boolean, replay?: { kind: ProviderKind; model: string }): ChatMessage[] {
+export function toChatMessages(
+  system: string,
+  messages: LlmMessage[],
+  vision: boolean,
+  replay?: { kind: ProviderKind; model: string },
+  opts: { textTools?: boolean } = {}
+): ChatMessage[] {
+  const textTools = opts.textTools ?? false;
   const out: ChatMessage[] = [{ role: 'system', content: system }];
+  const names = new Map<string, string>();
   let lastTurnStart = -1;
   messages.forEach((m, i) => {
     if (startsTurn(m)) lastTurnStart = i;
   });
   messages.forEach((message, index) => {
     if (message.role === 'assistant') {
-      const text = message.content
+      let text = message.content
         .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
         .map((b) => b.text)
         .join('');
-      const calls = message.content
-        .filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
-        .map((b) => ({
-          id: b.id,
-          type: 'function' as const,
-          function: { name: b.name, arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}) }
-        }));
+      const uses = message.content.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use');
+      for (const use of uses) names.set(use.id, use.name);
+      const calls = textTools
+        ? []
+        : uses.map((b) => ({
+            id: b.id,
+            type: 'function' as const,
+            function: { name: b.name, arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}) }
+          }));
+      if (textTools) text = [text, ...uses.map((b) => toolCallMarkup(b.name, b.input))].filter((part) => part.length > 0).join('\n\n');
       if (text.length === 0 && calls.length === 0) return;
       const saved = replay ? message.content.map((b) => replayOf(b, replay.kind, replay.model)).find((r) => r !== null) : null;
       out.push({
@@ -219,7 +243,8 @@ export function toChatMessages(system: string, messages: LlmMessage[], vision: b
           .filter((c) => c.type === 'text')
           .map((c) => (c.type === 'text' ? c.text : ''))
           .join('\n');
-        out.push({ role: 'tool', tool_call_id: block.toolUseId, content: (block.isError ? 'Error: ' : '') + (text || '(no output)') });
+        if (textTools) parts.push({ type: 'text', text: toolResponseMarkup(names.get(block.toolUseId) ?? 'tool', text || '(no output)', block.isError) });
+        else out.push({ role: 'tool', tool_call_id: block.toolUseId, content: (block.isError ? 'Error: ' : '') + (text || '(no output)') });
         for (const c of block.content) {
           if (c.type === 'image' && vision) toolImages.push({ type: 'image_url', image_url: { url: `data:${c.mediaType};base64,${c.data}` } });
         }
@@ -233,7 +258,12 @@ export function toChatMessages(system: string, messages: LlmMessage[], vision: b
         );
       }
     }
-    if (toolImages.length > 0) parts.unshift({ type: 'text', text: 'Images returned by the tool calls above:' }, ...toolImages);
+    if (toolImages.length > 0) {
+      const heading: ChatContentPart = { type: 'text', text: 'Images returned by the tool calls above:' };
+      // As text, the results are in this message, so their images follow them.
+      if (textTools) parts.push(heading, ...toolImages);
+      else parts.unshift(heading, ...toolImages);
+    }
     if (parts.length === 0) return;
     const onlyText = parts.every((p) => p.type === 'text');
     out.push({ role: 'user', content: onlyText ? parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n') : parts });
@@ -297,6 +327,8 @@ export class OpenAiChatProvider implements LLMProvider {
   private readonly replyBudget = new Map<string, number>();
   /** OpenAI models that answered "only supported in v1/responses"; they go there first from then on. */
   private readonly responsesOnly = new Set<string>();
+  /** Models that refused the tools parameter; they get their tools in the prompt from then on. */
+  private readonly textTools = new Set<string>();
 
   constructor(connection: ProviderConnection & { kind: ChatKind }, customModels: CustomModel[] = [], catalog: ProviderCatalog | null = null) {
     this.id = connection.id;
@@ -363,15 +395,20 @@ export class OpenAiChatProvider implements LLMProvider {
       catalogFallback = true;
       listed = known.filter((m) => !m.deprecated).map((m) => ({ id: m.id }));
     }
+    // A server on this computer may have loaded a model with far less context than it could hold; ask it, once.
+    const flavor = isLocalUrl(this.base) ? flavorOf(listed) : null;
+    const loadedAt = flavor ? await loadedContexts(this.base, flavor, signal, this.headers()) : new Map<string, number>();
+    const loaded = (id: string): number | null => loadedAt.get(id) ?? loadedAt.get('*') ?? null;
     const models: ModelInfo[] = listed
       .filter((m) => {
         if (this.kind === 'openai') return !NON_CHAT.test(m.id);
-        if (this.kind === 'openai-compatible') return this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id);
+        // A picture, video, voice or music model is listed with the media models (Settings → Models), not as one to chat with.
+        if (this.kind === 'openai-compatible') return (this.meta(m.id) !== null || !NON_CHAT_LIGHT.test(m.id)) && mediaKindOf(m.id) === null;
         return true;
       })
       .map((m): ModelInfo => {
         const lifecycle = official ? openAiShutdownDate(m.shutdown_date) : undefined;
-        return withModelLifecycle({ ...this.toModelInfo(m), ...(lifecycle ? { lifecycle } : {}), availability: {
+        return withModelLifecycle({ ...this.toModelInfo(m, loaded(m.id)), ...(lifecycle ? { lifecycle } : {}), availability: {
           state: catalogFallback || this.kind === 'openrouter' ? 'cataloged-unverified' as const : 'available' as const,
           source: catalogFallback ? 'catalog' as const : 'provider' as const, checkedAt: Date.now(),
           reason: catalogFallback ? 'Catalog metadata; this provider has no model-list API. Account access to each model is unverified.'
@@ -380,7 +417,7 @@ export class OpenAiChatProvider implements LLMProvider {
       });
     const ids = new Set(models.map((m) => m.ref.modelId));
     for (const custom of this.customModels) {
-      if (!ids.has(custom.id)) models.push({ ...this.toModelInfo({ id: custom.id }), availability: {
+      if (!ids.has(custom.id)) models.push({ ...this.toModelInfo({ id: custom.id }, loaded(custom.id)), availability: {
         state: 'cataloged-unverified', source: 'custom', checkedAt: null, reason: 'Custom model ID; account access has not been verified.', selectable: true
       } });
     }
@@ -394,12 +431,13 @@ export class OpenAiChatProvider implements LLMProvider {
       headers: this.headers(),
       body: { model: modelId, messages: [{ role: 'user', content: 'Reply with OK.' }], max_tokens: 1, stream: false },
       ...(signal ? { signal } : {}),
-      timeoutMs: 60_000
+      timeoutMs: firstByteTimeout(this.base, 60_000)
     });
     await response.text().catch(() => '');
   }
 
-  private toModelInfo(m: OpenAiModel): ModelInfo {
+  /** `loaded` is the context the server says it loaded this model with, when it is a local server that says. */
+  private toModelInfo(m: OpenAiModel, loaded: number | null = null): ModelInfo {
     const custom = this.customModels.find((c) => c.id === m.id);
     const meta = this.meta(m.id);
     let known: { context: number | null; output: number | null } = { context: meta?.context ?? null, output: meta?.output ?? null };
@@ -427,19 +465,29 @@ export class OpenAiChatProvider implements LLMProvider {
       }
     }
     // What a server says about its own model is about this server; the catalog's figure is about the model in general.
+    // llama.cpp's trained length says what the model could hold, so it is never taken as the size, only as its
+    // cap: on what the server says it loaded, and on the size assumed when the server didn't say.
+    const trained = reported(m, [['meta', 'n_ctx_train']], 1024);
     const size = contextSize({
-      reported: reported(m, CONTEXT_PATHS, 1024),
+      reported: loaded ?? reported(m, CONTEXT_PATHS, 1024),
       listed: known.context,
       typical: this.catalog?.typicalContext(m.id) ?? null,
       local: isLocalUrl(this.base)
     });
-    let context = size.tokens;
+    let context = trained !== null ? Math.min(size.tokens, trained) : size.tokens;
     let output = reported(m, OUTPUT_PATHS, 256) ?? known.output ?? (this.kind === 'openrouter' ? Math.min(32_768, Math.floor(context / 4)) : 8_192);
     if (custom) {
       context = custom.contextWindow ?? context;
       output = custom.maxOutputTokens ?? output;
       vision = custom.vision ?? vision;
     }
+    // A model on this computer without native tool calls is taught to write them as text.
+    const toolFormat = custom?.toolFormat ?? (isLocalUrl(this.base) && !tools ? 'text' : undefined);
+    if (toolFormat === 'text') tools = true;
+    // A model is lean by default only when something said how small its window is: the server, Settings, or a
+    // trained length so short that the window can't be larger. The size assumed when nothing said is only a guess.
+    const windowKnown = !size.assumed || custom?.contextWindow !== undefined || (trained !== null && trained <= LEAN_CONTEXT);
+    const lean = custom?.prompt ? custom.prompt === 'lean' : leanByDefault(isLocalUrl(this.base), context, windowKnown);
     // Plain OpenAI-compatible servers only get the levels the catalog says the model accepts.
     const effort = catalogEffort(meta, {
       reasoning,
@@ -458,6 +506,8 @@ export class OpenAiChatProvider implements LLMProvider {
       contextWindow: context,
       maxOutputTokens: output,
       supportsTools: tools,
+      ...(toolFormat === 'text' ? { toolFormat } : {}),
+      ...(lean ? { lean } : {}),
       supportsVision: vision,
       supportsWebSearch: false,
       effort,
@@ -477,11 +527,19 @@ export class OpenAiChatProvider implements LLMProvider {
     let maxTokens = Math.min(req.model.maxOutputTokens, 64_000, this.replyBudget.get(modelId) ?? Infinity);
     const wire = req.effort && req.model.effort ? req.model.effort.values?.[req.effort] : undefined;
     const interleaved = this.meta(modelId)?.interleaved ?? null;
+    const offered = req.tools.length > 0 && req.model.supportsTools;
+    let textMode = req.model.toolFormat === 'text' || this.textTools.has(modelId);
     const build = (withStreamOptions: boolean, withReasoning: boolean): Record<string, unknown> => ({
       model: modelId,
       stream: true,
-      messages: toChatMessages(req.system, req.messages, req.model.supportsVision, { kind: this.kind, model: modelId }),
-      ...(req.tools.length > 0 && req.model.supportsTools
+      messages: toChatMessages(
+        textMode && offered ? `${req.system}\n\n${textToolPrompt(req.tools)}` : req.system,
+        req.messages,
+        req.model.supportsVision,
+        { kind: this.kind, model: modelId },
+        { textTools: textMode }
+      ),
+      ...(offered && !textMode
         ? {
             tools: req.tools.map((t) => ({
               type: 'function',
@@ -506,7 +564,7 @@ export class OpenAiChatProvider implements LLMProvider {
     let refusal: ProviderError | null = null;
     for (let attempt = 0; attempt < 6 && !response; attempt++) {
       try {
-        response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: 120_000 });
+        response = await request({ url, headers: this.headers(), body: build(streamOptions, reasoningParam), signal, timeoutMs: firstByteTimeout(this.base, 120_000) });
       } catch (error) {
         if (this.kind === 'openrouter') throwIfPrivacyBlocked(error, req.privacy);
         // A model chat completions doesn't serve: this one is answered by the Responses API.
@@ -514,6 +572,24 @@ export class OpenAiChatProvider implements LLMProvider {
           this.responsesOnly.add(modelId);
           yield* this.streamResponses(req, signal);
           return;
+        }
+        // A bare 404 from chat completions means the server doesn't have this model, and its own text
+        // ("404 page not found") says nothing about which model or what to do. A 404 that gives a reason
+        // (OpenRouter's "No endpoints found that support tool use.") keeps it.
+        if (error instanceof ProviderError && error.code === 'not_found' && BARE_404.test(error.message)) {
+          throw new ProviderError(
+            'not_found',
+            `${hostOf(this.base)} doesn't serve the model ${modelId}. Pick another model, or refresh the list in Settings → Models.`,
+            { status: error.status, retryable: false, cause: error }
+          );
+        }
+        // A model without native tool calls: from now on its tools go in the prompt. This comes before the
+        // check below because llama-server refuses with a 500.
+        if (offered && !textMode && refusesTools(error)) {
+          refusal = error;
+          this.textTools.add(modelId);
+          textMode = true;
+          continue;
         }
         if (!(error instanceof ProviderError) || (error.code !== 'bad_request' && error.code !== 'context_length')) throw error;
         refusal = error;
@@ -534,6 +610,11 @@ export class OpenAiChatProvider implements LLMProvider {
     }
     if (!response) throw refusal ?? new ProviderError('bad_request', 'The provider rejected the request.');
     if (!response.body) throw new ProviderError('server', 'The provider returned an empty stream.');
+    // Calls written as text are read from the whole reply: in text mode always, and from a server on this
+    // computer that may hand them back as text even when it was offered native tools. The markup is held
+    // back while it streams so it never shows.
+    const recover = offered && (textMode || isLocalUrl(this.base));
+    const filter = recover ? new ToolMarkupFilter() : null;
 
     let text = '';
     let thinking = '';
@@ -543,76 +624,99 @@ export class OpenAiChatProvider implements LLMProvider {
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     let costUsd: number | undefined;
 
-    for await (const msg of parseSse(response.body)) {
-      if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-      if (msg.data === '[DONE]') break;
-      let chunk: Record<string, unknown>;
-      try {
-        chunk = JSON.parse(msg.data) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      const err = chunk.error as { message?: string; code?: number | string } | undefined;
-      if (err) {
-        const code = Number(err.code);
-        throw new ProviderError(code === 429 ? 'rate_limit' : code >= 500 ? 'server' : 'unknown', err.message ?? 'Provider error', {
-          retryable: code === 429 || code >= 500
-        });
-      }
-      const u = chunk.usage as
-        | {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-            prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
-            cost?: number;
-            cost_details?: { upstream_inference_cost?: number | null };
-          }
-        | undefined;
-      if (u) {
-        // prompt_tokens counts every input token; cache reads and writes are reported inside it.
-        const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
-        const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
-        usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached - written);
-        usage.cacheReadTokens = cached;
-        usage.cacheWriteTokens = written;
-        usage.outputTokens = u.completion_tokens ?? 0;
-        // OpenRouter reports what it charged; with your own upstream key the upstream bill comes on top.
-        if (this.kind === 'openrouter' && typeof u.cost === 'number') costUsd = u.cost + (u.cost_details?.upstream_inference_cost ?? 0);
-      }
-      const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
-      if (!choice) continue;
-      const delta = (choice.delta ?? {}) as Record<string, unknown>;
-      if (typeof delta.content === 'string' && delta.content.length > 0) {
-        text += delta.content;
-        yield { type: 'text-delta', text: delta.content };
-      }
-      const reasoning = typeof delta.reasoning === 'string' ? delta.reasoning : delta.reasoning_content;
-      if (typeof reasoning === 'string' && reasoning.length > 0) {
-        thinking += reasoning;
-        yield { type: 'thinking-delta', text: reasoning };
-      }
-      if (Array.isArray(delta.reasoning_details)) {
-        for (const fragment of delta.reasoning_details) mergeReasoningDetail(details, fragment);
-      }
-      if (Array.isArray(delta.tool_calls)) {
-        for (const raw of delta.tool_calls as Array<Record<string, unknown>>) {
-          const index = typeof raw.index === 'number' ? raw.index : calls.length;
-          const slot = (calls[index] ??= { id: '', name: '', args: '' });
-          if (typeof raw.id === 'string' && raw.id) slot.id = raw.id;
-          const fn = raw.function as { name?: string; arguments?: string } | undefined;
-          if (fn?.name && !slot.name) slot.name = fn.name;
-          if (typeof fn?.arguments === 'string') slot.args += fn.arguments;
+    let damaged = 0;
+    let shownAny = false;
+    try {
+      for await (const msg of parseSse(response.body)) {
+        if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+        if (msg.data === '[DONE]') break;
+        let chunk: Record<string, unknown>;
+        try {
+          chunk = JSON.parse(msg.data) as Record<string, unknown>;
+        } catch {
+          if (isDamagedEvent(msg.data)) damaged++;
+          continue;
         }
+        const err = chunk.error as { message?: string; code?: number | string } | undefined;
+        if (err) {
+          const code = Number(err.code);
+          throw new ProviderError(code === 429 ? 'rate_limit' : code >= 500 ? 'server' : 'unknown', err.message ?? 'Provider error', {
+            retryable: code === 429 || code >= 500
+          });
+        }
+        const u = chunk.usage as
+          | {
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+              cost?: number;
+              cost_details?: { upstream_inference_cost?: number | null };
+            }
+          | undefined;
+        if (u) {
+          // prompt_tokens counts every input token; cache reads and writes are reported inside it.
+          const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+          const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
+          usage.inputTokens = Math.max(0, (u.prompt_tokens ?? 0) - cached - written);
+          usage.cacheReadTokens = cached;
+          usage.cacheWriteTokens = written;
+          usage.outputTokens = u.completion_tokens ?? 0;
+          // OpenRouter reports what it charged; with your own upstream key the upstream bill comes on top.
+          if (this.kind === 'openrouter' && typeof u.cost === 'number') costUsd = u.cost + (u.cost_details?.upstream_inference_cost ?? 0);
+        }
+        const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
+        if (!choice) continue;
+        const delta = (choice.delta ?? {}) as Record<string, unknown>;
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+          text += delta.content;
+          const shown = filter ? filter.push(delta.content) : delta.content;
+          if (shown.length > 0) {
+            shownAny = true;
+            yield { type: 'text-delta', text: shown };
+          }
+        }
+        const reasoning = typeof delta.reasoning === 'string' ? delta.reasoning : delta.reasoning_content;
+        if (typeof reasoning === 'string' && reasoning.length > 0) {
+          thinking += reasoning;
+          shownAny = true;
+          yield { type: 'thinking-delta', text: reasoning };
+        }
+        if (Array.isArray(delta.reasoning_details)) {
+          for (const fragment of delta.reasoning_details) mergeReasoningDetail(details, fragment);
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const raw of delta.tool_calls as Array<Record<string, unknown>>) {
+            const index = typeof raw.index === 'number' ? raw.index : calls.length;
+            const slot = (calls[index] ??= { id: '', name: '', args: '' });
+            if (typeof raw.id === 'string' && raw.id) slot.id = raw.id;
+            const fn = raw.function as { name?: string; arguments?: string } | undefined;
+            if (fn?.name && !slot.name) slot.name = fn.name;
+            if (typeof fn?.arguments === 'string') slot.args += fn.arguments;
+          }
+        }
+        if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) finish = choice.finish_reason;
       }
-      if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) finish = choice.finish_reason;
+      if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
+      // EOF or [DONE] closes the transport, but only the choice's finish reason
+      // confirms this reply is complete. Keep streamed text visible on failure;
+      // never offer accumulated tool calls from an unconfirmed reply to the loop.
+      // Servers may omit [DONE] when they do send a finish reason.
+      if (finish === null) throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
+    } catch (error) {
+      // Once something was shown the reply can't be asked for again and its deltas are all that is kept, so
+      // what the filter held goes out with them. Before that, nothing goes out, and the request can be retried.
+      const held = filter?.flush() ?? '';
+      if (shownAny && held.length > 0) yield { type: 'text-delta', text: held };
+      throw error;
     }
-
-    if (signal.aborted) throw new ProviderError('aborted', 'Request cancelled.');
-    // EOF or [DONE] closes the transport, but only the choice's finish reason
-    // confirms this reply is complete. Keep streamed text visible on failure;
-    // never offer accumulated tool calls from an unconfirmed reply to the loop.
-    // Servers may omit [DONE] when they do send a finish reason.
-    if (finish === null) throw new ProviderError('network', 'The reply stopped before it was complete. The provider did not send a finish reason.');
+    // A finished reply's text block replaces what the deltas showed, so what the filter still holds is
+    // not sent as a delta: the block carries the reply without the markup that was read as calls.
+    let written: TextToolCall[] = [];
+    if (recover && (textMode || calls.length === 0)) {
+      const read = extractTextToolCalls(text, new Map(req.tools.map((t) => [t.name, t.inputSchema])));
+      text = read.text;
+      written = read.calls;
+    }
 
     if (thinking.length > 0) yield { type: 'block', block: { type: 'thinking', text: thinking, display: 'summary', origin: this.kind } };
     const replay = this.replayFor(modelId, details, thinking, interleaved);
@@ -630,8 +734,12 @@ export class OpenAiChatProvider implements LLMProvider {
         yield { type: 'block', block: { type: 'tool_use', id, name: call.name, input: call.args, meta: { invalidJson: 'true' } } };
       }
     }
+    for (const call of written) {
+      yield { type: 'block', block: { type: 'tool_use', id: `call_${randomUUID().slice(0, 8)}`, name: call.name, input: call.input } };
+    }
     yield { type: 'usage', usage, ...(costUsd !== undefined ? { costUsd } : {}) };
-    yield { type: 'finish', reason: calls.length > 0 && finish !== 'length' ? 'tool_use' : mapFinish(finish) };
+    const asked = calls.length + written.length > 0;
+    yield { type: 'finish', reason: asked && finish !== 'length' ? 'tool_use' : mapFinish(finish), ...(damaged > 0 ? { damaged } : {}) };
   }
 
   /** One reply from the Responses API, for the models that chat completions does not serve. */

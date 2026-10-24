@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GraftError } from '@shared/errors';
+import { log } from '../app/log';
 import type { Db } from '../db/database';
 import { fromGitPath, git, runGit } from './git';
 
@@ -269,13 +270,14 @@ export class CheckpointService {
     return row ? toRecord(row) : null;
   }
 
-  async create(sessionId: string, workDir: string, messageId: string): Promise<CheckpointRecord> {
+  /** `signal` ends the snapshot (its git processes are stopped): a turn that is stopped, or a folder too large to snapshot in time. */
+  async create(sessionId: string, workDir: string, messageId: string, signal?: AbortSignal): Promise<CheckpointRecord> {
     const target = await this.target(workDir);
     const previous = this.list(sessionId).filter((c) => c.gitDir === target.gitDir).at(-1);
-    const { commit } = await this.snapshot(target, sessionId, `graft checkpoint for session ${sessionId}`, previous?.commitSha ?? null);
+    const { commit } = await this.snapshot(target, sessionId, `graft checkpoint for session ${sessionId}`, previous?.commitSha ?? null, signal);
     const id = randomUUID();
     const ref = `refs/graft/checkpoints/${safeRefPart(sessionId)}/${id}`;
-    await git(this.args(target, ['update-ref', ref, commit]), { cwd: target.root, env: target.env });
+    await git(this.args(target, ['update-ref', ref, commit]), { cwd: target.root, env: target.env, ...(signal ? { signal } : {}) });
     this.db
       .prepare('INSERT INTO checkpoints (id, session_id, message_id, repo_dir, git_dir, ref, commit_sha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, sessionId, messageId, target.root, target.gitDir, ref, commit, Date.now());
@@ -382,6 +384,35 @@ export class CheckpointService {
       }
     }
     this.db.prepare('DELETE FROM checkpoints WHERE session_id = ?').run(sessionId);
-    fs.rmSync(path.join(this.indexRoot, safeRefPart(sessionId)), { recursive: true, force: true });
+    await this.removeIndexes(safeRefPart(sessionId));
+  }
+
+  /**
+   * Removes the private index folders of sessions that no longer exist: ones a
+   * delete couldn't remove because a git still held them, and incognito ones.
+   */
+  async sweepIndexes(sessionIds: ReadonlySet<string>): Promise<void> {
+    const keep = new Set([...sessionIds].map(safeRefPart));
+    let names: string[];
+    try {
+      names = await fs.promises.readdir(this.indexRoot);
+    } catch {
+      return;
+    }
+    for (const name of names) if (!keep.has(name)) await this.removeIndexes(name);
+  }
+
+  /**
+   * A session's private index folder goes, tried again for a few seconds while
+   * something still holds a file of it (a git that is ending, a virus scanner).
+   * What is still held stays for the next start's sweep: a session is deleted
+   * whatever becomes of its index, which only made snapshots faster.
+   */
+  private async removeIndexes(name: string): Promise<void> {
+    try {
+      await fs.promises.rm(path.join(this.indexRoot, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      log.warn('checkpoints', 'A private index folder is still in use; it goes at the next start', { folder: name, message: (error as Error).message });
+    }
   }
 }

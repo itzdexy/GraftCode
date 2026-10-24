@@ -48,12 +48,22 @@ describe('customize files', () => {
     const home = makeTempDir();
     const file = await saveSkill(home, { scope: 'user', projectRoot: null, name: 'pdf-forms', description: 'Fill PDF forms', body: '# Steps\n1. Do it', previousPath: null });
     expect(file).toBe(path.join(home, 'skills', 'pdf-forms', 'SKILL.md'));
-    expect(loadSkills(home, null)).toMatchObject([{ name: 'pdf-forms', description: 'Fill PDF forms', scope: 'user' }]);
-    expect(listSkills(home, null)[0]?.body).toBe('# Steps\n1. Do it\n');
+    expect(loadSkills(home, null, null)).toMatchObject([{ name: 'pdf-forms', description: 'Fill PDF forms', scope: 'user' }]);
+    expect(listSkills(home, null, null)[0]?.body).toBe('# Steps\n1. Do it\n');
     await expect(saveSkill(home, { scope: 'user', projectRoot: null, name: 'x', description: '  ', body: '', previousPath: null })).rejects.toMatchObject({ code: 'description_required' });
     await expect(deleteSkill(home, null, path.join(home, 'settings.json'))).rejects.toMatchObject({ code: 'outside_folder' });
     await deleteSkill(home, null, file);
     expect(fs.existsSync(path.dirname(file))).toBe(false);
+    removeDir(home);
+  });
+
+  it('lists built-in skills first, and not one that is replaced', () => {
+    const home = makeTempDir();
+    const builtin = path.resolve(__dirname, '../../resources/skills');
+    writeFile(home, 'skills/alpha/SKILL.md', '---\nname: alpha\ndescription: A\n---\nx');
+    expect(listSkills(home, null, builtin).map((s) => [s.name, s.scope])).toEqual([['diagram-design', 'builtin'], ['alpha', 'user']]);
+    writeFile(home, 'skills/diagram-design/SKILL.md', '---\nname: diagram-design\ndescription: Mine\n---\nx');
+    expect(listSkills(home, null, builtin).map((s) => [s.name, s.scope])).toEqual([['alpha', 'user'], ['diagram-design', 'user']]);
     removeDir(home);
   });
 

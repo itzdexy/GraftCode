@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, TriangleAlert } from 'lucide-react';
 import type { StoredMessage } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
@@ -6,6 +6,12 @@ import { sourceIndex, sourcesOf } from '@shared/sources';
 import { Button } from '../../components/Button';
 import { Tooltip } from '../../components/Tooltip';
 import { cn } from '../../lib/cn';
+import { useCrossFaded } from '../../lib/motion';
+import { overlayOpen, useShortcut } from '../../lib/shortcuts';
+import { useApp } from '../../stores/app';
+import { useFileRefs } from '../../stores/fileRefs';
+import { usePaneActive } from '../../stores/panes';
+import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
 import {
   AssistantText,
@@ -19,27 +25,38 @@ import {
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
 import { CheckItem, RunningChecks } from './CheckItem';
+import { ConversationContext, type Conversation } from './conversation';
+import { DiagramCard } from './DiagramCard';
+import { ModelsCard } from './ModelsCard';
 import { EditsCard } from './EditsCard';
 import { FilesCard } from './FilesCard';
+import { FindBar, type FindBarHandle } from './FindBar';
 import { SourcesContext } from './Markdown';
 import { MediaCard } from './MediaCard';
+import { useRewind } from './RewindDialog';
 import { RunningShell, ShellItem } from './ShellItem';
 import { SourcesCard } from './SourcesCard';
 import { StatusLine } from './ThinkingIndicator';
+import { StepGroup } from './StepGroup';
 import { ToolGroup } from './ToolGroup';
 import { type TranscriptItem } from './transcriptModel';
 import { createTranscriptProjection } from './transcriptProjection';
 
 const STICK_THRESHOLD = 80;
 
+/** Where each session's transcript was left when it wasn't at the bottom, for coming back to it (until the window closes). */
+const leftAt = new Map<string, number>();
+
 /**
  * One transcript item. Items that appear while a turn runs (the message just
  * sent, the reply, tool work) rise in; what is already there when a session
- * opens just appears. The choice is made once, when the item mounts.
+ * opens just appears. The choice is made once, when the item mounts. What
+ * the person sent themselves is marked as that (.motion-sent travels further
+ * in the lively style).
  */
-function Arrival({ live, children }: { live: boolean; children: ReactNode }) {
+function Arrival({ live, sent, children }: { live: boolean; sent: boolean; children: ReactNode }) {
   const [rise] = useState(live);
-  return <div className={rise ? 'motion-rise' : undefined}>{children}</div>;
+  return <div className={rise ? (sent ? 'motion-rise motion-sent' : 'motion-rise') : undefined}>{children}</div>;
 }
 
 interface TranscriptProps {
@@ -49,8 +66,12 @@ interface TranscriptProps {
   onEdit: ((message: StoredMessage) => void) | null;
   onRetry: () => void;
   onRegenerate: (() => void) | null;
+  /** Sends a message as if it had been typed: a part of a reply can ask for something (a drawing of its diagram). */
+  onSend: (text: string) => void;
   /** Bottom padding so the last message clears overlays. */
   className?: string;
+  /** Which half of a split this transcript is; keys (Ctrl+F, F3) only act on the focused one. */
+  pane?: 'main' | 'side';
 }
 
 function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text: string }>; current: number; onJump: (index: number) => void }) {
@@ -80,14 +101,36 @@ function Timeline({ turns, current, onJump }: { turns: Array<{ key: string; text
 }
 
 /** Scrollable transcript with sticky autoscroll, a jump-to-bottom button and a turn timeline. */
-export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, className }: TranscriptProps) {
+export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegenerate, onSend, className, pane = 'main' }: TranscriptProps) {
   const variant = summary.kind === 'chat' ? 'chat' : 'code';
+  // What a piece of a reply needs to act on its conversation. It changes with the session only: the newest
+  // onSend is reached through a ref, so a reply that streams does not draw every code span again on each word.
+  const sendNow = useRef(onSend);
+  useEffect(() => {
+    sendNow.current = onSend;
+  }, [onSend]);
+  const canDraw = summary.kind === 'code' || !summary.incognito;
+  const conversation = useMemo<Conversation>(
+    () => ({ sessionId: summary.id, kind: variant, canDraw, send: (text) => sendNow.current(text) }),
+    [summary.id, variant, canDraw]
+  );
+  // Files are made and deleted while a turn runs: what was learned about the names in this session's replies is asked again once it ends.
+  const turn = useRef({ id: summary.id, active: view.turnActive });
+  useEffect(() => {
+    if (turn.current.id === summary.id && turn.current.active && !view.turnActive) useFileRefs.getState().forget(summary.id);
+    turn.current = { id: summary.id, active: view.turnActive };
+  }, [summary.id, view.turnActive]);
   // While a "!" command or the project's checks run no model is working, so the last turn stays as it finished.
   const modelWorking = view.turnActive && view.shellCommand === null && view.checking === null;
+  // Chats fold a turn's work into one line; a code session shows it the way Settings → Appearance says.
+  const chosen = useApp((s) => s.settings?.appearance.transcriptView ?? 'normal');
+  // From one transcript view to another the window cross-fades, so the view drawn follows the setting a frame behind.
+  const groupingNow = variant === 'chat' ? 'summary' : chosen;
+  const grouping = useCrossFaded(groupingNow, groupingNow);
   const projectTranscript = useMemo(() => createTranscriptProjection(), []);
   const items = useMemo(
-    () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking),
-    [projectTranscript, view.messages, view.streaming, view.running, modelWorking]
+    () => projectTranscript(view.messages, { streaming: view.streaming, running: view.running }, modelWorking, grouping),
+    [projectTranscript, view.messages, view.streaming, view.running, modelWorking, grouping]
   );
   const messagesById = useMemo(() => new Map(view.messages.map((m) => [m.id, m])), [view.messages]);
   // What the conversation read and found, for the marks on citations; null when it never used the web.
@@ -95,11 +138,53 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     const seen = sourcesOf(view.messages);
     return seen.length > 0 ? sourceIndex(seen) : null;
   }, [view.messages]);
+  // What was already there when the session opened. A card that comes later was made while it was open, and shows that it is new.
+  const [opened, setOpened] = useState<{ id: string; keys: Set<string> } | null>(null);
+  if (items.length > 0 && opened?.id !== summary.id) setOpened({ id: summary.id, keys: new Set(items.map((i) => i.key)) });
+  const fresh = (key: string): boolean => opened?.id === summary.id && !opened.keys.has(key);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  /** A scroll position waiting to be returned to. */
+  const restore = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [currentTurn, setCurrentTurn] = useState(0);
+  // Find in the conversation: the shortcut opens the bar, and selects the text of one that is open.
+  const [finding, setFinding] = useState(false);
+  const findBar = useRef<FindBarHandle>(null);
+  const focused = usePaneActive(pane);
+  // A dialog covers the conversation, an editor and a terminal have a find of their own while the keyboard
+  // is in them, and with two sessions side by side only the focused one answers.
+  const findKey = (): boolean => focused && !overlayOpen() && !document.activeElement?.closest('.monaco-editor, .xterm');
+  useShortcut(
+    'findInTranscript',
+    () => {
+      if (finding) findBar.current?.focus();
+      else setFinding(true);
+    },
+    true,
+    findKey
+  );
+  // F3 and Shift+F3 step the current match from anywhere in the window; with no bar open they open it, like Ctrl+F.
+  useShortcut('findNext', () => (finding ? findBar.current?.step(1) : setFinding(true)), true, findKey);
+  useShortcut('findPrevious', () => (finding ? findBar.current?.step(-1) : setFinding(true)), true, findKey);
+  // Escape closes the find bar from wherever the keyboard is: F3 can step the matches while the
+  // keyboard is somewhere else, and the bar would not hear the key then. The key is taken before
+  // the window's own Escape (stopping a running turn) gets it. The bar keeps it when it has the
+  // keyboard, so that closing it puts the keyboard back where it came from.
+  useEffect(() => {
+    if (!finding) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || overlayOpen()) return;
+      if (document.activeElement?.closest('.monaco-editor, .xterm')) return;
+      if ((event.target as HTMLElement | null)?.closest('[data-find-bar]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFinding(false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [finding]);
 
   const turns = useMemo(
     () => items.filter((i): i is Extract<TranscriptItem, { kind: 'user' }> => i.kind === 'user').map((i) => ({ key: i.key, text: i.text })),
@@ -123,9 +208,33 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
+  // Opening a session returns to where it was left, or starts at the latest message. Declared before the
+  // effect below, so that one already knows which of the two applies when both run for a new session.
   useLayoutEffect(() => {
+    const saved = leftAt.get(summary.id);
+    restore.current = saved ?? null;
+    stick.current = saved === undefined;
+    if (saved === undefined) scrollToBottom();
+  }, [summary.id, scrollToBottom]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    // Returned to once, as soon as there are messages to scroll (they may still be loading when the session opens).
+    if (el && restore.current !== null && items.length > 0) {
+      const saved = restore.current;
+      restore.current = null;
+      if (saved < el.scrollHeight - el.clientHeight - STICK_THRESHOLD) {
+        el.scrollTop = saved;
+        // No scroll event follows when the position did not change, and the jump-to-latest button depends on one.
+        el.dispatchEvent(new Event('scroll'));
+        return;
+      }
+      // What was open above that place has folded since: the place is gone, so start at the latest message as before.
+      leftAt.delete(summary.id);
+      stick.current = true;
+    }
     if (stick.current) scrollToBottom();
-  }, [items, scrollToBottom]);
+  }, [items, scrollToBottom, summary.id]);
 
   const onScroll = (): void => {
     const el = scrollRef.current;
@@ -133,6 +242,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
     stick.current = bottom;
     setAtBottom(bottom);
+    // While a place is still being returned to, scrolling is the transcript settling, not the user leaving it somewhere new.
+    if (bottom) leftAt.delete(summary.id);
+    else if (restore.current === null) leftAt.set(summary.id, el.scrollTop);
     const markers = el.querySelectorAll<HTMLElement>('[data-turn]');
     let current = 0;
     markers.forEach((marker, i) => {
@@ -149,15 +261,18 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     el.scrollTo({ top: marker.offsetTop - 16, behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    // Opening a session starts at the latest message.
-    stick.current = true;
-    scrollToBottom();
-  }, [summary.id, scrollToBottom]);
-
   const lastTextKey = items.findLast((i) => i.kind === 'text')?.key ?? null;
+  // Undo is offered on the file card of the last turn only. The snapshot it goes back to holds every file as it was
+  // before that turn, so after a later turn (which may have changed files by command, leaving no card) it would undo more.
+  const lastTurnAt = items.findLastIndex((i) => i.kind === 'user' || i.kind === 'shell' || i.kind === 'mission');
+  const lastEdits = items.slice(lastTurnAt + 1).findLast((i) => i.kind === 'edits');
+  const undoTurn = (messageId: string | null): void => {
+    if (messageId !== null) useRewind.getState().open({ sessionId: summary.id, messageId, chat: false, mode: 'files' });
+  };
   const lastItem = items.at(-1);
-  const showStatus = modelWorking && view.permission === null && view.question === null;
+  // A live block of steps is the working line itself, so it stands in for the one below the transcript.
+  const liveSteps = grouping !== 'summary' && lastItem?.kind === 'activity' && lastItem.live;
+  const showStatus = modelWorking && view.permission === null && view.question === null && !liveSteps;
   const failed = summary.status === 'error' && summary.lastError && !view.turnActive;
 
   const render = (item: TranscriptItem): JSX.Element | null => {
@@ -179,19 +294,38 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <AssistantText item={item} variant={variant} actions={actions} />;
       }
       case 'thinking':
-        return <ThinkingItem item={item} />;
+        return <ThinkingItem item={item} defaultOpen={grouping === 'verbose'} />;
       case 'tools':
         return <ToolGroup calls={item.calls} />;
       case 'activity':
-        return <ActivityGroup item={item} />;
+        return grouping === 'summary' ? (
+          <ActivityGroup item={item} />
+        ) : (
+          <StepGroup
+            item={item}
+            verbose={grouping === 'verbose'}
+            turn={{ sessionId: summary.id, startedAt: view.turnStartedAt, contextTokens: summary.usage.contextTokens, tasks: summary.kind === 'code' }}
+          />
+        );
       case 'edits':
-        return <EditsCard files={item.files} />;
+        return (
+          <EditsCard
+            files={item.files}
+            onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null}
+            onOpen={summary.kind === 'code' ? (path, line) => usePanels.getState().openFile(summary.id, path, { line }) : null}
+          />
+        );
       case 'files':
         return <FilesCard sessionId={summary.id} files={item.files} />;
+      case 'diagrams':
+        return <DiagramCard sessionId={summary.id} diagrams={item.diagrams} />;
+      case 'models':
+        // Models are read from the session's folder; a chat has none.
+        return summary.kind === 'code' ? <ModelsCard sessionId={summary.id} paths={item.paths} /> : null;
       case 'sources':
-        return <SourcesCard sources={item.sources} />;
+        return <SourcesCard sources={item.sources} fresh={fresh(item.key)} />;
       case 'media':
-        return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} />;
+        return <MediaCard sessionId={summary.id} folder={summary.kind === 'code' ? (summary.worktreePath ?? summary.cwd) : null} media={item.media} fresh={fresh(item.key)} />;
       case 'todos':
         return <TodosItem item={item} />;
       case 'plan':
@@ -239,15 +373,20 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
   return (
     <div className="relative min-h-0 flex-1">
       {variant === 'code' ? <Timeline turns={turns} current={currentTurn} onJump={jumpTo} /> : null}
-      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto" aria-label="Conversation" role="log" aria-live="off">
+      {finding ? <FindBar ref={findBar} root={contentRef} scroller={scrollRef} onClose={() => setFinding(false)} /> : null}
+      {/* The scrollbar keeps its place: content as tall as the window would otherwise widen and narrow the column on and on as the bar comes and goes. */}
+      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]" aria-label="Conversation" role="log" aria-live="off">
         <div ref={contentRef} className={cn('mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] flex-col gap-14 px-24 pt-16 pb-24', className)}>
-          <SourcesContext.Provider value={sources}>
-            {items.map((item) => (
-              <Arrival key={item.key} live={view.turnActive}>
-                {render(item)}
-              </Arrival>
-            ))}
-          </SourcesContext.Provider>
+          <ConversationContext.Provider value={conversation}>
+            <SourcesContext.Provider value={sources}>
+              {items.map((item) => (
+                <Arrival key={item.key} live={view.turnActive} sent={item.kind === 'user'}>
+                  {/* Verbose opens rows by default, and a row on screen keeps the state it has: what an item holds is drawn afresh when Verbose goes on or off. */}
+                  <Fragment key={grouping === 'verbose' ? 'opened' : 'folded'}>{render(item)}</Fragment>
+                </Arrival>
+              ))}
+            </SourcesContext.Provider>
+          </ConversationContext.Provider>
           {view.retrying ? (
             <p className="text-md text-fg-muted">
               {view.retrying.reason}. Retrying in {Math.ceil(view.retrying.delayMs / 1000)}s (attempt {view.retrying.attempt})…
@@ -287,6 +426,7 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
           aria-label="Scroll to the latest message"
           onClick={() => {
             stick.current = true;
+            restore.current = null;
             scrollToBottom('smooth');
           }}
           className="absolute bottom-12 left-1/2 flex size-28 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-icon shadow-popover transition-ui hover:text-icon-strong"

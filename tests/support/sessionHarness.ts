@@ -28,10 +28,16 @@ export interface Harness {
   projectDir: string;
   home: string;
   waitFor(predicate: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>;
+  /** Sends a message and waits for the turn it starts (and any turn it hands off to). */
+  turn(text: string): Promise<void>;
+  /** A new runtime over what is stored, as after Graft restarts. It becomes `session`; dispose the old one first. */
+  reopen(): AgentSession;
 }
 
 export interface HarnessOptions {
   script: FakeStep[];
+  /** The session's clock (default: one fixed moment). */
+  now?: () => Date;
   mode?: PermissionMode;
   kind?: 'code' | 'chat';
   effort?: EffortLevel | null;
@@ -63,6 +69,8 @@ export interface HarnessOptions {
   chatFiles?: SessionDeps['chatFiles'];
   documents?: SessionDeps['documents'];
   runCode?: SessionDeps['runCode'];
+  /** The folder of the skills Graft ships (default: none). */
+  builtinSkills?: string | null;
   media?: SessionDeps['media'];
   /** Settings → Models → Agents (default: session model, four at once, one retry, no budget). */
   agents?: Partial<SessionPreferences['agents']>;
@@ -72,10 +80,22 @@ export interface HarnessOptions {
   fallbackModel?: SessionPreferences['fallbackModel'];
   /** Settings → Permissions → Steps per turn (default: no limit). */
   maxSteps?: number | null;
+  /** Settings → Permissions → limits for one turn (default: none). */
+  turnBudget?: Partial<SessionPreferences['turnBudget']>;
+  /** Settings → Permissions → limits for a whole session, a project or a day (default: none). */
+  spendBudget?: Partial<SessionPreferences['spendBudget']>;
   /** The project's sandbox settings (default: no sandbox). */
   sandbox?: SessionDeps['sandbox'];
+  /** The language server's errors for an edited file (default: none, so edits are not checked). */
+  problems?: SessionDeps['problems'];
+  /** Settings → Models → Sessions: check edits for errors (default on). */
+  checkEdits?: boolean;
   /** A shell manager of the test's own (default: a plain one). */
   shells?: SessionDeps['shells'];
+  /** Takes the snapshot before each user turn (default: none is taken). */
+  checkpoint?: SessionDeps['checkpoint'];
+  /** How long a turn waits for its snapshot, and closing for a turn (default: the app's own). */
+  timings?: SessionDeps['timings'];
   /** MCP tools connected for the session (default: none). */
   mcpTools?: Array<ToolDefinition<Record<string, unknown>>>;
   /** What connected MCP servers add: their notes, their prompts, and what filling one in gives (default: no servers). */
@@ -102,6 +122,8 @@ export function makeHarness(options: HarnessOptions): Harness {
     archived: false,
     unread: false,
     incognito: options.incognito ?? false,
+    groupId: null,
+    completedAt: null,
     projectId: null,
     projectPath: options.kind === 'chat' ? null : projectDir,
     projectName: 'project',
@@ -153,11 +175,13 @@ export function makeHarness(options: HarnessOptions): Harness {
     mcpPrompt: (server, name, args) => (options.mcp?.getPrompt ? options.mcp.getPrompt(server, name, args) : Promise.reject(new Error('No MCP prompts in this test.'))),
     shells: options.shells ?? makeShellManager(path.join(home, 'shell-logs')),
     ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+    ...(options.problems ? { problems: options.problems } : {}),
     shellLabel: shell.label,
     settings,
     hooks: () => (options.hooks ? new HookRunner(() => options.hooks ?? {}, shell, () => projectDir) : null),
     rgPath: RG_PATH,
     graftHome: home,
+    builtinSkills: options.builtinSkills ?? null,
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
     trust: () => undefined,
@@ -175,10 +199,14 @@ export function makeHarness(options: HarnessOptions): Harness {
       computerUse: options.computer !== undefined,
       personalization: options.personalization ?? { about: '', instructions: '', style: 'default' },
       maxSteps: options.maxSteps ?? null,
-      agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents }
+      turnBudget: { tokens: null, costUsd: null, minutes: null, toolCalls: null, retries: null, ...options.turnBudget },
+      spendBudget: { sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, ...options.spendBudget },
+      agents: { routing: 'session', roles: {}, maxParallel: 4, tokenBudget: null, retries: 1, ...options.agents },
+      checkEdits: options.checkEdits ?? true
     }),
     gitInfo: () => Promise.resolve({ isRepo: false, branch: null }),
-    checkpoint: () => Promise.resolve(null),
+    checkpoint: options.checkpoint ?? (() => Promise.resolve(null)),
+    ...(options.timings ? { timings: options.timings } : {}),
     emit: (_id, event) => {
       events.push(event);
       for (const l of [...listeners]) l(event);
@@ -186,11 +214,15 @@ export function makeHarness(options: HarnessOptions): Harness {
     notify: (_summary, kind, text) => notifications.push({ kind, text }),
     generateTitle: (_summary, text) => titles.push(text),
     log: () => undefined,
-    now: () => new Date('2026-09-30T12:00:00Z')
+    now: options.now ?? (() => new Date('2026-09-30T12:00:00Z'))
   };
   const session = new AgentSession(summary, deps);
   return {
     session,
+    reopen() {
+      this.session = new AgentSession(store.getSummary(summary.id), deps);
+      return this.session;
+    },
     store,
     provider,
     events,
@@ -202,16 +234,23 @@ export function makeHarness(options: HarnessOptions): Harness {
       const existing = events.find(predicate);
       if (existing) return Promise.resolve(existing);
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('waitFor timed out')), timeoutMs);
         const listener = (e: AgentEvent): void => {
-          if (predicate(e)) {
-            clearTimeout(timer);
-            listeners.splice(listeners.indexOf(listener), 1);
-            resolve(e);
-          }
+          if (!predicate(e)) return;
+          clearTimeout(timer);
+          listeners.splice(listeners.indexOf(listener), 1);
+          resolve(e);
         };
+        // The listener comes off on timeout too: a wait that ran out must not answer a later event.
+        const timer = setTimeout(() => {
+          listeners.splice(listeners.indexOf(listener), 1);
+          reject(new Error('waitFor timed out'));
+        }, timeoutMs);
         listeners.push(listener);
       });
+    },
+    async turn(text) {
+      this.session.send(text);
+      await this.session.idle();
     }
   };
 }

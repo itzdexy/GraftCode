@@ -31,7 +31,8 @@ export interface CommandFile {
 export interface SkillFile {
   name: string;
   description: string;
-  scope: CustomScope;
+  /** `builtin`: a skill that ships with Graft; it can be read and replaced by one of the same name, not edited. */
+  scope: CustomScope | 'builtin';
   path: string;
   body: string;
 }
@@ -41,7 +42,7 @@ export interface MemoryInfo {
   path: string;
   exists: boolean;
   content: string;
-  /** Another instruction file Graft reads when GRAFT.md is absent (AGENTS.md / CLAUDE.md). */
+  /** Another instruction file Graft reads when GRAFT.md is absent (AGENTS.md / CLAUDE.md / GEMINI.md). */
   fallback: string | null;
 }
 
@@ -142,12 +143,14 @@ export async function deleteAgent(graftHome: string, projectRoot: string | null,
   await fs.promises.rm(file, { force: true });
 }
 
-export function listSkills(graftHome: string, projectRoot: string | null): SkillFile[] {
-  return loadSkills(graftHome, projectRoot).map((s) => {
+/** The skills a session in this project would be offered: the built-in ones first, then the others by name. */
+export function listSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null): SkillFile[] {
+  const skills = loadSkills(graftHome, projectRoot, builtinDir).map((s) => {
     const raw = fs.readFileSync(s.path, 'utf8');
     const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trimStart();
     return { name: s.name, description: s.description, scope: s.scope, path: s.path, body };
   });
+  return [...skills.filter((s) => s.scope === 'builtin'), ...skills.filter((s) => s.scope !== 'builtin')];
 }
 
 export async function saveSkill(

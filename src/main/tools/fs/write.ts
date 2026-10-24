@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { diagramInfo } from '@shared/diagrams';
 import { GraftError } from '@shared/errors';
+import type { DiagramInfo } from '@shared/schemas/toolDisplay';
 import { makeDir, refusedChange } from '../../files/makeDir';
+import { problemsNote, type Problem } from '../../languages/problems';
 import { unifiedDiff } from '../diffUtil';
 import type { FileStateTracker } from '../fileState';
 import { displayPath, resolvePath } from '../paths';
-import { errorResult, textResult, type ToolDefinition } from '../types';
+import { errorResult, textResult, type ToolContext, type ToolDefinition } from '../types';
 
 export const WriteInput = z.object({
   file_path: z.string().min(1).describe('Path of the file to create or replace.'),
@@ -54,6 +57,29 @@ export function freshnessError(files: FileStateTracker, abs: string, shown: stri
   return `${shown} no longer exists.`;
 }
 
+/**
+ * What a change's result says and shows about the file's problems: the note
+ * for the model and the list for the transcript, when the language server
+ * finds errors in the file as it is now. A server that fails or cannot say
+ * never fails the edit.
+ */
+export async function problemsAfter(
+  abs: string,
+  shown: string,
+  ctx: Pick<ToolContext, 'checkFile' | 'projectRoot'>
+): Promise<{ note: string | null; display: { problems?: { source: string; total: number; items: Problem[] } } }> {
+  const found = (await ctx.checkFile?.(ctx.projectRoot, abs).catch(() => null)) ?? null;
+  if (!found || found.total === 0) return { note: null, display: {} };
+  return { note: problemsNote(shown, found), display: { problems: { source: found.source, total: found.total, items: found.problems } } };
+}
+
+/** What an edit's result says when the file it left behind is a diagram (an .html page that meets the diagram contract); nothing otherwise. */
+export function diagramMark(file: string, content: string): { diagram?: DiagramInfo } {
+  if (!/\.html?$/i.test(file)) return {};
+  const diagram = diagramInfo(content, path.basename(file));
+  return diagram ? { diagram } : {};
+}
+
 export const writeTool: ToolDefinition<WriteInput> = {
   name: 'Write',
   description: [
@@ -94,14 +120,17 @@ export const writeTool: ToolDefinition<WriteInput> = {
     const diff = unifiedDiff(shown, before ?? '', input.content);
     const lines = input.content.length === 0 ? 0 : input.content.split(/\r?\n/).length;
     const message = before === null ? `Created ${shown} (${lines} lines).` : `Wrote ${shown} (${lines} lines).`;
-    const notes = ctx.notesForPaths([abs]);
+    const checked = await problemsAfter(abs, shown, ctx);
+    const notes = [checked.note, ctx.notesForPaths([abs])].filter((n) => n).join('\n\n');
     return textResult(notes ? `${message}\n\n${notes}` : message, {
       kind: 'edit',
       path: shown,
       created: before === null,
       patch: diff.patch,
       added: diff.added,
-      removed: diff.removed
+      removed: diff.removed,
+      ...checked.display,
+      ...diagramMark(abs, input.content)
     });
   }
 };

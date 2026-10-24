@@ -1,24 +1,26 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ErrorState, LoadingState } from '../../components/States';
 import { invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
-import { usePresence } from '../../lib/motion';
+import { SLIDE_EXIT_MS, useCrossFaded, usePresence } from '../../lib/motion';
 import { useShortcut } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
-import { useNav, type Route } from '../../stores/nav';
+import { pageUnder, useNav, type Route, type SettingsSection } from '../../stores/nav';
+import { usePanes } from '../../stores/panes';
 import { useSessions } from '../../stores/sessions';
+import { openSearch } from '../../stores/textSearch';
 import { useUi } from '../../stores/ui';
 import { ChatHome } from '../home/ChatHome';
 import { CodeHome } from '../home/CodeHome';
 import { MissionDialog } from '../session/MissionDialog';
 import { RewindDialog } from '../session/RewindDialog';
-import { SessionView } from '../session/SessionView';
 import { SystemPromptDialog } from '../session/SystemPromptDialog';
 import { CommandPalette } from './CommandPalette';
 import { InfoDialogs } from './InfoDialogs';
 import { SearchDialog } from './SearchDialog';
 import { SessionDialogs } from './SessionDialogs';
+import { SessionSplit } from './SessionSplit';
 import { Sidebar } from './Sidebar';
 import { openSettings, startNew, toggleSidebar } from './shellActions';
 
@@ -28,10 +30,7 @@ const ArtifactsView = lazy(() => import('../artifacts/ArtifactsView').then((m) =
 const SitesView = lazy(() => import('../sites/SitesView').then((m) => ({ default: m.SitesView })));
 const ScheduledView = lazy(() => import('../scheduled/ScheduledView').then((m) => ({ default: m.ScheduledView })));
 const CustomizeView = lazy(() => import('../customize/CustomizeView').then((m) => ({ default: m.CustomizeView })));
-const SettingsView = lazy(() => import('../settings/SettingsView').then((m) => ({ default: m.SettingsView })));
-
-/** Matches --g-duration-base, the time the sidebar takes to slide away. */
-const SIDEBAR_EXIT_MS = 180;
+const SettingsWindow = lazy(() => import('../settings/SettingsWindow').then((m) => ({ default: m.SettingsWindow })));
 
 function routeKey(route: Route): string {
   if (route.name === 'session') return `session:${route.id}`;
@@ -45,7 +44,7 @@ function RouteView({ route }: { route: Route }) {
     case 'home':
       return mode === 'code' ? <CodeHome /> : <ChatHome />;
     case 'session':
-      return <SessionView key={route.id} sessionId={route.id} />;
+      return <SessionSplit key={route.id} id={route.id} />;
     case 'projects':
       return <Later>{<ProjectsView />}</Later>;
     case 'artifacts':
@@ -57,7 +56,8 @@ function RouteView({ route }: { route: Route }) {
     case 'customize':
       return <Later>{<CustomizeView key={route.tab ?? 'commands'} initialTab={route.tab ?? 'commands'} />}</Later>;
     case 'settings':
-      return <Later>{<SettingsView section={route.section} />}</Later>;
+      // Settings is a window over a page (SettingsLayer), never the page itself.
+      return null;
   }
 }
 
@@ -65,17 +65,41 @@ function Later({ children }: { children: JSX.Element }) {
   return <Suspense fallback={<LoadingState className="h-full" />}>{children}</Suspense>;
 }
 
+/**
+ * Settings, over whatever page is open. It loads the first time it is opened, and stays in the page for a moment
+ * after it closes so that its leaving shows; the section it showed last is the one it leaves with.
+ */
+function SettingsLayer() {
+  const route = useNav((s) => s.route);
+  const open = route.name === 'settings';
+  const present = usePresence(open);
+  const [section, setSection] = useState<SettingsSection>('profile');
+  if (route.name === 'settings' && route.section !== section) setSection(route.section);
+  if (!present) return null;
+  return (
+    <Suspense fallback={null}>
+      <SettingsWindow open={open} section={route.name === 'settings' ? route.section : section} />
+    </Suspense>
+  );
+}
+
 /** Main window after onboarding: sidebar, the routed view, and app-wide dialogs and shortcuts. */
 export function AppShell() {
   const collapsed = useApp((s) => s.settings?.ui.sidebarCollapsed ?? false);
   // The sidebar stays while it slides away (see .graft-slide-x), then leaves the page.
-  const sidebarPresent = usePresence(!collapsed, SIDEBAR_EXIT_MS);
+  const sidebarPresent = usePresence(!collapsed, SLIDE_EXIT_MS);
   const route = useNav((s) => s.route);
+  const back = useNav((s) => s.back);
+  // The page that is drawn. Settings lies over the page it was opened from; and from one page to another the page
+  // gives way (a cross-fade, or the new page rising in: see .graft-page), so the page drawn follows the route a frame
+  // behind it while the route itself changes at once.
+  const page = useCrossFaded(route.name === 'settings' ? pageUnder(back) : route, routeKey(route.name === 'settings' ? pageUnder(back) : route), 'page');
   const loaded = useSessions((s) => s.loaded);
   const loadError = useSessions((s) => s.loadError);
 
   useEffect(() => {
     void useSessions.getState().loadList();
+    void useSessions.getState().loadGroups();
   }, []);
 
   const activeSession = route.name === 'session' ? route.id : null;
@@ -89,6 +113,16 @@ export function AppShell() {
   useShortcut('focusComposer', () => useUi.getState().focusComposer?.());
   useShortcut('openSettings', () => openSettings());
   useShortcut('commandPalette', () => useUi.getState().setPaletteOpen(true));
+  // A file and a symbol are opened by name in the code session on screen; elsewhere the keys are left alone.
+  const inProject = useSessions((s) => {
+    const session = activeSession ? s.summaries[activeSession] : undefined;
+    return session?.kind === 'code' && (session.worktreePath ?? session.cwd) !== null;
+  });
+  // The open session is the main pane of a split; its keys step aside while the keyboard is in the other one.
+  const mainFocused = usePanes((s) => s.side === null || s.focus === 'main');
+  useShortcut('quickOpen', () => useUi.getState().setPaletteOpen(true, '', 'files'), inProject && mainFocused);
+  useShortcut('goToSymbol', () => useUi.getState().setPaletteOpen(true, '', 'symbols'), inProject && mainFocused);
+  useShortcut('searchFiles', () => (activeSession ? openSearch(activeSession) : undefined), inProject && mainFocused);
 
   return (
     <div className="flex h-full bg-bg">
@@ -96,15 +130,16 @@ export function AppShell() {
         {/* The column can only narrow around something without a width of its own; the sidebar keeps its width inside. */}
         <div>{sidebarPresent ? <Sidebar /> : null}</div>
       </div>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <ErrorBoundary label="This view" resetKey={routeKey(route)}>
+      <main className="graft-page flex min-w-0 flex-1 flex-col">
+        <ErrorBoundary label="This view" resetKey={routeKey(page)}>
           {loadError ? (
             <ErrorState title="Couldn't load your sessions" message={loadError} onRetry={() => void useSessions.getState().loadList()} />
-          ) : loaded || route.name !== 'session' ? (
-            <RouteView route={route} />
+          ) : loaded || page.name !== 'session' ? (
+            <RouteView route={page} />
           ) : null}
         </ErrorBoundary>
       </main>
+      <SettingsLayer />
       <SearchDialog />
       <CommandPalette />
       <SessionDialogs />

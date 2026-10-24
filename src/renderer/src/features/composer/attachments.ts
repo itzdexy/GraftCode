@@ -71,6 +71,15 @@ export async function readAttachments(files: File[], room: AttachmentRoom): Prom
   return { images, files: texts, rejected: [...new Set(rejected)] };
 }
 
+/**
+ * The pictures a message box takes of those sent to it from elsewhere in the window. `images` were asked for
+ * (a screenshot): a model that cannot read them refuses them aloud. `extras` only came along with something
+ * else (the picture of a picked element): they are left out without a word.
+ */
+export function picturesTaken(sent: { images: ImageBlock[]; extras: ImageBlock[] }, supportsImages: boolean): { images: ImageBlock[]; refused: boolean } {
+  return supportsImages ? { images: [...sent.images, ...sent.extras], refused: false } : { images: [], refused: sent.images.length > 0 };
+}
+
 export function imageSrc(image: ImageBlock): string {
   return `data:${image.mediaType};base64,${image.data}`;
 }

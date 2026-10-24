@@ -31,6 +31,17 @@ export const MediaFileSchema = z.object({
 });
 export type MediaFile = z.infer<typeof MediaFileSchema>;
 
+/**
+ * A diagram a tool wrote (see shared/diagrams.ts): what the transcript needs to hold a place for it
+ * before it is drawn. The size is its viewBox's.
+ */
+export const DiagramInfoSchema = z.object({
+  title: z.string().max(120),
+  width: z.number().int().min(100).max(8000),
+  height: z.number().int().min(100).max(8000)
+});
+export type DiagramInfo = z.infer<typeof DiagramInfoSchema>;
+
 export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   /** Generated media (GenerateImage, ComfyUI). `costUsd` is what the provider charged: 0 on this computer, null when unknown. */
   z.object({
@@ -55,7 +66,17 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     created: z.boolean(),
     patch: z.string(),
     added: z.number().int(),
-    removed: z.number().int()
+    removed: z.number().int(),
+    /** Errors the language server found in the file right after this change; absent when none were found or nothing checked. */
+    problems: z
+      .object({
+        source: z.string(),
+        total: z.number().int(),
+        items: z.array(z.object({ line: z.number().int(), column: z.number().int(), code: z.union([z.string(), z.number()]).nullable(), text: z.string() }))
+      })
+      .optional(),
+    /** Present when the file, as this change left it, is a diagram: the transcript then shows it at the end of the turn. */
+    diagram: DiagramInfoSchema.optional()
   }),
   z.object({ kind: z.literal('glob'), pattern: z.string(), count: z.number().int(), files: z.array(z.string()) }),
   z.object({ kind: z.literal('grep'), pattern: z.string(), count: z.number().int(), preview: z.string() }),
@@ -81,7 +102,16 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('kill-shell'), shellId: z.string(), killed: z.boolean() }),
   /** `url` is where the page answered from; `requested` is the address that was asked for, when the page had moved. */
-  z.object({ kind: z.literal('fetch'), url: z.string(), requested: z.string().optional(), status: z.number().int(), bytes: z.number().int(), title: z.string().nullable() }),
+  z.object({
+    kind: z.literal('fetch'),
+    url: z.string(),
+    requested: z.string().optional(),
+    status: z.number().int(),
+    bytes: z.number().int(),
+    title: z.string().nullable(),
+    /** The picture the page offers for links to it (see extractImage); absent when it names none, and in results stored before 0.6.24. */
+    image: z.string().max(2000).optional()
+  }),
   /** A computer-use step; the screenshot rides along in the result's content, the point is where it acted (screenshot pixels). */
   z.object({
     kind: z.literal('computer'),
@@ -117,7 +147,8 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     /** `site` names the site when the URL is a redirect. */
     results: z.array(z.object({ title: z.string(), url: z.string(), site: z.string().optional() }))
   }),
-  MadeFileSchema.extend({ kind: z.literal('file'), preview: z.string().nullable() }),
+  /** `diagram` is present when the file a chat saved is a diagram: the transcript then shows it at the end of the turn. */
+  MadeFileSchema.extend({ kind: z.literal('file'), preview: z.string().nullable(), diagram: DiagramInfoSchema.optional() }),
   z.object({
     kind: z.literal('code'),
     code: z.string(),

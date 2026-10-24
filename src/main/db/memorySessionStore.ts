@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { GraftError } from '@shared/errors';
-import type { ContentBlock, MessageMeta, StoredMessage } from '@shared/schemas/messages';
-import type { SessionSummary } from '@shared/schemas/sessions';
+import type { ContentBlock, MessageMeta, StoredMessage, ToolResultBlock } from '@shared/schemas/messages';
+import type { SessionGroup, SessionSummary } from '@shared/schemas/sessions';
 import type { TodoItem } from '@shared/schemas/toolDisplay';
 import type { AgentRun } from '@shared/schemas/agentRuns';
 import type { Mission } from '@shared/schemas/missions';
+import { addUsage, EMPTY_USAGE, type Usage } from '@shared/schemas/common';
+import type { UsageDay, UsageEntry } from '@shared/usage';
+import { keepable, type JournalEntry, type JournalStart } from '../agent/journal';
 import type { SessionPatch, SessionStore } from './sessionsRepo';
 
 /**
@@ -18,6 +21,9 @@ export class MemorySessionStore implements SessionStore {
   private readonly agentRuns = new Map<string, AgentRun[]>();
   private readonly missions = new Map<string, Mission[]>();
   private readonly pruneCutoffs = new Map<string, number>();
+  private readonly usage: UsageDay[] = [];
+  private readonly journal = new Map<string, JournalEntry[]>();
+  private readonly groups = new Map<string, SessionGroup>();
 
   getPruneBeforeSeq(sessionId: string): number {
     this.getSummary(sessionId);
@@ -47,6 +53,7 @@ export class MemorySessionStore implements SessionStore {
     this.todos.delete(sessionId);
     this.agentRuns.delete(sessionId);
     this.missions.delete(sessionId);
+    this.journal.delete(sessionId);
   }
 
   list(): SessionSummary[] {
@@ -177,9 +184,83 @@ export class MemorySessionStore implements SessionStore {
     this.missions.set(sessionId, (this.missions.get(sessionId) ?? []).filter((m) => m.createdAt < fromTime));
   }
 
+  /** Kept while Graft runs and never written anywhere: an incognito chat leaves no record of what it used. */
+  recordUsage(entry: UsageEntry): void {
+    const found = this.usage.find((u) => u.day === entry.day && u.providerId === entry.providerId && u.modelId === entry.modelId);
+    const row: UsageDay = found ?? { day: entry.day, providerId: entry.providerId, modelId: entry.modelId, requests: 0, usage: EMPTY_USAGE, costUsd: 0, unpriced: 0 };
+    if (!found) this.usage.push(row);
+    row.requests += 1;
+    row.usage = addUsage(row.usage, entry.usage);
+    row.costUsd += entry.costUsd ?? 0;
+    if (entry.costUsd === null) row.unpriced += 1;
+  }
+
+  usageSince(fromDay: string): UsageDay[] {
+    return this.usage
+      .filter((u) => u.day >= fromDay)
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map((u) => ({ ...u }));
+  }
+
+  projectUsage(projectPath: string): { totals: Usage; costUsd: number } {
+    let totals = EMPTY_USAGE;
+    let costUsd = 0;
+    for (const session of this.sessions.values()) {
+      if (session.projectPath !== projectPath) continue;
+      totals = addUsage(totals, session.usage.totals);
+      costUsd += session.usage.costUsd ?? 0;
+    }
+    return { totals, costUsd };
+  }
+
+  listGroups(): SessionGroup[] {
+    return [...this.groups.values()].sort((a, b) => a.createdAt - b.createdAt || a.name.localeCompare(b.name));
+  }
+
+  createGroup(name: string): SessionGroup {
+    const group: SessionGroup = { id: randomUUID(), name, createdAt: Date.now() };
+    this.groups.set(group.id, group);
+    return group;
+  }
+
+  renameGroup(id: string, name: string): SessionGroup {
+    const group = this.groups.get(id);
+    if (!group) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    const next = { ...group, name };
+    this.groups.set(id, next);
+    return next;
+  }
+
+  deleteGroup(id: string): void {
+    if (!this.groups.delete(id)) throw new GraftError('group_not_found', `Group ${id} does not exist.`);
+    for (const [sessionId, session] of this.sessions) if (session.groupId === id) this.sessions.set(sessionId, { ...session, groupId: null });
+  }
+
   private list_(sessionId: string): StoredMessage[] {
     const list = this.messages.get(sessionId);
     if (!list) throw new GraftError('session_not_found', `Session ${sessionId} does not exist.`);
     return list;
+  }
+
+  journalStart(entry: JournalStart): void {
+    const kept = (this.journal.get(entry.sessionId) ?? []).filter((other) => other.toolUseId !== entry.toolUseId);
+    this.journal.set(entry.sessionId, [...kept, { ...entry, endedAt: null, result: null }]);
+  }
+
+  journalEnd(sessionId: string, toolUseId: string, result: ToolResultBlock, at: number): void {
+    const entry = this.journal.get(sessionId)?.find((other) => other.toolUseId === toolUseId);
+    if (!entry) return;
+    entry.endedAt = at;
+    entry.result = keepable(result);
+  }
+
+  journalSettle(sessionId: string, rootIds: string[]): void {
+    const kept = (this.journal.get(sessionId) ?? []).filter((entry) => !rootIds.includes(entry.rootId));
+    if (kept.length > 0) this.journal.set(sessionId, kept);
+    else this.journal.delete(sessionId);
+  }
+
+  journalOpen(sessionId: string): JournalEntry[] {
+    return (this.journal.get(sessionId) ?? []).map((entry) => ({ ...entry }));
   }
 }

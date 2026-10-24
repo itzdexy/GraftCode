@@ -34,6 +34,40 @@ export function extractTitle(html: string): string | null {
   return m?.[1] ? decodeEntities(m[1].replace(/\s+/g, ' ').trim()) || null : null;
 }
 
+function metaAttribute(tag: string, name: string): string | null {
+  const match = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i').exec(tag);
+  return match ? (match[1] ?? match[2] ?? match[3] ?? '') : null;
+}
+
+/** Which <meta> names a page's picture, the most trusted first. */
+const IMAGE_META = ['og:image:secure_url', 'og:image', 'og:image:url', 'twitter:image', 'twitter:image:src'];
+const MAX_IMAGE_URL = 2000;
+
+/**
+ * The picture a page offers for links to it (Open Graph, else Twitter card),
+ * as an https address; null when it names none. Only the <head> is read.
+ */
+export function extractImage(html: string, baseUrl: string): string | null {
+  const end = html.search(/<\/head>/i);
+  const named = new Map<string, string>();
+  for (const tag of (end === -1 ? html.slice(0, 200_000) : html.slice(0, end)).match(/<meta\b[^>]*>/gi) ?? []) {
+    const name = (metaAttribute(tag, 'property') ?? metaAttribute(tag, 'name') ?? '').toLowerCase();
+    const content = metaAttribute(tag, 'content');
+    if (content && IMAGE_META.includes(name) && !named.has(name)) named.set(name, decodeEntities(content.trim()));
+  }
+  for (const name of IMAGE_META) {
+    const value = named.get(name);
+    if (!value) continue;
+    try {
+      const url = new URL(value, baseUrl);
+      if (url.protocol === 'https:' && url.href.length <= MAX_IMAGE_URL) return url.href;
+    } catch {
+      // Not an address: the next name may hold one.
+    }
+  }
+  return null;
+}
+
 /**
  * Converts HTML to readable Markdown-ish text: drops scripts/styles, keeps
  * headings, links, list items, code blocks and paragraph breaks.

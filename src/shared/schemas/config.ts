@@ -50,6 +50,17 @@ export const McpServerNameSchema = z
   .max(64)
   .regex(/^[A-Za-z0-9_-]+$/, 'Use letters, digits, "-" or "_"');
 
+/**
+ * What a server started on this computer gets of its environment, besides the variables its
+ * own settings give it:
+ *  - "all": everything, as a program started from a terminal would;
+ *  - "no-secrets": everything except variables that look like keys, tokens and passwords;
+ *  - "minimal": only what a program needs to start (the MCP SDK's own default list).
+ * None of them is a sandbox: the server runs as the user and can read what the user can.
+ */
+export const McpInheritSchema = z.enum(['all', 'no-secrets', 'minimal']);
+export type McpInherit = z.infer<typeof McpInheritSchema>;
+
 export const McpServerConfigSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('stdio'),
@@ -57,6 +68,8 @@ export const McpServerConfigSchema = z.discriminatedUnion('type', [
     args: z.array(z.string().max(4000)).max(100).default([]),
     env: z.record(z.string(), z.string()).default({}),
     cwd: z.string().optional(),
+    /** Left out by servers saved before 0.6.22, which inherit everything as they always did. */
+    inherit: McpInheritSchema.optional(),
     enabled: z.boolean().default(true)
   }),
   z.object({

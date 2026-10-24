@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
-import { addUsage, EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode, type Usage } from '@shared/schemas/common';
+import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } from '@shared/schemas/common';
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
-import { MISSION_LIMITS, missionOpen, type Mission, type MissionStart } from '@shared/schemas/missions';
+import { MISSION_LIMITS, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
-import { FORWARDED_PORTS, sandboxUrl, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
+import type { FileProblems } from '../languages/problems';
+import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
 import type { ModelInfo } from '@shared/schemas/models';
+import { CODE_ONLY_COMMANDS, commandsFor } from '@shared/commands';
 import { currentPlan } from '@shared/plans';
-import type { Source } from '@shared/sources';
-import type { PermissionRequest, PermissionResponse, QuestionAnswer, QuestionRequest, QuestionResponse } from '@shared/schemas/permissions';
+import type { PermissionResponse, QuestionResponse } from '@shared/schemas/permissions';
 import type { ContextReport, QueuedInput, SessionDetail, SessionStatus, SessionSummary } from '@shared/schemas/sessions';
-import type { TodoItem } from '@shared/schemas/toolDisplay';
+import type { SiteStack } from '@shared/schemas/sites';
 import { GraftError } from '@shared/errors';
 import type { DataHandling } from '@shared/privacy';
 import type { SearchEngineId, SearchResult } from '../tools/web/search';
@@ -19,47 +21,36 @@ import type { ComputerControl } from '../computer/desktop';
 import type { SessionPatch, SessionStore } from '../db/sessionsRepo';
 import type { RetryPolicy } from '../providers/retry';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
-import { decide, type Decision } from '../permissions/engine';
 import type { SettingsStore } from '../permissions/settingsStore';
 import { FileStateTracker } from '../tools/fileState';
 import type { ToolRegistry } from '../tools/registry';
 import type { ShellManager } from '../tools/shell/shellManager';
-import type { AgentBrowser, SubagentType, ToolContext } from '../tools/types';
-import { CHAT_ONLY_TOOLS, PARENT_ONLY_TOOLS, READ_ONLY_TOOLS } from '../tools/builtin';
+import type { ToolContext } from '../tools/types';
 import type { ChatFile } from '../chat/chatFiles';
 import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
+import { answerAside } from './aside';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
-import { checksSummary, runChecks } from './checks';
+import { runChecks, suggestChecks } from './checks';
 import type { HookRunner } from './hooks';
 import { modelOrder, toLlmHistory, withSentTimes } from './history';
 import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
 import { SessionContextState } from './contextState';
 import type { AgentWorkspaces } from './workspaces';
-import { workspaceHost } from './workspaceHost';
-import { runAgentLoop, type LoopHost, type LoopModel, type PermissionAnswer, type PermissionPrompt } from './loop';
+import { runAgentLoop, type LoopHost } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
 import { expandMentions } from './mentions';
-import { BUILTIN_AGENTS, loadAgents, subagentTools } from './agents';
-import { runAgentGroup, type AgentGroupInput, type AgentGroupSettings } from './agentGroup';
-import type { GraphControl } from './orchestrator';
-import {
-  afterMissionChecks,
-  afterMissionTurn,
-  applyMissionUpdate,
-  cancelMission,
-  createMission,
-  missionBrief,
-  missionCheckFailure,
-  missionContinuation,
-  pauseMission,
-  resumeMission,
-  type MissionUpdateInput,
-  type TurnEnd
-} from './mission';
+import { loadAgents } from './agents';
+import type { AgentGroupSettings } from './agentGroup';
+import { createMission, missionBrief, type TurnEnd } from './mission';
+import { MissionController } from './missionController';
+import { ModelOffering } from './offering';
+import { reconcileInterrupted, type Cut } from './journal';
+import { SessionHost, type TurnScope } from './sessionHost';
+import type { TurnLimits, SpendLimits } from './turnBudget';
 import { MemoryLoader } from './memory';
 import { loadSkills } from './skills';
 import {
@@ -74,6 +65,7 @@ import {
   planPrompt,
   prPrompt,
   PROMPT_COMMANDS,
+  diagramPrompt,
   researchPrompt,
   reviewPrompt,
   securityReviewPrompt,
@@ -82,8 +74,8 @@ import {
 } from './slashCommands';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
-import { estimateMessagesTokens, estimateTextTokens, shouldCompact } from './tokens';
-import { searchTools, type SearchableTool } from '../tools/toolSearch';
+import { estimateMessagesTokens } from './tokens';
+import { searchTools } from '../tools/toolSearch';
 
 export interface ModelResolver {
   resolve(ref: ModelRef, signal?: AbortSignal): Promise<{ provider: LLMProvider; model: ModelInfo }>;
@@ -113,8 +105,14 @@ export interface SessionPreferences {
   personalization: Personalization;
   /** Settings → Permissions → Steps per turn; null means no limit. */
   maxSteps: number | null;
+  /** Settings → Permissions → limits for one turn: tokens, estimated cost, minutes of work. */
+  turnBudget: TurnLimits;
+  /** Settings → Permissions → limits for a session and for a day: everything the session has used, and everything used today on this computer. */
+  spendBudget: SpendLimits;
   /** Settings → Models → Agents: how groups of agents are routed and limited. */
   agents: AgentGroupSettings;
+  /** Settings → Models → Sessions: after an edit, the language server says what is wrong with the file. */
+  checkEdits: boolean;
 }
 
 export interface SessionDeps {
@@ -138,13 +136,17 @@ export interface SessionDeps {
   hooks(projectRoot: string | null, trusted: boolean): HookRunner | null;
   rgPath: string;
   graftHome: string;
+  /** The skills that ship with Graft; null when there are none. */
+  builtinSkills: string | null;
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   trust(projectRoot: string): void;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
   sandbox?(projectRoot: string): SandboxSettings | null;
-  /** The site from the Sites tab that this folder holds, with its live address; null for other folders. */
-  site?(projectRoot: string): Promise<{ name: string; url: string } | null>;
+  /** The errors the local language server finds in a file of a project (see languages/problems.ts). Absent: edits are not checked. */
+  problems?(projectRoot: string, file: string, signal: AbortSignal): Promise<FileProblems | null>;
+  /** The site from the Sites tab that this folder holds, with its live address and what it is built with; null for other folders. */
+  site?(projectRoot: string): Promise<{ name: string; url: string; stack: SiteStack } | null>;
   preferences(): SessionPreferences;
   /** Display name of the provider behind a provider id, e.g. "OpenRouter". */
   providerName(providerId: string): string;
@@ -170,8 +172,10 @@ export interface SessionDeps {
   /** Shows the Browser panel in a session's view, when the agent opens a page there. */
   revealBrowser?(sessionId: string): void;
   gitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }>;
-  /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. */
-  checkpoint(sessionId: string, cwd: string, messageId: string): Promise<string | null>;
+  /** Snapshots the working tree before a user turn; returns a checkpoint id, or null when unavailable. `signal` ends it early. */
+  checkpoint(sessionId: string, cwd: string, messageId: string, signal?: AbortSignal): Promise<string | null>;
+  /** How long a turn waits for its folder's snapshot, and closing a session for its turn (defaults CHECKPOINT_BUDGET_MS, DISPOSE_WAIT_MS); tests shorten them. */
+  timings?: { checkpointMs?: number; disposeMs?: number };
   emit(sessionId: string, event: AgentEvent): void;
   notify(summary: SessionSummary, kind: 'needs-input' | 'finished' | 'error', text: string): void;
   generateTitle(summary: SessionSummary, firstText: string): void;
@@ -189,13 +193,6 @@ interface InternalQueued {
   mission?: { kind: 'start'; input: MissionStart } | { kind: 'step'; text: string; turn: number; of: number } | { kind: 'verify' };
 }
 
-/** How long one of a mission's checks may run. */
-const MISSION_CHECK_TIMEOUT_SEC = 600;
-
-/** A sub-agent's steps when Settings sets no limit: it reports back on one delegated task, so it stays bounded. */
-const SUBAGENT_ITERATIONS = 200;
-/** MCP tool definitions weighing more than this (or a tenth of the model's window) wait to be loaded with ToolSearch. */
-const DEFER_MCP_TOKENS = 10_000;
 const DELTA_FLUSH_MS = 40;
 /** "!" commands from the message box: how long they may run, and how much of their output the transcript keeps. */
 const USER_SHELL_TIMEOUT_MS = 300_000;
@@ -205,6 +202,14 @@ const MODE_CYCLE: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
 /** Removing old tool output counts as enough when the context falls to this share of the window; otherwise the session summarizes. */
 const PRUNE_TARGET = 0.6;
 const DEFAULT_TITLES = new Set(['New session', 'New chat']);
+
+/** How long a turn waits for the snapshot of its folder before it goes on without one. */
+export const CHECKPOINT_BUDGET_MS = 20_000;
+/** How long closing a session waits for its turn to end. */
+export const DISPOSE_WAIT_MS = 8_000;
+/** Folders whose snapshot ran past the budget in this run of Graft: they are not snapshotted again until it restarts. */
+const TOO_LARGE_TO_SNAPSHOT = new Set<string>();
+const folderKey = (folder: string): string => (process.platform === 'win32' ? path.resolve(folder).toLowerCase() : path.resolve(folder));
 
 /**
  * One conversation and its agent runtime. Turns run one at a time; input
@@ -219,18 +224,17 @@ export class AgentSession {
   private queue: InternalQueued[] = [];
   /** Queued messages sent with "Send now": they join the running turn after its next tool step. */
   private steering: InternalQueued[] = [];
-  private pendingPermission: { request: PermissionRequest; resolve: (a: PermissionAnswer) => void } | null = null;
-  private pendingQuestion: { request: QuestionRequest; resolve: (a: QuestionAnswer[] | null) => void } | null = null;
-  private readonly sessionAllow: string[] = [];
-  /** The groups of agents running now, by the RunAgents call that started each: how one agent of a group is stopped. */
-  private readonly agentGroups = new Map<string, GraphControl>();
+  /** Side questions being answered, by the id their asker gave them. */
+  private readonly asides = new Map<string, AbortController>();
   readonly files: FileStateTracker;
+  private readonly missions: MissionController;
+  /** What this session's agent loops get from it: the user's answers, tool context, usage, sub-agents and groups. */
+  private readonly host: SessionHost;
   private memory: MemoryLoader | null = null;
   private system: string | null = null;
   private toolNames: string[] | null = null;
-  /** The MCP tools of a setup too big to send with every request wait to be loaded; once they do, they do for the session. */
-  private mcpDeferred = false;
-  private readonly loadedMcp = new Set<string>();
+  /** What a model is offered here: its tools, web access, media, and the MCP tools waiting for ToolSearch. */
+  private readonly offering: ModelOffering;
   private promptKey: string | null = null;
   private modelKey: string | null = null;
   /** Thinking in messages before this seq is never replayed (model switch, tool set change). */
@@ -241,10 +245,18 @@ export class AgentSession {
   private deltaBuffer: { messageId: string; kind: 'text' | 'thinking'; text: string } | null = null;
   private deltaTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  /** Whether this runtime has started a turn since it was made. */
+  private ranTurn = false;
+  /** Whether this runtime has said that nothing checks the project's changes (see sayUnchecked). */
+  private saidUnchecked = false;
+  /** Whether this runtime has said that its folder gets no checkpoints (see takeCheckpoint). */
+  private checkpointSkipSaid = false;
+  /** Snapshots still being taken: one can outlast the reply it was taken for. */
+  private readonly snapshots = new Set<Promise<void>>();
+  /** Aborted when the session closes, which ends a snapshot that outlasted its turn. */
+  private readonly closing = new AbortController();
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
-  /** The permission request on screen and those behind it (see prompt). */
-  private promptChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     summary: SessionSummary,
@@ -254,6 +266,57 @@ export class AgentSession {
     this.contextState = new SessionContextState(deps.store, summary.id);
     this.files = new FileStateTracker(deps.platform);
     this.status = summary.status === 'running' || summary.status === 'needs-input' ? 'idle' : summary.status;
+    this.missions = new MissionController({
+      sessionId: this.id,
+      store: deps.store,
+      shells: deps.shells,
+      emit: (event) => this.emit(event),
+      notify: (kind, text) => deps.notify(this.summary, kind, text),
+      log: (level, message, fields) => deps.log(level, message, fields),
+      workingDir: () => this.workingDir(),
+      syncSandbox: () => this.syncSandbox()
+    });
+    this.offering = new ModelOffering(() => ({
+      kind: this.summary.kind,
+      incognito: this.summary.incognito,
+      webSearch: this.deps.preferences().webSearch,
+      computerUse: this.deps.preferences().computerUse,
+      searchEngine: this.deps.search.active(),
+      registry: this.deps.tools,
+      mcpToolNames: (root) => this.deps.mcpToolNames(root),
+      settingsRoot: this.settingsRoot(),
+      hasBrowser: this.deps.browser !== undefined,
+      hasComputer: this.deps.computer !== null,
+      hasChatFiles: this.deps.chatFiles !== null,
+      hasRunCode: this.deps.runCode !== null,
+      hasBuiltinSkills: this.deps.builtinSkills !== null,
+      media: this.deps.media,
+      missionOpen: this.missions.isOpen()
+    }));
+    this.host = new SessionHost({
+      id: this.id,
+      deps,
+      files: this.files,
+      missions: this.missions,
+      summary: () => this.summary,
+      emit: (event) => this.emit(event),
+      setStatus: (status) => this.setStatus(status),
+      notice: (level, text) => this.notice(level, text),
+      projectRoot: () => this.projectRoot(),
+      settingsRoot: () => this.settingsRoot(),
+      workingDir: () => this.workingDir(),
+      chatWork: (model) => this.offering.chatWork(model),
+      effortFor: (model) => this.effortFor(model),
+      privacy: () => this.privacy(),
+      system: () => this.system,
+      toolNames: () => this.toolNames,
+      notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
+      deferredTools: (model) => this.deferredTools(model),
+      history: () => this.history(),
+      pruneOutput: (tokens, contextWindow) => this.pruneOutput(tokens, contextWindow),
+      compact: (instructions, signal, keepRecent, using) => this.compact(instructions, signal, keepRecent, using),
+      leavePlanMode: () => this.leavePlanMode()
+    });
   }
 
   get summary(): SessionSummary {
@@ -270,12 +333,13 @@ export class AgentSession {
   }
 
   detail(): SessionDetail {
+    const pending = this.host.pending();
     return {
       summary: this.liveSummary(),
       messages: this.deps.store.listMessages(this.id),
       todos: this.deps.store.getTodos(this.id),
-      pendingPermission: this.pendingPermission?.request ?? null,
-      pendingQuestion: this.pendingQuestion?.request ?? null,
+      pendingPermission: pending.permission,
+      pendingQuestion: pending.question,
       queue: this.publicQueue(),
       agentRuns: this.deps.store.listAgentRuns(this.id),
       mission: this.deps.store.getMission(this.id)
@@ -379,6 +443,44 @@ export class AgentSession {
   }
 
   /**
+   * Answers a side question from the conversation as it stands. It is one request beside whatever the session is
+   * doing: no turn starts or is disturbed and nothing is stored. The answer goes to the asker alone; `aside` events
+   * carry it while it arrives. It reads the steps that are finished, not the reply being written at that moment.
+   */
+  async aside(askId: string, question: string): Promise<string> {
+    if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
+    const asked = question.trim();
+    if (asked.length === 0) throw new GraftError('empty_question', 'Type a question after /btw.');
+    const controller = new AbortController();
+    this.asides.set(askId, controller);
+    try {
+      const { provider, model } = await this.resolveModel(controller.signal);
+      return await answerAside({
+        provider,
+        model,
+        history: this.history(),
+        question: asked,
+        cacheKey: this.id,
+        privacy: this.privacy(),
+        signal: controller.signal,
+        // Not through emit: that would end the batch of the reply a running turn is streaming with every piece.
+        onText: (text) => {
+          if (!this.disposed) this.deps.emit(this.id, { type: 'aside', askId, text });
+        }
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new GraftError('aside_cancelled', 'The side question was cancelled.');
+      throw error;
+    } finally {
+      this.asides.delete(askId);
+    }
+  }
+
+  cancelAside(askId: string): void {
+    this.asides.get(askId)?.abort();
+  }
+
+  /**
    * Runs a command the user typed after "!" in the message box, in this
    * session's shell (so a cd carries over to the agent's Shell tool). The
    * command and its output join the conversation as context for the next
@@ -448,58 +550,15 @@ export class AgentSession {
   interrupt(): void {
     if (!this.controller) return;
     this.controller.abort();
-    // Stop also answers whatever the turn is waiting on. The matching *-resolved
-    // events matter: without them the prompt card stays on screen with no way to
-    // answer it, because the request it refers to is already gone.
-    if (this.pendingPermission) {
-      const { request } = this.pendingPermission;
-      this.pendingPermission.resolve({ decision: 'deny' });
-      this.pendingPermission = null;
-      this.emit({ type: 'permission-resolved', requestId: request.id });
-    }
-    if (this.pendingQuestion) {
-      const { request } = this.pendingQuestion;
-      this.pendingQuestion.resolve(null);
-      this.pendingQuestion = null;
-      this.emit({ type: 'question-resolved', requestId: request.id });
-    }
+    this.host.cancelPending();
   }
 
   respondPermission(response: PermissionResponse): void {
-    const pending = this.pendingPermission;
-    if (!pending || pending.request.id !== response.requestId) {
-      throw new GraftError('stale_request', 'That permission request is no longer pending.');
-    }
-    this.pendingPermission = null;
-    const rule = pending.request.suggestedRule;
-    if ((response.decision === 'allow-session' || response.decision === 'allow-always') && rule) this.sessionAllow.push(rule);
-    if (response.decision === 'allow-always' && rule) {
-      const root = this.settingsRoot();
-      if (root) {
-        this.deps.trust(root);
-        this.deps.settings.addRule('local', root, 'allow', rule).catch((error: unknown) => {
-          this.notice('warning', `Couldn't save the rule ${rule}: ${(error as Error).message}`);
-        });
-      }
-    }
-    this.emit({ type: 'permission-resolved', requestId: response.requestId });
-    this.setStatus('running');
-    pending.resolve({
-      decision: response.decision,
-      ...(response.feedback ? { feedback: response.feedback } : {}),
-      ...(response.plan !== undefined ? { plan: response.plan } : {})
-    });
+    this.host.respondPermission(response);
   }
 
   answerQuestion(response: QuestionResponse): void {
-    const pending = this.pendingQuestion;
-    if (!pending || pending.request.id !== response.requestId) {
-      throw new GraftError('stale_request', 'That question is no longer pending.');
-    }
-    this.pendingQuestion = null;
-    this.emit({ type: 'question-resolved', requestId: response.requestId });
-    this.setStatus('running');
-    pending.resolve(response.dismissed ? null : response.answers);
+    this.host.answerQuestion(response);
   }
 
   setPermissionMode(mode: PermissionMode): void {
@@ -600,17 +659,24 @@ export class AgentSession {
     // keep writing to a session that is being removed.
     this.disposed = true;
     this.interrupt();
-    await this.idle();
+    this.closing.abort();
+    for (const aside of this.asides.values()) aside.abort();
+    // A turn caught in something that doesn't hear the stop must not keep its session from being deleted, or the
+    // app from closing: after DISPOSE_WAIT_MS the session is let go and the turn is left to end on its own.
+    let timer: NodeJS.Timeout | undefined;
+    const ended = await Promise.race([
+      this.idle().then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.deps.timings?.disposeMs ?? DISPOSE_WAIT_MS);
+      })
+    ]);
+    clearTimeout(timer);
+    if (!ended) this.deps.log('warn', 'A turn did not end when its session was closed', { session: this.id });
     this.flushDeltas();
     await this.deps.shells.disposeSession(this.id);
   }
 
   // ---- missions -----------------------------------------------------------
-
-  private saveMission(mission: Mission): void {
-    this.deps.store.saveMission(mission);
-    this.emit({ type: 'mission', mission });
-  }
 
   private missionItem(mission: NonNullable<InternalQueued['mission']>, text = ''): InternalQueued {
     return { id: randomUUID(), text, images: [], files: [], createdAt: Date.now(), mission };
@@ -624,8 +690,7 @@ export class AgentSession {
   startMission(input: MissionStart): { queued: boolean } {
     if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
     if (this.summary.kind !== 'code' || !this.projectRoot()) throw new GraftError('mission_unavailable', 'Missions run in code sessions that have a project folder.');
-    const current = this.deps.store.getMission(this.id);
-    if ((current && missionOpen(current.status)) || this.queue.some((q) => q.mission?.kind === 'start')) {
+    if (this.missions.isOpen() || this.queue.some((q) => q.mission?.kind === 'start')) {
       throw new GraftError('mission_exists', 'This session already has a mission. Finish or stop it before starting another.');
     }
     const item = this.missionItem({ kind: 'start', input }, input.objective);
@@ -640,17 +705,13 @@ export class AgentSession {
 
   /** Pauses the mission. A turn that is running finishes its work; nothing follows it until the mission is resumed. */
   pauseMission(): void {
-    const mission = this.deps.store.getMission(this.id);
-    if (mission?.status !== 'active') throw new GraftError('no_mission', 'There is no mission running to pause.');
-    this.saveMission(pauseMission(mission, 'You paused it.', Date.now()));
+    this.missions.pause();
   }
 
   /** Resumes a paused mission; one that had used all of its turns gets `extraTurns` more. */
   resumeMission(extraTurns: number = MISSION_LIMITS.moreTurns): void {
     if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
-    const mission = this.deps.store.getMission(this.id);
-    if (mission?.status !== 'paused') throw new GraftError('no_mission', 'There is no paused mission to resume.');
-    this.saveMission(resumeMission(mission, extraTurns, Date.now()));
+    this.missions.resume(extraTurns);
     // While a turn runs, its end carries the mission on.
     if (this.running) return;
     this.lastTurn = { end: 'completed', error: null };
@@ -660,97 +721,17 @@ export class AgentSession {
 
   /** Ends the mission for good, and stops the turn that is working on it. */
   cancelMission(): void {
-    const mission = this.deps.store.getMission(this.id);
-    if (!mission || !missionOpen(mission.status)) throw new GraftError('no_mission', 'There is no mission to stop.');
-    this.saveMission(cancelMission(mission, Date.now()));
+    this.missions.cancel();
     this.queue = this.queue.filter((q) => !q.mission);
     this.interrupt();
   }
 
-  /** A MissionUpdate call from the agent. */
-  private updateMission(input: MissionUpdateInput): { reply: string; isError: boolean } {
-    const mission = this.deps.store.getMission(this.id);
-    if (!mission) return { reply: 'There is no mission running in this session.', isError: true };
-    const next = applyMissionUpdate(mission, input, Date.now());
-    if (next.mission !== mission) this.saveMission(next.mission);
-    if (!next.isError && input.status === 'blocked') this.deps.notify(this.summary, 'needs-input', `Mission blocked: ${input.summary ?? ''}`.slice(0, 200));
-    return { reply: next.reply, isError: next.isError };
-  }
-
-  /**
-   * What the mission does now that a turn ended: it pauses (a stop, a failure,
-   * no turns left), ends (done, with nothing to check), or goes on, in which
-   * case this returns the turn to start.
-   */
+  /** The turn the mission asks for now that one ended; null when it paused, ended, or there is none. */
   private missionFollowUp(): InternalQueued | null {
     // A session being closed leaves its mission as it is: it comes back paused the next time Graft starts.
     if (this.disposed) return null;
-    const mission = this.deps.store.getMission(this.id);
-    if (!mission) return null;
-    const next = afterMissionTurn(mission, this.lastTurn.end, Date.now(), this.lastTurn.error ?? undefined);
-    if (next.mission !== mission) this.saveMission(next.mission);
-    switch (next.action) {
-      case 'none':
-        return null;
-      case 'stop':
-        this.deps.notify(this.summary, 'needs-input', `Mission paused: ${next.mission.reason ?? ''}`.slice(0, 200));
-        return null;
-      case 'done':
-        this.missionDone(next.mission);
-        return null;
-      case 'verify':
-        return this.missionItem({ kind: 'verify' });
-      case 'continue':
-        return this.missionItem({ kind: 'step', text: missionContinuation(next.mission), turn: next.mission.turns, of: next.mission.maxTurns });
-    }
-  }
-
-  private missionDone(mission: Mission): void {
-    this.deps.log('info', 'Mission done', { session: this.id, turns: mission.turns });
-    this.deps.notify(this.summary, 'finished', `Mission done: ${mission.objective}`.slice(0, 200));
-  }
-
-  /**
-   * Runs the mission's checks on the agent's report of "done". Returns what
-   * the agent is told when they fail, or null when the turn has nothing more
-   * to do (they passed, the mission paused, or the turn was stopped).
-   */
-  private async verifyMission(turnId: string, signal: AbortSignal): Promise<{ text: string; turn: number; of: number } | null> {
-    const mission = this.deps.store.getMission(this.id);
-    if (mission?.status !== 'active' || !mission.claimed) return null;
-    const round = (mission.verification?.round ?? 0) + 1;
-    this.emit({ type: 'checks', commands: mission.checks, round });
-    let report: CheckReport;
-    try {
-      await this.syncSandbox();
-      report = await runChecks({ commands: mission.checks, fix: true, timeoutSec: MISSION_CHECK_TIMEOUT_SEC }, round, {
-        sessionId: this.id,
-        cwd: this.workingDir(),
-        signal,
-        shells: this.deps.shells
-      });
-    } catch (error) {
-      if (signal.aborted) return null;
-      const reason = `Its checks couldn't run: ${(error as Error).message}`;
-      this.saveMission(pauseMission(mission, reason, Date.now()));
-      this.deps.notify(this.summary, 'needs-input', `Mission paused: ${reason}`.slice(0, 200));
-      return null;
-    }
-    // Stopped part-way: the turn ends as interrupted, which pauses the mission with its report still standing.
-    if (signal.aborted) return null;
-    const stored = this.deps.store.appendMessage(this.id, 'user', [{ type: 'text', text: checksSummary(report) }], { turnId, kind: 'check', check: report });
-    this.emit({ type: 'message', message: stored });
-    const next = afterMissionChecks(mission, report, Date.now());
-    this.saveMission(next.mission);
-    if (next.action === 'done') {
-      this.missionDone(next.mission);
-      return null;
-    }
-    if (next.action === 'stop') {
-      this.deps.notify(this.summary, 'needs-input', `Mission paused: ${next.mission.reason ?? ''}`.slice(0, 200));
-      return null;
-    }
-    return { text: missionCheckFailure(next.mission, report), turn: next.mission.turns, of: next.mission.maxTurns };
+    const next = this.missions.afterTurn(this.lastTurn.end, this.lastTurn.error);
+    return next ? this.missionItem(next) : null;
   }
 
   // ---- turn orchestration -------------------------------------------------
@@ -779,9 +760,68 @@ export class AgentSession {
     }
   }
 
-  /** Waits for the current turn, and for any turn it hands off to (tests and shutdown). */
+  /** Waits for the current turn, for any turn it hands off to, and for a snapshot that outlasted its turn (tests and shutdown). */
   async idle(): Promise<void> {
-    while (this.running) await this.running.catch(() => undefined);
+    while (this.running || this.snapshots.size > 0) {
+      if (this.running) await this.running.catch(() => undefined);
+      else await Promise.all(this.snapshots);
+    }
+  }
+
+  /**
+   * Starts the snapshot of a user turn and names it on the message once taken. It ends with the turn's Stop and when
+   * the session closes; otherwise it may go on after a reply in words, and the next snapshot waits for it.
+   */
+  private startSnapshot(messageId: string, signal: AbortSignal): Promise<void> {
+    const taking = this.takeCheckpoint(messageId, AbortSignal.any([signal, this.closing.signal])).then((checkpointId) => {
+      if (!checkpointId || this.disposed) return;
+      try {
+        this.emit({ type: 'message', message: this.deps.store.updateMessageMeta(messageId, { checkpointId }) });
+      } catch (error) {
+        this.deps.log('warn', 'Could not name a checkpoint on its message', { session: this.id, message: (error as Error).message });
+      }
+    });
+    this.snapshots.add(taking);
+    void taking.finally(() => this.snapshots.delete(taking));
+    return taking;
+  }
+
+  /**
+   * The snapshot a user turn starts from, for Rewind. It gets CHECKPOINT_BUDGET_MS: a folder that takes longer
+   * (a whole Downloads folder, a drive) gets no checkpoint for the rest of this run of Graft, and the turn goes on
+   * without one and says so. Stopping the turn ends the snapshot at once.
+   */
+  private async takeCheckpoint(messageId: string, signal: AbortSignal): Promise<string | null> {
+    const folder = this.workingDir();
+    const name = path.basename(folder) || folder;
+    if (TOO_LARGE_TO_SNAPSHOT.has(folderKey(folder))) {
+      if (!this.checkpointSkipSaid) {
+        this.checkpointSkipSaid = true;
+        this.notice('warning', `No checkpoints in ${name}: it is too large to snapshot before each turn, so Rewind can't restore its files. Open a project's own folder to have them.`);
+      }
+      return null;
+    }
+    const budget = new AbortController();
+    const budgetMs = this.deps.timings?.checkpointMs ?? CHECKPOINT_BUDGET_MS;
+    const timer = setTimeout(() => budget.abort(new Error('checkpoint budget')), budgetMs);
+    try {
+      return await this.deps.checkpoint(this.id, folder, messageId, AbortSignal.any([signal, budget.signal]));
+    } catch (error) {
+      if (signal.aborted) return null;
+      if (budget.signal.aborted) {
+        TOO_LARGE_TO_SNAPSHOT.add(folderKey(folder));
+        this.checkpointSkipSaid = true;
+        this.notice(
+          'warning',
+          `No checkpoint for this turn: ${name} took longer than ${String(Math.round(budgetMs / 1000))} seconds to snapshot, so Rewind can't restore its files. Graft won't try again in this folder until it restarts; open a project's own folder to have checkpoints.`
+        );
+        return null;
+      }
+      this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
@@ -842,6 +882,27 @@ export class AgentSession {
     return root ? this.deps.settings.checks(root, this.deps.isTrusted(root)) : null;
   }
 
+  /**
+   * Said once for the session when a turn changed files and none of the project's checks ran:
+   * a finished turn is not a checked one, and nothing else on the screen says which it was.
+   */
+  private sayUnchecked(): void {
+    if (this.saidUnchecked || this.summary.kind !== 'code' || this.checksConfig()) return;
+    const root = this.settingsRoot();
+    if (!root) return;
+    this.saidUnchecked = true;
+    // The project has checks; it is trust that is missing.
+    if (this.deps.settings.checks(root, true)) {
+      this.notice('info', 'Nothing checked these changes: this project has checks, and they run only once you trust the project (Settings → Permissions).');
+      return;
+    }
+    const found = suggestChecks(root);
+    this.notice(
+      'info',
+      `Nothing checked these changes: this project has no checks set up. Add them in Customize → Checks and they run after every turn that changes files.${found.length > 0 ? ` Found here: ${found.join(', ')}.` : ''}`
+    );
+  }
+
   /** Runs the checks; null when the turn was stopped or they couldn't run. */
   private async runChecks(root: string | null, round: number, signal: AbortSignal): Promise<CheckReport | null> {
     const config = this.checksConfig();
@@ -898,8 +959,18 @@ export class AgentSession {
       const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
       if (custom) return { text: expandCommand(custom, slash.args), typed: item.text };
     }
+    if (summary.kind !== 'code' && CODE_ONLY_COMMANDS.has(slash.name)) {
+      // A chat has no project: nothing it could hold back, review, test or commit.
+      this.commandOutput(slash.name === 'plan' ? 'Plan mode works in code sessions. Here, just ask for a plan.' : `/${slash.name} works on a project, so it runs in code sessions. Here, just ask.`);
+      return null;
+    }
     if (UI_COMMANDS.has(slash.name)) {
       this.commandOutput(`/${slash.name} opens in the app: type it on its own, or use the command palette (Ctrl+Shift+P).`);
+      return null;
+    }
+    if (slash.name === 'btw') {
+      // A side question is asked beside the conversation (see aside). As a message of its own it would become part of it.
+      this.commandOutput('A side question is asked on its own: type /btw and the question in the message box, with nothing attached.');
       return null;
     }
     if (slash.name.startsWith('mcp__')) return this.runMcpPrompt(slash.name, slash.args, item.text);
@@ -938,7 +1009,7 @@ export class AgentSession {
       }
       case 'help': {
         const lines = [
-          ...listCommands(this.deps.graftHome, this.projectRoot()).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
+          ...commandsFor(summary.kind, listCommands(this.deps.graftHome, this.projectRoot())).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
           ...this.deps.mcpPrompts(this.settingsRoot()).map((p) => `- /${mcpPromptCommand(p.server, p.name)}${promptHint(p) ? ` ${promptHint(p)}` : ''} — ${p.description || `Prompt from the ${p.server} server`}`)
         ];
         this.commandOutput(
@@ -956,6 +1027,8 @@ export class AgentSession {
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'research':
         return { text: researchPrompt(slash.args), typed: item.text };
+      case 'diagram':
+        return { text: diagramPrompt(slash.args), typed: item.text };
       case 'test':
         return { text: testPrompt(slash.args), typed: item.text };
       case 'decompile':
@@ -975,11 +1048,6 @@ export class AgentSession {
         return null;
       }
       case 'plan': {
-        // Plan mode belongs to code sessions: a chat has nothing it could change, so there is nothing to hold back.
-        if (summary.kind !== 'code') {
-          this.commandOutput('Plan mode works in code sessions. Here, just ask for a plan.');
-          return null;
-        }
         this.setPermissionMode('plan');
         if (slash.args.length === 0) {
           this.commandOutput('Plan mode is on. Describe what you want planned.');
@@ -1021,42 +1089,6 @@ export class AgentSession {
     return { provider, model, ref };
   }
 
-  /**
-   * Web access for this session and model. The search engine setting decides
-   * where searches go: the WebSearch tool runs them, except that a model's
-   * built-in search (Claude on Anthropic, the only adapter with one) runs when
-   * Anthropic is the engine. WebFetch reads pages. Incognito chats get none,
-   * so nothing goes to a search engine.
-   */
-  private webTools(model: ModelInfo): { native: boolean; clientSearch: boolean; fetch: boolean } {
-    const summary = this.summary;
-    const allowed = this.deps.preferences().webSearch && !summary.incognito && model.supportsTools;
-    const engine = allowed ? this.deps.search.active() : null;
-    const native = engine === 'anthropic' && model.supportsWebSearch;
-    const clientSearch = engine !== null && !native;
-    // Code sessions always had WebFetch (it asks first in Ask mode); chats get it with web access on.
-    return { native, clientSearch, fetch: summary.kind === 'code' || allowed };
-  }
-
-  /** CreateFile and RunCode, for chats with a model that uses tools. Incognito chats get neither: they never write to disk. */
-  private chatWork(model: ModelInfo): { files: boolean; code: boolean } {
-    const summary = this.summary;
-    const files = summary.kind === 'chat' && !summary.incognito && model.supportsTools && this.deps.chatFiles !== null;
-    return { files, code: files && this.deps.runCode !== null };
-  }
-
-  /**
-   * Generated media for this session and model: the image engine behind
-   * GenerateImage, and whether ComfyUI is connected. Incognito chats get
-   * neither, so nothing they write goes to an image provider.
-   */
-  private mediaFor(model: ModelInfo): { image: string | null; comfy: boolean } {
-    const media = this.deps.media;
-    if (!media || !model.supportsTools || this.summary.incognito) return { image: null, comfy: false };
-    const engine = media.imageEngine();
-    return { image: engine ? (engine.engine === 'comfyui' ? 'ComfyUI on this computer' : engine.model) : null, comfy: media.comfy() !== null };
-  }
-
   /** Incognito asks for zero retention; otherwise the Privacy setting decides. */
   private privacy(): RequestPrivacy {
     const incognito = this.summary.incognito;
@@ -1071,102 +1103,11 @@ export class AgentSession {
     return model.effort.levels.includes(wanted) ? wanted : model.effort.default;
   }
 
-  /** Computer use: code sessions with it switched on, on a model that can see screenshots. */
-  private computerFor(model: ModelInfo): boolean {
-    return this.summary.kind === 'code' && this.deps.computer !== null && this.deps.preferences().computerUse && model.supportsVision;
-  }
-
-  /** Tools a turn on this model offers: built-ins for the session kind, plus MCP tools in code sessions. */
-  private toolsFor(model: ModelInfo): string[] {
-    const summary = this.summary;
-    const web = this.webTools(model);
-    const work = this.chatWork(model);
-    const computer = this.computerFor(model);
-    const media = this.mediaFor(model);
-    // Chats get the apps connected for all projects (never in incognito, which keeps everything local).
-    const mcpTools = this.mcpToolsFor(model);
-    const chatOnly = new Set<string>(CHAT_ONLY_TOOLS);
-    const mission = summary.kind === 'code' ? this.deps.store.getMission(this.id) : null;
-    const onMission = mission !== null && missionOpen(mission.status);
-    const builtins =
-      summary.kind === 'code'
-        ? this.deps.tools
-            .names()
-            .filter(
-              (n) =>
-                !n.startsWith('mcp__') &&
-                !chatOnly.has(n) &&
-                (n !== 'WebSearch' || web.clientSearch) &&
-                n !== 'ToolSearch' &&
-                (n !== 'Computer' || computer) &&
-                (n !== 'Browser' || this.deps.browser !== undefined) &&
-                (n !== 'GenerateImage' || media.image !== null) &&
-                (n !== 'ComfyUI' || media.comfy) &&
-                (n !== 'MissionUpdate' || onMission)
-            )
-        : [
-            ...(web.fetch ? ['WebFetch'] : []),
-            ...(web.clientSearch ? ['WebSearch'] : []),
-            // Researchers, for a question with several parts: they get the web tools above and nothing else.
-            ...(web.fetch || web.clientSearch ? ['RunAgents'] : []),
-            ...(work.files ? ['CreateFile'] : []),
-            ...(work.code ? ['RunCode'] : []),
-            // A chat keeps what it makes in its own files, so pictures need those.
-            ...(work.files && media.image !== null ? ['GenerateImage'] : [])
-          ];
-    const { offered } = this.splitMcp(mcpTools, model);
-    return [...builtins, ...(this.mcpDeferred ? ['ToolSearch'] : []), ...offered];
-  }
-
-  /** The MCP tools this session can use: a code session's own and the user's, a chat's user-level ones, none in incognito. */
-  private mcpToolsFor(model: ModelInfo): string[] {
-    const summary = this.summary;
-    return summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : summary.incognito || !model.supportsTools ? [] : this.deps.mcpToolNames(null);
-  }
-
-  /**
-   * MCP tools whose definitions would weigh on every request (a big setup: GitHub's
-   * has dozens) are not sent until the agent searches for them with ToolSearch.
-   * The choice is made once, so the tools and the prompt stay the same between turns.
-   */
-  private splitMcp(mcpTools: string[], model: ModelInfo): { offered: string[]; deferred: string[] } {
-    if (mcpTools.length === 0) return { offered: [], deferred: [] };
-    if (!this.mcpDeferred) {
-      const weight = estimateTextTokens(JSON.stringify(this.deps.tools.specs(mcpTools)));
-      if (weight > Math.min(DEFER_MCP_TOKENS, Math.floor(model.contextWindow * 0.1))) this.mcpDeferred = true;
-    }
-    if (!this.mcpDeferred) return { offered: mcpTools, deferred: [] };
-    return { offered: mcpTools.filter((n) => this.loadedMcp.has(n)), deferred: mcpTools.filter((n) => !this.loadedMcp.has(n)) };
-  }
-
-  /** How many tools of each server are waiting, for the prompt. */
-  private deferredByServer(model: ModelInfo): Array<{ server: string; count: number }> {
-    const { deferred } = this.splitMcp(this.mcpToolsFor(model), model);
-    const counts = new Map<string, number>();
-    for (const name of deferred) {
-      const server = this.deps.tools.get(name)?.mcp?.server ?? 'other';
-      counts.set(server, (counts.get(server) ?? 0) + 1);
-    }
-    return [...counts].map(([server, count]) => ({ server, count }));
-  }
-
-  /** The tools waiting to be loaded, as ToolSearch searches them. */
-  private deferredEntries(): SearchableTool[] {
-    const summary = this.summary;
-    const names = summary.kind === 'code' ? this.deps.mcpToolNames(this.settingsRoot()) : this.deps.mcpToolNames(null);
-    return names
-      .filter((n) => !this.loadedMcp.has(n))
-      .flatMap((name) => {
-        const tool = this.deps.tools.get(name);
-        return tool ? [{ name, server: tool.mcp?.server ?? '', description: tool.description }] : [];
-      });
-  }
-
   /** Builds the system prompt for this model; code sessions read project notes through the given loader. */
   private async composePrompt(model: ModelInfo, memory: MemoryLoader | null): Promise<string> {
     const identity = { label: model.label, id: model.ref.modelId, provider: this.deps.providerName(model.ref.providerId) };
     const summary = this.summary;
-    const web = this.webTools(model);
+    const web = this.offering.web(model);
     const prefs = this.deps.preferences();
     const root = this.projectRoot();
     if (summary.kind === 'code' && root && memory) {
@@ -1180,17 +1121,18 @@ export class AgentSession {
         date: this.deps.now().toISOString().slice(0, 10),
         mode: summary.permissionMode,
         memory: memory.initial(this.workingDir()),
-        skills: loadSkills(this.deps.graftHome, root),
+        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills),
         webSearch: web.native || web.clientSearch,
-        computer: this.computerFor(model),
+        computer: this.offering.computer(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         mcpNotes: this.deps.mcpInstructions(this.settingsRoot()),
-        deferredTools: this.deferredByServer(model),
+        deferredTools: this.offering.deferredByServer(model),
         agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,
-        media: this.mediaFor(model)
+        media: this.offering.media(model),
+        lean: model.lean === true
       });
     }
     // An incognito chat doesn't tell the provider who is asking or what they wrote about themselves.
@@ -1200,12 +1142,13 @@ export class AgentSession {
       model: identity,
       web: { search: web.native || web.clientSearch, fetch: web.fetch },
       researchers: web.fetch || web.clientSearch,
-      workspace: this.chatWork(model),
+      workspace: this.offering.chatWork(model),
       personalization: summary.incognito ? null : prefs.personalization,
       mcpServers: summary.incognito ? [] : this.deps.mcpServerNames(null),
       mcpNotes: summary.incognito ? [] : this.deps.mcpInstructions(null),
-      deferredTools: this.deferredByServer(model),
-      images: this.chatWork(model).files ? this.mediaFor(model).image : null
+      deferredTools: this.offering.deferredByServer(model),
+      images: this.offering.chatWork(model).files ? this.offering.media(model).image : null,
+      videos: this.offering.chatWork(model).files ? this.offering.media(model).video : null
     });
   }
 
@@ -1222,9 +1165,9 @@ export class AgentSession {
    */
   async promptPreview(): Promise<{ system: string; tools: string[]; model: string }> {
     const { model, ref } = await this.resolveModel(new AbortController().signal);
-    const tools = this.toolsFor(model);
+    const tools = this.offering.tools(model);
     const label = `${model.label} via ${this.deps.providerName(ref.providerId)}`;
-    if (this.system && this.modelKey === `${ref.providerId}:${ref.modelId}`) return { system: this.system, tools, model: label };
+    if (this.system && this.modelKey === this.promptModelKey(ref, model)) return { system: this.system, tools, model: label };
     return { system: await this.composePrompt(model, this.memoryLoader()), tools, model: label };
   }
 
@@ -1237,10 +1180,15 @@ export class AgentSession {
     const { model } = await this.resolveModel(new AbortController().signal);
     const measured = this.summary.usage.contextTokens;
     return {
-      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools), messages: this.history() }),
+      parts: contextBreakdown({ system, tools: this.deps.tools.specs(tools, this.offering.toolDescriptions(model)), messages: this.history() }),
       measured: measured > 0 ? measured : null,
       limit: model.contextWindow
     };
+  }
+
+  /** What the session's prompt was built for: the model, and whether it got the lean prompt (Settings can change that for the same model). */
+  private promptModelKey(ref: ModelRef, model: ModelInfo): string {
+    return `${ref.providerId}:${ref.modelId}${model.lean === true ? ':lean' : ''}`;
   }
 
   /**
@@ -1249,7 +1197,7 @@ export class AgentSession {
    * prompt always names the model that is answering.
    */
   private async ensurePrompt(model: ModelInfo): Promise<{ system: string; toolNames: string[] }> {
-    const toolNames = this.toolsFor(model);
+    const toolNames = this.offering.tools(model);
     if (!this.system) {
       this.memory = this.memoryLoader();
       this.system = await this.composePrompt(model, this.memory);
@@ -1301,6 +1249,12 @@ export class AgentSession {
     const turnId = randomUUID();
     this.setStatus('running');
     this.emit({ type: 'turn-start', turnId });
+    // The limits count for this turn and everything it starts; "Continue" after a pause is a new turn.
+    this.host.beginTurn();
+    // Calls an earlier turn left without an answer are answered before anything is added behind them. On this
+    // session's first turn they are from before the app last stopped; later, from a turn that failed.
+    this.reconcile(this.ranTurn ? 'failed' : 'stopped');
+    this.ranTurn = true;
     let endReason: TurnEnd = 'completed';
     let failure: string | null = null;
     try {
@@ -1312,10 +1266,11 @@ export class AgentSession {
 
       let userText: string | null = null;
       let starting: Mission | null = null;
+      let snapshot: Promise<void> | null = null;
       const missionTurn = item?.mission;
       if (missionTurn && missionTurn.kind !== 'start') {
         // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
-        const step = missionTurn.kind === 'verify' ? await this.verifyMission(turnId, signal) : missionTurn;
+        const step = missionTurn.kind === 'verify' ? await this.missions.verify(turnId, signal) : missionTurn;
         if (step === null) {
           if (signal.aborted) endReason = 'interrupted';
           return;
@@ -1335,30 +1290,26 @@ export class AgentSession {
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (!(await this.promptAllowed(hooks, userText, signal))) return;
         const userMessageId = randomUUID();
-        let checkpointId: string | null = null;
-        if (summary.kind === 'code') {
-          try {
-            checkpointId = await this.deps.checkpoint(this.id, this.workingDir(), userMessageId);
-          } catch (error) {
-            this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);
-          }
-        }
         const content = this.userContent(item, userText);
         // The transcript shows what was typed; notes and attachments travel only to the model.
         const meta: MessageMeta = {
           turnId,
           typed: handled.typed ?? item.text,
-          ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}),
-          ...(checkpointId ? { checkpointId } : {})
+          ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {})
         };
+        // The message is saved and shown at once. The folder's snapshot follows, and nothing is changed before it is
+        // taken: a large folder used to keep the message unseen, and the turn unstoppable, for as long as it took.
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
         this.emit({ type: 'message', message: stored });
         // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
-        if (starting) this.saveMission({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
+        if (starting) this.missions.save({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
+        // The snapshot Rewind goes back to is taken while the model starts answering: a reply in words never waits
+        // for it, and nothing that changes a file runs before it is taken (the loop's beforeChange).
+        if (summary.kind === 'code') snapshot = this.startSnapshot(userMessageId, signal);
       }
 
       const { provider, model, ref } = await this.resolveModel(signal);
-      const key = `${ref.providerId}:${ref.modelId}`;
+      const key = this.promptModelKey(ref, model);
       if (this.modelKey !== null && this.modelKey !== key) {
         this.markThinkingStale();
         this.system = null;
@@ -1374,15 +1325,13 @@ export class AgentSession {
       // The model that answers this turn. The backup model takes its place when the session's keeps failing,
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
+      const scope: TurnScope = { hooks, root, trusted };
+      const taken = snapshot;
       const host: LoopHost = {
-        ...this.makeHost(model, provider, hooks, root, trusted, answering),
+        ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),
         takeSteering: (s) => this.deliverSteering(turnId, hooks, s),
         checks: this.checksConfig() ? (round, s) => this.runChecks(root, round, s) : undefined,
-        fallback: async () => {
-          const backup = await this.backupFor(model, toolNames.length > 0, signal);
-          if (backup) Object.assign(answering, { model: backup.model, provider: backup.provider });
-          return backup;
-        }
+        ...(taken ? { beforeChange: () => taken } : {})
       };
       const result = await runAgentLoop(
         this.history(),
@@ -1391,9 +1340,10 @@ export class AgentSession {
           model,
           registry: this.deps.tools,
           toolNames,
+          toolDescriptions: this.offering.toolDescriptions(model),
           system,
           effort,
-          webSearch: this.webTools(model).native,
+          webSearch: this.offering.web(model).native,
           cacheKey: this.id,
           privacy: this.privacy(),
           turnId,
@@ -1416,9 +1366,10 @@ export class AgentSession {
         this.deps.notify(this.summary, 'error', result.error.message);
         return;
       }
+      if (result.reason === 'completed' && result.changed) this.sayUnchecked();
       if (result.reason === 'completed' && userText !== null) this.maybeTitle(starting ? starting.objective : userText);
       // A turn of a mission that is still going isn't the end of anything: the mission says when it is done or needs the user.
-      const onMission = this.deps.store.getMission(this.id)?.status === 'active';
+      const onMission = this.missions.current()?.status === 'active';
       if ((result.reason === 'completed' || result.reason === 'guard') && !onMission) this.deps.notify(this.summary, 'finished', result.finalText.slice(0, 140));
     } catch (error) {
       if (signal.aborted) {
@@ -1435,9 +1386,38 @@ export class AgentSession {
       this.setStatus('error', info);
       this.deps.notify(this.summary, 'error', info.message);
     } finally {
+      // A turn that failed between a tool and its answer: what the tool returned is put into the conversation now.
+      this.reconcile('failed');
+      if (endReason === 'interrupted') this.sayStopped(turnId);
       this.lastTurn = { end: endReason, error: failure };
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
+    }
+  }
+
+  /**
+   * A turn stopped before the model said a word says so under the message, as a reply cut short does: otherwise
+   * the message sits there unanswered, with nothing to tell what happened to it. The model never sees the note.
+   */
+  private sayStopped(turnId: string): void {
+    // A session being closed or deleted has no one to tell.
+    if (this.disposed) return;
+    try {
+      const last = this.deps.store.listMessages(this.id).at(-1);
+      if (last?.role !== 'user' || last.content.some((b) => b.type === 'tool_result')) return;
+      const stored = this.deps.store.appendMessage(this.id, 'assistant', [{ type: 'text', text: 'Stopped.' }], { kind: 'notice', turnId });
+      this.emit({ type: 'message', message: stored });
+    } catch (error) {
+      this.deps.log('error', 'Could not note a stopped turn', { session: this.id, message: (error as Error).message });
+    }
+  }
+
+  /** Answers tool calls that were left open, from the journal (agent/journal.ts), and shows what was added. */
+  private reconcile(cut: Cut): void {
+    try {
+      for (const message of reconcileInterrupted(this.deps.store, this.id, cut)?.messages ?? []) this.emit({ type: 'message', message });
+    } catch (error) {
+      this.deps.log('error', 'Could not reconcile the tool journal', { session: this.id, message: (error as Error).message });
     }
   }
 
@@ -1566,451 +1546,37 @@ export class AgentSession {
     return this.history();
   }
 
-  // ---- loop host ----------------------------------------------------------
+  // ---- what the loop host asks of the session -----------------------------
 
-  private permissionEnv(root: string | null, trusted: boolean) {
-    const { rules, problems } = this.deps.settings.rules(this.settingsRoot(), trusted, this.sessionAllow);
-    for (const p of problems) this.deps.log('warn', 'Settings problem', { message: p });
+  /** An approved plan ends Plan mode: the session goes back to the mode it was in before. */
+  private leavePlanMode(): void {
+    const mode = this.prePlanMode === 'plan' ? 'auto-edit' : this.prePlanMode;
+    this.deps.store.updateSession(this.id, { permissionMode: mode });
+    this.emit({ type: 'mode', permissionMode: mode });
+  }
+
+  /** ToolSearch's view of the tools still waiting (a lean model's built-ins, MCP tools); null when the session sends them all. */
+  private deferredTools(model: ModelInfo): ToolContext['deferredTools'] {
+    if (!this.offering.deferring(model)) return null;
     return {
-      mode: this.summary.permissionMode,
-      projectRoot: root ?? this.workingDir(),
-      platform: this.deps.platform,
-      rules,
-      bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
-      allowNetwork: this.summary.kind === 'chat',
-      sandboxed: this.deps.shells.sandboxFor(this.id) !== null
-    };
-  }
-
-  /**
-   * Asks the user about one action. Agents working side by side can each need
-   * an answer at the same moment, and there is one card: requests wait their turn.
-   */
-  private prompt(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer> {
-    const asked = this.promptChain.then(() => this.promptNow(request, signal));
-    this.promptChain = asked.catch(() => undefined);
-    return asked;
-  }
-
-  private promptNow(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer> {
-    return new Promise((resolve) => {
-      if (signal.aborted) {
-        resolve({ decision: 'deny' });
-        return;
-      }
-      this.pendingPermission = { request, resolve };
-      this.setStatus('needs-input');
-      this.emit({ type: 'permission', request });
-      this.deps.notify(this.summary, 'needs-input', request.title);
-    });
-  }
-
-  /**
-   * The model from Settings → Models that finishes a turn when the session's model keeps failing.
-   * None in an incognito chat (its model was chosen for where it runs), none when it is the model
-   * that is failing or can't be found, and none when the turn offers tools and it can't call them.
-   */
-  private async backupFor(failing: ModelInfo, needsTools: boolean, signal: AbortSignal): Promise<LoopModel | null> {
-    const ref = this.deps.preferences().fallbackModel;
-    if (!ref || this.summary.incognito) return null;
-    if (ref.providerId === failing.ref.providerId && ref.modelId === failing.ref.modelId) return null;
-    try {
-      const { provider, model } = await this.deps.models.resolve(ref, signal);
-      if (needsTools && !model.supportsTools) return null;
-      return { provider, model, effort: this.effortFor(model) };
-    } catch (error) {
-      this.deps.log('warn', 'The backup model is not available', { session: this.id, message: (error as Error).message });
-      return null;
-    }
-  }
-
-  /**
-   * What the loop needs from the session. `answering` is the model the host measures and
-   * summarizes with; the main turn passes one it can change, everyone else keeps their own.
-   */
-  private makeHost(
-    model: ModelInfo,
-    provider: LLMProvider,
-    hooks: HookRunner | null,
-    root: string | null,
-    trusted: boolean,
-    answering: { model: ModelInfo; provider: LLMProvider } = { model, provider }
-  ): LoopHost {
-    const cwd = this.workingDir();
-    const describeContext = { cwd, projectRoot: root ?? cwd, platform: this.deps.platform };
-    const host: LoopHost = {
-      append: (role, content, meta, id) => this.deps.store.appendMessage(this.id, role, content, meta, id),
-      emit: (event) => this.emit(event),
-      decide: (query) => decide(query, this.permissionEnv(root, trusted)),
-      askPermission: (prompt: PermissionPrompt, signal) =>
-        this.prompt(
-          {
-            id: randomUUID(),
-            sessionId: this.id,
-            toolUseId: prompt.toolUseId,
-            toolName: prompt.toolName,
-            title: prompt.title,
-            detail: prompt.detail,
-            reason: prompt.decision.reason,
-            dangerous: prompt.decision.dangerous,
-            outsideProject: prompt.decision.outsideProject,
-            suggestedRule: prompt.decision.suggestedRule,
-            agentLabel: prompt.agentLabel
-          },
-          signal
-        ),
-      toolContext: (toolUseId, signal) => this.toolContext(toolUseId, signal, answering.model, answering.provider, hooks, root, trusted),
-      describeContext: () => describeContext,
-      hooks,
-      todos: () => this.deps.store.getTodos(this.id),
-      maybeCompact: async (_history, tokens, signal, overflow) => {
-        const window = answering.model.contextWindow;
-        if (!this.deps.preferences().autoCompact || !(overflow || shouldCompact(tokens, window))) return null;
-        // A request the provider just refused was measured wrong, so an estimate of what removing output frees can't be trusted either.
-        if (!overflow && this.pruneOutput(tokens, window)) return this.history();
-        // And one that was refused needs all the room there is: nothing is kept beside the summary.
-        return this.compact('', signal, !overflow, answering);
-      },
-      onUsage: (usage: Usage, contextTokens: number | null, costUsd: number | null) => {
-        const current = this.summary.usage;
-        const next = {
-          totals: addUsage(current.totals, usage),
-          contextTokens: contextTokens ?? current.contextTokens,
-          contextLimit: contextTokens === null ? current.contextLimit : answering.model.contextWindow,
-          costUsd: costUsd === null ? current.costUsd : (current.costUsd ?? 0) + costUsd
-        };
-        this.deps.store.updateSession(this.id, { usage: next });
-        this.emit({ type: 'usage', usage: next });
-      },
-      log: (level, message, fields) => this.deps.log(level, message, { session: this.id, ...fields })
-    };
-    return host;
-  }
-
-  /**
-   * The Browser panel for this session's Browser tool. In a sandboxed session,
-   * localhost addresses go to the port the sandbox forwards, so a dev server the
-   * agent started in the container opens like one running on this computer.
-   */
-  private agentBrowser(): AgentBrowser | null {
-    if (!this.deps.browser) return null;
-    const panel = (): BrowserPanel => {
-      const p = this.deps.browser?.();
-      if (!p) throw new Error('The browser needs the Graft window open.');
-      return p;
-    };
-    return {
-      open: async (url) => {
-        const p = panel();
-        this.deps.revealBrowser?.(this.id);
-        const opened = await p.navigate(sandboxUrl(url, this.deps.shells.sandbox?.box(this.id)?.ports ?? {}));
-        await p.settle();
-        return opened;
-      },
-      snapshot: () => panel().snapshot(),
-      capture: () => panel().capture(),
-      click: (target) => panel().click(target),
-      type: (target, text, submit) => panel().type(target, text, submit),
-      press: (key) => panel().press(key),
-      scroll: (direction) => panel().scroll(direction),
-      back: async () => {
-        const p = panel();
-        p.back();
-        await p.settle();
-      },
-      reload: async () => {
-        const p = panel();
-        p.reload();
-        await p.settle();
-      },
-      waitForText: (text, ms) => panel().waitForText(text, ms),
-      console: () => this.deps.browser?.()?.consoleLog() ?? [],
-      currentUrl: () => this.deps.browser?.()?.currentUrl() ?? null
-    };
-  }
-
-  private toolContext(
-    toolUseId: string,
-    signal: AbortSignal,
-    model: ModelInfo,
-    provider: LLMProvider,
-    hooks: HookRunner | null,
-    root: string | null,
-    trusted: boolean
-  ): ToolContext {
-    const cwd = this.workingDir();
-    const work = this.chatWork(model);
-    return {
-      sessionId: this.id,
-      toolUseId,
-      mcpRoot: this.summary.kind === 'code' ? this.settingsRoot() : null,
-      trustedProject: trusted && this.summary.kind === 'code',
-      cwd,
-      projectRoot: root ?? cwd,
-      platform: this.deps.platform,
-      signal,
-      files: this.files,
-      shells: this.deps.shells,
-      rgPath: this.deps.rgPath,
-      modelSupportsVision: model.supportsVision,
-      todos: {
-        get: () => this.deps.store.getTodos(this.id),
-        set: (todos: TodoItem[]) => {
-          this.deps.store.updateSession(this.id, { todos });
-          this.emit({ type: 'todos', todos });
+      find: (query, limit) => searchTools(this.offering.deferredEntries(model), query, limit),
+      load: (names) => {
+        this.offering.load(names);
+        for (const name of names) {
+          // The running turn offers them from its next request on.
+          if (this.toolNames && !this.toolNames.includes(name)) this.toolNames.push(name);
         }
       },
-      progress: (chunk) => this.emit({ type: 'tool-progress', toolUseId, chunk }),
-      askUser: (questions) =>
-        new Promise((resolve) => {
-          if (signal.aborted) {
-            resolve(null);
-            return;
-          }
-          const request: QuestionRequest = { id: randomUUID(), sessionId: this.id, toolUseId, questions };
-          this.pendingQuestion = { request, resolve };
-          this.setStatus('needs-input');
-          this.emit({ type: 'question', request });
-          this.deps.notify(this.summary, 'needs-input', questions[0]?.question ?? 'The agent has a question');
-        }),
-      approvePlan: async (plan) => {
-        const decision: Decision = { behavior: 'ask', reason: 'Approve the plan to leave plan mode.', dangerous: null, outsideProject: false, suggestedRule: null };
-        const answer = await this.prompt(
-          {
-            id: randomUUID(),
-            sessionId: this.id,
-            toolUseId,
-            toolName: 'ExitPlanMode',
-            title: 'Approve this plan?',
-            detail: { kind: 'plan', plan },
-            reason: decision.reason,
-            dangerous: null,
-            outsideProject: false,
-            suggestedRule: null,
-            agentLabel: null
-          },
-          signal
-        );
-        if (answer.decision === 'deny') return { approved: false, feedback: answer.feedback ?? null, plan };
-        const mode = this.prePlanMode === 'plan' ? 'auto-edit' : this.prePlanMode;
-        this.deps.store.updateSession(this.id, { permissionMode: mode });
-        this.emit({ type: 'mode', permissionMode: mode });
-        // The user may have edited the plan before approving it: theirs is the one to follow.
-        // An edit that changed only spacing, or left nothing, is an ordinary approval.
-        const edited = answer.plan?.trim() ?? '';
-        return { approved: true, feedback: null, plan: edited.length > 0 && edited !== plan.trim() ? edited : plan };
-      },
-      runSubagent: (input) => this.runSubagent(input, toolUseId, signal, model, provider, hooks, root, trusted),
-      runAgents: (input) => this.runAgents(input, toolUseId, signal, model, provider, hooks, root, trusted),
-      notesForPaths: (paths) => this.memory?.notesFor(paths) ?? null,
-      search: (query, count, searchSignal) => this.deps.search.search(query, count, searchSignal),
-      computer: this.deps.computer,
-      publicWebOnly: this.summary.kind === 'chat',
-      chatFiles: work.files && this.deps.chatFiles ? { save: (name, data) => this.deps.chatFiles!.save(this.id, name, data) } : null,
-      makeDocument:
-        work.files && this.deps.documents
-          ? (kind, name, source, s) =>
-              this.deps.documents!.make(
-                kind,
-                source,
-                // A document may place the pictures made in its own chat, and nothing else.
-                { title: name.replace(/\.[^.]+$/, ''), assets: { image: (file) => this.deps.chatFiles?.image?.(this.id, file) ?? null } },
-                s
-              )
-          : null,
-      runCode: work.code ? this.deps.runCode : null,
-      browser: this.summary.kind === 'code' ? this.agentBrowser() : null,
-      media: this.summary.incognito ? null : this.deps.media,
-      mission: this.summary.kind === 'code' ? { update: (input) => this.updateMission(input) } : null,
-      spend: (costUsd) => {
-        const current = this.summary.usage;
-        const next = { ...current, costUsd: (current.costUsd ?? 0) + costUsd };
-        this.deps.store.updateSession(this.id, { usage: next });
-        this.emit({ type: 'usage', usage: next });
-      },
-      deferredTools: this.mcpDeferred
-        ? {
-            find: (query, limit) => searchTools(this.deferredEntries(), query, limit),
-            load: (names) => {
-              for (const name of names) {
-                this.loadedMcp.add(name);
-                // The running turn offers them from its next request on.
-                if (this.toolNames && !this.toolNames.includes(name)) this.toolNames.push(name);
-              }
-            },
-            summary: () => {
-              const waiting = this.deferredByServer(model);
-              return waiting.length > 0 ? `Waiting to be loaded: ${waiting.map((w) => `${w.server} (${String(w.count)})`).join(', ')}.` : 'Nothing is waiting to be loaded.';
-            }
-          }
-        : null
+      summary: () => {
+        const waiting = this.offering.deferredByServer(model);
+        return waiting.length > 0 ? `Waiting to be loaded: ${waiting.map((w) => `${w.server} (${String(w.count)})`).join(', ')}.` : 'Nothing is waiting to be loaded.';
+      }
     };
   }
 
   /** Stops one agent of a group that is running (the Agents panel's Stop); the rest of the group goes on. False when it already ended. */
   stopAgent(runId: string): boolean {
-    const run = this.deps.store.listAgentRuns(this.id).find((r) => r.id === runId);
-    return run ? (this.agentGroups.get(run.groupId)?.stop(run.nodeId) ?? false) : false;
-  }
-
-  /** Runs a group of agents for the RunAgents tool; each agent's record is saved with the session and shown in the agent graph. */
-  private async runAgents(
-    input: AgentGroupInput,
-    parentToolUseId: string,
-    signal: AbortSignal,
-    model: ModelInfo,
-    provider: LLMProvider,
-    hooks: HookRunner | null,
-    root: string | null,
-    trusted: boolean
-  ): Promise<{ report: string; agents: Array<{ nodeId: string; title: string; role: string; status: string; durationMs: number | null }>; sources: Source[] }> {
-    const prefs = this.deps.preferences();
-    const chat = this.summary.kind === 'chat';
-    // A chat has no project: nothing to run a command in and no files to change. Its agents research, whatever role they are given.
-    if (chat && input.agents.some((agent) => agent.verify !== undefined || agent.writes !== undefined)) {
-      throw new GraftError('bad_agent_graph', 'In a chat, agents can search and read the web and nothing else: leave out verify and writes.');
-    }
-    const available = this.toolNames ?? this.deps.tools.names();
-    const { report, runs, sources } = await runAgentGroup(
-      input,
-      parentToolUseId,
-      {
-        onControl: (control) => this.agentGroups.set(parentToolUseId, control),
-        sessionId: this.id,
-        system: this.system ?? '',
-        toolNames: chat ? available.filter((name) => name === 'WebFetch' || name === 'WebSearch') : available,
-        customAgents: loadAgents(this.deps.graftHome, this.projectRoot()),
-        sessionModel: model,
-        sessionProvider: provider,
-        settings: prefs.agents,
-        registry: this.deps.tools,
-        privacy: this.privacy(),
-        maxSteps: prefs.maxSteps ?? SUBAGENT_ITERATIONS,
-        ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {}),
-        candidates: async (s) => (await this.deps.models.candidates?.(s)) ?? [model],
-        resolve: (ref, s) => this.deps.models.resolve(ref, s),
-        loopHost: (m, p) => this.makeHost(m, p, hooks, root, trusted),
-        ...(this.deps.workspaces ? { workspaces: this.deps.workspaces } : {}),
-        // Taproot is the main agent's way of working; an agent of a group gets the strongest plain effort instead.
-        effort: (m) => {
-          const effort = this.effortFor(m);
-          return effort === 'taproot' ? (m.effort?.levels.includes('max') ? 'max' : (m.effort?.default ?? null)) : effort;
-        },
-        save: (run) => {
-          this.deps.store.saveAgentRun(run);
-          this.emit({ type: 'agent-run', run });
-        },
-        progress: (text) => this.emit({ type: 'tool-progress', toolUseId: parentToolUseId, chunk: text }),
-        notice: (event) => this.emit(event)
-      },
-      signal
-    ).finally(() => this.agentGroups.delete(parentToolUseId));
-    return {
-      report,
-      sources,
-      agents: runs.map((run) => ({
-        nodeId: run.nodeId,
-        title: run.title,
-        role: run.roleLabel,
-        status: run.status,
-        durationMs: run.startedAt !== null && run.endedAt !== null ? run.endedAt - run.startedAt : null
-      }))
-    };
-  }
-
-  private async runSubagent(
-    input: { description: string; prompt: string; type: SubagentType },
-    parentToolUseId: string,
-    signal: AbortSignal,
-    model: ModelInfo,
-    provider: LLMProvider,
-    hooks: HookRunner | null,
-    root: string | null,
-    trusted: boolean
-  ): Promise<{ text: string; toolCalls: number }> {
-    const builtin = (BUILTIN_AGENTS as readonly string[]).includes(input.type);
-    const agent = builtin ? null : (loadAgents(this.deps.graftHome, this.projectRoot()).find((a) => a.name === input.type) ?? null);
-    if (!builtin && !agent) {
-      const custom = loadAgents(this.deps.graftHome, this.projectRoot()).map((a) => a.name);
-      throw new GraftError('unknown_agent', `There is no agent named "${input.type}". Use ${[...BUILTIN_AGENTS, ...custom].map((n) => `"${n}"`).join(', ')}.`);
-    }
-    // A sub-agent never gets more than the session has (e.g. no WebSearch without a search engine).
-    const toolNames = subagentTools(this.toolNames ?? this.deps.tools.names(), READ_ONLY_TOOLS, PARENT_ONLY_TOOLS, input.type, agent);
-    const readOnly = toolNames.every((n) => (READ_ONLY_TOOLS as readonly string[]).includes(n));
-    const role = agent ? `\n\n# Your role: ${agent.name}\n${agent.instructions}` : '';
-    let system = `${this.system ?? ''}\n\n# Delegated task\nYou are a sub-agent working on one task for the main agent: "${input.description}". You have a fresh context; the main agent sees only your final message, so make it a complete, self-contained report (findings with path:line references, changes made, anything unresolved).${readOnly ? ' You are read-only: research and report; do not try to change anything.' : ''}${role}`;
-    const scratch: StoredMessage[] = [];
-    const original = this.makeHost(model, provider, hooks, root, trusted);
-    const lease = this.deps.workspaces && !readOnly && this.summary.kind === 'code'
-      ? await this.deps.workspaces.create(original.describeContext().cwd, signal) : null;
-    let privateHost: Awaited<ReturnType<typeof workspaceHost>> | null;
-    try { privateHost = lease ? await workspaceHost(original, lease) : null; }
-    catch (error) { if (lease) this.deps.workspaces?.retain(lease); throw error; }
-    if (lease) {
-      system += `\n\n# Private writer checkout\nYour working directory is ${lease.cwd}. Use relative paths here. Ignored files and dependency folders are not copied. Destination conflicts preserve your checkout for review.`;
-      this.notice('info', 'The delegated writer is using a private checkout.');
-    }
-    const parent = privateHost?.host ?? original;
-    const host: LoopHost = {
-      ...parent,
-      append: (role, content, meta, id) => {
-        const message: StoredMessage = { id: id ?? randomUUID(), sessionId: this.id, seq: scratch.length + 1, role, content, meta, createdAt: Date.now() };
-        scratch.push(message);
-        return message;
-      },
-      emit: (event) => {
-        if (event.type === 'tool-start') this.emit({ type: 'tool-progress', toolUseId: parentToolUseId, chunk: `${event.summary}\n` });
-        else if (event.type === 'notice') this.emit(event);
-      },
-      maybeCompact: () => Promise.resolve(null),
-      todos: () => [],
-      // "Send now" messages are for the main agent; a sub-agent never takes them.
-      takeSteering: () => Promise.resolve([]),
-      // A subagent's spend counts toward the session; its context size isn't the conversation's.
-      onUsage: (usage, _tokens, costUsd) => parent.onUsage(usage, null, costUsd)
-    };
-    try {
-      const result = await runAgentLoop(
-        [{ role: 'user', content: [{ type: 'text', text: input.prompt }] }],
-        {
-          provider,
-          model,
-          registry: this.deps.tools,
-          toolNames,
-          system,
-          effort: this.effortFor(model) === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : model.effort?.default ?? null) : this.effortFor(model),
-          webSearch: false,
-          cacheKey: `${this.id}:${parentToolUseId}`,
-          privacy: this.privacy(),
-          turnId: parentToolUseId,
-          maxIterations: this.deps.preferences().maxSteps ?? SUBAGENT_ITERATIONS,
-          agentLabel: input.description,
-          taproot: false,
-          // The main turn runs the project's checks; a sub-agent's work is one task
-          // inside that turn and is covered by the same run.
-          checksFix: false,
-          stripThinking: false,
-          sessionId: this.id
-        },
-        host,
-        signal
-      );
-      if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
-      if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
-      if (lease && this.deps.workspaces) {
-        await privateHost?.close();
-        const touched = scratch.flatMap((m) => m.content.flatMap((b) => b.type === 'tool_result' && !b.isError && b.display?.kind === 'edit' ? [b.display.path] : []));
-        await this.deps.workspaces.integrate(lease, [], signal, touched);
-        this.files.clear();
-      }
-      return { text: result.finalText, toolCalls: result.toolCalls };
-    } finally {
-      await privateHost?.close();
-      if (lease && lease.info.state !== 'integrated') {
-        this.deps.workspaces?.retain(lease);
-        this.notice('warning', `The delegated writer's unfinished changes are retained at ${lease.cwd}.`);
-      }
-    }
+    return this.host.stopAgent(runId);
   }
 }
 

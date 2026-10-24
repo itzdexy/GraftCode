@@ -45,6 +45,8 @@ export function SessionRow({ session, active, detail }: { session: SessionSummar
 
   return (
     <li
+      // Read by the sidebar's list: a row that changes place travels there (lib/flip.ts).
+      data-flip-key={session.id}
       className={cn(
         'group relative mx-[var(--g-sidebar-inset)] flex h-[var(--g-list-row-height)] items-center rounded-md transition-ui',
         active ? 'bg-selected' : 'hover:bg-sidebar-hover',

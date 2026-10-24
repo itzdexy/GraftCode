@@ -245,3 +245,23 @@ describe('paths and registry', () => {
     expect(edit?.inputSchema).not.toHaveProperty('$schema');
   });
 });
+
+describe('a diagram written by the edit tools', () => {
+  const DIAGRAM =
+    '<!DOCTYPE html><html><head><title>t</title></head><body><svg viewBox="0 0 960 600" role="img" aria-labelledby="a-title a-desc"><title id="a-title">Orders</title><desc id="a-desc">d</desc></svg></body></html>';
+
+  it('is marked on the result of Write and of Edit, with its title and size', async () => {
+    const ctx = makeToolContext(dir);
+    const written = await writeTool.execute({ file_path: 'docs/diagrams/orders.html', content: DIAGRAM }, ctx);
+    expect(written.display).toMatchObject({ kind: 'edit', path: 'docs/diagrams/orders.html', diagram: { title: 'Orders', width: 960, height: 600 } });
+    await readTool.execute({ file_path: 'docs/diagrams/orders.html' }, ctx);
+    const edited = await editTool.execute({ file_path: 'docs/diagrams/orders.html', old_string: 'Orders', new_string: 'Orders and refunds' }, ctx);
+    expect(edited.display).toMatchObject({ kind: 'edit', diagram: { title: 'Orders and refunds' } });
+  });
+
+  it('is not marked on other files', async () => {
+    const ctx = makeToolContext(dir);
+    expect((await writeTool.execute({ file_path: 'page.html', content: '<html><body><p>hi</p></body></html>' }, ctx)).display).not.toHaveProperty('diagram');
+    expect((await writeTool.execute({ file_path: 'notes.txt', content: DIAGRAM }, ctx)).display).not.toHaveProperty('diagram');
+  });
+});

@@ -1,8 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { CalendarClock, ChevronDown, ChevronRight, FolderClosed, PanelsTopLeft, Plus, Search, Shapes, SlidersHorizontal } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight, EllipsisVertical, FolderClosed, PanelsTopLeft, Pencil, Plus, Search, Shapes, SlidersHorizontal, Trash } from 'lucide-react';
 import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../components/Menu';
 import { cn } from '../../lib/cn';
+import { useFlip } from '../../lib/flip';
 import { useShortcutLabel } from '../../lib/shortcuts';
 import { useNow } from '../../lib/time';
 import { useApp } from '../../stores/app';
@@ -12,8 +14,9 @@ import { reportError } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { newSessionIn } from '../home/codeContext';
 import { FilterPopover } from './FilterPopover';
-import { groupByProject, needsYou, visibleSessions, withoutThose } from './sessionLists';
+import { completedSessions, groupByProject, needsYou, splitGroups, visibleSessions, withoutThose, type GroupSection } from './sessionLists';
 import { SessionRow } from './SessionRow';
+import { useSessionDialog } from './SessionDialogs';
 import { SidebarFooter } from './SidebarFooter';
 import { SidebarResizer } from './SidebarResizer';
 import { startNew } from './shellActions';
@@ -129,8 +132,8 @@ function ChatList({ sessions, activeId, controls }: { sessions: SessionSummary[]
   );
 }
 
-function CodeList({ sessions, activeId, controls }: { sessions: SessionSummary[]; activeId: string | null; controls: boolean }) {
-  const groups = useMemo(() => groupByProject(sessions), [sessions]);
+function CodeList({ sessions, elsewhere, activeId, controls }: { sessions: SessionSummary[]; elsewhere: SessionSummary[]; activeId: string | null; controls: boolean }) {
+  const groups = useMemo(() => groupByProject(sessions, elsewhere), [sessions, elsewhere]);
   if (groups.length === 0) {
     return (
       <section aria-label="Sessions">
@@ -157,14 +160,93 @@ function CodeList({ sessions, activeId, controls }: { sessions: SessionSummary[]
             ) : null}
             {i === 0 && controls ? <ListControls kind="code" /> : null}
           </ListHeader>
-          <ul className="flex flex-col">
-            {group.sessions.map((s) => (
-              <SessionRow key={s.id} session={s} active={s.id === activeId} />
-            ))}
-          </ul>
+          {group.sessions.length > 0 ? (
+            <ul className="flex flex-col">
+              {group.sessions.map((s) => (
+                <SessionRow key={s.id} session={s} active={s.id === activeId} />
+              ))}
+            </ul>
+          ) : (
+            <EmptyList text={group.elsewhere === 1 ? 'Its session is under Needs you.' : `Its ${String(group.elsewhere)} sessions are under Needs you.`} />
+          )}
         </section>
       ))}
     </div>
+  );
+}
+
+/** A section header that folds: the chevron and the name toggle, the count says how many wait inside. */
+function FoldHeader({ label, count, open, onToggle, children }: { label: string; count: number; open: boolean; onToggle: () => void; children?: ReactNode }) {
+  return (
+    <div className="flex h-24 items-center gap-4 pr-[calc(var(--g-sidebar-inset)+4px)] pl-9">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-full min-w-0 flex-1 items-center gap-4 rounded-md text-left"
+      >
+        {open ? (
+          <ChevronDown className="size-12 shrink-0 text-icon-muted" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-12 shrink-0 text-icon-muted" aria-hidden="true" />
+        )}
+        <h2 className="min-w-0 flex-1 truncate text-xs font-normal text-fg-muted">{label}</h2>
+        <span className="px-2 text-xs text-fg-faint tabular-nums">{count}</span>
+      </button>
+      {children}
+    </div>
+  );
+}
+
+/** A named group of sessions the user filed together, folded or open, with its own menu. */
+function GroupList({ section, kind, activeId, controls }: { section: GroupSection; kind: 'chat' | 'code'; activeId: string | null; controls: boolean }) {
+  const collapsed = useUi((s) => s.collapsedGroups[section.group.id] === true);
+  const openGroup = useSessionDialog((s) => s.openGroup);
+  return (
+    <section aria-label={section.group.name}>
+      <FoldHeader label={section.group.name} count={section.sessions.length} open={!collapsed} onToggle={() => useUi.getState().toggleGroup(section.group.id)}>
+        {controls ? <ListControls kind={kind} /> : null}
+        <Menu>
+          <MenuTrigger asChild>
+            <IconButton label={`Actions for ${section.group.name}`} size="xs">
+              <EllipsisVertical className="size-14" />
+            </IconButton>
+          </MenuTrigger>
+          <MenuContent align="end">
+            <MenuItem icon={<Pencil className="size-14" />} onSelect={() => openGroup({ kind: 'rename-group', group: section.group })}>
+              Rename…
+            </MenuItem>
+            <MenuItem icon={<Trash className="size-14 text-danger" />} onSelect={() => openGroup({ kind: 'delete-group', group: section.group })}>
+              Remove group…
+            </MenuItem>
+          </MenuContent>
+        </Menu>
+      </FoldHeader>
+      {collapsed ? null : (
+        <ul className="flex flex-col">
+          {section.sessions.map((s) => (
+            <SessionRow key={s.id} session={s} active={s.id === activeId} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Sessions the user marked as completed: out of the way at the bottom, folded shut. */
+function CompletedList({ sessions, activeId }: { sessions: SessionSummary[]; activeId: string | null }) {
+  const open = useUi((s) => s.completedOpen);
+  return (
+    <section aria-label="Completed">
+      <FoldHeader label="Completed" count={sessions.length} open={open} onToggle={() => useUi.getState().setCompletedOpen(!open)} />
+      {open ? (
+        <ul className="flex flex-col">
+          {sessions.map((s) => (
+            <SessionRow key={s.id} session={s} active={s.id === activeId} />
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
@@ -180,11 +262,25 @@ export function Sidebar() {
   const width = preview ?? storedWidth;
 
   const now = useNow(60_000);
+  const groups = useSessions((s) => s.groups);
   const sessions = useMemo(() => visibleSessions(Object.values(summaries), mode, filter, now), [summaries, mode, filter, now]);
   const activeId = route.name === 'session' ? route.id : null;
   // What waits for the user elsewhere is listed once, at the top; the lists below go without it.
   const needing = useMemo(() => needsYou(Object.values(summaries), mode, filter, activeId), [summaries, mode, filter, activeId]);
-  const rest = useMemo(() => withoutThose(sessions, needing), [sessions, needing]);
+  // Completed sessions wait at the bottom, in a section of their own.
+  const completed = useMemo(() => completedSessions(Object.values(summaries), mode, filter, now), [summaries, mode, filter, now]);
+  // Whatever the filter says, a session marked completed is never in a working list. An archived one is
+  // raised only by the archived filter, where it stays: archiving is the stronger filing of the two.
+  const finished = useMemo(() => Object.values(summaries).filter((s) => s.completedAt !== null && !s.archived), [summaries]);
+  const rest = useMemo(() => withoutThose(withoutThose(sessions, needing), finished), [sessions, needing, finished]);
+  // Sessions the user filed under a named group are listed there, not in their project or chat list.
+  const filed = useMemo(() => splitGroups(groups, rest), [groups, rest]);
+  // The search and filter controls sit in the first header that is shown.
+  const listControls = needing.length === 0 && !(filed.sections.length > 0 && filed.rest.length === 0);
+  // A session row that changes place (into or out of Needs you or Completed, or up its list after a new message) travels there.
+  const lists = useFlip<HTMLElement>(
+    [...needing, ...filed.sections.flatMap((section) => section.sessions), ...filed.rest, ...completed].map((s) => s.id).join(',')
+  );
 
   const moreOpen = useUi((s) => s.moreOpen);
   const entry = (id: 'projects' | 'artifacts' | 'sites' | 'scheduled' | 'customize', label: string, icon: ReactNode): NavEntry => ({
@@ -217,7 +313,7 @@ export function Sidebar() {
       <div className="app-drag flex h-[var(--g-titlebar-height)] shrink-0 items-center pr-[var(--g-sidebar-inset)] pl-[calc(var(--g-controls-left)+var(--g-sidebar-inset))]">
         <TitlebarControls className="flex-1" />
       </div>
-      <nav aria-label="Main" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-8 pb-12">
+      <nav ref={lists} aria-label="Main" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-8 pb-12">
         <ul className="flex flex-col">
           {nav.map((e) => (
             <NavRow key={e.id} entry={e} active={e.isActive(route)} />
@@ -244,12 +340,17 @@ export function Sidebar() {
         {loaded ? (
           <div className="mt-24 flex flex-col gap-8">
             {needing.length > 0 ? <NeedsYouList sessions={needing} kind={mode} activeId={activeId} /> : null}
-            {/* With every session waiting, there is no list below to call empty. */}
-            {needing.length > 0 && rest.length === 0 ? null : mode === 'chat' ? (
-              <ChatList sessions={rest} activeId={activeId} controls={needing.length === 0} />
+            {filed.sections.map((section, i) => (
+              // When the ordinary list below is empty (everything filed in groups), the controls sit in the first group.
+              <GroupList key={section.group.id} section={section} kind={mode} activeId={activeId} controls={i === 0 && needing.length === 0 && filed.rest.length === 0} />
+            ))}
+            {/* With every session waiting or filed, there is no list below to call empty. */}
+            {filed.rest.length === 0 && (needing.length > 0 || filed.sections.length > 0) ? null : mode === 'chat' ? (
+              <ChatList sessions={filed.rest} activeId={activeId} controls={listControls} />
             ) : (
-              <CodeList sessions={rest} activeId={activeId} controls={needing.length === 0} />
+              <CodeList sessions={filed.rest} elsewhere={needing} activeId={activeId} controls={listControls} />
             )}
+            {completed.length > 0 ? <CompletedList sessions={completed} activeId={activeId} /> : null}
           </div>
         ) : null}
       </nav>

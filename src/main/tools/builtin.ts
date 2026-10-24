@@ -14,8 +14,9 @@ import { webSearchTool } from './web/webSearch';
 import { computerTool } from './computer';
 import { browserTool } from './browserTool';
 import { createFileTool, runCodeTool } from './chat/chatTools';
-import { comfyTool, generateImageTool } from './media';
+import { comfyTool, generateImageTool, generateVideoTool } from './media';
 import { toolSearchTool } from './toolSearch';
+import { skillTool } from './skillTool';
 import { semanticCodeTool } from './search/semantic';
 import type { LanguageServers } from '../languages/servers';
 
@@ -23,8 +24,10 @@ import type { LanguageServers } from '../languages/servers';
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'Symbols', 'SemanticCode', 'WebFetch', 'WebSearch'] as const;
 /** Tools a sub-agent may never use (no nesting, no user interaction). */
 export const PARENT_ONLY_TOOLS = ['Task', 'RunAgents', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'MissionUpdate', 'Browser', 'ToolSearch'] as const;
-/** Tools offered in chats only; code sessions have Write and Shell instead. */
-export const CHAT_ONLY_TOOLS = ['CreateFile', 'RunCode'] as const;
+/** The core tools of a lean model's code session; every other built-in waits for ToolSearch. */
+export const LEAN_TOOLS = ['AskUserQuestion', 'Edit', 'ExitPlanMode', 'Glob', 'Grep', 'KillShell', 'Read', 'Shell', 'ShellOutput', 'TodoWrite', 'WebFetch', 'Write'] as const;
+/** Tools offered in chats only; code sessions have Write, Shell and Read instead. */
+export const CHAT_ONLY_TOOLS = ['CreateFile', 'RunCode', 'Skill'] as const;
 
 export function createBuiltinRegistry(languages: LanguageServers | null = null): ToolRegistry {
   const registry = new ToolRegistry();
@@ -51,7 +54,9 @@ export function createBuiltinRegistry(languages: LanguageServers | null = null):
   registry.register(exitPlanModeTool);
   registry.register(createFileTool);
   registry.register(runCodeTool);
+  registry.register(skillTool);
   registry.register(generateImageTool);
+  registry.register(generateVideoTool);
   registry.register(comfyTool);
   registry.register(toolSearchTool);
   return registry;

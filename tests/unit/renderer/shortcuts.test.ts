@@ -52,4 +52,34 @@ describe('recording shortcuts', () => {
     expect(lib.shortcutProblem('interrupt', 'Escape', current)).toBeNull();
     expect(lib.shortcutProblem('cyclePermissionMode', 'M', current)).toMatch(/single character/);
   });
+
+  it('has a key for finding in the conversation that clashes with no other', () => {
+    expect(DEFAULT_SHORTCUTS.findInTranscript).toBe('Ctrl+F');
+    expect(lib.SHORTCUT_DESCRIPTIONS.findInTranscript).toBe('Find in the conversation');
+    expect(lib.shortcutProblem('findInTranscript', 'Ctrl+F', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('search', 'Ctrl+F', DEFAULT_SHORTCUTS)).toMatch(/Find in the conversation/);
+  });
+
+  it('has bare function keys for stepping through what find found, which typing never needs', () => {
+    expect([DEFAULT_SHORTCUTS.findNext, DEFAULT_SHORTCUTS.findPrevious]).toEqual(['F3', 'Shift+F3']);
+    // A bare key is allowed for these two: F3 types nothing, unlike a letter.
+    expect(lib.shortcutProblem('findNext', 'F3', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('findPrevious', 'Shift+F3', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('search', 'F3', DEFAULT_SHORTCUTS)).toMatch(/Find the next match in the conversation/);
+    expect(lib.shortcutProblem('findNext', 'N', DEFAULT_SHORTCUTS)).toMatch(/Add Ctrl or Alt/);
+  });
+
+  it('has keys for opening a file and a symbol by name', () => {
+    expect([DEFAULT_SHORTCUTS.quickOpen, DEFAULT_SHORTCUTS.goToSymbol]).toEqual(['Ctrl+P', 'Ctrl+T']);
+    expect([lib.SHORTCUT_DESCRIPTIONS.quickOpen, lib.SHORTCUT_DESCRIPTIONS.goToSymbol]).toEqual(['Open a file by name', 'Go to a symbol by name']);
+    expect(lib.shortcutProblem('quickOpen', 'Ctrl+P', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('goToSymbol', 'Ctrl+T', DEFAULT_SHORTCUTS)).toBeNull();
+  });
+
+  it('has a key for searching the text of the project that clashes with no other', () => {
+    expect(DEFAULT_SHORTCUTS.searchFiles).toBe('Ctrl+Shift+H');
+    expect(lib.SHORTCUT_DESCRIPTIONS.searchFiles).toBe('Search in the files of the project');
+    expect(lib.shortcutProblem('searchFiles', 'Ctrl+Shift+H', DEFAULT_SHORTCUTS)).toBeNull();
+    expect(lib.shortcutProblem('search', 'Ctrl+Shift+H', DEFAULT_SHORTCUTS)).toMatch(/Search in the files of the project/);
+  });
 });

@@ -11,7 +11,7 @@ import { matchesAccelerator } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
-import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, readAttachments } from './attachments';
+import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, picturesTaken, readAttachments } from './attachments';
 import { detectToken, useSuggestions, type Suggestion } from './suggestions';
 
 export interface ComposerProps {
@@ -78,7 +78,8 @@ export function Composer({
   const setDraft = useUi((s) => s.setDraft);
   const [images, setImages] = useState<ImageBlock[]>([]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
-  const [sending, setSending] = useState(false);
+  /** The send on its way, if any: messages go one after another, in the order they were sent. */
+  const inFlight = useRef<Promise<void>>(Promise.resolve());
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -117,15 +118,19 @@ export function Composer({
     if (autoFocus) focus();
   }, [autoFocus, focus]);
 
+  // The list of suggestions scrolls: the one the arrow keys are on stays in view.
+  useEffect(() => {
+    if (popupOpen) document.getElementById(`${listId}-${String(activeIndex)}`)?.scrollIntoView({ block: 'nearest' });
+  }, [popupOpen, listId, activeIndex]);
+
   // Attachments sent from elsewhere: the Browser panel's screenshots, picked elements and console logs.
   useEffect(() => {
     const take = (): void => {
       const got = useUi.getState().takeInbox(draftKey);
       if (!got) return;
-      if (got.images.length > 0) {
-        if (supportsImages) setImages((current) => [...current, ...got.images].slice(0, MAX_IMAGES));
-        else useToasts.getState().push({ tone: 'error', title: 'This model can’t read images', description: 'Pick a model that can see images to send a screenshot.' });
-      }
+      const pictures = picturesTaken(got, supportsImages);
+      if (pictures.images.length > 0) setImages((current) => [...current, ...pictures.images].slice(0, MAX_IMAGES));
+      if (pictures.refused) useToasts.getState().push({ tone: 'error', title: 'This model can’t read images', description: 'Pick a model that can see images to send a screenshot.' });
       if (got.files.length > 0) setFiles((current) => [...current, ...got.files].slice(0, MAX_TEXT_FILES));
       focus();
     };
@@ -165,26 +170,40 @@ export function Composer({
 
   const hasAttachments = images.length > 0 || files.length > 0;
   const hasContent = text.trim().length > 0 || hasAttachments;
-  const canSend = hasContent && !sending && blockedReason === null;
+  const canSend = hasContent && blockedReason === null;
 
-  const submit = async (override?: string): Promise<void> => {
-    const message = override ?? text;
-    if ((message.trim().length === 0 && !hasAttachments) || sending || blockedReason !== null) return;
-    setSending(true);
-    try {
-      const sent = await onSubmit(message, images, files);
-      if (sent) {
-        if (history) pushHistory(message);
-        setHistoryIndex(null);
-        setDraft(draftKey, '');
-        setImages([]);
-        setFiles([]);
+  /**
+   * Sends what is in the box. The box empties at once, so what is typed next is the next message: it used to be
+   * emptied when the send came back, which threw away whatever had been typed meanwhile, and an Enter pressed before
+   * then did nothing. A message sent while the one before is on its way waits for it. One that is not sent comes back,
+   * ahead of anything typed since.
+   */
+  const submit = (override?: string): Promise<void> => {
+    // Read from the store, not this render: a second Enter before the next render must find the box empty.
+    const message = override ?? useUi.getState().drafts[draftKey] ?? '';
+    if ((message.trim().length === 0 && !hasAttachments) || blockedReason !== null) return Promise.resolve();
+    const sentImages = images;
+    const sentFiles = files;
+    setDraft(draftKey, '');
+    setImages([]);
+    setFiles([]);
+    setHistoryIndex(null);
+    const run = inFlight.current.then(async () => {
+      try {
+        if (await onSubmit(message, sentImages, sentFiles)) {
+          if (history) pushHistory(message);
+          return;
+        }
+      } catch (error) {
+        reportError("Couldn't send the message", error);
       }
-    } catch (error) {
-      reportError("Couldn't send the message", error);
-    } finally {
-      setSending(false);
-    }
+      const typed = useUi.getState().drafts[draftKey] ?? '';
+      setDraft(draftKey, typed.trim().length === 0 ? message : `${message}\n\n${typed}`);
+      setImages((current) => [...sentImages, ...current].slice(0, MAX_IMAGES));
+      setFiles((current) => [...sentFiles, ...current].slice(0, MAX_TEXT_FILES));
+    });
+    inFlight.current = run;
+    return run;
   };
 
   const choose = (item: Suggestion, viaEnter: boolean): void => {
@@ -375,7 +394,7 @@ export function Composer({
       id={listId}
       role="listbox"
       aria-label={token?.kind === 'slash' ? 'Commands' : 'Files'}
-      className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-popover)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
+      className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-float)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
     >
       {suggestions.items.length === 0 ? <p className="px-8 py-6 text-base text-fg-muted">Searching files…</p> : null}
       {suggestions.items.map((item, i) => (

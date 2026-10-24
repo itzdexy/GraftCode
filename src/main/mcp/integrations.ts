@@ -70,10 +70,12 @@ export function findCommand(name: string, platform: NodeJS.Platform, env: NodeJS
   const system = platformOf(platform);
   if (!system) return null;
   const extensions = system === 'win32' ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((e) => e.length > 0) : [''];
-  const dirs = [...(env.PATH ?? env.Path ?? '').split(path.delimiter), ...installDirs(system, env)].filter((d) => d.length > 0);
+  // The target platform's path rules here too, as in installDirs: the answer doesn't depend on where it is worked out.
+  const p = system === 'win32' ? path.win32 : path.posix;
+  const dirs = [...(env.PATH ?? env.Path ?? '').split(p.delimiter), ...installDirs(system, env)].filter((d) => d.length > 0);
   for (const dir of dirs) {
     for (const ext of extensions) {
-      const file = path.join(dir, `${name}${ext}`);
+      const file = p.join(dir, `${name}${ext}`);
       if (exists(file)) return file;
     }
   }
@@ -135,7 +137,8 @@ export function integrationSetup(
   if (!launch) throw new GraftError('integration_unavailable', `${integration.name} isn’t available on this system.`);
   const key = serverKey('user', null, integration.serverName);
   const secrets: Record<string, string> = {};
-  const entries: Record<string, string> = {};
+  // A local server's fixed environment first; what is typed for it comes after.
+  const entries: Record<string, string> = launch.type === 'stdio' ? { ...(integration.env ?? {}) } : {};
   for (const field of integration.fields ?? []) {
     const value = (values[field.key] ?? '').trim();
     if (value.length === 0) {
@@ -158,7 +161,8 @@ export function integrationSetup(
   const runtime = integration.runtime ? findCommand(RUNTIME_COMMAND[integration.runtime], platform, env, exists) : null;
   return {
     name: integration.serverName,
-    config: { type: 'stdio', command: runtime ?? fill(launch.command, env), args: launch.args.map((a) => fill(a, env)), env: entries, keepEnv: [], cwd: null, enabled: true },
+    // What an integration needs is in `entries`; this computer's keys and tokens are not its business.
+    config: { type: 'stdio', command: runtime ?? fill(launch.command, env), args: launch.args.map((a) => fill(a, env)), env: entries, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true },
     secrets
   };
 }

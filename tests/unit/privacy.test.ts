@@ -33,6 +33,8 @@ describe('where data goes', () => {
       archived: false,
       unread: false,
       incognito: false,
+      groupId: null,
+      completedAt: null,
       projectId: null,
       projectPath: null,
       projectName: null,

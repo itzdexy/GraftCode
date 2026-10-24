@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Collapse } from '../../components/Collapse';
+import { ConnectorIcon } from '../../components/ConnectorIcon';
 import { Ring } from '../../components/ContextRing';
 import { cn } from '../../lib/cn';
 import { ToolCallBody } from './ToolDetail';
+import { pictureSrc, resultPictures } from './toolPictures';
 import { callParts, summarizeCalls, type ToolCall } from './transcriptModel';
 
 function callFailed(call: ToolCall): boolean {
@@ -31,13 +33,21 @@ export function DiffCount({ added, removed, pill = false }: { added: number; rem
   );
 }
 
+/** Where a call's row sits: inside an indented list, a row of a bordered list, or a line of the transcript itself. */
+type RowVariant = 'indented' | 'boxed' | 'flush';
+
+const ROW: Record<RowVariant, string> = { indented: 'min-h-24 rounded-sm px-4', boxed: 'min-h-30 w-full px-10', flush: 'min-h-26 max-w-full self-start rounded-sm' };
+const ROW_BODY: Record<RowVariant, string> = { indented: 'pt-2 pb-8 pl-4', boxed: 'px-10 pt-2 pb-10', flush: 'pt-2 pb-4' };
+
 /** One tool call as a step: what was done in muted text, what it was done to in strong text; opens to its details. */
-export function CallRow({ call }: { call: ToolCall }) {
-  const [open, setOpen] = useState(call.running !== null);
+export function CallRow({ call, variant = 'indented', defaultOpen = false }: { call: ToolCall; variant?: RowVariant; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen || call.running !== null);
   const failed = callFailed(call);
   const declined = call.result?.display?.kind === 'denied';
   const edit = call.result?.display?.kind === 'edit' && !call.result.isError ? call.result.display : null;
   const parts = callParts(call);
+  const pictures = resultPictures(call.result);
+  const mcpServer = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__resources__') ? (call.name.split('__')[1] ?? null) : null;
   return (
     <div className="flex flex-col">
       <button
@@ -45,9 +55,11 @@ export function CallRow({ call }: { call: ToolCall }) {
         aria-expanded={open}
         title={parts.title}
         onClick={() => setOpen(!open)}
-        className="group/row flex min-h-24 items-center gap-6 rounded-sm px-4 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary"
+        className={cn('group/row flex items-center gap-6 text-left text-md text-fg-muted transition-ui hover:text-fg-secondary', ROW[variant])}
       >
         {call.running ? <Ring value={0} size={10} spinning label="Running" /> : null}
+        {/* A connector's tool shows the mark of the app it reaches (Blender, Roblox Studio…). */}
+        {mcpServer ? <ConnectorIcon server={{ name: mcpServer }} size={14} /> : null}
         <span className="min-w-0 truncate">
           {parts.verb}
           {parts.verb && parts.target ? ' ' : ''}
@@ -56,10 +68,20 @@ export function CallRow({ call }: { call: ToolCall }) {
           ) : null}
         </span>
         {edit ? <DiffCount added={edit.added} removed={edit.removed} pill /> : null}
+        {edit?.problems ? <span className="shrink-0 text-amber-fg">{edit.problems.total === 1 ? '1 problem' : `${String(edit.problems.total)} problems`}</span> : null}
         {failed ? <span className="shrink-0 text-danger">Failed</span> : declined ? <span className="shrink-0 text-amber-fg">Declined</span> : null}
+        {pictures.length > 0 ? (
+          // A glance at what came back; the pictures themselves open from the details.
+          <span role="img" aria-label={pictures.length === 1 ? 'Sent a picture' : `Sent ${String(pictures.length)} pictures`} className="flex shrink-0 items-center gap-2">
+            {pictures.slice(0, 3).map((image, i) => (
+              <img key={i} src={pictureSrc(image)} alt="" className="motion-pop h-18 w-28 rounded-[3px] border border-border-card object-cover" />
+            ))}
+            {pictures.length > 3 ? <span className="text-xs text-fg-muted tabular-nums">+{String(pictures.length - 3)}</span> : null}
+          </span>
+        ) : null}
         <ChevronRight className={cn('size-14 shrink-0 transition-transform duration-[var(--g-duration-fast)]', open && 'rotate-90')} aria-hidden="true" />
       </button>
-      <Collapse open={open} className="pt-2 pb-8 pl-4">
+      <Collapse open={open} className={ROW_BODY[variant]}>
         <ToolCallBody call={call} />
       </Collapse>
     </div>

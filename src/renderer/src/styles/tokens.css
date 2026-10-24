@@ -81,7 +81,7 @@
   --g-timeline-tick-height: 2px;
   --g-timeline-tick-gap: 5px; /* tick pitch ~7.4px */
   --g-panel-width: 263px; /* backgroundPanel.x 808..1070 */
-  --g-scrollbar-size: 6px; /* scrollbarThumbX.length */
+  --g-scrollbar-size: 10px; /* the lane; the thumb in it is 4px, 6px under the pointer (globals.css) */
   --g-icon-size: 16px;
   --g-icon-size-sm: 14px;
   --g-icon-size-xs: 12px; /* messageActionIcons are 12px wide */
@@ -109,6 +109,8 @@
   --g-duration-slow: 250ms;
   --g-duration-exit: 110ms;
   --g-duration-spring: 280ms;
+  /* A whole view giving way to another (a cross-fade). */
+  --g-duration-view: 150ms;
   --g-ease: cubic-bezier(0.2, 0, 0, 1);
   --g-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --g-ease-in: cubic-bezier(0.4, 0, 1, 1);
@@ -117,11 +119,16 @@
     1.0056, 1.0035, 1
   );
 
-  /* Stacking */
+  /*
+   * Stacking. A menu or a popover opens from a control and is drawn at the top of the page, so it has to
+   * lie over a dialog: Settings is one, and its menus open inside it. What floats over its own part of
+   * the page without leaving it (the list above the message box) stays under every dialog.
+   */
   --g-z-sticky: 10;
   --g-z-panel: 20;
-  --g-z-popover: 50;
+  --g-z-float: 50;
   --g-z-dialog: 60;
+  --g-z-popover: 65;
   --g-z-toast: 70;
 }
 
@@ -348,6 +355,26 @@
 }
 
 /*
+ * Settings → Appearance → Motion style. Lively is what the page is marked with unless Calm was chosen:
+ * what a person does is answered with movement that is seen. A page that is opened rises into place,
+ * a window springs open, a sent message travels up from the message box (globals.css has the rules).
+ * Calm is everything above as it stands: short fades and a few pixels of travel.
+ * Leaving takes the same time in both, so closing never feels like waiting.
+ * This block has to stay above the ones that set every time to nothing: at the same weight the later one wins.
+ */
+:root[data-motion-style='lively'] {
+  /* A page giving way to another: the new one rises in. */
+  --g-duration-view: 300ms;
+  /* An arrival that springs: a window, a sent message, a panel, a home screen. */
+  --g-duration-lively: 380ms;
+  /* A damped spring sampled into linear(): 7% past its place at the half-way mark, settled at the end. */
+  --g-ease-lively: linear(
+    0, 0.0496, 0.1692, 0.3229, 0.4842, 0.6356, 0.7666, 0.8724, 0.9522, 1.008, 1.0431, 1.0617, 1.068, 1.0657, 1.0582, 1.048, 1.037, 1.0265,
+    1.0173, 1.0098, 1.0041, 1
+  );
+}
+
+/*
  * Reduced motion. Settings → Appearance → Motion marks the page:
  * data-motion="reduced" keeps it still, data-motion="full" animates even when
  * the operating system asks for less, and no mark (System) follows the system.
@@ -359,6 +386,8 @@
     --g-duration-slow: 0ms;
     --g-duration-exit: 0ms;
     --g-duration-spring: 0ms;
+    --g-duration-view: 0ms;
+    --g-duration-lively: 0ms;
   }
 }
 :root[data-motion='reduced'] {
@@ -367,4 +396,6 @@
   --g-duration-slow: 0ms;
   --g-duration-exit: 0ms;
   --g-duration-spring: 0ms;
+  --g-duration-view: 0ms;
+  --g-duration-lively: 0ms;
 }

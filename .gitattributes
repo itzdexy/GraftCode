@@ -2,3 +2,5 @@
 *.png binary
 *.ico binary
 *.woff2 binary
+# The bundled skills are upstream's files, byte for byte: no line ending is ever converted.
+resources/skills/** -text

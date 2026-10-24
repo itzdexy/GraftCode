@@ -23,7 +23,8 @@ test('a trusted code session exposes real semantic definitions and current type 
   }, project);
   provider.script({ toolCalls: [
     { name: 'SemanticCode', input: { action: 'definition', file: 'main.ts', line: 2, column: 23 } },
-    { name: 'SemanticCode', input: { action: 'diagnostics', file: 'main.ts' } }
+    { name: 'SemanticCode', input: { action: 'diagnostics', file: 'main.ts' } },
+    { name: 'SemanticCode', input: { action: 'symbol', file: 'main.ts', name: 'twice' } }
   ] }, { text: 'The semantic server resolved the imported function and detected the type mismatch.' });
   const composer = graft.window.getByRole('textbox', { name: 'Describe a task or ask a question' });
   await composer.fill('Resolve this imported function and inspect its current type errors'); await composer.press('Enter');
@@ -32,4 +33,9 @@ test('a trusted code session exposes real semantic definitions and current type 
   expect(messages).toContain('typescript-language-server');
   expect(messages).toContain('library.ts');
   expect(messages).toContain('2345');
+  // A declaration found by its name alone, with its kind in words and its place on the name.
+  expect(messages).toContain('\\"name\\": \\"twice\\"');
+  expect(messages).toContain('\\"kind\\": \\"function\\"');
+  // The transcript says what was asked, not the tool's name.
+  await expect(graft.window.getByText('Looked up the code’s structure 3 times')).toBeVisible();
 });

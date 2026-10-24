@@ -8,12 +8,15 @@ import { contextLimit, spendText, usageText } from '../../../src/renderer/src/fe
 import { partBars } from '../../../src/renderer/src/features/composer/contextModel';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
 import { fileGlyph } from '../../../src/renderer/src/features/session/fileCardModel';
+import { customModelSummary } from '../../../src/renderer/src/features/settings/customModelSummary';
 import {
   DEFAULT_FILTER,
+  completedSessions,
   groupByProject,
   homeSessions,
   matchesFilter,
   needsYou,
+  splitGroups,
   visibleSessions,
   withoutThose
 } from '../../../src/renderer/src/features/shell/sessionLists';
@@ -31,6 +34,8 @@ function session(partial: Partial<SessionSummary> & { id: string }): SessionSumm
     archived: false,
     unread: false,
     incognito: false,
+    groupId: null,
+    completedAt: null,
     projectId: null,
     projectPath: null,
     projectName: null,
@@ -105,6 +110,47 @@ describe('session lists', () => {
     expect(withoutThose(calm, [])).toBe(calm);
   });
 
+  it('leaves completed sessions out of what waits, out of home, and lists them apart, newest completion first', () => {
+    const all = [
+      session({ id: 'done-new', completedAt: NOW - MIN }),
+      session({ id: 'done-old', completedAt: NOW - DAY, updatedAt: NOW - 10 * DAY, status: 'error' }),
+      session({ id: 'open' }),
+      session({ id: 'done-archived', completedAt: NOW, archived: true }),
+      session({ id: 'done-chat', kind: 'chat', completedAt: NOW })
+    ];
+    expect(completedSessions(all, 'code', DEFAULT_FILTER, NOW).map((s) => s.id)).toEqual(['done-new', 'done-old']);
+    expect(completedSessions(all, 'chat', DEFAULT_FILTER, NOW).map((s) => s.id)).toEqual(['done-chat']);
+    // The filter is the same one every other list answers to: a filtered Completed shows what matches, not nothing.
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'idle' }, NOW).map((s) => s.id)).toEqual(['done-new']);
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, date: 'day' }, NOW).map((s) => s.id)).toEqual(['done-new']);
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'attention' }, NOW).map((s) => s.id)).toEqual(['done-old']);
+    // An archived session is raised by the archived filter, not by Completed.
+    expect(completedSessions(all, 'code', { ...DEFAULT_FILTER, status: 'archived' }, NOW)).toEqual([]);
+    // A completed error is not something that waits for the user; home is recent work, and this is filed away.
+    expect(needsYou(all, 'code', DEFAULT_FILTER).map((s) => s.id)).toEqual([]);
+    expect(homeSessions(all, 'code', 10).map((s) => s.id)).toEqual(['open']);
+  });
+
+  it('takes grouped sessions out of their project or chat list, and leaves empty groups out', () => {
+    const work = { id: 'g-work', name: 'Work', createdAt: NOW - DAY };
+    const empty = { id: 'g-empty', name: 'Empty', createdAt: NOW - 2 * DAY };
+    const filed = splitGroups(
+      [work, empty],
+      [
+        session({ id: 'a', groupId: work.id }),
+        session({ id: 'b', groupId: work.id, pinned: true, updatedAt: NOW - 2 * DAY }),
+        session({ id: 'c' }),
+        // A group that is no longer there: the session falls back to its ordinary list, it is not lost.
+        session({ id: 'd', groupId: 'g-gone' })
+      ]
+    );
+    expect(filed.sections.map((s) => [s.group.name, s.sessions.map((x) => x.id)])).toEqual([['Work', ['b', 'a']]]);
+    expect(filed.rest.map((s) => s.id).sort()).toEqual(['c', 'd']);
+    // No groups at all: the list is returned as it is.
+    const plain = [session({ id: 'a' })];
+    expect(splitGroups([], plain)).toEqual({ sections: [], rest: plain });
+  });
+
   it('filters by attention, project and date', () => {
     const needs = session({ id: 'needs', status: 'needs-input', projectPath: '/p/one' });
     const unread = session({ id: 'unread', unread: true, projectPath: '/p/two' });
@@ -140,6 +186,23 @@ describe('session lists', () => {
     expect(groups[1]?.detail).toBe('C:\\a\\New folder');
     expect(groups[2]?.detail).toBe('C:\\b\\New folder');
     expect(groups[0]?.detail).toBeNull();
+  });
+
+  it('keeps the header of a project whose sessions all wait under Needs you, so another can be started there', () => {
+    const waiting = [
+      session({ id: 'w1', projectPath: 'C:/work/beta', projectName: 'beta', status: 'needs-input' }),
+      session({ id: 'w2', projectPath: 'C:/work/beta', projectName: 'beta', status: 'error' }),
+      session({ id: 'w3', projectPath: 'C:/work/Alpha', projectName: 'Alpha', status: 'needs-input' }),
+      session({ id: 'w4', projectPath: null, projectName: null, status: 'error' })
+    ];
+    const groups = groupByProject([session({ id: '1', projectPath: 'C:/work/Alpha', projectName: 'Alpha' })], waiting);
+    expect(groups.map((g) => [g.name, g.sessions.map((s) => s.id), g.elsewhere])).toEqual([
+      ['Alpha', ['1'], 1],
+      ['beta', [], 2]
+    ]);
+    // A session with no folder has no project to start another in: nothing is kept for it.
+    expect(groupByProject([], [waiting[3]!])).toEqual([]);
+    expect(groupByProject([session({ id: '1', projectPath: 'C:/work/Alpha', projectName: 'Alpha' })])[0]?.elsewhere).toBe(0);
   });
 
   it('orders home sessions by attention, then recency', () => {
@@ -271,5 +334,14 @@ describe('context and spend', () => {
     });
     expect(spendText(usage({ inputTokens: 900, outputTokens: 20 }, 0.004))).toEqual({ tokens: '900 input · 20 output', cost: 'Less than $0.01' });
     expect(spendText(usage({ inputTokens: 900 }, null))?.cost).toBe('No published prices for this model');
+  });
+});
+
+describe('custom model summary', () => {
+  it('names the window and any prompt or tool-call choice made for the model', () => {
+    expect(customModelSummary({ id: 'q', contextWindow: 16384, prompt: 'lean', toolFormat: 'text' })).toBe('16,384 tokens · lean prompt · tools in text');
+    expect(customModelSummary({ id: 'q', label: 'Qwen', vision: true, prompt: 'full', toolFormat: 'native' })).toBe('Qwen · images · full prompt · native tools');
+    // Nothing chosen means automatic, which the row leaves unsaid.
+    expect(customModelSummary({ id: 'q' })).toBe('');
   });
 });

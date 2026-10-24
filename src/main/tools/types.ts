@@ -10,10 +10,12 @@ import type { ComputerControl } from '../computer/desktop';
 import type { ChatFile } from '../chat/chatFiles';
 import type { CodeRun } from '../chat/codeSandbox';
 import type { DocumentKind } from '../chat/documents';
-import type { ConsoleEntry, PageSnapshot } from '../browser/browserPanel';
+import type { ConsoleEntry, PageShot, PageSnapshot } from '../browser/browserPanel';
+import type { PageCheck } from '../browser/pageCheck';
 import type { MediaAccess } from '../media/mediaService';
 import type { AgentGroupInput } from '../agent/agentGroup';
 import type { MissionUpdateInput } from '../agent/mission';
+import type { FileProblems } from '../languages/problems';
 
 export type PermissionClass = 'read' | 'write' | 'exec' | 'network' | 'computer' | 'none';
 /** "general", "explore", or the name of a custom agent (see agent/agents.ts). */
@@ -42,6 +44,12 @@ export interface DescribeContext {
 export interface ToolContext extends DescribeContext {
   /** Only trusted code projects may start a bundled local language server. */
   trustedProject?: boolean;
+  /**
+   * The errors that server finds in a file of the project at `root` right after it changed; null when it cannot say.
+   * Absent where edits are not checked. The root is the caller's `projectRoot`: an agent writing in a private
+   * checkout is checked there, not in the project it was cut from.
+   */
+  checkFile?(root: string, file: string): Promise<FileProblems | null>;
   sessionId: string;
   toolUseId: string;
   signal: AbortSignal;
@@ -72,6 +80,8 @@ export interface ToolContext extends DescribeContext {
   publicWebOnly: boolean;
   /** Saves files the user can download from the chat; null outside chats and in incognito chats. */
   chatFiles: { save(name: string, data: Buffer): ChatFile } | null;
+  /** The folder of the skills Graft ships, for the Skill tool; null when the build has none. */
+  builtinSkills: string | null;
   /** Builds a PDF, a text document, slides or a spreadsheet from what was written, for CreateFile; null where files can't be made. */
   makeDocument: ((kind: DocumentKind, name: string, source: string, signal: AbortSignal) => Promise<Buffer>) | null;
   /** Runs JavaScript in an isolated page with no network or file access; null outside chats. */
@@ -109,7 +119,10 @@ export interface AgentBrowser {
   /** Opens a page (showing the panel) and waits for it to load; returns the address it opened. */
   open(url: string): Promise<string>;
   snapshot(): Promise<PageSnapshot>;
-  capture(): Promise<{ mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }>;
+  /** The page as an image: as the panel shows it, or laid out `width` px wide. */
+  capture(width?: number): Promise<PageShot>;
+  /** What is wrong with the page as it is laid out now, or `width` px wide. */
+  check(width?: number): Promise<PageCheck>;
   click(target: PageTarget): Promise<string>;
   type(target: PageTarget, text: string, submit: boolean): Promise<string>;
   press(key: string): Promise<void>;

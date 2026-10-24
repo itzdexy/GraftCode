@@ -4,17 +4,18 @@ import { INTEGRATION_CATEGORIES, INTEGRATIONS } from '../../src/shared/integrati
 import { findCommand, integrationSetup, integrationStatus } from '../../src/main/mcp/integrations';
 import { resolveSecrets, secretId, secretRefs, serverKey } from '../../src/main/mcp/mcpConfig';
 
-const sep = path.delimiter;
+// A Windows computer is described by Windows' own path rules, whatever system runs the tests.
+const win = path.win32;
 const files = (list: string[]) => (file: string) => list.includes(file);
 
 describe('finding runtimes', () => {
   it('looks on PATH with the platform’s extensions, then in the usual install folders', () => {
-    const bin = path.join('C:', 'tools', 'bin');
-    const uvx = path.join(bin, 'uvx.EXE');
-    const env = { PATH: [path.join('C:', 'nothing'), bin].join(sep), PATHEXT: '.COM;.EXE;.CMD', USERPROFILE: path.join('C:', 'Users', 'ada') };
+    const bin = win.join('C:\\', 'tools', 'bin');
+    const uvx = win.join(bin, 'uvx.EXE');
+    const env = { PATH: [win.join('C:\\', 'nothing'), bin].join(win.delimiter), PATHEXT: '.COM;.EXE;.CMD', USERPROFILE: win.join('C:\\', 'Users', 'ada') };
     expect(findCommand('uvx', 'win32', env, files([uvx]))).toBe(uvx);
     // Installed after the app started: not on its PATH yet, but in ~/.local/bin.
-    const local = path.join('C:', 'Users', 'ada', '.local', 'bin', 'uvx.EXE');
+    const local = win.join('C:\\', 'Users', 'ada', '.local', 'bin', 'uvx.EXE');
     expect(findCommand('uvx', 'win32', { ...env, PATH: '' }, files([local]))).toBe(local);
     expect(findCommand('npx', 'win32', env, files([]))).toBeNull();
     expect(findCommand('npx', 'freebsd', env, files([]))).toBeNull();
@@ -22,7 +23,7 @@ describe('finding runtimes', () => {
 });
 
 describe('integrations', () => {
-  const winEnv = { PATH: '', PATHEXT: '.EXE;.CMD', USERPROFILE: path.join('C:', 'Users', 'ada'), LOCALAPPDATA: path.join('C:', 'Users', 'ada', 'AppData', 'Local') };
+  const winEnv = { PATH: '', PATHEXT: '.EXE;.CMD', USERPROFILE: win.join('C:\\', 'Users', 'ada'), LOCALAPPDATA: win.join('C:\\', 'Users', 'ada', 'AppData', 'Local') };
 
   it('every preset has a launch for at least one platform, steps and an https docs link', () => {
     for (const i of INTEGRATIONS) {
@@ -46,11 +47,11 @@ describe('integrations', () => {
   });
 
   it('builds a stdio server from the preset, using a runtime found outside PATH by its full path', () => {
-    const uvx = path.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
+    const uvx = win.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
     const blender = integrationSetup('blender', {}, 'win32', winEnv, files([uvx]));
     expect(blender).toEqual({
       name: 'blender',
-      config: { type: 'stdio', command: uvx, args: ['mcp-for-blender'], env: {}, keepEnv: [], cwd: null, enabled: true },
+      config: { type: 'stdio', command: uvx, args: ['mcp-for-blender'], env: {}, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true },
       secrets: {}
     });
     const roblox = integrationSetup('roblox-studio', {}, 'win32', winEnv, files([]));
@@ -59,16 +60,36 @@ describe('integrations', () => {
     expect(godot.config).toMatchObject({ type: 'stdio', command: 'npx', args: ['-y', '@coding-solo/godot-mcp'], env: { GODOT_PATH: 'C:\\Godot\\godot.exe' } });
   });
 
+  it('has something for each kind of work, every one of them in a kind the gallery shows, remote ones over https', () => {
+    expect(INTEGRATIONS.length).toBeGreaterThanOrEqual(50);
+    for (const category of INTEGRATION_CATEGORIES) expect(INTEGRATIONS.some((i) => i.category === category), category).toBe(true);
+    for (const i of INTEGRATIONS) {
+      expect(INTEGRATION_CATEGORIES, i.id).toContain(i.category);
+      for (const launch of Object.values(i.launch)) if (launch.type === 'http') expect(launch.url, i.id).toMatch(/^https:\/\/|^http:\/\/127\.0\.0\.1:/);
+    }
+  });
+
+  it('gives a local server its fixed environment, and a remote one only the key that is typed', () => {
+    const zotero = integrationSetup('zotero', {}, 'linux', { PATH: '' }, files([]));
+    expect(zotero.config).toMatchObject({ type: 'stdio', command: 'uvx', args: ['--from', 'zotero-mcp-server', 'zotero-mcp'], env: { ZOTERO_LOCAL: 'true' } });
+    // A token that may be left out is: the server works without it.
+    expect(integrationSetup('huggingface', {}, 'linux', { PATH: '' }, files([])).config).toMatchObject({ type: 'http', url: 'https://huggingface.co/mcp', headers: {} });
+    const stripe = integrationSetup('stripe', { token: ' rk_test_123 ' }, 'linux', { PATH: '' }, files([]));
+    expect(stripe.config).toMatchObject({ type: 'http', url: 'https://mcp.stripe.com' });
+    expect(Object.values(stripe.secrets)).toEqual(['Bearer rk_test_123']);
+    expect(() => integrationSetup('stripe', {}, 'linux', { PATH: '' }, files([]))).toThrow(/Enter the restricted api key first/);
+  });
+
   it('sets Ghidra up for reverse engineering: the documented server, with the folder Ghidra is installed in', () => {
     const ghidra = INTEGRATIONS.find((i) => i.id === 'ghidra')!;
     expect(ghidra.category).toBe('Reverse engineering');
     expect(INTEGRATION_CATEGORIES).toContain('Reverse engineering');
     const status = Object.fromEntries(integrationStatus('win32', winEnv, files([])).map((s) => [s.id, s.blocker]));
     expect(status.ghidra).toEqual({ kind: 'runtime', runtime: 'uv' });
-    const uvx = path.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
+    const uvx = win.join(winEnv.USERPROFILE, '.local', 'bin', 'uvx.EXE');
     const setup = integrationSetup('ghidra', { GHIDRA_INSTALL_DIR: ' C:\\ghidra ' }, 'win32', winEnv, files([uvx]));
     // The launch its own documentation gives: uvx pyghidra-mcp --transport stdio, with GHIDRA_INSTALL_DIR set.
-    expect(setup.config).toEqual({ type: 'stdio', command: uvx, args: ['pyghidra-mcp', '--transport', 'stdio'], env: { GHIDRA_INSTALL_DIR: 'C:\\ghidra' }, keepEnv: [], cwd: null, enabled: true });
+    expect(setup.config).toEqual({ type: 'stdio', command: uvx, args: ['pyghidra-mcp', '--transport', 'stdio'], env: { GHIDRA_INSTALL_DIR: 'C:\\ghidra' }, keepEnv: [], cwd: null, inherit: 'no-secrets', enabled: true });
     expect(setup.secrets).toEqual({});
     expect(() => integrationSetup('ghidra', {}, 'linux', { PATH: '' }, files([]))).toThrow(/Enter the ghidra folder first/);
   });

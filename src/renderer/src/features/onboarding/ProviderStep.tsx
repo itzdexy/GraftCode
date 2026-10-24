@@ -1,11 +1,13 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { PROVIDER_KINDS, type ProviderKind } from '@shared/schemas/common';
 import { PROVIDER_KIND_INFO } from '@shared/providerKinds';
+import type { DetectedServer } from '@shared/schemas/models';
 import { Badge } from '../../components/Badge';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { useApp } from '../../stores/app';
+import { addFoundServer, FoundServerList } from '../providers/FoundServers';
 import { ProviderPicker, type PickedProvider } from '../providers/ProviderPicker';
 import { NATIVE_PRESET } from '../providers/targets';
 import { StepLayout, type StepProps } from './StepLayout';
@@ -22,9 +24,41 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [found, setFound] = useState<DetectedServer[]>([]);
+  const [adding, setAdding] = useState<string | null>(null);
+
+  // A server already running here is the quickest start, so the step looks for one as it opens. Finding none says
+  // nothing: the providers below are the way on.
+  useEffect(() => {
+    let live = true;
+    invoke('providers:detectLocal')
+      .then((servers) => {
+        if (live) setFound(servers);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** Adds a found server and goes on: the next step then shows it connected. */
+  const addServer = async (server: DetectedServer): Promise<void> => {
+    if (busy || adding) return;
+    setAdding(server.baseUrl);
+    setError(null);
+    try {
+      const provider = await addFoundServer(server);
+      const settings = await invoke('settings:update', { onboarding: { providerKind: server.kind, providerPreset: server.preset, providerId: provider.id } });
+      useApp.getState().setSettings(settings);
+      await onNext();
+    } catch (e) {
+      setError(errorText(e));
+      setAdding(null);
+    }
+  };
 
   const submit = async (chosen: ProviderKind | null = kind, preset: string | null = chosen ? NATIVE_PRESET[chosen] : null): Promise<void> => {
-    if (!chosen || busy) return;
+    if (!chosen || busy || adding !== null) return;
     setBusy(true);
     setError(null);
     try {
@@ -65,10 +99,18 @@ export function ProviderStep({ onNext, onBack }: StepProps) {
       onSubmit={() => submit()}
       onBack={onBack}
       primaryLabel="Continue"
-      primaryDisabled={kind === null}
+      primaryDisabled={kind === null || adding !== null}
       busy={busy}
       error={error}
     >
+      {found.length > 0 ? (
+        <section aria-label="Running on this computer" className="mb-16">
+          <h3 className="mb-6 text-sm font-medium text-fg-secondary">Running on this computer</h3>
+          <div className="rounded-lg border border-border bg-surface">
+            <FoundServerList servers={found} adding={adding} onAdd={(server) => void addServer(server)} />
+          </div>
+        </section>
+      ) : null}
       <div
         role="radiogroup"
         aria-label="Provider"

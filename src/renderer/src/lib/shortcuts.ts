@@ -22,7 +22,13 @@ export const SHORTCUT_DESCRIPTIONS: Record<ShortcutId, string> = {
   cyclePermissionMode: 'Cycle permission mode (in the message box)',
   openSettings: 'Open settings',
   toggleFiles: 'Show or hide the files panel',
-  commandPalette: 'Open the command palette'
+  commandPalette: 'Open the command palette',
+  findInTranscript: 'Find in the conversation',
+  findNext: 'Find the next match in the conversation',
+  findPrevious: 'Find the previous match in the conversation',
+  quickOpen: 'Open a file by name',
+  goToSymbol: 'Go to a symbol by name',
+  searchFiles: 'Search in the files of the project'
 };
 
 /** Shortcuts that act inside the message box may use bare keys; the rest need Ctrl or Alt. */
@@ -142,13 +148,17 @@ export function useShortcutLabel(id: ShortcutId): string {
 /**
  * Runs `handler` when the configured accelerator for `id` is pressed anywhere
  * in the window. Keys without a modifier (Escape, Shift+Tab) are skipped while
- * a dialog or menu is open so those keep their local meaning.
+ * a dialog or menu is open so those keep their local meaning. `when` can
+ * leave a press to whatever has the keyboard (an editor with a find of its
+ * own): it is asked before the key is taken.
  */
-export function useShortcut(id: ShortcutId, handler: (event: KeyboardEvent) => void, enabled = true): void {
+export function useShortcut(id: ShortcutId, handler: (event: KeyboardEvent) => void, enabled = true, when?: (event: KeyboardEvent) => boolean): void {
   const accelText = useApp((s) => s.settings?.shortcuts[id] ?? DEFAULT_SHORTCUTS[id]);
   const handlerRef = useRef(handler);
+  const whenRef = useRef(when);
   useLayoutEffect(() => {
     handlerRef.current = handler;
+    whenRef.current = when;
   });
   useEffect(() => {
     if (!enabled) return;
@@ -157,6 +167,7 @@ export function useShortcut(id: ShortcutId, handler: (event: KeyboardEvent) => v
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.repeat || !matches(event, accel)) return;
       if (!accel.mod && overlayOpen()) return;
+      if (whenRef.current && !whenRef.current(event)) return;
       event.preventDefault();
       handlerRef.current(event);
     };
@@ -165,7 +176,12 @@ export function useShortcut(id: ShortcutId, handler: (event: KeyboardEvent) => v
   }, [accelText, enabled]);
 }
 
-/** True while a Radix menu, popover or dialog is open. */
+/**
+ * True while a Radix menu, popover or dialog is open. A menu that is closing is still in the
+ * DOM for its exit animation; it is closed, and the keys are the window's again.
+ */
 export function overlayOpen(): boolean {
-  return document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]') !== null;
+  return (
+    document.querySelector('[data-radix-popper-content-wrapper] [data-state="open"], [role="dialog"][data-state="open"]') !== null
+  );
 }

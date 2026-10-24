@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EMPTY_USAGE } from '../../src/shared/schemas/common';
+import type { SessionUsage } from '../../src/shared/schemas/sessions';
 import { migrate, openDatabase, schemaVersion, type Db } from '../../src/main/db/database';
 import { MIGRATIONS } from '../../src/main/db/migrations';
 import { SessionsRepo } from '../../src/main/db/sessionsRepo';
@@ -133,6 +135,41 @@ describe('sessions and messages', () => {
     repo.updateSession(first.id, { status: 'running', unread: true });
     expect(repo.getSummary(first.id).updatedAt).toBe(before);
   });
+
+  it('sums what the sessions of one project used, and only those, for the limit for a whole project', () => {
+    const projects = new ProjectsRepo(db);
+    const mine = projects.upsert(dir);
+    const theirs = projects.upsert(path.join(dir, 'other'));
+    const repo = new SessionsRepo(db);
+    const base = {
+      kind: 'code' as const,
+      cwd: dir,
+      worktreePath: null,
+      branch: null,
+      baseBranch: null,
+      model: null,
+      effort: null,
+      permissionMode: 'ask' as const
+    };
+    const used = (inputTokens: number, outputTokens: number, costUsd: number | null): SessionUsage => ({
+      totals: { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      contextTokens: 0,
+      contextLimit: 0,
+      costUsd
+    });
+    const a = repo.create({ ...base, title: 'a', projectId: mine.id });
+    const b = repo.create({ ...base, title: 'b', projectId: mine.id });
+    const elsewhere = repo.create({ ...base, title: 'c', projectId: theirs.id });
+    repo.updateSession(a.id, { usage: used(1000, 200, 0.4) });
+    repo.updateSession(b.id, { usage: used(300, 50, null) });
+    repo.updateSession(elsewhere.id, { usage: used(9000, 0, 99) });
+    expect(repo.projectUsage(mine.path)).toEqual({
+      totals: { inputTokens: 1300, outputTokens: 250, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: 0.4
+    });
+    // A folder no session of which is stored has used nothing.
+    expect(repo.projectUsage(path.join(dir, 'nowhere'))).toEqual({ totals: EMPTY_USAGE, costUsd: 0 });
+  });
 });
 
 describe('projects and providers', () => {
@@ -186,6 +223,27 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
   });
 
+  it('gives an install from before the limits for one turn, one session, one project, or one day no limits, checks its edits, and keeps what it had set', () => {
+    const stored = { runInTray: true, bypassModeEnabled: false, bypassKeepsChecks: true, autoCompact: false, webSearch: true, computerUse: false, maxSteps: 250 };
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('behavior', JSON.stringify(stored));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    settings.update({ behavior: { turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 } });
+    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    settings.update({ behavior: { turnToolCalls: 500, turnRetries: 0 } });
+    expect(new AppSettingsService(db).get().behavior).toMatchObject({ turnToolCalls: 500, turnRetries: 0 });
+    settings.update({ behavior: { sessionTokens: 2_000_000, projectTokens: 5_000_000, dayCostUsd: 10, projectCostUsd: 2.5 } });
+    expect(new AppSettingsService(db).get().behavior).toMatchObject({ sessionTokens: 2_000_000, projectTokens: 5_000_000, dayCostUsd: 10, projectCostUsd: 2.5 });
+    // A limit too small to be meant is refused, and nothing changes.
+    expect(() => settings.update({ behavior: { turnTokens: 5 } })).toThrow(/turnTokens/);
+    expect(() => settings.update({ behavior: { turnCostUsd: 0 } })).toThrow(/turnCostUsd/);
+    expect(() => settings.update({ behavior: { sessionTokens: 5 } })).toThrow(/sessionTokens/);
+    expect(() => settings.update({ behavior: { projectTokens: 5 } })).toThrow(/projectTokens/);
+    expect(() => settings.update({ behavior: { dayCostUsd: 0 } })).toThrow(/dayCostUsd/);
+    expect(() => settings.update({ behavior: { projectCostUsd: 0 } })).toThrow(/projectCostUsd/);
+    expect(new AppSettingsService(db).get().behavior.turnTokens).toBe(1_000_000);
+  });
+
   it('gives an install from before the sound switch the sound, and keeps its notification choices', () => {
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('notifications', JSON.stringify({ enabled: true, needsInput: false, finished: true, errors: false }));
     const settings = new AppSettingsService(db);
@@ -210,6 +268,25 @@ describe('app settings', () => {
   it('follows the system when the old "Reduce motion" switch was off', () => {
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ reducedMotion: false }));
     expect(new AppSettingsService(db).get().appearance.motion).toBe('system');
+  });
+
+  it('moves in the lively style until someone asks for calm, also in a profile from before there was a choice', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ theme: 'dark', motion: 'on' }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance).toMatchObject({ theme: 'dark', motion: 'on', motionStyle: 'lively' });
+    settings.update({ appearance: { motionStyle: 'calm' } });
+    expect(new AppSettingsService(db).get().appearance.motionStyle).toBe('calm');
+    expect(() => settings.update({ appearance: { motionStyle: 'wild' as 'calm' } })).toThrow(/motionStyle/);
+  });
+
+  it('colors code with Vitesse in a profile from before there was a choice, and keeps the themes picked', () => {
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify({ theme: 'light', motion: 'on', motionStyle: 'calm' }));
+    const settings = new AppSettingsService(db);
+    expect(settings.get().appearance).toMatchObject({ theme: 'light', motionStyle: 'calm', codeThemeDark: 'vitesse-dark', codeThemeLight: 'vitesse-light' });
+    settings.update({ appearance: { codeThemeDark: 'night-owl', codeThemeLight: 'catppuccin-latte' } });
+    expect(new AppSettingsService(db).get().appearance).toMatchObject({ codeThemeDark: 'night-owl', codeThemeLight: 'catppuccin-latte' });
+    // A light theme can't be the dark one.
+    expect(() => settings.update({ appearance: { codeThemeDark: 'catppuccin-latte' as 'night-owl' } })).toThrow(/codeThemeDark/);
   });
 });
 

@@ -194,6 +194,11 @@
     background: color-mix(in srgb, var(--g-blue) 45%, transparent);
   }
 
+  /*
+   * Scrollbars: a slim rounded thumb in a wider, invisible lane, so it is easy to grab and light to look
+   * at. It stays faint until its area is pointed at or scrolled (lib/scrollbars.ts marks a scrolled area
+   * for a moment), widens under the pointer, and takes on the accent while it is dragged.
+   */
   ::-webkit-scrollbar {
     width: var(--g-scrollbar-size);
     height: var(--g-scrollbar-size);
@@ -203,11 +208,24 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--g-scrollbar-thumb);
+    background-color: color-mix(in srgb, var(--g-scrollbar-thumb) 40%, transparent);
+    background-clip: padding-box;
+    border: 3px solid transparent;
     border-radius: var(--g-radius-full);
+    min-height: 40px;
+    min-width: 40px;
+  }
+  :hover::-webkit-scrollbar-thumb,
+  .graft-scrolling::-webkit-scrollbar-thumb {
+    background-color: var(--g-scrollbar-thumb);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--g-scrollbar-thumb-hover);
+    background-color: var(--g-scrollbar-thumb-hover);
+    border-width: 2px;
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in srgb, var(--g-accent) 55%, var(--g-scrollbar-thumb-hover));
+    border-width: 2px;
   }
 }
 
@@ -364,6 +382,8 @@
 .graft-collapse {
   display: grid;
   grid-template-rows: 1fr;
+  /* One column as wide as the section and no wider, so a long line scrolls inside its own box instead of stretching the page. */
+  grid-template-columns: minmax(0, 1fr);
   transition:
     grid-template-rows var(--g-duration-base) var(--g-ease-out),
     opacity var(--g-duration-base) var(--g-ease-out);
@@ -394,10 +414,13 @@
 .graft-slide-x {
   display: grid;
   grid-template-columns: 1fr;
+  /* One row, as tall as the column and no taller: what is inside shrinks and scrolls instead of being cut at the bottom. */
+  grid-template-rows: minmax(0, 1fr);
   transition: grid-template-columns var(--g-duration-slow) var(--g-ease-out);
 }
 .graft-slide-x > * {
   min-width: 0;
+  min-height: 0;
   /* The resize handle reaches a few pixels past the sidebar's edge. */
   overflow: clip;
   overflow-clip-margin: 4px;
@@ -406,6 +429,24 @@
   grid-template-columns: 0fr;
   transition-duration: var(--g-duration-base);
   transition-timing-function: var(--g-ease);
+}
+/* A column at the page's far edge is cut exactly at its edge: nothing of it may reach past the page while it slides. */
+.graft-slide-x--flush > * {
+  overflow-clip-margin: 0px;
+}
+
+/*
+ * A whole view giving way to another (the page, the session, the theme, the
+ * transcript view): a short cross-fade of the window, and nothing that moves.
+ * The page stays usable while it fades: a click is never lost to it.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--g-duration-view);
+  animation-timing-function: var(--g-ease);
+}
+::view-transition {
+  pointer-events: none;
 }
 
 /*
@@ -472,6 +513,11 @@
   }
 }
 
+/* A task whose state just changed: its mark pops in, once, and only in a list that arrived while its turn ran. */
+.motion-rise .todo-mark--changed {
+  animation: graft-pop var(--g-duration-base) var(--g-ease-out) both;
+}
+
 @layer utilities {
   .motion-rise {
     animation: graft-rise 260ms var(--g-ease-out) both;
@@ -505,6 +551,12 @@
   .motion-menu-up {
     --g-pop-y: 4px;
     transform-origin: bottom center;
+    animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
+  }
+  /* The find bar grows down from the corner it sits in. */
+  .motion-menu-down {
+    --g-pop-y: -4px;
+    transform-origin: top right;
     animation: graft-pop-in var(--g-duration-fast) var(--g-ease-out);
   }
   .motion-stagger > * {
@@ -629,6 +681,112 @@
   scale: 0.4;
 }
 
+/*
+ * Lively (Settings → Appearance → Motion style; its times are in tokens.css). What a person does is
+ * answered with movement that is seen: a page that is opened, a window, a menu, a message that was
+ * sent, a panel that was asked for, a home screen that was gone to. What Graft does by itself (a step
+ * joining a turn, a reply being written) moves as little as in Calm: that happens all the time.
+ * Only opacity and transforms move, things leave as fast as they do in Calm, and the rules for reduced
+ * motion below set all of it to nothing.
+ */
+@keyframes graft-page-out {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes graft-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+@keyframes graft-spring-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+  }
+}
+@keyframes graft-pop-spring {
+  from {
+    opacity: 0;
+    transform: translate(var(--g-pop-x, 0), var(--g-pop-y, 0)) scale(0.88);
+  }
+}
+@keyframes graft-sent {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.96);
+  }
+}
+@keyframes graft-settle {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.98);
+  }
+}
+@keyframes graft-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+/*
+ * A page giving way to another. While that takes (data-view-change, see withViewTransition) the page has a
+ * frame of its own: the old page sinks back and is gone, the new one rises into place, and the sidebar
+ * beside them holds still. A new theme is no change of page and still fades the window as a whole.
+ */
+:root[data-motion-style='lively'][data-view-change='page'] .graft-page {
+  view-transition-name: graft-page;
+}
+:root[data-motion-style='lively']::view-transition-old(graft-page) {
+  animation: graft-page-out var(--g-duration-exit) var(--g-ease-in) both;
+}
+:root[data-motion-style='lively']::view-transition-new(graft-page) {
+  animation: graft-page-in var(--g-duration-view) var(--g-ease-out) both;
+}
+
+/* Windows spring open; menus and popovers spring from the control that opened them. Both are in place a third of the way in. */
+:root[data-motion-style='lively'] .overlay-dialog[data-state='open'] {
+  animation: graft-spring-in var(--g-duration-lively) var(--g-ease-lively);
+}
+:root[data-motion-style='lively'] .overlay-pop[data-state='open'],
+:root[data-motion-style='lively'] .overlay-pop[data-state='delayed-open'] {
+  animation: graft-pop-spring var(--g-duration-slow) var(--g-ease-lively);
+}
+
+/* What the person just sent or asked for travels up from the message box. */
+:root[data-motion-style='lively'] .motion-sent {
+  transform-origin: bottom center;
+  animation: graft-sent var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
+/* A home screen settles in piece by piece, and a toast lands. */
+:root[data-motion-style='lively'] .motion-stagger > * {
+  animation: graft-settle var(--g-duration-lively) var(--g-ease-lively) both;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(2) {
+  animation-delay: 50ms;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(3) {
+  animation-delay: 100ms;
+}
+:root[data-motion-style='lively'] .motion-stagger > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+:root[data-motion-style='lively'] .graft-toast:not([data-state='closed']) {
+  animation: graft-settle var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
+/*
+ * A panel comes in from the edge it sits by, also when it joins panels that are already open. The browser's
+ * panel does not: its page is a native view placed over it by its measured place, and it would be measured mid-way.
+ */
+:root[data-motion-style='lively'] .graft-panel:not(.graft-panel--still) {
+  animation: graft-panel-in var(--g-duration-lively) var(--g-ease-lively) both;
+}
+
 /* Reduced motion (see tokens.css): the system's request unless Motion is On, or Motion set to Reduced. */
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) *,
@@ -662,6 +820,18 @@
  * (Markdown.tsx wraps the words only while the reply streams). No fill mode,
  * so a word that has arrived carries no animation afterwards.
  */
+/*
+ * Find in the conversation marks what it found with highlights, which paint
+ * over the text without changing any element: every match, and the current
+ * one stronger.
+ */
+::highlight(graft-find) {
+  background-color: color-mix(in srgb, var(--g-amber) 28%, transparent);
+}
+::highlight(graft-find-current) {
+  background-color: color-mix(in srgb, var(--g-amber) 60%, transparent);
+}
+
 /* Behind a previewed picture: a quiet checkerboard, so transparent parts read as transparent. */
 .graft-checker {
   background: repeating-conic-gradient(var(--g-surface-control) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
@@ -777,6 +947,15 @@
     padding-left: 0.8em;
     color: var(--g-text-secondary);
   }
+  /* In a chat a quoted block is an aside in a report (a key fact, a caveat): a card of its own. */
+  .graft-prose--chat blockquote {
+    margin: 0.8em 0;
+    border: 1px solid var(--g-border-card);
+    border-radius: var(--g-radius-md);
+    background: var(--g-surface-sunken);
+    padding: 0.55em 0.9em;
+    font-size: 0.95em;
+  }
   .graft-prose hr {
     margin: 1em 0;
     border: 0;
@@ -785,5 +964,14 @@
   .graft-prose--chat pre,
   .graft-prose--chat code {
     font-family: var(--g-font-mono);
+  }
+  /* Equations (KaTeX). A formula wider than the column scrolls by itself, so the reply never does. */
+  .graft-prose .katex {
+    font-size: 1.05em;
+  }
+  .graft-prose .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: 2px;
   }
 }
