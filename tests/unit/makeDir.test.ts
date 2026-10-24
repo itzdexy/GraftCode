@@ -62,6 +62,17 @@ describe('making folders', () => {
     await expect(writeFileAtomic(path.join(root, 'css', 'site.css'), 'body{}')).rejects.toThrow(onWindows ? /Windows didn't let Graft create/ : /ENOENT/);
   });
 
+  it('creates a file on a drive without hard links (exFAT, FAT32, some network shares), still refusing one created meanwhile', async () => {
+    const root = temp();
+    const noLinks = () => { throw Object.assign(new Error('EISDIR: illegal operation on a directory, link'), { code: 'EISDIR' }); };
+    vi.spyOn(fs, 'linkSync').mockImplementation(noLinks);
+    await writeFileAtomic(path.join(root, 'index.html'), '<h1>Hi</h1>', null);
+    expect(fs.readFileSync(path.join(root, 'index.html'), 'utf8')).toBe('<h1>Hi</h1>');
+    await expect(writeFileAtomic(path.join(root, 'index.html'), 'other', null)).rejects.toThrow(/was created while this write was prepared/);
+    expect(fs.readFileSync(path.join(root, 'index.html'), 'utf8')).toBe('<h1>Hi</h1>');
+    expect(fs.readdirSync(root)).toEqual(['index.html']);
+  });
+
   it.runIf(onWindows)("doesn't blame Controlled folder access for a name Windows doesn't allow", async () => {
     const root = temp();
     expect(() => makeDirSync(path.join(root, 'what?', 'inner'))).toThrow(/^EINVAL/);

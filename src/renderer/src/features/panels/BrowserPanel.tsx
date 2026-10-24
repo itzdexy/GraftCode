@@ -109,7 +109,10 @@ function useServers(sessionId: string, active: boolean): Array<{ url: string; la
         .catch((error: unknown) => logError('Could not look for dev servers', error));
     };
     scan();
-    const timer = setInterval(scan, 5000);
+    // Nobody reads the list while the window is minimized or behind another: the ports are probed again once it shows.
+    const timer = setInterval(() => {
+      if (!document.hidden) scan();
+    }, 5000);
     return () => {
       cancelled = true;
       clearInterval(timer);

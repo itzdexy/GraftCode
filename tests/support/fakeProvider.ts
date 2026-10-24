@@ -21,7 +21,8 @@ export interface FakeReply {
   chunkDelayMs?: number;
 }
 export interface FakeFailure {
-  error: ProviderError;
+  /** Usually a ProviderError; any other error stands for what fetch itself throws. */
+  error: ProviderError | Error;
   /** Emit this much of `text` before failing (mid-stream failure). */
   partialText?: string;
   partialThinking?: string;
