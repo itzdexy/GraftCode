@@ -46,7 +46,10 @@ describe('provider metadata recovery', () => {
     const before = await h.registry.listModels(h.record.id);
     h.list.mockResolvedValueOnce([]);
     expect((await h.registry.listModels(h.record.id, { refresh: true }))[0]).toMatchObject({ availability: { state: 'unknown', selectable: false } });
+    // A turn asks the provider again before refusing: still left out, it is refused; back, the turn goes ahead.
+    h.list.mockResolvedValueOnce([]);
     await expect(h.registry.resolveModel(before[0]!.ref)).rejects.toMatchObject({ code: 'model_unavailable' });
+    await expect(h.registry.resolveModel(before[0]!.ref)).resolves.toMatchObject({ availability: { state: 'available' } });
     expect((await h.registry.listModels(h.record.id, { refresh: true }))[0]?.availability?.state).toBe('available');
   });
 

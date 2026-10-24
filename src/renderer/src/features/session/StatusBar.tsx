@@ -5,7 +5,7 @@ import type { SessionSummary } from '@shared/schemas/sessions';
 import { IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../../components/Menu';
-import { errorText, invoke } from '../../lib/ipc';
+import { errorText, invoke, RequestError } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
@@ -18,15 +18,23 @@ export function useDiffStats(sessionId: string, refreshKey: unknown): DiffStatsV
   const [stats, setStats] = useState<DiffStatsView | null>(null);
   useEffect(() => {
     let cancelled = false;
+    // Without Git there are no stats to read until something changes (refreshKey), so asking every 15 s would only fail again.
+    let noGit = false;
     const load = (): void => {
       invoke('git:diffStats', { sessionId })
         .then((value) => {
           if (!cancelled) setStats(value);
         })
-        .catch((error: unknown) => logError('Could not read diff stats', error));
+        .catch((error: unknown) => {
+          if (error instanceof RequestError && error.code === 'git_missing') noGit = true;
+          else logError('Could not read diff stats', error);
+        });
     };
     load();
-    const timer = setInterval(load, POLL_MS);
+    // A window in the background shows no stats: it reads them again when it comes back (focus).
+    const timer = setInterval(() => {
+      if (!noGit && !document.hidden) load();
+    }, POLL_MS);
     const onFocus = (): void => load();
     window.addEventListener('focus', onFocus);
     return () => {

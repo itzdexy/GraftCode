@@ -27,10 +27,17 @@ export async function writeFileAtomic(abs: string, content: string, expected?: s
     catch (error) { throw refusedChange(abs, error, 'write'); }
     if (expected === null) {
       // Link creates the destination exclusively; it cannot overwrite a concurrently created file.
+      const created = () => new GraftError('file_conflict', `${abs} was created while this write was prepared. Read it before changing it.`);
       try { fs.linkSync(temp, abs); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new GraftError('file_conflict', `${abs} was created while this write was prepared. Read it before changing it.`);
-        throw error;
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw created();
+        // A drive without hard links (exFAT, FAT32, some shares) refuses the link with EISDIR, EPERM or ENOTSUP;
+        // an exclusive copy is just as safe against a file created meanwhile.
+        try { fs.copyFileSync(temp, abs, fs.constants.COPYFILE_EXCL); }
+        catch (copyError) {
+          if ((copyError as NodeJS.ErrnoException).code === 'EEXIST') throw created();
+          throw error;
+        }
       }
     } else {
       if (expected !== undefined) {

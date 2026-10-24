@@ -236,6 +236,9 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     if (stick.current) scrollToBottom();
   }, [items, scrollToBottom, summary.id]);
 
+  const turnFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(turnFrame.current), []);
+
   const onScroll = (): void => {
     const el = scrollRef.current;
     if (!el) return;
@@ -245,12 +248,17 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
     // While a place is still being returned to, scrolling is the transcript settling, not the user leaving it somewhere new.
     if (bottom) leftAt.delete(summary.id);
     else if (restore.current === null) leftAt.set(summary.id, el.scrollTop);
-    const markers = el.querySelectorAll<HTMLElement>('[data-turn]');
-    let current = 0;
-    markers.forEach((marker, i) => {
-      if (marker.offsetTop - el.scrollTop <= el.clientHeight / 3) current = i;
+    // Which turn is in view only matters to the timeline, and is worked out once a frame however many scroll events come.
+    if (variant !== 'code' || turnFrame.current !== 0) return;
+    turnFrame.current = requestAnimationFrame(() => {
+      turnFrame.current = 0;
+      const markers = el.querySelectorAll<HTMLElement>('[data-turn]');
+      const line = el.scrollTop + el.clientHeight / 3;
+      let current = 0;
+      // Turns go down the page in order: the first one below the line ends the search.
+      for (let i = 0; i < markers.length && markers[i]!.offsetTop <= line; i++) current = i;
+      setCurrentTurn(current);
     });
-    setCurrentTurn(current);
   };
 
   const jumpTo = (index: number): void => {

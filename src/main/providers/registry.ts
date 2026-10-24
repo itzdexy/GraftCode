@@ -213,7 +213,16 @@ export class ProviderRegistry {
 
   async resolveModel(ref: ModelRef, signal?: AbortSignal): Promise<ModelInfo> {
     const models = await this.listModels(ref.providerId, signal ? { signal } : {});
-    const found = models.find((m) => m.ref.modelId === ref.modelId);
+    let found = models.find((m) => m.ref.modelId === ref.modelId);
+    // A model the last list left out may be back (a provider's list can come back short for a while): ask again once
+    // before refusing the turn, so Retry can work. A list that fails to come keeps the refusal as it was.
+    if (!found || (found.availability?.selectable === false && found.availability.source === 'cache')) {
+      const again = await this.listModels(ref.providerId, { refresh: true, ...(signal ? { signal } : {}) }).catch((error: unknown) => {
+        if (signal?.aborted) throw error;
+        return null;
+      });
+      if (again) found = again.find((m) => m.ref.modelId === ref.modelId);
+    }
     if (found?.availability?.selectable === false) throw new GraftError('model_unavailable', found.availability.reason ?? 'Refresh the model list or select a replacement.');
     if (found) return found;
     throw new GraftError('model_not_found', `The provider did not list "${ref.modelId}". This does not confirm retirement. Retry or choose another model; your conversation and selection are preserved.`);

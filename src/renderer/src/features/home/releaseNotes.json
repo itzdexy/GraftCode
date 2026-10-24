@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.37",
+    "date": "2026-10-24",
+    "items": [
+      "Writing a new file works on drives without hard links, such as an exFAT or FAT32 USB drive or a second drive formatted that way. Before, every new file on such a drive failed with EISDIR; a file someone else creates in the meantime is still never overwritten.",
+      "A reply whose connection the server drops before anything arrives is retried like any other network failure, and can move on to your backup model. It used to end the turn with an unexplained \"terminated\".",
+      "A model that a provider's list left out for a while no longer blocks Retry: Graft asks the provider again before refusing the turn, and goes ahead if the model is back.",
+      "Provider errors read as sentences: \"Rate limited (429): Too Many Requests\" instead of the JSON the provider sent, and OpenRouter's \"Provider returned error\" now says which provider refused and why.",
+      "Less work in the background: the status bar stops checking the folder's changes while Graft is minimized or covered, and stops asking at all where Git is not installed; the Browser panel stops probing for dev servers while it can't be seen. Scrolling a long conversation works out the current turn once a frame instead of on every scroll event."
+    ]
+  },
+  {
     "version": "0.6.36",
     "date": "2026-10-20",
     "items": [
