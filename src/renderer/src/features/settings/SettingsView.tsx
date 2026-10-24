@@ -138,7 +138,7 @@ function SettingsNav({ current, onFind }: { current: SettingsSection; onFind: (h
   };
 
   return (
-    <nav aria-label="Settings" className="flex w-[204px] shrink-0 flex-col overflow-y-auto pt-16 pr-8 pb-24 pl-16">
+    <nav aria-label="Settings" className="scroll-fade-y flex w-[204px] shrink-0 flex-col overflow-y-auto pt-16 pr-8 pb-24 pl-16">
       <h1 className="px-8 pb-10 text-xl font-medium text-fg-strong">Settings</h1>
       <div className="relative mb-8" data-own-escape={query.length > 0 ? '' : undefined}>
         <Search className="pointer-events-none absolute top-1/2 left-8 size-13 -translate-y-1/2 text-icon-muted" aria-hidden="true" />
@@ -221,7 +221,7 @@ export function SettingsBody({ section }: { section: SettingsSection }) {
     <div className="flex min-h-0 flex-1">
       <SettingsNav current={info.id} onFind={onFind} />
       {/* Keyed by section, so each one opens at its top instead of where the last one was scrolled to. */}
-      <div key={info.id} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <div key={info.id} className="scroll-fade-y min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[720px] px-24 pt-16 pb-40">
           <header className="mb-20">
             <h2 className="text-xl font-medium text-fg-strong">{info.label}</h2>

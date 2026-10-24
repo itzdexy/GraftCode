@@ -18,17 +18,19 @@ function callFailed(call: ToolCall): boolean {
 export function DiffCount({ added, removed, pill = false }: { added: number; removed: number; pill?: boolean }) {
   if (added === 0 && removed === 0) return null;
   const label = `${String(added)} lines added, ${String(removed)} removed`;
+  // A side with nothing in it is left out: a new file reads "+44", not "+44 −0" with a red badge.
   if (!pill) {
     return (
-      <span className="shrink-0 font-mono text-xs" aria-label={label}>
-        <span className="text-diff-add">+{added}</span> <span className="text-diff-del">−{removed}</span>
+      <span className="flex shrink-0 gap-4 font-mono text-xs" aria-label={label}>
+        {added > 0 ? <span className="text-diff-add">+{added}</span> : null}
+        {removed > 0 ? <span className="text-diff-del">−{removed}</span> : null}
       </span>
     );
   }
   return (
     <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] leading-none" aria-label={label}>
-      <span className="rounded-xs bg-diff-add-bg px-4 py-2 text-diff-add">+{added}</span>
-      <span className="rounded-xs bg-diff-del-bg px-4 py-2 text-diff-del">−{removed}</span>
+      {added > 0 ? <span className="rounded-xs bg-diff-add-bg px-4 py-2 text-diff-add">+{added}</span> : null}
+      {removed > 0 ? <span className="rounded-xs bg-diff-del-bg px-4 py-2 text-diff-del">−{removed}</span> : null}
     </span>
   );
 }

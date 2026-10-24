@@ -19,6 +19,68 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.39 a visual pass over the main screens (2026-10-24)
+
+The visual work the 0.6.37 round could not do. The renderer preview (the git-ignored harness in
+`out/preview`) had gone stale with 0.6.36's groups, so it was repaired first: canned answers for
+the group, completed and export channels and for the Customize, Changes and Browser channels it
+lacked, and settings filled from the app's own `DEFAULT_APP_SETTINGS`, so a field a later round
+adds no longer leaves the preview short. Then home, a code session (a transcript, a plan waiting
+for approval, an error, a running turn, a reply streaming and finished), the Files, Changes and
+Browser panels, Settings and Customize were looked at in dark and light at 1280×800 and at the
+smallest window, 900×640, and each defect below was fixed and shot again. Cut from `origin/main`
+at 0.6.36 (`a4bf011`); 0.6.37 and 0.6.38 are other rounds' and are not on this branch. No
+migration, setting, channel, shortcut or package.
+
+- **The column under a transcript lines up with it** (`styles/globals.css` `.transcript-column`,
+  `features/session/SessionView.tsx`, `features/home/CodeHome.tsx`). The transcript keeps a 10px
+  lane for its scrollbar (`scrollbar-gutter: stable`); the cards, bars and composer under it were
+  laid out in the full width, so they stood 10px wider on the right than the conversation, and
+  5px off centre when the column was wider than the content. They are now laid out in the same
+  width as the transcript. The home screen keeps the same lane, so the message box sits in the
+  same place on home and in a session.
+- **Turn ticks off the text** (`features/session/Transcript.tsx`). The turn timeline sat at 12px,
+  and its 13px ticks reached into the transcript's 24px padding, onto the first letter of each line
+  when the column was full width. It sits at 2px now, with the tick centred in its button.
+- **Edge fades for areas that scroll** (`styles/globals.css` `.scroll-fade-y`, `.scroll-fade-x`).
+  A scroll-driven animation sets the length of a mask at each edge from the area's own scroll
+  position: no fade where the content fits (no scroll timeline), a fade at an edge with more past
+  it. Used on the home screen (at 900×640 the quick starts were cut flat under the message box),
+  on both columns of Settings (About was hidden below Data at 1280×800 with nothing to say so) and
+  on the Changes panel's tabs. It follows scrolling, not time, so reduced motion keeps it: its
+  `animation-duration: auto` is exempted from the reduced-motion rules, which would otherwise
+  shrink it to its end state.
+- **Panel tabs scroll in a narrow panel** (`features/panels/ChangesPanel.tsx`). At 900px Changes,
+  Files, Search and Problems ran under the close button. The tab list scrolls sideways with its
+  scrollbar hidden and the fade above, padded 3px so focus rings are not clipped.
+- **Home session rows** (`features/home/CodeHome.tsx`). The state (Needs input, Error, Running)
+  came before the title, so titles started at four different places. It comes after the title now,
+  in the same size as the project and the time.
+- **No −0 badges** (`features/session/ToolGroup.tsx` `DiffCount`). A file with nothing removed
+  showed a red −0 pill beside its +44 (and a pure deletion a green +0). A side with nothing in it is
+  left out, in the pill and in the plain form; the spoken label still gives both numbers.
+- **Selected marks follow the accent** (`components/Menu.tsx`, `features/models/ModelListbox.tsx`,
+  `features/composer/ModelQuickMenu.tsx`, `features/shell/FilterPopover.tsx`,
+  `features/session/AskUserCard.tsx`, `features/onboarding/ProviderStep.tsx`). The check on what
+  you picked was always blue, whatever accent was chosen in Appearance; it is the accent now, like
+  the checks that already were (the palette and accent pickers).
+- **"Filter 1 model"** (`features/models/ModelListbox.tsx`): the filter said "Filter 1 models" with
+  one model.
+- **Desktop tests and scroll-linked animations** (`tests/e2e/conversation.spec.ts`, `review.spec.ts`,
+  `windows.spec.ts`, `recordings.spec.ts`). Their `shot()` waited for every animation that was not
+  infinite to finish; an edge fade runs on a scroll timeline and never finishes, so four tests that open
+  Settings or the Changes panel timed out at two minutes. They wait for, or finish, only animations on
+  the document's timeline now.
+
+Verification on Windows: `npm run typecheck`, `npx eslint . --max-warnings 0`, `npx vitest run`
+(1706 passed, 73 skipped), `npm run build`, then `npx playwright test`: 83 passed, 6 skipped and the
+four timeouts above, which pass after the helper fix (the four specs again: 14 passed).
+
+Looked at and left as they are: reduced motion (with Motion set to Reduced, a probe that lists every
+animation still running while a turn streams, a panel opens and Settings opens found none; with
+Motion on it found the expected ones), the light theme, the Browser panel's empty state and the
+Customize pages.
+
 ### 0.6.36 groups, completed sessions, a split view and find that steps (2026-10-20)
 
 The rest of the list from the comparison with what the big AI apps have that people like

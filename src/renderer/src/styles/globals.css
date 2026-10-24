@@ -253,6 +253,34 @@
   .scrollbar-stable {
     scrollbar-gutter: stable;
   }
+  /*
+   * The column under a transcript (cards, bars, the composer). The transcript keeps a lane on its right for
+   * its scrollbar, so this column is laid out in the same width, and its edges line up with the
+   * conversation above it at every window size.
+   */
+  .transcript-column {
+    width: calc(100% - var(--g-scrollbar-size));
+    max-width: calc(var(--g-content-width) + 48px);
+    margin-left: max(0px, calc((100% - var(--g-scrollbar-size) - var(--g-content-width) - 48px) / 2));
+  }
+  /*
+   * A scrolling area fades out at an edge its content goes on past, so a cut-off row reads as "more this
+   * way" and not as a broken layout. The fade follows the area's own scroll position, with no script; an
+   * area whose content fits has no scroll timeline, so it shows no fade.
+   */
+  .scroll-fade-y,
+  .scroll-fade-x {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--g-fade-start), #000 calc(100% - var(--g-fade-end)), transparent);
+    animation-name: graft-scroll-fade;
+    animation-duration: auto;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self y);
+  }
+  .scroll-fade-x {
+    mask-image: linear-gradient(to right, transparent, #000 var(--g-fade-start), #000 calc(100% - var(--g-fade-end)), transparent);
+    animation-timeline: scroll(self x);
+  }
   /* Syntax tokens carry both theme colors as custom properties (lib/highlight.ts). */
   .code-token {
     color: var(--shiki-dark);
@@ -813,6 +841,41 @@
 :root[data-motion='reduced'] .pressable:active,
 :root[data-motion='reduced'] .send-button:active:not(:disabled) {
   scale: 1;
+}
+
+/*
+ * The edge fade of .scroll-fade-y and .scroll-fade-x. It is set by where the area is scrolled to, not
+ * by time, so nothing moves on its own and reduced motion leaves it in place (the rules above would set
+ * its length to zero).
+ */
+@property --g-fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@property --g-fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes graft-scroll-fade {
+  0% {
+    --g-fade-start: 0px;
+    --g-fade-end: 28px;
+  }
+  2%,
+  98% {
+    --g-fade-start: 28px;
+    --g-fade-end: 28px;
+  }
+  100% {
+    --g-fade-start: 28px;
+    --g-fade-end: 0px;
+  }
+}
+:root .scroll-fade-y.scroll-fade-y,
+:root .scroll-fade-x.scroll-fade-x {
+  animation-duration: auto !important;
 }
 
 /*

@@ -183,7 +183,7 @@ function CodeSession({
             onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
             pane={pane}
           />
-          <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
+          <div className="transcript-column flex shrink-0 flex-col gap-8 px-24 pb-8">
             {view.question ? <AskUserCard key={view.question.id} sessionId={summary.id} request={view.question} /> : null}
             {view.permission ? <PermissionCard key={view.permission.id} sessionId={summary.id} request={view.permission} /> : null}
             <AsideCards sessionId={summary.id} />
@@ -301,7 +301,7 @@ function ChatSession({
           onSend={(text) => void send(text, [], []).catch((e: unknown) => reportError("Couldn't send the message", e))}
           pane={pane}
         />
-        <div className="mx-auto flex w-full max-w-[calc(var(--g-content-width)+48px)] shrink-0 flex-col gap-8 px-24 pb-8">
+        <div className="transcript-column flex shrink-0 flex-col gap-8 px-24 pb-8">
           {missing ? (
             <p role="alert" className="text-sm text-amber-fg">
               This chat's model ({summary.model?.modelId}) is no longer available. Pick another one below.
