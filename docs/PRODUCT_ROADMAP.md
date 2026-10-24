@@ -19,6 +19,15 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.40 0.6.37 and 0.6.39 in one release (2026-10-24)
+
+0.6.37 (`feat/polish-pass`, the faults from the installed app's log) and 0.6.39
+(`feat/visual-polish`, the visual pass) were cut from 0.6.36 on their own, and the user had
+installed both builds in turn, so neither build had the other's work. This merges the two and is
+the version published on GitHub, the first release since 0.6.13. 0.6.38 was claimed by another
+local round and never released; a round after this one starts at 0.6.41. Nothing else changes:
+no migration, setting, channel, shortcut or package beyond the two rounds'.
+
 ### 0.6.39 a visual pass over the main screens (2026-10-24)
 
 The visual work the 0.6.37 round could not do. The renderer preview (the git-ignored harness in

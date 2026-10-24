@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.6.40",
+    "date": "2026-10-24",
+    "items": [
+      "0.6.37 and 0.6.39 were built apart; this version has both. Coming from 0.6.39, you gain 0.6.37's fixes: new files can be written on exFAT and FAT32 drives, a dropped connection is retried and can move on to your backup model, Retry is no longer blocked for ten minutes after a model left a provider's list, provider errors read as sentences, and Graft does less work while it is minimized. Coming from 0.6.37, you gain 0.6.39's visual pass, below."
+    ]
+  },
+  {
     "version": "0.6.39",
     "date": "2026-10-24",
     "items": [
