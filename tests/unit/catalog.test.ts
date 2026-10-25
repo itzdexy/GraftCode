@@ -20,6 +20,7 @@ function meta(partial: Partial<CatalogModel>): CatalogModel {
   return {
     id: 'm',
     name: 'M',
+    outputs: [],
     family: null,
     tools: true,
     vision: false,

@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.6.42",
+    "date": "2026-10-24",
+    "items": [
+      "Settings → Models shows every image, video, speech and music model a provider offers, also when its own model list leaves them out. NVIDIA's list names only text models; its FLUX, Qwen-Image, Cosmos video and Magpie voice models now appear in their sections. The same goes for any provider the model catalog knows: 313 media models across them."
+    ]
+  },
+  {
     "version": "0.6.41",
     "date": "2026-10-24",
     "items": [

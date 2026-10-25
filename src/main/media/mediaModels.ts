@@ -1,5 +1,6 @@
 import type { MediaModel, MediaModelKind } from '@shared/ipc/contracts';
 import { labelFromId } from '../providers/catalog';
+import type { CatalogModel } from '../providers/presets';
 import { joinUrl, requestJson } from '../providers/http';
 import { videoModels } from './videos';
 
@@ -157,6 +158,22 @@ async function gemini(base: string, apiKey: string, signal?: AbortSignal): Promi
     const id = m.name.replace(/^models\//, '');
     const kind = mediaKindOf(id, GEMINI_KINDS);
     return kind ? [{ id, name: text(m.displayName, 120) ?? labelFromId(id), kind, description: text(m.description, 400), created: null }] : [];
+  });
+}
+
+/**
+ * The media models the catalog (models.dev) knows a provider offers, for the ones its own list leaves out:
+ * NVIDIA's /v1/models, for one, lists none of its image, speech or video models. A model that writes text and
+ * speaks (an omni chat model) stays a text model.
+ */
+export function catalogMediaModels(models: CatalogModel[]): MediaModel[] {
+  return models.flatMap((m): MediaModel[] => {
+    if (m.missing || m.outputs.length === 0) return [];
+    const speaks = m.outputs.includes('audio') && !m.outputs.includes('image') && !m.outputs.includes('video');
+    if (speaks && m.capabilities.tools === true) return [];
+    const kind: MediaModelKind = m.outputs.includes('video') ? 'video' : m.outputs.includes('image') ? 'image'
+      : (mediaKindOf(m.id) ?? (/(tts|voice|speech)/i.test(m.id) ? 'speech' : 'audio'));
+    return [{ id: m.id, name: m.name, kind, description: null, created: m.releasedAt === null ? null : Math.round(m.releasedAt / 1000) }];
   });
 }
 
