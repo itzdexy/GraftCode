@@ -21,6 +21,7 @@ import { withoutThinking } from './history';
 import { toBatches } from './toolBatches';
 import { TAPROOT_REVIEW, taprootOpenTasks } from './systemPrompt';
 import { contextTokens, estimateMessagesTokens, estimateTextTokens, usageCost } from './tokens';
+import { mediaKindOf } from '../media/mediaModels';
 
 export interface PermissionPrompt {
   toolUseId: string;
@@ -407,7 +408,47 @@ function effectOf(call: ToolUseBlock): 'read' | 'change' {
  * results back, and repeat until the model stops calling tools. Never
  * throws: failures end the turn with reason "error" and a message.
  */
+/**
+ * What a model makes instead of text, when it is an image or video model picked as the session's model (an NVIDIA
+ * genai address, FLUX, Veo…): such a model can't chat, so its turn makes one picture or clip from the message.
+ */
+export function mediaTurnKind(modelId: string): 'image' | 'video' | null {
+  if (/\/genai\//i.test(modelId)) return 'image';
+  const kind = mediaKindOf(modelId);
+  return kind === 'image' || kind === 'video' ? kind : null;
+}
+
+/** The turn of an image or video model: the message is the prompt, and GenerateImage or GenerateVideo makes it with that model. */
+async function mediaTurn(kind: 'image' | 'video', history: LlmMessage[], config: LoopConfig, host: LoopHost, signal: AbortSignal): Promise<LoopResult> {
+  const result = (reason: LoopResult['reason'], error: LoopResult['error'] = null, calls = 0): LoopResult => ({ reason, error, usage: EMPTY_USAGE, toolCalls: calls, finalText: '', changed: false });
+  const asked = history.findLast((m) => m.role === 'user' && textOf(m.content).trim().length > 0);
+  const prompt = asked ? textOf(asked.content).trim().slice(0, 4000) : '';
+  if (!prompt) return result('error', { code: 'bad_request', message: `Describe the ${kind === 'image' ? 'picture' : 'clip'} to make.` });
+  const name = prompt.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || kind;
+  const { modelId, providerId } = config.model.ref;
+  const call: ToolUseBlock = {
+    type: 'tool_use',
+    id: `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    name: kind === 'image' ? 'GenerateImage' : 'GenerateVideo',
+    input: kind === 'image' ? { prompt, path: `images/${name}.png`, model: modelId, provider: providerId } : { prompt, path: `videos/${name}.mp4`, model: modelId }
+  };
+  const messageId = randomUUID();
+  host.emit({ type: 'assistant-start', messageId });
+  const said = host.append('assistant', [call], { turnId: config.turnId, model: config.model.ref }, messageId);
+  host.emit({ type: 'message', message: said });
+  // The tool is run whatever the offering says: the user chose this model to make exactly this.
+  const results = await executeCalls([call], { ...config, toolNames: [...new Set([...config.toolNames, call.name])] }, host, signal);
+  const stored = host.append('user', results, { turnId: config.turnId });
+  host.journal?.settled(results.map((r) => r.toolUseId));
+  host.emit({ type: 'message', message: stored });
+  if (signal.aborted) return result('interrupted', null, 1);
+  const failed = results.find((r) => r.isError);
+  return failed ? result('error', { code: 'bad_request', message: textOf(failed.content) }, 1) : result('completed', null, 1);
+}
+
 export async function runAgentLoop(initial: LlmMessage[], config: LoopConfig, host: LoopHost, signal: AbortSignal): Promise<LoopResult> {
+  const making = mediaTurnKind(config.model.ref.modelId);
+  if (making) return mediaTurn(making, initial, config, host, signal);
   let history = [...initial];
   let usage = EMPTY_USAGE;
   let lastContext = 0;

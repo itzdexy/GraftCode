@@ -26,6 +26,8 @@ export interface MediaSettings {
 }
 
 export interface ProviderImageAccess {
+  /** The provider's id in Settings → Providers. */
+  id: string;
   kind: ImageProviderKind;
   apiKey: string;
   baseUrl: string | null;
@@ -57,13 +59,21 @@ export interface MadeImage {
 /** What the media tools use; the service implements it, and tests stand in for it. */
 export interface MediaAccess {
   imageEngine(): { engine: ImageEngineId; model: string } | null;
-  generate(request: { prompt: string; aspect: ImageAspect; transparent: boolean }, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeImage>;
+  generate(request: ImageGeneration, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeImage>;
   thumbnail(data: Buffer): { mediaType: 'image/jpeg'; data: string } | null;
   comfy(): ComfyClient | null;
   workflows(projectRoot: string | null): WorkflowFile[];
   /** The video model GenerateVideo uses, or null without an OpenRouter key. */
   videoModel(): string | null;
-  generateVideo(request: Omit<VideoRequest, 'model'>, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo>;
+  generateVideo(request: Omit<VideoRequest, 'model'> & { model?: string | null }, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo>;
+}
+
+export interface ImageGeneration {
+  prompt: string;
+  aspect: ImageAspect;
+  transparent: boolean;
+  /** An image model to use instead of Settings → Images', with the provider it is on (the session's model, when it is an image model). */
+  model?: { id: string; providerId: string } | null;
 }
 
 const MAX_WORKFLOW_BYTES = 2_000_000;
@@ -121,9 +131,16 @@ export class MediaService implements MediaAccess {
     return { engine: provider.kind, model };
   }
 
-  async generate(request: { prompt: string; aspect: ImageAspect; transparent: boolean }, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeImage> {
+  async generate(request: ImageGeneration, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeImage> {
+    if (request.model) {
+      const named = request.model;
+      const access = this.deps.providers().find((p) => p.id === named.providerId);
+      if (!access) throw new GraftError('no_image_engine', `Graft can't make pictures through that model's provider. Images work through OpenRouter, OpenAI, Google and NVIDIA.`);
+      const made = await generateImage(access, { prompt: request.prompt, model: named.id, aspect: request.aspect, transparent: request.transparent }, signal);
+      return { ...made, engine: access.kind, model: named.id };
+    }
     const chosen = this.imageEngine();
-    if (!chosen) throw new GraftError('no_image_engine', 'No image model is set up. Add a provider that makes images (OpenRouter, OpenAI or Google) or turn on ComfyUI in Settings → Images.');
+    if (!chosen) throw new GraftError('no_image_engine', 'No image model is set up. Add a provider that makes images (OpenRouter, OpenAI, Google or NVIDIA) or turn on ComfyUI in Settings → Images.');
     if (chosen.engine === 'comfyui') return this.generateWithComfy(request, chosen.model, signal, onProgress);
     const access = this.deps.providers().find((p) => p.kind === chosen.engine);
     if (!access) throw new GraftError('no_image_engine', 'The provider chosen for images has no key anymore. Check Settings → Providers.');
@@ -157,11 +174,12 @@ export class MediaService implements MediaAccess {
   }
 
   /** One clip, made through OpenRouter's video API with the user's key. */
-  async generateVideo(request: Omit<VideoRequest, 'model'>, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo> {
-    const model = this.videoModel();
+  async generateVideo(request: Omit<VideoRequest, 'model'> & { model?: string | null }, signal: AbortSignal, onProgress?: (text: string) => void): Promise<MadeVideo> {
+    const model = request.model ?? this.videoModel();
     const access = this.deps.providers().find((p) => p.kind === 'openrouter');
     if (!model || !access) throw new GraftError('no_video_model', 'Making video needs OpenRouter as a provider with its key. Add it in Settings → Providers.');
-    return generateVideo({ apiKey: access.apiKey, baseUrl: access.baseUrl }, { ...request, model }, signal, onProgress);
+    const { model: _named, ...rest } = request;
+    return generateVideo({ apiKey: access.apiKey, baseUrl: access.baseUrl }, { ...rest, model }, signal, onProgress);
   }
 
   /** Providers with a key that can make images (for Settings). */

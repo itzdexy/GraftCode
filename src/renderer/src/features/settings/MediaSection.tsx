@@ -12,19 +12,20 @@ import { Group, saveSettings, SelectField, SettingRow, SwitchRow } from './commo
 
 type Provider = MediaStatus['providers'][number];
 
-const PROVIDER_LABEL: Record<Provider, string> = { openrouter: 'OpenRouter', openai: 'OpenAI', gemini: 'Google Gemini' };
+const PROVIDER_LABEL: Record<Provider, string> = { openrouter: 'OpenRouter', openai: 'OpenAI', gemini: 'Google Gemini', nvidia: 'NVIDIA' };
 
 const OPTIONS: Array<{ value: ImageEngineSetting; label: string; description: string }> = [
   { value: 'auto', label: 'Automatic', description: 'ComfyUI when it is switched on below; otherwise the first provider you have a key for.' },
   { value: 'openrouter', label: 'OpenRouter', description: 'One key for GPT Image, Gemini, FLUX, Recraft (vector icons), Seedream and more. Billed per picture.' },
   { value: 'openai', label: 'OpenAI', description: 'GPT Image with your OpenAI key. Supports transparent backgrounds.' },
   { value: 'gemini', label: 'Google Gemini', description: 'Gemini’s image models with your Google AI Studio key.' },
+  { value: 'nvidia', label: 'NVIDIA', description: 'FLUX, Stable Diffusion and Qwen-Image from build.nvidia.com with your NVIDIA key.' },
   { value: 'comfyui', label: 'ComfyUI', description: 'Your own models on this computer. Free, private, and as good as the checkpoints you have installed.' },
   { value: 'off', label: 'Off', description: 'The agent never generates images.' }
 ];
 
 function isProvider(value: ImageEngineSetting): value is Provider {
-  return value === 'openrouter' || value === 'openai' || value === 'gemini';
+  return value === 'openrouter' || value === 'openai' || value === 'gemini' || value === 'nvidia';
 }
 
 /** The model for the chosen provider: typed, since providers add image models faster than a list could keep up. */

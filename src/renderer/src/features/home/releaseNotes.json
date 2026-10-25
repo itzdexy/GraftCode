@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.6.43",
+    "date": "2026-10-24",
+    "items": [
+      "Pick an image or video model as a session's model and your message becomes the prompt: the turn makes the picture or clip with that model and shows it, instead of failing because the model can't chat. Works with FLUX and the other image models on OpenRouter, OpenAI, Google and NVIDIA, and with OpenRouter's video models.",
+      "NVIDIA makes pictures: its FLUX, Stable Diffusion and Qwen-Image models are called on their own addresses at ai.api.nvidia.com, which its chat endpoint doesn't serve. NVIDIA is also a choice in Settings → Images."
+    ]
+  },
+  {
     "version": "0.6.42",
     "date": "2026-10-24",
     "items": [

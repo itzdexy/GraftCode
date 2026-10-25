@@ -84,7 +84,7 @@ describe('image models', () => {
   });
 
   it('has a default model for every provider that can make images', () => {
-    expect(Object.keys(DEFAULT_IMAGE_MODEL).sort()).toEqual(['gemini', 'openai', 'openrouter']);
+    expect(Object.keys(DEFAULT_IMAGE_MODEL).sort()).toEqual(['gemini', 'nvidia', 'openai', 'openrouter']);
   });
 });
 
@@ -173,8 +173,8 @@ describe('ComfyUI', () => {
 });
 
 describe('which engine makes images', () => {
-  const openrouter: ProviderImageAccess = { kind: 'openrouter', apiKey: 'k', baseUrl: null };
-  const openai: ProviderImageAccess = { kind: 'openai', apiKey: 'k', baseUrl: null };
+  const openrouter: ProviderImageAccess = { id: 'p-openrouter', kind: 'openrouter', apiKey: 'k', baseUrl: null };
+  const openai: ProviderImageAccess = { id: 'p-openai', kind: 'openai', apiKey: 'k', baseUrl: null };
 
   it('has none until a provider that makes images or ComfyUI is set up', () => {
     expect(service({}).imageEngine()).toBeNull();
@@ -301,7 +301,7 @@ describe('the GenerateVideo tool', () => {
     expect(result.isError).toBe(false);
     expect(fs.readFileSync(path.join(dir, 'assets', 'intro.mp4')).equals(MP4)).toBe(true);
     expect(result.display).toMatchObject({ kind: 'media', engine: 'openrouter', model: 'google/veo-3.1-lite', costUsd: 0.32, files: [{ path: 'assets/intro.mp4', kind: 'video' }] });
-    expect(asked).toEqual([{ prompt: 'a sprout grows in a clay pot', seconds: 6, aspect: '9:16', firstFrame: null, audio: null }]);
+    expect(asked).toEqual([{ prompt: 'a sprout grows in a clay pot', seconds: 6, aspect: '9:16', firstFrame: null, audio: null, model: null }]);
     expect(spent).toEqual([0.32]);
   });
 

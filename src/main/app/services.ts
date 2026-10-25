@@ -119,6 +119,18 @@ function searchService(settings: AppSettingsService, keys: KeyStore, registry: P
 }
 
 const IMAGE_PROVIDERS: readonly string[] = ['openrouter', 'openai', 'gemini'] satisfies ImageProviderKind[];
+/** The image engine of a provider: its kind for the vendors', NVIDIA for an OpenAI-compatible provider at NVIDIA's address. */
+function imageKind(p: { kind: string; baseUrl: string | null }): ImageProviderKind | null {
+  if (IMAGE_PROVIDERS.includes(p.kind)) return p.kind as ImageProviderKind;
+  return p.kind === 'openai-compatible' && p.baseUrl && /(^|\.)api\.nvidia\.com$/i.test(hostOf(p.baseUrl)) ? 'nvidia' : null;
+}
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
 
 /**
  * Generated media. Providers that make images are the vendors' own endpoints
@@ -133,7 +145,7 @@ function mediaService(settings: AppSettingsService, keys: KeyStore, registry: Pr
     ...(thumbnail ? { thumbnail } : {}),
     providers: () => {
       const preferred = settings.get().defaults.model?.providerId ?? null;
-      const usable = registry.summaries().filter((p) => p.enabled && p.hasKey && IMAGE_PROVIDERS.includes(p.kind));
+      const usable = registry.summaries().filter((p) => p.enabled && p.hasKey && imageKind(p) !== null);
       return [...usable.filter((p) => p.id === preferred), ...usable.filter((p) => p.id !== preferred)].flatMap((p): ProviderImageAccess[] => {
         let apiKey: string | null;
         try {
@@ -141,7 +153,9 @@ function mediaService(settings: AppSettingsService, keys: KeyStore, registry: Pr
         } catch {
           apiKey = null;
         }
-        return apiKey ? [{ kind: p.kind as ImageProviderKind, apiKey, baseUrl: p.baseUrl }] : [];
+        const kind = imageKind(p);
+        // NVIDIA's pictures come from another address than its chat models, so its base URL isn't theirs.
+        return apiKey && kind ? [{ id: p.id, kind, apiKey, baseUrl: kind === 'nvidia' ? null : p.baseUrl }] : [];
       });
     }
   });
