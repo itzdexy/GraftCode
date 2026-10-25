@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.44",
+    "date": "2026-10-24",
+    "items": [
+      "While a picture is being made, the dots are a game of Snake: click the grid or press an arrow key (or W A S D) to play, Space to start again, Escape to stop. The best score is kept until Graft restarts.",
+      "A picture made by picking an image model gets your words as its prompt and its file name. Before, the time stamp Graft adds to each message went along too, and named the file after the date.",
+      "The card of a generated picture keeps its title on one line and names the model briefly (flux-3-image-klein, not its whole address); the full id shows on hover.",
+      "NVIDIA's image models on Settings → Models are the ten its servers answer for, each checked by hand: FLUX 3 Image Klein, FLUX.2 Klein, FLUX.1 Dev, Schnell and Kontext, Stable Diffusion 3 Medium, SDXL, SDXL Turbo, Bria 2.3 and ConsiStory. Use makes one the image model. The model catalog is refreshed."
+    ]
+  },
+  {
     "version": "0.6.43",
     "date": "2026-10-24",
     "items": [

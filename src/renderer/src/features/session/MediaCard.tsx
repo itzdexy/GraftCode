@@ -15,6 +15,11 @@ function iconFor(file: MediaFile): typeof FileImage {
   return FileImage;
 }
 
+/** A model's own name, without the address or lab it is listed under: "flux-3-image-klein" for an NVIDIA genai address. */
+export function modelName(model: string): string {
+  return model.replace(/^https?:\/\/[^/]+/i, '').split('/').filter(Boolean).at(-1) ?? model;
+}
+
 /**
  * The pictures and clips a turn generated. Pictures show as previews; in a
  * chat each can be saved or opened, and in a code session each is shown in
@@ -72,11 +77,13 @@ export function MediaCard({ sessionId, folder, media, fresh = false }: { session
     <section aria-label="Generated media" className={cn('overflow-hidden rounded-md border border-border-card', alone && 'max-w-[440px]')}>
       <header className="flex h-30 items-center gap-8 border-b border-border-subtle px-12 text-md">
         <Sparkles className="size-13 shrink-0 text-accent" aria-hidden="true" />
-        <span className="flex-1 font-medium text-fg-strong">{title}</span>
-        <span className="truncate text-sm text-fg-faint">
-          {media.model || media.engine}
-          {media.costUsd !== null && media.costUsd > 0 ? ` · $${media.costUsd.toFixed(media.costUsd < 0.1 ? 3 : 2)}` : ''}
+        <span className="shrink-0 font-medium whitespace-nowrap text-fg-strong">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-right text-sm text-fg-faint" title={media.model || media.engine}>
+          {modelName(media.model) || media.engine}
         </span>
+        {media.costUsd !== null && media.costUsd > 0 ? (
+          <span className="shrink-0 text-sm text-fg-faint tabular-nums">${media.costUsd.toFixed(media.costUsd < 0.1 ? 3 : 2)}</span>
+        ) : null}
       </header>
       <ul className={alone ? 'p-8' : 'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-8 p-8'}>
         {files.map((file) => {

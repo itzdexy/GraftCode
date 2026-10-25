@@ -17,7 +17,7 @@ import type { ToolRegistry } from '../tools/registry';
 import type { AnyTool, DescribeContext, ToolCallDescriptor, ToolContext, ToolResult } from '../tools/types';
 import { checksFailurePrompt, checksSummary, MAX_CHECK_ROUNDS } from './checks';
 import type { HookRunner } from './hooks';
-import { withoutThinking } from './history';
+import { isSentStamp, withoutThinking } from './history';
 import { toBatches } from './toolBatches';
 import { TAPROOT_REVIEW, taprootOpenTasks } from './systemPrompt';
 import { contextTokens, estimateMessagesTokens, estimateTextTokens, usageCost } from './tokens';
@@ -421,8 +421,9 @@ export function mediaTurnKind(modelId: string): 'image' | 'video' | null {
 /** The turn of an image or video model: the message is the prompt, and GenerateImage or GenerateVideo makes it with that model. */
 async function mediaTurn(kind: 'image' | 'video', history: LlmMessage[], config: LoopConfig, host: LoopHost, signal: AbortSignal): Promise<LoopResult> {
   const result = (reason: LoopResult['reason'], error: LoopResult['error'] = null, calls = 0): LoopResult => ({ reason, error, usage: EMPTY_USAGE, toolCalls: calls, finalText: '', changed: false });
-  const asked = history.findLast((m) => m.role === 'user' && textOf(m.content).trim().length > 0);
-  const prompt = asked ? textOf(asked.content).trim().slice(0, 4000) : '';
+  const typed = (m: LlmMessage): string => textOf(m.content.filter((b) => b.type !== 'text' || !isSentStamp(b.text))).trim();
+  const asked = history.findLast((m) => m.role === 'user' && typed(m).length > 0);
+  const prompt = asked ? typed(asked).slice(0, 4000) : '';
   if (!prompt) return result('error', { code: 'bad_request', message: `Describe the ${kind === 'image' ? 'picture' : 'clip'} to make.` });
   const name = prompt.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || kind;
   const { modelId, providerId } = config.model.ref;

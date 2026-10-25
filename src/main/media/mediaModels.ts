@@ -57,6 +57,35 @@ export const COMPATIBLE_KINDS: ReadonlyArray<readonly [MediaModelKind, RegExp]> 
   ['audio', /(^|[/_-])(musicgen|lyria|stable-audio|ace-step|audioldm)([/._-]|$)/i]
 ];
 
+/**
+ * NVIDIA's image models, by the address each has under ai.api.nvidia.com/v1/genai. Its /v1/models lists none of
+ * them, and the catalog's ids for NVIDIA are not these addresses (flux_2-klein-4b where NVIDIA serves
+ * flux.2-klein-4b), so this list stands in for both.
+ * shortcut: checked by hand on 2026-10-24 (each answered 401 without a key, not 404); refresh it when NVIDIA adds models.
+ */
+export const NVIDIA_IMAGE_MODELS: ReadonlyArray<{ id: string; name: string; description: string }> = [
+  { id: 'black-forest-labs/flux-3-image-klein', name: 'FLUX 3 Image Klein', description: 'Black Forest Labs’ newest small FLUX: fast, sharp pictures from text.' },
+  { id: 'black-forest-labs/flux.2-klein-4b', name: 'FLUX.2 Klein 4B', description: 'A compact FLUX.2 for quick drafts.' },
+  { id: 'black-forest-labs/flux.1-dev', name: 'FLUX.1 Dev', description: 'High-quality FLUX.1 for detailed images.' },
+  { id: 'black-forest-labs/flux.1-schnell', name: 'FLUX.1 Schnell', description: 'The fastest FLUX.1, a few steps per picture.' },
+  { id: 'black-forest-labs/flux.1-kontext-dev', name: 'FLUX.1 Kontext Dev', description: 'FLUX that follows instructions closely and keeps a subject consistent.' },
+  { id: 'stabilityai/stable-diffusion-3-medium', name: 'Stable Diffusion 3 Medium', description: 'Stability AI’s SD3 with good text in pictures.' },
+  { id: 'stabilityai/stable-diffusion-xl', name: 'Stable Diffusion XL', description: 'The SDXL base model.' },
+  { id: 'stabilityai/sdxl-turbo', name: 'SDXL Turbo', description: 'SDXL in a single step, for instant drafts.' },
+  { id: 'briaai/bria-2.3', name: 'Bria 2.3', description: 'Bria’s model trained on licensed images, for commercial use.' },
+  { id: 'nvidia/consistory', name: 'ConsiStory', description: 'NVIDIA’s model that keeps one subject the same across pictures.' }
+];
+
+/** Whether a base URL is NVIDIA's (integrate.api.nvidia.com and its other API hosts). */
+export function isNvidia(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    return /(^|\.)api\.nvidia\.com$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** The kind of media a model makes, by its name, or null for a text model. */
 export function mediaKindOf(id: string, rules: ReadonlyArray<readonly [MediaModelKind, RegExp]> = COMPATIBLE_KINDS): MediaModelKind | null {
   return rules.find(([, pattern]) => pattern.test(id))?.[0] ?? null;

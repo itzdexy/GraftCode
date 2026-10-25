@@ -83,6 +83,11 @@ export function sentStamp(ms: number, timeZone = Intl.DateTimeFormat().resolvedO
   return `[Sent ${when} (${timeZone})]`;
 }
 
+/** Whether a text block is the stamp withSentTimes adds. */
+export function isSentStamp(text: string): boolean {
+  return /^\[Sent [^\]]*\]$/.test(text.trim());
+}
+
 /**
  * Starts each message the user typed with the time it was sent, so a chat
  * can answer "what time is it" without a tool. The stamp comes from the
