@@ -80,7 +80,7 @@ describe('the snapshot a turn starts from', () => {
     open.push(h);
     await h.turn('Look at the folder');
     expect(seen.signal?.aborted).toBe(true);
-    expect(notices(h.events).some((text) => /^No checkpoint for this turn: .+ took longer than 0 seconds to snapshot/.test(text))).toBe(true);
+    expect(notices(h.events).some((text) => /^Rewind is off in .+: it took longer than 0 seconds to snapshot/.test(text))).toBe(true);
     // The turn went on without one.
     expect(h.provider.requests).toHaveLength(1);
     await h.turn('And again');

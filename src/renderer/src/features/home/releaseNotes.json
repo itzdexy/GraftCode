@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.6.41",
+    "date": "2026-10-24",
+    "items": [
+      "A session in a drive, your home folder, Downloads, Desktop, Documents or OneDrive no longer spends 20 seconds trying to snapshot it before giving up: Rewind is off there from the start, said once in a quiet note instead of an orange warning."
+    ]
+  },
+  {
     "version": "0.6.40",
     "date": "2026-10-24",
     "items": [
