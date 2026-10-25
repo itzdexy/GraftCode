@@ -92,7 +92,7 @@ export const SearchEngineSettingSchema = z.enum(['auto', ...SEARCH_ENGINE_IDS, '
 export type SearchEngineSetting = z.infer<typeof SearchEngineSettingSchema>;
 
 /** Engines that can make pictures for the GenerateImage tool (Settings → Images). */
-export const IMAGE_ENGINE_SETTINGS = ['auto', 'off', 'openrouter', 'openai', 'gemini', 'comfyui'] as const;
+export const IMAGE_ENGINE_SETTINGS = ['auto', 'off', 'openrouter', 'openai', 'gemini', 'nvidia', 'comfyui'] as const;
 export type ImageEngineSetting = (typeof IMAGE_ENGINE_SETTINGS)[number];
 
 export const OnboardingStepSchema = z.enum(['name', 'avatar', 'provider', 'key', 'defaults', 'done']);

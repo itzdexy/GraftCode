@@ -1,5 +1,37 @@
 [
   {
+    "version": "0.6.44",
+    "date": "2026-10-24",
+    "items": [
+      "While a picture is being made, the dots are a game of Snake: click the grid or press an arrow key (or W A S D) to play, Space to start again, Escape to stop. The best score is kept until Graft restarts.",
+      "A picture made by picking an image model gets your words as its prompt and its file name. Before, the time stamp Graft adds to each message went along too, and named the file after the date.",
+      "The card of a generated picture keeps its title on one line and names the model briefly (flux-3-image-klein, not its whole address); the full id shows on hover.",
+      "NVIDIA's image models on Settings → Models are the ten its servers answer for, each checked by hand: FLUX 3 Image Klein, FLUX.2 Klein, FLUX.1 Dev, Schnell and Kontext, Stable Diffusion 3 Medium, SDXL, SDXL Turbo, Bria 2.3 and ConsiStory. Use makes one the image model. The model catalog is refreshed."
+    ]
+  },
+  {
+    "version": "0.6.43",
+    "date": "2026-10-24",
+    "items": [
+      "Pick an image or video model as a session's model and your message becomes the prompt: the turn makes the picture or clip with that model and shows it, instead of failing because the model can't chat. Works with FLUX and the other image models on OpenRouter, OpenAI, Google and NVIDIA, and with OpenRouter's video models.",
+      "NVIDIA makes pictures: its FLUX, Stable Diffusion and Qwen-Image models are called on their own addresses at ai.api.nvidia.com, which its chat endpoint doesn't serve. NVIDIA is also a choice in Settings → Images."
+    ]
+  },
+  {
+    "version": "0.6.42",
+    "date": "2026-10-24",
+    "items": [
+      "Settings → Models shows every image, video, speech and music model a provider offers, also when its own model list leaves them out. NVIDIA's list names only text models; its FLUX, Qwen-Image, Cosmos video and Magpie voice models now appear in their sections. The same goes for any provider the model catalog knows: 313 media models across them."
+    ]
+  },
+  {
+    "version": "0.6.41",
+    "date": "2026-10-24",
+    "items": [
+      "A session in a drive, your home folder, Downloads, Desktop, Documents or OneDrive no longer spends 20 seconds trying to snapshot it before giving up: Rewind is off there from the start, said once in a quiet note instead of an orange warning."
+    ]
+  },
+  {
     "version": "0.6.40",
     "date": "2026-10-24",
     "items": [

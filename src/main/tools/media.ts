@@ -71,7 +71,9 @@ export const GenerateImageInput = z.object({
   path: z.string().min(1).max(400).describe('Where to save it, relative to the project, e.g. "assets/hero.png". In a chat, a file name.'),
   aspect: z.enum(IMAGE_ASPECTS).optional().describe('square (default), landscape (3:2), portrait (2:3), wide (16:9) or tall (9:16).'),
   transparent: z.boolean().optional().describe('A transparent background, for logos, icons and cut-outs.'),
-  overwrite: z.boolean().optional().describe('Replace the file if it already exists.')
+  overwrite: z.boolean().optional().describe('Replace the file if it already exists.'),
+  model: z.string().min(1).max(300).optional().describe('Only when the user named an image model: its id. Leave it out to use the one in Settings.'),
+  provider: z.string().min(1).max(200).optional().describe('With model: the id of the provider it is on.')
 });
 export type GenerateImageInput = z.infer<typeof GenerateImageInput>;
 
@@ -97,7 +99,7 @@ export const generateImageTool: ToolDefinition<GenerateImageInput> = {
   async execute(input, ctx): Promise<ToolResult> {
     const media = ctx.media;
     const engine = media?.imageEngine() ?? null;
-    if (!media || !engine) {
+    if (!media || (!engine && !(input.model && input.provider))) {
       return errorResult('No image model is set up. The user can add a provider that makes images (OpenRouter, OpenAI or Google) or turn on ComfyUI in Settings → Images.');
     }
     const target = ctx.chatFiles ? null : resolvePath(input.path, ctx.cwd);
@@ -110,7 +112,8 @@ export const generateImageTool: ToolDefinition<GenerateImageInput> = {
     }
     let made;
     try {
-      made = await media.generate({ prompt: input.prompt, aspect: input.aspect ?? 'square', transparent: input.transparent === true }, ctx.signal, (text) => ctx.progress(text));
+      const named = input.model && input.provider ? { id: input.model, providerId: input.provider } : null;
+      made = await media.generate({ prompt: input.prompt, aspect: input.aspect ?? 'square', transparent: input.transparent === true, model: named }, ctx.signal, (text) => ctx.progress(text));
     } catch (error) {
       if (ctx.signal.aborted || isAbortError(error)) throw error;
       return errorResult(`Couldn't generate the image: ${(error as Error).message}`);
@@ -161,7 +164,8 @@ export const GenerateVideoInput = z.object({
   aspect: z.enum(VIDEO_ASPECTS).optional().describe('16:9 (landscape), 9:16 (vertical, for phones), 1:1, 4:3, 3:4 or 21:9. Leave it out for the model’s own.'),
   first_frame: z.string().max(400).optional().describe('A picture in the project the clip starts on, to bring it to life, e.g. "assets/hero.png". Code sessions only.'),
   audio: z.boolean().optional().describe('Sound with the picture, for models that make it. Leave it out for the model’s own.'),
-  overwrite: z.boolean().optional().describe('Replace the file if it already exists.')
+  overwrite: z.boolean().optional().describe('Replace the file if it already exists.'),
+  model: z.string().min(1).max(300).optional().describe('Only when the user named a video model: its OpenRouter id. Leave it out to use the one in Settings.')
 });
 export type GenerateVideoInput = z.infer<typeof GenerateVideoInput>;
 
@@ -217,7 +221,7 @@ export const generateVideoTool: ToolDefinition<GenerateVideoInput> = {
     let made;
     try {
       made = await media.generateVideo(
-        { prompt: input.prompt, seconds: input.seconds ?? null, aspect: input.aspect ?? null, firstFrame, audio: input.audio ?? null },
+        { prompt: input.prompt, seconds: input.seconds ?? null, aspect: input.aspect ?? null, firstFrame, audio: input.audio ?? null, model: input.model ?? null },
         ctx.signal,
         (text) => ctx.progress(text)
       );

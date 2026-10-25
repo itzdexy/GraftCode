@@ -26,7 +26,7 @@ export const MEDIA_SECTIONS: readonly MediaSectionInfo[] = [
 ];
 
 /** Image engines Graft can generate with (Settings → Images). */
-const IMAGE_ENGINES = new Set(['openrouter', 'openai', 'gemini']);
+const IMAGE_ENGINES = new Set(['openrouter', 'openai', 'gemini', 'nvidia']);
 
 /** What "Use" does for a model of this kind from this provider, or null when Graft can't use it. */
 export function actionFor(kind: MediaModelKind, providerKind: string, model: MediaModel): 'images' | 'video' | 'read-aloud' | null {
@@ -38,7 +38,7 @@ export function actionFor(kind: MediaModelKind, providerKind: string, model: Med
 
 /** Why a provider's models of a kind have no Use, where Graft uses that kind through another provider. */
 export function providerNote(kind: MediaModelKind, providerKind: string): string | null {
-  if (kind === 'image' && !IMAGE_ENGINES.has(providerKind)) return 'Graft makes pictures through OpenRouter, OpenAI or Google.';
+  if (kind === 'image' && !IMAGE_ENGINES.has(providerKind)) return 'Graft makes pictures through OpenRouter, OpenAI, Google or NVIDIA.';
   if (kind === 'video' && providerKind !== 'openrouter') return 'Graft makes video through OpenRouter for now.';
   if (kind === 'speech' && providerKind !== 'openrouter') return 'Read aloud speaks with OpenRouter’s voices.';
   return null;
@@ -75,7 +75,7 @@ export interface MediaSection extends MediaSectionInfo {
 }
 
 /** Providers known to offer media models; a list another provider couldn't give is not worth a line. */
-const MEDIA_PROVIDERS = new Set(['openrouter', 'openai', 'gemini']);
+const MEDIA_PROVIDERS = new Set(['openrouter', 'openai', 'gemini', 'nvidia']);
 
 /** The sections with what each provider offers, narrowed to what is typed (name or id), best matches first. */
 export function mediaSections(lists: readonly ProviderMediaModels[], query: string): MediaSection[] {

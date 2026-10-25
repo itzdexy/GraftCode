@@ -21,7 +21,9 @@ export const CatalogModelSchema = z.object({
   p: z.array(price.nullable()).min(2).max(4).optional(), d: text.optional(), s: text.optional(),
   /** Missing from a later catalog is uncertainty, never retirement. */
   missing: z.boolean().optional(),
-  audio: z.boolean().optional(), structured: z.boolean().optional()
+  audio: z.boolean().optional(), structured: z.boolean().optional(),
+  /** What the model makes besides text (models.dev output modalities). */
+  m: z.array(z.enum(['image', 'video', 'audio'])).max(3).optional()
 });
 export type RawModel = z.infer<typeof CatalogModelSchema>;
 export const CatalogProviderSchema = z.object({
@@ -57,6 +59,12 @@ const COMPATIBLE: Record<string, string> = {
   togetherai: 'https://api.together.xyz/v1', venice: 'https://api.venice.ai/api/v1',
   vercel: 'https://ai-gateway.vercel.sh/v1', xai: 'https://api.x.ai/v1'
 };
+const MEDIA_OUT = ['image', 'video', 'audio'] as const;
+/** The kinds of media among a model's outputs, or undefined when it makes only text. */
+function mediaOut(output: string[] | undefined): Array<(typeof MEDIA_OUT)[number]> | undefined {
+  const kinds = MEDIA_OUT.filter((kind) => output?.includes(kind));
+  return kinds.length > 0 ? kinds : undefined;
+}
 const EFFORT = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 /** Decode data only; SDK names, scripts, headers and credentials are never imported or executed. */
@@ -90,7 +98,8 @@ export function decodeModelsDev(input: unknown, generatedAt: string): CatalogDat
         // Community metadata may report deprecation; it cannot confirm official retirement.
         ...(model.status === 'deprecated' || model.status === 'beta' ? { s: model.status } : {}),
         ...(model.modalities ? { audio: inputModes.includes('audio') || (model.modalities.output ?? []).includes('audio') } : {}),
-        ...(model.structured_output !== undefined ? { structured: model.structured_output } : {})
+        ...(model.structured_output !== undefined ? { structured: model.structured_output } : {}),
+        ...(mediaOut(model.modalities?.output) ? { m: mediaOut(model.modalities?.output) } : {})
       });
     }
     providers.push({ id: providerId, name: provider.name ?? providerId, kind: native ?? 'openai-compatible', api,

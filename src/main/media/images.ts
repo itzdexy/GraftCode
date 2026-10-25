@@ -5,9 +5,10 @@ import { joinUrl, requestJson } from '../providers/http';
  * Image models, called with the user's own provider keys from the main
  * process. Three wire formats cover them: OpenRouter's images endpoint (one
  * key for GPT Image, Gemini, FLUX, Recraft, Seedream and more), OpenAI's
- * images endpoint, and Gemini's interactions endpoint.
+ * images endpoint, Gemini's interactions endpoint, and NVIDIA's genai endpoint
+ * (FLUX, Stable Diffusion, SANA and Qwen-Image on build.nvidia.com).
  */
-export type ImageProviderKind = 'openrouter' | 'openai' | 'gemini';
+export type ImageProviderKind = 'openrouter' | 'openai' | 'gemini' | 'nvidia';
 
 /** The shape of the picture, in words a model picks reliably; each engine maps it to what it accepts. */
 export const IMAGE_ASPECTS = ['square', 'landscape', 'portrait', 'wide', 'tall'] as const;
@@ -37,18 +38,22 @@ export interface GeneratedImage {
 const BASE: Record<ImageProviderKind, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
   openai: 'https://api.openai.com/v1',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta'
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
+  nvidia: 'https://ai.api.nvidia.com/v1/genai'
 };
 
 /** Used when Settings → Images names no model. */
 export const DEFAULT_IMAGE_MODEL: Record<ImageProviderKind, string> = {
   openrouter: 'google/gemini-3.1-flash-image',
   openai: 'gpt-image-2',
-  gemini: 'gemini-3.1-flash-image'
+  gemini: 'gemini-3.1-flash-image',
+  nvidia: 'black-forest-labs/flux.1-schnell'
 };
 
 const RATIO: Record<ImageAspect, string> = { square: '1:1', landscape: '3:2', portrait: '2:3', wide: '16:9', tall: '9:16' };
 const OPENAI_SIZE: Record<ImageAspect, string> = { square: '1024x1024', landscape: '1536x1024', wide: '1536x1024', portrait: '1024x1536', tall: '1024x1536' };
+/** Sizes NVIDIA's FLUX and SD models take (multiples of 64, about a megapixel). */
+const NVIDIA_SIZE: Record<ImageAspect, [number, number]> = { square: [1024, 1024], landscape: [1216, 832], portrait: [832, 1216], wide: [1344, 768], tall: [768, 1344] };
 /** A picture can take a couple of minutes before the first byte of the answer. */
 const TIMEOUT_MS = 240_000;
 
@@ -147,6 +152,44 @@ async function gemini(access: ImageAccess, req: ImageRequest, signal?: AbortSign
   return decoded(extractImage(answer), null);
 }
 
+/**
+ * NVIDIA's image models are not on its chat endpoint (integrate.api.nvidia.com): each has its own address under
+ * ai.api.nvidia.com/v1/genai/<model>. A model id may be that whole address. The answer carries the picture as
+ * artifacts[].base64, or as an image field (sometimes a data: URL).
+ */
+async function nvidia(access: ImageAccess, req: ImageRequest, signal?: AbortSignal): Promise<GeneratedImage> {
+  const url = /^https?:\/\//i.test(req.model) ? req.model : joinUrl(BASE.nvidia, req.model.replace(/^\/+/, ''));
+  const [width, height] = NVIDIA_SIZE[req.aspect];
+  const send = (sized: boolean): Promise<unknown> =>
+    requestJson<unknown>({
+      url,
+      headers: { authorization: `Bearer ${access.apiKey}`, accept: 'application/json' },
+      body: { prompt: promptFor(req), ...(sized ? { width, height } : {}), seed: 0 },
+      ...(signal ? { signal } : {}),
+      timeoutMs: TIMEOUT_MS
+    });
+  let answer: unknown;
+  try {
+    answer = await send(true);
+  } catch (error) {
+    // A model that takes no size (or other sizes) refuses the request; the picture matters more than its shape.
+    if (!(error instanceof ProviderError) || error.code !== 'bad_request') throw error;
+    answer = await send(false);
+  }
+  return decoded(nvidiaImage(answer), null);
+}
+
+export function nvidiaImage(answer: unknown): { data: string; mediaType: string } | null {
+  if (!isRecord(answer)) return null;
+  const artifact = Array.isArray(answer.artifacts) && isRecord(answer.artifacts[0]) ? answer.artifacts[0] : null;
+  const raw = typeof artifact?.base64 === 'string' ? artifact.base64 : typeof answer.image === 'string' ? answer.image : null;
+  if (raw) {
+    const url = /^data:(image\/[\w.+-]+);base64,(.*)$/s.exec(raw);
+    return url ? { mediaType: url[1]!, data: url[2]! } : { mediaType: raw.startsWith('/9j/') ? 'image/jpeg' : 'image/png', data: raw };
+  }
+  return extractImage(answer);
+}
+
 /** One picture from an image model. Throws ProviderError with a message the user can act on. */
 export function generateImage(access: ImageAccess, req: ImageRequest, signal?: AbortSignal): Promise<GeneratedImage> {
   switch (access.kind) {
@@ -156,5 +199,7 @@ export function generateImage(access: ImageAccess, req: ImageRequest, signal?: A
       return openAi(access, req, signal);
     case 'gemini':
       return gemini(access, req, signal);
+    case 'nvidia':
+      return nvidia(access, req, signal);
   }
 }

@@ -1,5 +1,6 @@
 import type { MediaModel, MediaModelKind } from '@shared/ipc/contracts';
 import { labelFromId } from '../providers/catalog';
+import type { CatalogModel } from '../providers/presets';
 import { joinUrl, requestJson } from '../providers/http';
 import { videoModels } from './videos';
 
@@ -55,6 +56,35 @@ export const COMPATIBLE_KINDS: ReadonlyArray<readonly [MediaModelKind, RegExp]> 
   ['transcription', /(^|[/_-])(whisper|parakeet|canary)|transcri|speech-to-text/i],
   ['audio', /(^|[/_-])(musicgen|lyria|stable-audio|ace-step|audioldm)([/._-]|$)/i]
 ];
+
+/**
+ * NVIDIA's image models, by the address each has under ai.api.nvidia.com/v1/genai. Its /v1/models lists none of
+ * them, and the catalog's ids for NVIDIA are not these addresses (flux_2-klein-4b where NVIDIA serves
+ * flux.2-klein-4b), so this list stands in for both.
+ * shortcut: checked by hand on 2026-10-24 (each answered 401 without a key, not 404); refresh it when NVIDIA adds models.
+ */
+export const NVIDIA_IMAGE_MODELS: ReadonlyArray<{ id: string; name: string; description: string }> = [
+  { id: 'black-forest-labs/flux-3-image-klein', name: 'FLUX 3 Image Klein', description: 'Black Forest Labs’ newest small FLUX: fast, sharp pictures from text.' },
+  { id: 'black-forest-labs/flux.2-klein-4b', name: 'FLUX.2 Klein 4B', description: 'A compact FLUX.2 for quick drafts.' },
+  { id: 'black-forest-labs/flux.1-dev', name: 'FLUX.1 Dev', description: 'High-quality FLUX.1 for detailed images.' },
+  { id: 'black-forest-labs/flux.1-schnell', name: 'FLUX.1 Schnell', description: 'The fastest FLUX.1, a few steps per picture.' },
+  { id: 'black-forest-labs/flux.1-kontext-dev', name: 'FLUX.1 Kontext Dev', description: 'FLUX that follows instructions closely and keeps a subject consistent.' },
+  { id: 'stabilityai/stable-diffusion-3-medium', name: 'Stable Diffusion 3 Medium', description: 'Stability AI’s SD3 with good text in pictures.' },
+  { id: 'stabilityai/stable-diffusion-xl', name: 'Stable Diffusion XL', description: 'The SDXL base model.' },
+  { id: 'stabilityai/sdxl-turbo', name: 'SDXL Turbo', description: 'SDXL in a single step, for instant drafts.' },
+  { id: 'briaai/bria-2.3', name: 'Bria 2.3', description: 'Bria’s model trained on licensed images, for commercial use.' },
+  { id: 'nvidia/consistory', name: 'ConsiStory', description: 'NVIDIA’s model that keeps one subject the same across pictures.' }
+];
+
+/** Whether a base URL is NVIDIA's (integrate.api.nvidia.com and its other API hosts). */
+export function isNvidia(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    return /(^|\.)api\.nvidia\.com$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
 
 /** The kind of media a model makes, by its name, or null for a text model. */
 export function mediaKindOf(id: string, rules: ReadonlyArray<readonly [MediaModelKind, RegExp]> = COMPATIBLE_KINDS): MediaModelKind | null {
@@ -157,6 +187,22 @@ async function gemini(base: string, apiKey: string, signal?: AbortSignal): Promi
     const id = m.name.replace(/^models\//, '');
     const kind = mediaKindOf(id, GEMINI_KINDS);
     return kind ? [{ id, name: text(m.displayName, 120) ?? labelFromId(id), kind, description: text(m.description, 400), created: null }] : [];
+  });
+}
+
+/**
+ * The media models the catalog (models.dev) knows a provider offers, for the ones its own list leaves out:
+ * NVIDIA's /v1/models, for one, lists none of its image, speech or video models. A model that writes text and
+ * speaks (an omni chat model) stays a text model.
+ */
+export function catalogMediaModels(models: CatalogModel[]): MediaModel[] {
+  return models.flatMap((m): MediaModel[] => {
+    if (m.missing || m.outputs.length === 0) return [];
+    const speaks = m.outputs.includes('audio') && !m.outputs.includes('image') && !m.outputs.includes('video');
+    if (speaks && m.capabilities.tools === true) return [];
+    const kind: MediaModelKind = m.outputs.includes('video') ? 'video' : m.outputs.includes('image') ? 'image'
+      : (mediaKindOf(m.id) ?? (/(tts|voice|speech)/i.test(m.id) ? 'speech' : 'audio'));
+    return [{ id: m.id, name: m.name, kind, description: null, created: m.releasedAt === null ? null : Math.round(m.releasedAt / 1000) }];
   });
 }
 

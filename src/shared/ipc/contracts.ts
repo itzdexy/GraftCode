@@ -95,7 +95,7 @@ export const MediaStatusSchema = z.object({
   /** The engine GenerateImage uses now (null: none is set up, or image generation is off). */
   engine: z.object({ engine: z.string(), model: z.string() }).nullable(),
   /** Providers with a key that can make images; the keys themselves never leave the main process. */
-  providers: z.array(z.enum(['openrouter', 'openai', 'gemini'])),
+  providers: z.array(z.enum(['openrouter', 'openai', 'gemini', 'nvidia'])),
   /** The model each provider uses when Settings names none. */
   defaults: z.record(z.string(), z.string()),
   /** What ComfyUI has, when it is switched on; `reachable` is false while it isn't running. */

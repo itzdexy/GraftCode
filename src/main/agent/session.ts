@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import type { AgentEvent } from '@shared/schemas/agentEvents';
 import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } from '@shared/schemas/common';
@@ -210,6 +211,14 @@ export const DISPOSE_WAIT_MS = 8_000;
 /** Folders whose snapshot ran past the budget in this run of Graft: they are not snapshotted again until it restarts. */
 const TOO_LARGE_TO_SNAPSHOT = new Set<string>();
 const folderKey = (folder: string): string => (process.platform === 'win32' ? path.resolve(folder).toLowerCase() : path.resolve(folder));
+/** A drive, the home folder or one of its catch-all folders: never one project, and always too large to snapshot in time. */
+function isPersonalFolder(folder: string): boolean {
+  const resolved = path.resolve(folder);
+  if (path.parse(resolved).root === resolved) return true;
+  const home = os.homedir();
+  const key = folderKey(resolved);
+  return [home, ...['Downloads', 'Desktop', 'Documents', 'OneDrive'].map((name) => path.join(home, name))].some((f) => folderKey(f) === key);
+}
 
 /**
  * One conversation and its agent runtime. Turns run one at a time; input
@@ -794,10 +803,10 @@ export class AgentSession {
   private async takeCheckpoint(messageId: string, signal: AbortSignal): Promise<string | null> {
     const folder = this.workingDir();
     const name = path.basename(folder) || folder;
-    if (TOO_LARGE_TO_SNAPSHOT.has(folderKey(folder))) {
+    if (isPersonalFolder(folder) || TOO_LARGE_TO_SNAPSHOT.has(folderKey(folder))) {
       if (!this.checkpointSkipSaid) {
         this.checkpointSkipSaid = true;
-        this.notice('warning', `No checkpoints in ${name}: it is too large to snapshot before each turn, so Rewind can't restore its files. Open a project's own folder to have them.`);
+        this.notice('info', `Rewind is off in ${name}: it is too large to snapshot before each turn. Open a project's own folder to have checkpoints.`);
       }
       return null;
     }
@@ -811,10 +820,7 @@ export class AgentSession {
       if (budget.signal.aborted) {
         TOO_LARGE_TO_SNAPSHOT.add(folderKey(folder));
         this.checkpointSkipSaid = true;
-        this.notice(
-          'warning',
-          `No checkpoint for this turn: ${name} took longer than ${String(Math.round(budgetMs / 1000))} seconds to snapshot, so Rewind can't restore its files. Graft won't try again in this folder until it restarts; open a project's own folder to have checkpoints.`
-        );
+        this.notice('info', `Rewind is off in ${name}: it took longer than ${String(Math.round(budgetMs / 1000))} seconds to snapshot. Open a project's own folder to have checkpoints.`);
         return null;
       }
       this.notice('warning', `Couldn't create a checkpoint before this turn: ${(error as Error).message}`);

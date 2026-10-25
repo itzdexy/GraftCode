@@ -62,3 +62,45 @@ export function stepSnake(snake: Snake, cols: number, rows: number): Snake {
   const placed = place(snake.seed, cols, rows, body);
   return { body, food: placed.cell, seed: placed.seed };
 }
+
+/**
+ * The same line as a game, while the picture is being made: the arrow keys steer it, a dot makes it one longer,
+ * and running into a wall or itself ends the round. It starts from wherever the wandering line is.
+ */
+export interface SnakeGame {
+  snake: Snake;
+  /** Where the head goes each step. */
+  dir: Cell;
+  /** The turn asked for since the last step; applied on the next, so two quick keys can't fold the line onto itself. */
+  wanted: Cell;
+  score: number;
+  over: boolean;
+}
+
+export function startGame(snake: Snake, dir?: Cell): SnakeGame {
+  const [head, neck] = snake.body;
+  const heading = dir ?? (head && neck && (head.x !== neck.x || head.y !== neck.y) ? { x: head.x - neck.x, y: head.y - neck.y } : { x: 1, y: 0 });
+  return { snake, dir: heading, wanted: heading, score: 0, over: false };
+}
+
+/** Asks for a turn; turning straight back is ignored. */
+export function steerGame(game: SnakeGame, dir: Cell): SnakeGame {
+  if (game.over || (dir.x === -game.dir.x && dir.y === -game.dir.y)) return game;
+  return { ...game, wanted: dir };
+}
+
+export function stepGame(game: SnakeGame, cols: number, rows: number): SnakeGame {
+  if (game.over) return game;
+  const head = game.snake.body[0];
+  if (!head) return game;
+  const dir = game.wanted;
+  const next = { x: head.x + dir.x, y: head.y + dir.y };
+  const ate = same(next, game.snake.food);
+  // The tail moves out of the way in the same step, unless the line grows.
+  const body = ate ? game.snake.body : game.snake.body.slice(0, -1);
+  if (next.x < 0 || next.y < 0 || next.x >= cols || next.y >= rows || body.some((c) => same(c, next))) return { ...game, dir, over: true };
+  const grown = [next, ...body];
+  if (!ate) return { ...game, dir, snake: { ...game.snake, body: grown } };
+  const placed = place(game.snake.seed, cols, rows, grown);
+  return { ...game, dir, score: game.score + 1, snake: { body: grown, food: placed.cell, seed: placed.seed } };
+}

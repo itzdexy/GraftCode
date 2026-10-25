@@ -45,8 +45,9 @@ import type { McpManager } from '../mcp/mcpManager';
 import { listArtifacts, readArtifactText, isKnownArtifact, type ArtifactServer } from '../artifacts/artifacts';
 import { canOpen } from '../chat/chatFiles';
 import { speechModels, synthesize, type SpeechAccess } from '../voice/speech';
-import { mediaModelsOf, type MediaSourceKind } from '../media/mediaModels';
-import type { ProviderMediaModels } from '@shared/ipc/contracts';
+import { catalogMediaModels, isNvidia, mediaModelsOf, NVIDIA_IMAGE_MODELS, type MediaSourceKind } from '../media/mediaModels';
+import { NATIVE_PRESET } from '../providers/presets';
+import type { MediaModel, ProviderMediaModels } from '@shared/ipc/contracts';
 import { DEFAULT_IMAGE_MODEL } from '../media/images';
 import type { MediaService } from '../media/mediaService';
 import { describeCron, nextRun, parseCron } from '../schedule/cron';
@@ -181,9 +182,24 @@ const mediaCache = new Map<string, { at: number; value: ProviderMediaModels }>()
  * a provider whose list can't be read says why. Lists are kept for half an hour unless asked again.
  */
 async function mediaModelsList(s: Services, refresh: boolean): Promise<ProviderMediaModels[]> {
-  const providers = s.registry.summaries().filter((p) => p.enabled && MEDIA_SOURCES.includes(p.kind) && (p.hasKey || p.kind === 'openai-compatible'));
-  return Promise.all(
+  const providers = s.registry.summaries().filter((p) => p.enabled);
+  const lists = await Promise.all(
     providers.map(async (p): Promise<ProviderMediaModels> => {
+      // What the catalog knows the provider makes, for the models its own list leaves out (NVIDIA lists none).
+      const preset = p.preset ?? NATIVE_PRESET[p.kind] ?? (p.baseUrl ? (s.catalog.presetsForUrl(p.baseUrl)[0] ?? null) : null);
+      const nvidia = p.kind === 'openai-compatible' && isNvidia(p.baseUrl);
+      const known = nvidia
+        ? NVIDIA_IMAGE_MODELS.map((m): MediaModel => ({ ...m, kind: 'image', created: null }))
+        : preset ? catalogMediaModels(s.catalog.models(preset)) : [];
+      // NVIDIA's pictures are made by its own engine, which the page needs to know for Use.
+      const providerKind = nvidia ? 'nvidia' : p.kind;
+      const merged = (live: MediaModel[]): MediaModel[] => {
+        const ids = new Set(live.map((m) => m.id));
+        return [...live, ...known.filter((m) => !ids.has(m.id))];
+      };
+      if (!MEDIA_SOURCES.includes(p.kind) || !(p.hasKey || p.kind === 'openai-compatible')) {
+        return { providerId: p.id, providerLabel: p.label, providerKind, models: known, error: null };
+      }
       let apiKey: string | null;
       try {
         apiKey = s.keys.get(p.id);
@@ -196,14 +212,16 @@ async function mediaModelsList(s: Services, refresh: boolean): Promise<ProviderM
       let value: ProviderMediaModels;
       try {
         const models = await mediaModelsOf({ kind: p.kind as MediaSourceKind, baseUrl: p.baseUrl, apiKey }, AbortSignal.timeout(30_000));
-        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models, error: null };
+        value = { providerId: p.id, providerLabel: p.label, providerKind, models: merged(models), error: null };
       } catch (error) {
-        value = { providerId: p.id, providerLabel: p.label, providerKind: p.kind, models: [], error: (error as Error).message };
+        value = { providerId: p.id, providerLabel: p.label, providerKind, models: known, error: (error as Error).message };
       }
       mediaCache.set(key, { at: Date.now(), value });
       return value;
     })
   );
+  // A provider that makes no media and could not say otherwise has no section.
+  return lists.filter((l) => l.models.length > 0 || l.error !== null || MEDIA_SOURCES.includes(l.providerKind));
 }
 
 /** Where a chat's file is stored; an error when the chat no longer has it. */

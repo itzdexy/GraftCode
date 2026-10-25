@@ -36,6 +36,8 @@ export interface CatalogModel {
   missing: boolean;
   /** Null means the source has not supplied this capability. */
   capabilities: { tools: boolean | null; vision: boolean | null; reasoning: boolean | null; audio: boolean | null; structured: boolean | null };
+  /** What it makes besides text; empty for a text model. */
+  outputs: Array<'image' | 'video' | 'audio'>;
 }
 
 /** Ollama runs locally and has its own adapter; it isn't in the generated catalog. */
@@ -75,7 +77,8 @@ function toModel(raw: RawModel): CatalogModel {
     deprecated: raw.s === 'deprecated',
     missing: raw.missing === true,
     capabilities: { tools: raw.t === undefined ? null : raw.t === 1, vision: raw.v === undefined ? null : raw.v === 1,
-      reasoning: raw.r === undefined ? null : raw.r === 1, audio: raw.audio ?? null, structured: raw.structured ?? null }
+      reasoning: raw.r === undefined ? null : raw.r === 1, audio: raw.audio ?? null, structured: raw.structured ?? null },
+    outputs: raw.m ?? []
   };
 }
 

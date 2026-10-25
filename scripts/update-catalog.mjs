@@ -64,6 +64,8 @@ function compactModel(m) {
   if (typeof m.reasoning === 'boolean') out.r = m.reasoning ? 1 : 0;
   if (m.modalities) out.audio = input.includes('audio') || (m.modalities.output ?? []).includes('audio');
   if (typeof m.structured_output === 'boolean') out.structured = m.structured_output;
+  const media = ['image', 'video', 'audio'].filter((kind) => (m.modalities?.output ?? []).includes(kind));
+  if (media.length > 0) out.m = media;
   if (effort && effort.length > 0) out.e = effort;
   if (budget) out.b = [typeof budget.min === 'number' ? Math.max(0, budget.min) : 1024, typeof budget.max === 'number' ? budget.max : 32_000];
   if (toggle) out.g = 1;
