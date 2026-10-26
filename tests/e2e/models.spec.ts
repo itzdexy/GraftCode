@@ -26,7 +26,7 @@ test('the Models page has a section for the picture, video, voice and transcript
   const images = settings.getByRole('region', { name: 'Image models' });
   await expect(images.getByText('black-forest-labs/FLUX.1-schnell')).toBeVisible();
   // This server isn't one Graft makes pictures through, and the section says so instead of offering Use.
-  await expect(images.getByText('Graft makes pictures through OpenRouter, OpenAI or Google.')).toBeVisible();
+  await expect(images.getByText('Graft makes pictures through OpenRouter, OpenAI, Google or NVIDIA.')).toBeVisible();
   await expect(images.getByRole('button', { name: /^Use for images/ })).toHaveCount(0);
   await expect(settings.getByRole('region', { name: 'Video models' }).getByText('Wan-AI/Wan2.2-T2V-A14B')).toBeVisible();
   await expect(settings.getByRole('region', { name: 'Voices' }).getByText('hexgrad/Kokoro-82M')).toBeVisible();
