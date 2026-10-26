@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.45",
+    "date": "2026-10-26",
+    "items": [
+      "The editor checks TypeScript and JavaScript as you type: errors are underlined when a file opens and again a second after you stop typing, in a trusted project. Check types (Ctrl+Shift+M) still runs one on demand.",
+      "Ctrl+L in the editor comments on the selected lines for the agent, the same as Ctrl+Alt+M: the comment goes with your next message, with the file, the lines and the code.",
+      "A link or picture in a reply that names a file of the project (logo.png, docs/setup.md) opens it in the Files panel. Before, clicking it did nothing.",
+      "\"Always allow\" on a permission card no longer marks the project trusted, which also turned on the repository's own hooks, MCP servers and rules. In a project you haven't trusted the card offers \"Allow for session\"; trust a project in Projects to save rules.",
+      "Commands that only look read-only now ask first in Ask mode and are refused in Plan mode: a variable set before the command (LD_PRELOAD=…), or an option that runs a program or writes a file (rg --pre, git diff --output, sort -o, find -fprintf).",
+      "Titles are never written by an image or video model, and one set as the backup model is skipped instead of failing."
+    ]
+  },
+  {
     "version": "0.6.44",
     "date": "2026-10-24",
     "items": [

@@ -25,7 +25,7 @@ export interface EditorComment { line: number; endLine: number; quote: string }
 export default function TextEditor({ sessionId, file, value, position, onChange, onSave, onNavigate, onComment, commentRequest = 0 }: {
   sessionId: string; file: string; value: string; position: CodeLocation | null;
   onChange: (value: string) => void; onSave: () => void; onNavigate: (location: CodeLocation) => void;
-  /** Asked for with Ctrl+Alt+M, or by raising `commentRequest`: the cursor's line, or the lines that are selected. */
+  /** Asked for with Ctrl+L or Ctrl+Alt+M, or by raising `commentRequest`: the cursor's line, or the lines that are selected. */
   onComment?: (at: EditorComment) => void; commentRequest?: number;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -48,16 +48,21 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
   const [references, setReferences] = useState<CodeLocation[]>([]);
   const [hover, setHover] = useState<string | null>(null);
   const supported = /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(file);
-  const query = async (action: 'diagnostics' | 'definition' | 'references' | 'hover'): Promise<void> => {
+  // The type check that runs on its own stops for this file after its first failure (an untrusted project, no server).
+  const autoCheck = useRef(true);
+  /** `quiet`: the check that runs by itself after typing stops; it shows its findings and never an error. */
+  const query = async (action: 'diagnostics' | 'definition' | 'references' | 'hover', quiet = false): Promise<void> => {
     const instance = editor.current, model = instance?.getModel();
-    if (!instance || !model || busy.current || !supported) return;
+    if (!instance || !model || (busy.current && !quiet) || !supported) return;
     const version = epoch.current;
     const cursor = instance.getPosition();
-    busy.current = true; setPending(true); setFailure(null); setStatus(null); setReferences([]); setHover(null);
+    // A quiet check never holds up what the user asks for; an edit (epoch) makes its answer stale.
+    if (!quiet) { busy.current = true; setPending(true); setFailure(null); setStatus(null); setReferences([]); setHover(null); }
     try {
       const result = await invoke('files:semantic', { sessionId, query: { action, file, line: cursor?.lineNumber, column: cursor?.column },
         content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
       if (version !== epoch.current || model.isDisposed()) return;
+      autoCheck.current = true;
       if (action === 'definition') {
         if (result.locations?.[0]) callbacks.current.onNavigate(result.locations[0]);
         else setStatus('No definition found in this project.');
@@ -78,8 +83,11 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
         })));
         setStatus(`Type check complete: ${findings.length} issue${findings.length === 1 ? '' : 's'}${result.truncated ? ' (truncated)' : ''}.`);
       }
-    } catch (error) { if (version === epoch.current && !model.isDisposed()) setFailure(errorText(error)); }
-    finally { busy.current = false; if (!model.isDisposed()) setPending(false); }
+    } catch (error) {
+      if (quiet) autoCheck.current = false;
+      else if (version === epoch.current && !model.isDisposed()) setFailure(errorText(error));
+    }
+    finally { if (!quiet) { busy.current = false; if (!model.isDisposed()) setPending(false); } }
   };
   const runQuery = useRef(query);
   useEffect(() => { runQuery.current = query; });
@@ -94,7 +102,16 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
       accessibilitySupport: 'on', fixedOverflowWidgets: true, padding: { top: 8, bottom: 8 } });
     editor.current = instance;
     if (position) { instance.setPosition({ lineNumber: position.line, column: position.column }); instance.revealLineInCenter(position.line); instance.focus(); }
+    // Type errors show the way an editor shows them: on open, and again once typing pauses.
+    autoCheck.current = true;
+    let checkTimer: ReturnType<typeof setTimeout> | undefined;
+    const checkSoon = (ms: number): void => {
+      clearTimeout(checkTimer);
+      if (supported && autoCheck.current) checkTimer = setTimeout(() => void runQuery.current('diagnostics', true), ms);
+    };
+    checkSoon(300);
     const changes = model.onDidChangeContent(() => {
+      checkSoon(1000);
       epoch.current++; setDiagnostics([]); setReferences([]); setHover(null); setStatus(null); setFailure(null); monaco.editor.setModelMarkers(model, 'graft-typescript', []);
       callbacks.current.onChange(model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true));
     });
@@ -103,7 +120,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     const definition = instance.addAction({ id: 'graft.definition', label: 'Go to definition', keybindings: [monaco.KeyCode.F12], run: () => runQuery.current('definition') });
     const referencesAction = instance.addAction({ id: 'graft.references', label: 'Find references', keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12], run: () => runQuery.current('references') });
     const hoverAction = instance.addAction({ id: 'graft.hover', label: 'Symbol information', keybindings: [monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI)], run: () => runQuery.current('hover') });
-    const comment = instance.addAction({ id: 'graft.comment', label: 'Comment for the agent', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM], run: () => {
+    const comment = instance.addAction({ id: 'graft.comment', label: 'Comment for the agent', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM], run: () => {
       const selection = instance.getSelection();
       if (selection) callbacks.current.onComment?.(selectionAnchor({ startLine: selection.startLineNumber, endLine: selection.endLineNumber, endColumn: selection.endColumn }, (line) => model.getLineContent(line)));
     } });
@@ -116,7 +133,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     };
     theme();
     const observer = new MutationObserver(theme); observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'data-accent'] });
-    return () => { observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); comment.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    return () => { clearTimeout(checkTimer); observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); comment.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
     // The model owns edits. Recreate it only for another file; content changes flow through onChange.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);

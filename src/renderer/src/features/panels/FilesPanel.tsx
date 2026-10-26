@@ -458,7 +458,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
               else { useEditorDrafts.getState().open(draftKey, ready); setEditing(draftKey); setLayout((current) => setWorkspaceTabMode(current, selected, 'edit')); }
             }}><Pencil className="size-13" /></IconButton> : null}
             {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={save}><Save className="size-13" /></IconButton> : null}
-            {edit ? <IconButton label="Comment for the agent" shortcut="Ctrl+Alt+M" size="xs" onClick={() => setCommentAsked((n) => n + 1)}><MessageSquarePlus className="size-13" /></IconButton> : null}
+            {edit ? <IconButton label="Comment for the agent" shortcut="Ctrl+L" size="xs" onClick={() => setCommentAsked((n) => n + 1)}><MessageSquarePlus className="size-13" /></IconButton> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
