@@ -27,6 +27,20 @@ const DEV_TOOLS = new Set([
   'php', 'phpunit', 'mix', 'elixir', 'java', 'javac', 'kotlinc', 'zig', 'gcc', 'g++', 'clang', 'clang++',
   'mkdir', 'touch', 'cp', 'mv', 'ln', 'sed', 'awk', 'tr', 'tee', 'new-item', 'copy-item', 'move-item', 'set-content', 'add-content', 'out-file'
 ]);
+/** Options that make a read-only command run a program or write a file. */
+const ACTIVE_OPTIONS: Record<string, (args: string[]) => boolean> = {
+  rg: (a) => a.some((x) => /^--pre(=|$)/.test(x)),
+  git: (a) => a.some((x) => /^(--output(=|$)|--ext-diff$|--open-files-in-pager(=|$)|-O)/.test(x)),
+  sort: (a) => a.some((x) => /^(--output(=|$)|-[a-zA-Z]*o)/.test(x)),
+  tree: (a) => a.some((x) => x.startsWith('-o')),
+  xxd: (a) => a.some((x) => x.startsWith('-r')),
+  date: (a) => a.some((x) => /^(-s|--set(=|$))/.test(x)),
+  file: (a) => a.some((x) => x === '-C' || x === '--compile'),
+  // uniq INPUT OUTPUT writes OUTPUT.
+  uniq: (a) => a.filter((x) => !x.startsWith('-')).length > 1
+};
+/** A variable set before the command (LD_PRELOAD, GIT_EXTERNAL_DIFF, NODE_OPTIONS) can change what it runs. */
+const SETS_VARIABLE = /^(?:(?:env|command|builtin|time|nice|nohup)\s+)*[A-Za-z_][A-Za-z0-9_]*=/;
 
 function commandName(w: string[]): string {
   return (w[0] ?? '').toLowerCase().replace(/\.(exe|cmd|bat)$/, '').split(/[\\/]/).pop() ?? '';
@@ -34,7 +48,7 @@ function commandName(w: string[]): string {
 
 function segmentRisk(w: string[]): CommandRisk {
   const name = commandName(w);
-  if (name === 'find') return w.some((x) => ['-exec', '-execdir', '-delete', '-ok', '-fprint'].includes(x)) ? 'unknown' : 'read-only';
+  if (name === 'find') return w.some((x) => ['-exec', '-execdir', '-delete', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'].includes(x)) ? 'unknown' : 'read-only';
   if (READ_ONLY_COMMANDS.has(name)) return 'read-only';
   if (name === 'git') {
     const sub = w[1] ?? '';
@@ -60,8 +74,11 @@ export function classifyCommand(command: string): CommandRisk {
   for (const segment of segments) {
     // Output redirection writes files: at least "low".
     const redirects = /(^|[^>&0-9])>{1,2}\s*[^&\s]/.test(segment.replace(/"[^"]*"|'[^']*'/g, ''));
-    const risk = segmentRisk(words(stripPrefixes(segment)));
-    const effective: CommandRisk = redirects && risk === 'read-only' ? 'low' : risk;
+    const w = words(stripPrefixes(segment));
+    const risk = segmentRisk(w);
+    // So do a variable set before the command and options that run programs or write files: Ask and Plan mode stop for them.
+    const active = redirects || SETS_VARIABLE.test(segment) || ACTIVE_OPTIONS[commandName(w)]?.(w.slice(1)) === true;
+    const effective: CommandRisk = active && risk === 'read-only' ? 'low' : risk;
     if (effective === 'unknown') return 'unknown';
     if (effective === 'low') worst = 'low';
   }
