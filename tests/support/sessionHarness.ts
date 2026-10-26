@@ -184,7 +184,6 @@ export function makeHarness(options: HarnessOptions): Harness {
     builtinSkills: options.builtinSkills ?? null,
     platform: process.platform,
     isTrusted: options.trusted ?? (() => true),
-    trust: () => undefined,
     preferences: () => ({
       webSearch: options.webSearch ?? false,
       bypassEnabled: options.bypassEnabled ?? false,

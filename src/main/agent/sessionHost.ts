@@ -202,10 +202,11 @@ export class SessionHost {
     this.pendingPermission = null;
     const rule = pending.request.suggestedRule;
     if ((response.decision === 'allow-session' || response.decision === 'allow-always') && rule) this.sessionAllow.push(rule);
-    if (response.decision === 'allow-always' && rule) {
+    // A saved rule applies only in a trusted project. Saving one never trusts the project: trust also
+    // turns on the repository's own hooks, MCP servers and allow rules, which the user decides on in Projects.
+    if (response.decision === 'allow-always' && rule && pending.request.projectTrusted) {
       const root = this.ports.settingsRoot();
       if (root) {
-        this.deps.trust(root);
         this.deps.settings.addRule('local', root, 'allow', rule).catch((error: unknown) => {
           this.ports.notice('warning', `Couldn't save the rule ${rule}: ${(error as Error).message}`);
         });
@@ -362,6 +363,7 @@ export class SessionHost {
             dangerous: prompt.decision.dangerous,
             outsideProject: prompt.decision.outsideProject,
             suggestedRule: prompt.decision.suggestedRule,
+            projectTrusted: scope.trusted,
             agentLabel: prompt.agentLabel
           },
           signal
@@ -508,6 +510,7 @@ export class SessionHost {
             dangerous: null,
             outsideProject: false,
             suggestedRule: null,
+            projectTrusted: scope.trusted,
             agentLabel: null
           },
           signal

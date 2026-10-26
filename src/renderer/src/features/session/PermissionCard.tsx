@@ -127,7 +127,7 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
         ...(canRemember
           ? [
               { key: '2', label: 'Allow for session', decision: 'allow-session' as const, variant: 'secondary' as const },
-              { key: '3', label: 'Always allow', decision: 'allow-always' as const, variant: 'secondary' as const }
+              ...(request.projectTrusted ? [{ key: '3', label: 'Always allow', decision: 'allow-always' as const, variant: 'secondary' as const }] : [])
             ]
           : [])
       ];
@@ -181,7 +181,13 @@ export function PermissionCard({ sessionId, request }: { sessionId: string; requ
       <div className="mt-10">{isPlan ? <PlanDetail plan={draft} editing={editing} onChange={setDraft} /> : <Detail request={request} />}</div>
       {canRemember && request.suggestedRule ? (
         <p className="mt-6 text-sm text-fg-muted">
-          “Always allow” saves the rule <span className="font-mono text-fg-secondary">{request.suggestedRule}</span> for this project.
+          {request.projectTrusted ? (
+            <>
+              “Always allow” saves the rule <span className="font-mono text-fg-secondary">{request.suggestedRule}</span> for this project.
+            </>
+          ) : (
+            <>To save rules for this project, trust it in Projects first.</>
+          )}
         </p>
       ) : null}
       {feedbackOpen ? (

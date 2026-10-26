@@ -147,6 +147,27 @@ describe('agent turns', () => {
     expect(fs.existsSync(path.join(h.projectDir, 'x.txt'))).toBe(false);
   });
 
+  it('"Always allow" saves the rule only in a trusted project; in an untrusted one it allows for the session and saves nothing', async () => {
+    const script = [
+      { toolCalls: [{ name: 'Write', input: { file_path: 'x.txt', content: 'a' } }] },
+      { toolCalls: [{ name: 'Write', input: { file_path: 'y.txt', content: 'b' } }] },
+      { text: 'ok' }
+    ];
+    for (const trusted of [false, true]) {
+      const h = harness({ script, trusted: () => trusted });
+      h.session.send('write files');
+      const event = await h.waitFor((e) => e.type === 'permission');
+      if (event.type !== 'permission') throw new Error('unreachable');
+      expect(event.request.projectTrusted).toBe(trusted);
+      h.session.respondPermission({ requestId: event.request.id, decision: 'allow-always' });
+      await h.session.idle();
+      // The rule covers the second write either way; only a trusted project keeps it on disk.
+      expect(h.events.filter((e) => e.type === 'permission')).toHaveLength(1);
+      expect(fs.existsSync(path.join(h.projectDir, 'y.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(h.projectDir, '.graft', 'settings.local.json'))).toBe(trusted);
+    }
+  });
+
   it('runs safe calls from one response in parallel and keeps result order', async () => {
     const h = harness({
       script: [
