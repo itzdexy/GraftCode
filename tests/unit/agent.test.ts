@@ -1768,6 +1768,9 @@ describe('auto-titling', () => {
     const fast = fakeModel({ ref: { providerId: 'fake', modelId: 'fast-mini' }, cheap: true });
     expect(titleModel(main, [main, fast]).ref.modelId).toBe('fast-mini');
     expect(titleModel(main, [main]).ref.modelId).toBe('fake-model');
+    // An image model writes no title, however cheap.
+    const painter = fakeModel({ ref: { providerId: 'fake', modelId: 'black-forest-labs/flux-3-image-klein' }, cheap: true });
+    expect(titleModel(main, [painter, main]).ref.modelId).toBe('fake-model');
     const { FakeProvider } = await import('../support/fakeProvider');
     const provider = new FakeProvider([{ text: 'Debugging flaky websocket tests' }]);
     expect(await generateTitle(provider, main, 'my websocket tests fail randomly', new AbortController().signal, { noTraining: true, zeroRetention: false })).toBe(

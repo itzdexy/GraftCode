@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isCitation, tidyMarkdown } from '../../../src/renderer/src/features/session/Markdown';
+import { isCitation, linkFileRef, tidyMarkdown } from '../../../src/renderer/src/features/session/Markdown';
 
 describe('markdown repairs', () => {
   it('splits a table header glued to the heading before it, so the table renders', () => {
@@ -36,5 +36,15 @@ describe('markdown repairs', () => {
     expect(isCitation('https://example.com/a', 'the full report')).toBe(false);
     expect(isCitation('https://example.com/a', 'other.org')).toBe(false);
     expect(isCitation('javascript:alert(1)', 'alert')).toBe(false);
+  });
+
+  it('reads a relative link as a project file, and leaves web addresses and anchors alone', () => {
+    expect(linkFileRef('claude-code-logo.jpg')?.path).toBe('claude-code-logo.jpg');
+    expect(linkFileRef('./src/app%2Dmain.ts#L12')).toMatchObject({ path: 'src/app-main.ts', line: 12 });
+    expect(linkFileRef('C:/work/a.ts')?.path).toBe('C:/work/a.ts');
+    expect(linkFileRef('https://example.com/a.png')).toBeNull();
+    expect(linkFileRef('mailto:me@example.com')).toBeNull();
+    expect(linkFileRef('#section')).toBeNull();
+    expect(linkFileRef('//cdn.example.com/a.js')).toBeNull();
   });
 });

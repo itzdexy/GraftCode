@@ -11,7 +11,7 @@ import { reportError } from '../../stores/toasts';
 import { SiteIcon } from '../web/SearchResults';
 import { CodeBlock } from './CodeBlock';
 import { ConversationContext } from './conversation';
-import { parseFileRef, refTooltip } from './fileRefs';
+import { parseFileRef, refTooltip, type FileRef } from './fileRefs';
 import { mathToDollars } from './mathModel';
 import { citationNote, citationState } from './sourcesModel';
 import { healMarkdown, splitBlocks } from './streaming';
@@ -90,6 +90,51 @@ function InlineCode({ children }: { children: ReactNode }): ReactNode {
       {children}
     </button>
   );
+}
+
+/** A scheme of two letters or more: a drive's "C:" is a path, not a scheme. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]+:/i;
+
+/** The project file a link's address names, or null for a web address, an anchor or anything that isn't a file name. */
+export function linkFileRef(href: string): FileRef | null {
+  return isRelative(href) ? parseFileRef(safeDecode(href)) : null;
+}
+
+const isRelative = (href: string): boolean => !HAS_SCHEME.test(href) && !href.startsWith('#') && !href.startsWith('//');
+
+/**
+ * A link. In a code session a relative one (`[logo](assets/logo.png)`) names a
+ * file of the project and opens it in the Files panel; one that names no file
+ * stays text. Anything else opens in the browser.
+ */
+function Link({ href, className, children }: { href: string; className: string; children: ReactNode }): ReactNode {
+  const conversation = useContext(ConversationContext);
+  const sessionId = conversation?.kind === 'code' ? conversation.sessionId : null;
+  const ref = sessionId === null ? null : linkFileRef(href);
+  const file = useResolvedPath(ref === null ? null : sessionId, ref?.path ?? null);
+  if (sessionId !== null && isRelative(href) && file === null) return <span>{children}</span>;
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        if (sessionId !== null && ref !== null && file) usePanels.getState().openFile(sessionId, file, ref.line === null ? null : { line: ref.line, column: ref.column });
+        else openLink(href);
+      }}
+      className={className}
+      title={file && ref ? refTooltip(file, ref.line) : href}
+    >
+      {children}
+    </a>
+  );
+}
+
+function safeDecode(href: string): string {
+  try {
+    return decodeURI(href);
+  } catch {
+    return href;
+  }
 }
 
 /** A link written as a citation: its text names the site it points to, e.g. [rolimons.com](https://www.rolimons.com/…). */
@@ -193,33 +238,18 @@ function buildComponents(live: boolean): Components {
       const text = childText(children);
       if (isCitation(href, text)) return <Citation href={href} text={text} arriving={arriving.trim()} />;
       return (
-        <a
-          href={href}
-          onClick={(e) => {
-            e.preventDefault();
-            openLink(href);
-          }}
-          className={`${arriving}text-link underline-offset-2 hover:underline`}
-          title={href}
-        >
+        <Link href={href} className={`${arriving}text-link underline-offset-2 hover:underline`}>
           {children}
-        </a>
+        </Link>
       );
     },
     img({ src, alt }) {
       // Remote images are blocked by the CSP (no tracking pixels); show them as links.
       if (typeof src === 'string' && src.startsWith('data:image/')) return <img src={src} alt={alt ?? ''} className="max-w-full rounded-md" />;
       return typeof src === 'string' ? (
-        <a
-          href={src}
-          onClick={(e) => {
-            e.preventDefault();
-            openLink(src);
-          }}
-          className="text-link hover:underline"
-        >
+        <Link href={src} className="text-link hover:underline">
           {alt || src}
-        </a>
+        </Link>
       ) : null;
     },
     table({ children }) {
