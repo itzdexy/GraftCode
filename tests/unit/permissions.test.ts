@@ -108,6 +108,27 @@ describe('command risk', () => {
     expect(classifyCommand(command)).toBe(risk);
   });
 
+  it.each([
+    'GIT_EXTERNAL_DIFF=./evil.sh git diff',
+    'LD_PRELOAD=./x.so ls',
+    'env NODE_OPTIONS=--require=./evil.js git status',
+    'rg --pre sh . evil.sh',
+    'git diff --output=src/main.ts',
+    'sort -o src/a.ts src/b.ts',
+    'find . -fprintf src/x.ts "%p"',
+    'uniq in.txt src/out.ts'
+  ])('a read-only command that runs a program or writes a file asks in Ask mode and is refused in Plan mode: %s', (command) => {
+    expect(classifyCommand(command)).not.toBe('read-only');
+    expect(decide(shell(command), env('ask')).behavior).toBe('ask');
+    expect(decide(shell(command), env('plan')).behavior).toBe('deny');
+  });
+
+  it('keeps plain read-only commands and a variable before a project script as they were', () => {
+    expect(decide(shell('git diff --stat'), env('ask')).behavior).toBe('allow');
+    expect(decide(shell('rg --pre-glob "*.gz" todo'), env('plan')).behavior).toBe('allow');
+    expect(classifyCommand('CI=1 npm test')).toBe('low');
+  });
+
   it('finds paths outside the project, including Git Bash drive paths', () => {
     expect(outsidePaths('cat ../secret.txt', root)).toEqual(['../secret.txt']);
     expect(outsidePaths(`ls "${root}"`, root)).toEqual([]);
