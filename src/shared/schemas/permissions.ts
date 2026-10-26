@@ -24,6 +24,8 @@ export const PermissionRequestSchema = z.object({
   outsideProject: z.boolean(),
   /** Rule written by "Always allow" / applied by "Allow for session"; null when none applies. */
   suggestedRule: z.string().nullable(),
+  /** "Always allow" saves rules only in a trusted project; untrusted, the card offers "Allow for session". */
+  projectTrusted: z.boolean(),
   /** Label of the sub-agent that asked, when not the main agent. */
   agentLabel: z.string().nullable()
 });

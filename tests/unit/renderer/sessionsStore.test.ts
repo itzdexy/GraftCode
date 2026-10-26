@@ -162,7 +162,7 @@ describe('session detail requests and live events', () => {
   it('keeps resolved prompts, an emptied queue and removed mission even before the initial snapshot arrives', async () => {
     const permission: PermissionRequest = {
       id: 'p', sessionId: 's', toolUseId: 'tool', toolName: 'Shell', title: 'Run it', detail: { kind: 'generic', text: 'Run' },
-      reason: 'Required', dangerous: null, outsideProject: false, suggestedRule: null, agentLabel: null
+      reason: 'Required', dangerous: null, outsideProject: false, suggestedRule: null, projectTrusted: true, agentLabel: null
     };
     const question = { id: 'q', sessionId: 's', toolUseId: 'tool', questions: [{ question: 'Which?', options: [], multiSelect: false }] };
     const request = deferredDetail();
