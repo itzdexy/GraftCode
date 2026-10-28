@@ -29,6 +29,7 @@ import { HookRunner } from './hooks';
 import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
 import { AgentSession, type SessionDeps } from './session';
+import { mediaTurnKind } from './loop';
 import { generateTitle, titleModel } from './title';
 import { AgentWorkspaces } from './workspaces';
 import type { McpPromptInfo } from '../mcp/mcpManager';
@@ -190,10 +191,6 @@ export class SessionManager {
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),
-      trust: (root) => {
-        const project = d.projects.findByPath(root) ?? d.projects.upsert(root);
-        d.projects.update(project.id, { trusted: true });
-      },
       preferences: () => {
         const s = d.settings.get();
         return {
@@ -228,7 +225,11 @@ export class SessionManager {
       emit: (sessionId, event) => this.onEvent(sessionId, event),
       notify: (summary, kind, text) => this.onNotify(summary, kind, text),
       generateTitle: (summary, text) => {
-        this.title(summary, text).catch((error: unknown) => d.log('warn', 'Title generation failed', { message: (error as Error).message }));
+        this.title(summary, text).catch((error: unknown) => {
+          // Deleted while its title was being written: nothing left to name.
+          if ((error as { code?: unknown }).code === 'session_not_found') return;
+          d.log('warn', 'Title generation failed', { message: (error as Error).message });
+        });
       },
       log: (level, message, fields) => d.log(level, message, fields),
       now: () => new Date()
@@ -268,6 +269,7 @@ export class SessionManager {
     const current = models.find((m) => m.ref.modelId === ref.modelId);
     if (!current) return;
     const chosen = titleModel(current, models);
+    if (mediaTurnKind(chosen.ref.modelId) !== null) return;
     const privacy = { noTraining: this.deps.settings.get().privacy.noTraining, zeroRetention: false };
     const provider = this.deps.registry.get(ref.providerId);
     let title: string | null;

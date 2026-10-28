@@ -46,7 +46,10 @@ test('an edit turn asks for approval, applies the change and shows it in the tra
   const card = w.getByRole('alertdialog', { name: 'Edit notes.txt' });
   await expect(card).toBeVisible();
   await expect(card.getByText('hello world')).toBeVisible();
-  await expect(card.getByRole('button', { name: /Always allow/ })).toBeVisible();
+  // The project isn't trusted, so a rule can be kept for the session but not saved.
+  await expect(card.getByRole('button', { name: /Allow for session/ })).toBeVisible();
+  await expect(card.getByRole('button', { name: /Always allow/ })).toHaveCount(0);
+  await expect(card.getByText('To save rules for this project, trust it in Projects first.')).toBeVisible();
   expect(fs.readFileSync(path.join(project, 'notes.txt'), 'utf8')).toBe('hello\n');
   await shot(w, 'session-permission');
 

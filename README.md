@@ -580,7 +580,7 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Next / previous match | `F3`, `Shift+F3` |
 | Open a file by name | `Ctrl+P` |
 | Go to a symbol by name | `Ctrl+T` |
-| Comment for the agent (in the editor) | `Ctrl+Alt+M` |
+| Comment for the agent (in the editor) | `Ctrl+L` or `Ctrl+Alt+M` |
 | Stop the agent | `Esc` |
 | Cycle permission mode | `Shift+Tab` |
 | Settings | `Ctrl+,` |

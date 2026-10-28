@@ -117,8 +117,8 @@ test('editor type checks unsaved drafts only after project trust and F12 opens t
     expect(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await w.screenshot({ path: test.info().outputPath(`editor-diagnostics-${size.width}.png`) });
   }
+  // Once a check has worked, the next one runs by itself when typing stops.
   await editor.focus(); await w.keyboard.press('Control+A'); await w.keyboard.type(original);
-  await w.keyboard.press('Control+Shift+M');
   await expect(w.getByRole('status').filter({ hasText: 'Type check complete: 0 issues.' })).toBeVisible();
   await editor.focus(); await w.keyboard.press('Control+Home'); await w.keyboard.press('ArrowDown'); await w.keyboard.press('Home');
   for (let i = 0; i < 22; i++) await w.keyboard.press('ArrowRight');

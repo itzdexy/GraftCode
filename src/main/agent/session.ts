@@ -141,7 +141,6 @@ export interface SessionDeps {
   builtinSkills: string | null;
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
-  trust(projectRoot: string): void;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
   sandbox?(projectRoot: string): SandboxSettings | null;
   /** The errors the local language server finds in a file of a project (see languages/problems.ts). Absent: edits are not checked. */

@@ -86,7 +86,7 @@ describe('the snapshot a turn starts from', () => {
     await h.turn('And again');
     expect(calls).toBe(1);
     expect(h.provider.requests).toHaveLength(2);
-    expect(notices(h.events).filter((text) => text.includes('No checkpoint'))).toHaveLength(1);
+    expect(notices(h.events).filter((text) => text.startsWith('Rewind is off'))).toHaveLength(1);
   });
 
   it('ends at once when the turn is stopped, and the turn ends with it', async () => {

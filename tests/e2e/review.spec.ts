@@ -113,7 +113,7 @@ test('comments on lines go to the agent with the next message, and commands leav
   await changes.getByRole('treeitem', { name: /other\.js/ }).getByRole('button', { name: /^other\.js/ }).click();
   await changes.getByRole('button', { name: 'Edit file', exact: true }).click();
   await w.getByRole('textbox', { name: 'Edit src/other.js' }).focus();
-  await w.keyboard.press('Control+Alt+m');
+  await w.keyboard.press('Control+l');
   const dialog = w.getByRole('dialog', { name: 'Comment for the agent' });
   await expect(dialog.getByText('src/other.js:1')).toBeVisible();
   await dialog.getByRole('textbox', { name: 'Comment for the agent' }).fill('Export a function instead.');

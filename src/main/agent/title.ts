@@ -1,5 +1,6 @@
 import type { ModelInfo } from '@shared/schemas/models';
 import { streamWithRetry } from '../providers/retry';
+import { mediaTurnKind } from './loop';
 import type { LLMProvider, RequestPrivacy } from '../providers/types';
 
 const TITLE_SYSTEM =
@@ -34,7 +35,8 @@ export function isFree(model: ModelInfo): boolean {
  * (or their own) instead of a cheap one that would be refused.
  */
 export function titleModel(current: ModelInfo, available: ModelInfo[]): ModelInfo {
-  available = available.filter((model) => model.availability?.selectable !== false);
+  // An image or video model writes no text.
+  available = available.filter((model) => model.availability?.selectable !== false && mediaTurnKind(model.ref.modelId) === null);
   if (isFree(current)) return available.find((m) => isFree(m) && m.cheap) ?? current;
   return available.find((m) => m.cheap && m.featured && m.supportsTools) ?? available.find((m) => m.cheap) ?? current;
 }
