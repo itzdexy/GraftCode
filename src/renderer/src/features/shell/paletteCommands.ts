@@ -54,7 +54,7 @@ import { useUi } from '../../stores/ui';
 import { useRewind } from '../session/RewindDialog';
 import { compact, interrupt, openMissionDialog } from '../session/sessionControls';
 import { useSystemPrompt } from '../session/SystemPromptDialog';
-import { ACCENTS, PALETTES, SETTINGS_SECTIONS } from '../settings/sections';
+import { ACCENTS, PALETTES, paletteChoice, SETTINGS_SECTIONS } from '../settings/sections';
 import { duplicateSession, exportSession, setPinned } from './sessionActions';
 import { useSessionDialog } from './SessionDialogs';
 import { openSettings, setMode, startNew, toggleSidebar } from './shellActions';
@@ -207,7 +207,7 @@ export function paletteCommands(ctx: PaletteContext): PaletteCommand[] {
       commands.push({ id: `theme.${t.id}`, title: `Theme: ${t.title}`, group: 'Appearance', keywords: 'mode color', icon: t.icon, checked: appearance.theme === t.id, run: () => save({ appearance: { theme: t.id } }) });
     }
     for (const p of PALETTES) {
-      commands.push({ id: `palette.${p.id}`, title: `Palette: ${p.label}`, group: 'Appearance', keywords: `colors theme ${p.description}`, icon: Palette, checked: appearance.palette === p.id, run: () => save({ appearance: { palette: p.id } }) });
+      commands.push({ id: `palette.${p.id}`, title: `Palette: ${p.label}`, group: 'Appearance', keywords: `colors theme ${p.description}`, icon: Palette, checked: appearance.palette === p.id, run: () => save({ appearance: paletteChoice(p.id, appearance.accent) }) });
     }
     for (const a of ACCENTS) {
       commands.push({ id: `accent.${a.id}`, title: `Accent: ${a.label}`, group: 'Appearance', keywords: 'color highlight', icon: Palette, checked: appearance.accent === a.id, run: () => save({ appearance: { accent: a.id } }) });

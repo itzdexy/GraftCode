@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.46",
+    "date": "2026-10-30",
+    "items": [
+      "A Halloween look: pick Hallow under Settings → Appearance → Palette (or \"Palette: Hallow\" in the command palette). Every surface turns violet night, the accent turns pumpkin unless you chose another one, Scion becomes a jack-o'-lantern with candlelit eyes, and three pixel bats circle above the home page. Home says \"Happy haunting\". With Motion reduced the bats hang still.",
+      "Pumpkin is also an accent of its own, for any palette. Its text passes the 4.5:1 contrast check on every light surface.",
+      "A permission rule like Shell(npm run:*) no longer allows a command that hides another one after the prefix: $(…), backticks or a heredoc. Only a rule that names the whole command allows those; everything else asks.",
+      "\"git branch topic\" and \"git tag v2\" create a branch or a tag, so they ask in Ask mode and are refused in Plan mode. Listing (git branch, git branch -a, git remote -v, git tag --list) still runs without asking.",
+      "Remove-Item -r (and -re, -rec, …, which PowerShell reads as -Recurse) counts as a recursive delete and always asks.",
+      "Pressing Stop while a PreToolUse hook is still deciding no longer lets the call it was looking at run afterwards.",
+      "GitHub tokens (ghp_…, github_pat_…) are scrubbed from Graft's log like other keys.",
+      "A setting that another Graft build saved and this one can't read now resets only that setting. Before, the whole group went back to defaults: an older build would have reset your theme, text sizes and motion because of one palette name.",
+      "A sub-agent, or an agent of a group, that its step limit cuts short is reported as stopped, with its last words, and what it changed stays in its own checkout. Before, its last words counted as a finished report and its half-done changes went into the project.",
+      "A project opened at the root of a drive (C:\\) counts its own files as inside it, so reading and editing them no longer asks every time.",
+      "The command palette, Ctrl+P, the model lists and / commands now search the same way: every word you type has to match, in any order, and a word at the start of a name ranks first. Session search keeps text found inside a conversation above titles that only match loosely."
+    ]
+  },
+  {
     "version": "0.6.45",
     "date": "2026-10-26",
     "items": [

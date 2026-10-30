@@ -2367,6 +2367,26 @@ describe('limits for one turn', () => {
     expect(pauses(h)).toHaveLength(1);
   });
 
+  it('reports a sub-agent its own step limit cut short as stopped, with its last words, not as finished', async () => {
+    const h = harness({
+      maxSteps: 2,
+      script: [
+        { toolCalls: [{ id: 'task-1', name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }] },
+        { text: 'Looking.', toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] },
+        { text: 'Half way.', toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Done.' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    const results = h.store.listMessages('session-1').flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && b.toolUseId === 'task-1' ? [b] : [])));
+    expect(results).toHaveLength(1);
+    expect(results[0]!.isError).toBe(true);
+    const text = results[0]!.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toContain('Stopped before it finished');
+    expect(text).toContain('Half way.');
+  });
+
   it('pauses after the minutes it worked, and the time an approval waited is not work', async () => {
     let at = Date.parse('2026-09-30T12:00:00Z');
     const h = harness({

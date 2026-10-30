@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AgentEvent } from '../../src/shared/schemas/agentEvents';
 import { textOf, type ContentBlock, type LlmMessage, type StoredMessage } from '../../src/shared/schemas/messages';
 import type { ModelInfo } from '../../src/shared/schemas/models';
+import type { HookRunner } from '../../src/main/agent/hooks';
 import type { LoopJournal } from '../../src/main/agent/journal';
 import { runAgentLoop, type LoopConfig, type LoopHost, type LoopModel, type LoopResult } from '../../src/main/agent/loop';
 import type { Decision } from '../../src/main/permissions/engine';
@@ -53,6 +54,8 @@ export interface LoopHarnessOptions {
   stopGraceMs?: number;
   /** A real adapter to answer instead of the scripted one (then `script` goes unused). */
   adapter?: LLMProvider;
+  /** Hooks around tool calls (default: none). */
+  hooks?: HookRunner;
 }
 
 export interface LoopHarness {
@@ -89,7 +92,7 @@ export function makeLoopHarness(options: LoopHarnessOptions): LoopHarness {
     askPermission: () => Promise.resolve({ decision: 'allow-once' }),
     toolContext: (toolUseId, signal) => ({ ...ctx, toolUseId, signal }),
     describeContext: () => ({ cwd: ctx.cwd, projectRoot: ctx.projectRoot, platform: ctx.platform }),
-    hooks: null,
+    hooks: options.hooks ?? null,
     maybeCompact: (history, tokens, _signal, overflow) => Promise.resolve(options.maybeCompact ? options.maybeCompact(history, tokens, overflow === true) : null),
     onUsage: () => undefined,
     todos: () => [],

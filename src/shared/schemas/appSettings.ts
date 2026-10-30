@@ -59,9 +59,9 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
 };
 
 /** Settings → Appearance: colour palettes (generated in styles/palettes.css) and accent colours. */
-export const PALETTE_IDS = ['graft', 'midnight', 'slate', 'grove', 'dune', 'contrast'] as const;
+export const PALETTE_IDS = ['graft', 'midnight', 'slate', 'grove', 'dune', 'hallow', 'contrast'] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
-export const ACCENT_IDS = ['leaf', 'ocean', 'iris', 'rose', 'gold', 'teal', 'mono'] as const;
+export const ACCENT_IDS = ['leaf', 'ocean', 'iris', 'rose', 'gold', 'teal', 'pumpkin', 'mono'] as const;
 export type AccentId = (typeof ACCENT_IDS)[number];
 /** Settings → Appearance → Motion. */
 export const MOTION_SETTINGS = ['system', 'on', 'reduced'] as const;

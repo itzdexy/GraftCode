@@ -718,10 +718,15 @@ export class SessionHost {
       );
       if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
       if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
-      // Cut short by the turn's own limit: it did not finish, so its last words are not a report
-      // and what it changed stays in its checkout (kept below) instead of going in half done.
-      const over = result.reason === 'guard' ? (this.turn?.exceeded() ?? null) : null;
-      if (over !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this sub-agent finished. ${over}`);
+      // Cut short, by the turn's limit or by its own (its step limit, the same calls over and over): it did not
+      // finish, so its last words are not a report and what it changed stays in its checkout (kept below)
+      // instead of going in half done.
+      if (result.reason === 'guard') {
+        const over = this.turn?.exceeded() ?? null;
+        if (over !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this sub-agent finished. ${over}`);
+        const last = result.finalText.trim();
+        throw new GraftError('subagent_stopped', `Stopped before it finished: the sub-agent reached its step limit or kept repeating the same calls.${last ? ` Its last words: ${last.slice(-1500)}` : ''}`);
+      }
       if (lease && this.deps.workspaces) {
         await privateHost?.close();
         const touched = scratch.flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && !b.isError && b.display?.kind === 'edit' ? [b.display.path] : [])));

@@ -4,8 +4,6 @@ import { cn } from '../lib/cn';
 
 export const Popover = RP.Root;
 export const PopoverTrigger = RP.Trigger;
-export const PopoverAnchor = RP.Anchor;
-export const PopoverClose = RP.Close;
 
 export const PopoverContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof RP.Content>>(
   function PopoverContent({ className, sideOffset = 6, collisionPadding = 8, ...props }, ref) {

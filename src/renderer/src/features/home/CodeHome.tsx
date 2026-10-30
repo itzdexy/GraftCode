@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { BookOpen, ChevronRight, FlaskConical, NotebookPen, ScanSearch } from 'lucide-react';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
 import type { SessionSummary } from '@shared/schemas/sessions';
+import { HallowBats } from '../../brand/HallowBats';
 import { Mark } from '../../brand/Mark';
 import { Mascot } from '../../brand/Mascot';
 import { LoadingState } from '../../components/States';
@@ -113,6 +114,7 @@ function useCodeContext(): CodeContext | null {
 export function CodeHome() {
   const name = useApp((s) => s.settings?.profile.name ?? '');
   const justOnboarded = useApp((s) => s.justOnboarded);
+  const hallow = useApp((s) => s.settings?.appearance.palette === 'hallow');
   const summaries = useSessions((s) => s.summaries);
   const loaded = useSessions((s) => s.loaded);
   const context = useCodeContext();
@@ -175,12 +177,13 @@ export function CodeHome() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ViewHeader actions={<WhatsNewLink />} />
-      <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <div className="scroll-fade-y relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <HallowBats />
         <div className="motion-stagger mx-auto w-full max-w-[calc(var(--g-content-width)+48px)] px-24 pt-16 pb-24">
           <h1 className="flex items-center gap-10 text-xl font-medium text-fg-strong">
             <Mark size={20} motion="idle" interactive />
             <span className="truncate">
-              {justOnboarded ? 'Welcome' : 'Welcome back'}
+              {justOnboarded ? 'Welcome' : hallow ? 'Happy haunting' : 'Welcome back'}
               {name ? `, ${name}` : ''}
             </span>
           </h1>

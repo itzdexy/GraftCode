@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from '../../../src/renderer/src/features/settings/sections';
+import { paletteChoice, SETTINGS_GROUPS, SETTINGS_SECTIONS } from '../../../src/renderer/src/features/settings/sections';
 import { searchSettings } from '../../../src/renderer/src/features/settings/settingsSearch';
 import INDEX from '../../../src/renderer/src/features/settings/settingsIndex.json';
 
@@ -60,5 +60,13 @@ describe('searching Settings', () => {
       { section: 'appearance', page: 'Appearance', setting: null },
       { section: 'data', page: 'Data', setting: null }
     ]);
+  });
+});
+
+describe('picking a palette', () => {
+  it('gives Hallow its pumpkin accent while the accent is still the default, and keeps one the person chose', () => {
+    expect(paletteChoice('hallow', 'leaf')).toEqual({ palette: 'hallow', accent: 'pumpkin' });
+    expect(paletteChoice('hallow', 'iris')).toEqual({ palette: 'hallow' });
+    expect(paletteChoice('dune', 'leaf')).toEqual({ palette: 'dune' });
   });
 });

@@ -182,6 +182,17 @@ describe('a group of agents', () => {
     expect(h.runs.fix!.verify).toMatchObject({ passed: false, rounds: 3 });
   });
 
+  it('fails an agent its step limit cut short, with its last words, instead of taking them as its report', async () => {
+    const h = await run({
+      maxSteps: 2,
+      group: [explorer('slow', 'Read slowly')],
+      agent: (_task, request) => ({ text: 'Half way.', toolCalls: [{ name: 'Glob', input: { pattern: `*.${String(request.messages.length)}` } }] })
+    });
+    expect(h.runs.slow).toMatchObject({ status: 'failed' });
+    expect(h.runs.slow!.error).toMatch(/Stopped before it finished/);
+    expect(h.runs.slow!.error).toContain('Half way.');
+  });
+
   it('stops an agent that spends more than its token budget', async () => {
     const h = await run({
       agents: { tokenBudget: 10_000 },

@@ -593,6 +593,124 @@
   --g-switch-thumb: #ffffff;
 }
 
+/* hallow: Halloween violet */
+:root[data-palette='hallow']:not([data-theme='light']),
+:root:not([data-theme='light']) [data-palette-preview='hallow'] {
+  --g-bg: #150e1e;
+  --g-bg-sidebar: #110a1a;
+  --g-surface: #20192a;
+  --g-surface-raised: #211a2b;
+  --g-surface-sunken: #1a1323;
+  --g-surface-inset: #261e30;
+  --g-surface-control: #2d2537;
+  --g-surface-strong: #383043;
+  --g-hover: #31293b;
+  --g-sidebar-hover: #1d1626;
+  --g-selected: #342c3f;
+  --g-segment-track: #1d1626;
+  --g-segment-thumb: #342c3f;
+  --g-toggle-track: #2b2335;
+  --g-toggle-thumb: #41394c;
+  --g-badge: #2b2335;
+  --g-input: #30283a;
+  --g-button-secondary: #31293b;
+  --g-button-secondary-hover: #3a3245;
+  --g-button-ghost: #292133;
+  --g-code-inline-bg: #211a2b;
+  --g-code-block-bg: #1a1323;
+  --g-mark-bg: #1f1828;
+  --g-button-primary-text: #150e1e;
+  --g-segment-thumb-border: #483f53;
+  --g-toggle-thumb-border: #544a5f;
+  --g-input-border: #453c50;
+  --g-border-subtle: #2a2134;
+  --g-border: #362d40;
+  --g-border-strong: #4a4155;
+  --g-border-card: #31283b;
+  --g-border-panel: #2c2336;
+  --g-divider: #382f42;
+  --g-key-border: #42394d;
+  --g-chip-edge: #251c2f;
+  --g-code-inline-border: #393044;
+  --g-timeline-tick: #453c50;
+  --g-scrollbar-thumb: #5a5166;
+  --g-scrollbar-thumb-hover: #6c6278;
+  --g-button-primary-disabled: #776d83;
+  --g-text-strong: #f1edf7;
+  --g-text: #eae6f0;
+  --g-text-secondary: #bebac4;
+  --g-text-tertiary: #bab6c0;
+  --g-text-muted: #8f8b94;
+  --g-text-faint: #8a868f;
+  --g-text-placeholder: #99959e;
+  --g-icon: #c3bfc9;
+  --g-icon-strong: #ebe7f1;
+  --g-icon-muted: #807c85;
+  --g-timeline-tick-current: #dedae4;
+  --g-button-primary: #eae6f0;
+  --g-button-primary-hover: #f1edf7;
+  --g-button-primary-disabled-text: #5b5760;
+  --g-switch-thumb: #908c95;
+}
+:root[data-palette='hallow'][data-theme='light'],
+:root[data-theme='light'] [data-palette-preview='hallow'] {
+  --g-bg: #faf7ff;
+  --g-bg-sidebar: #f3eff9;
+  --g-surface: #fefdff;
+  --g-surface-raised: #f4f0fa;
+  --g-surface-sunken: #f1edf7;
+  --g-surface-inset: #ebe6f0;
+  --g-surface-control: #e9e4ee;
+  --g-surface-strong: #dfdae4;
+  --g-hover: #ebe6f0;
+  --g-sidebar-hover: #e9e4ee;
+  --g-selected: #e2dde7;
+  --g-segment-track: #e7e2ec;
+  --g-segment-thumb: #fefdff;
+  --g-toggle-track: #ebe6f0;
+  --g-toggle-thumb: #fefdff;
+  --g-badge: #ebe6f0;
+  --g-input: #fefdff;
+  --g-button-secondary: #e9e4ee;
+  --g-button-secondary-hover: #dfdae4;
+  --g-button-ghost: #efeaf4;
+  --g-code-inline-bg: #f1edf7;
+  --g-code-block-bg: #f4f0fa;
+  --g-mark-bg: #fefdff;
+  --g-button-primary-text: #faf7ff;
+  --g-segment-thumb-border: #d3cedb;
+  --g-toggle-thumb-border: #d0cbd8;
+  --g-input-border: #cfcad7;
+  --g-border-subtle: #e6e0ef;
+  --g-border: #dcd7e5;
+  --g-border-strong: #bfbac7;
+  --g-border-card: #dcd7e5;
+  --g-border-panel: #e0dbe9;
+  --g-divider: #e3ddec;
+  --g-key-border: #cfcad7;
+  --g-chip-edge: #dcd7e5;
+  --g-code-inline-border: #e0dbe9;
+  --g-timeline-tick: #d4cfdc;
+  --g-scrollbar-thumb: #c4bfcc;
+  --g-scrollbar-thumb-hover: #aea9b6;
+  --g-button-primary-disabled: #cac5d2;
+  --g-text-strong: #17101f;
+  --g-text: #211b2a;
+  --g-text-secondary: #484051;
+  --g-text-tertiary: #504859;
+  --g-text-muted: #6e6678;
+  --g-text-faint: #726a7c;
+  --g-text-placeholder: #726a7c;
+  --g-icon: #574f61;
+  --g-icon-strong: #211b2a;
+  --g-icon-muted: #776f81;
+  --g-timeline-tick-current: #403849;
+  --g-button-primary: #211b2a;
+  --g-button-primary-hover: #362e3f;
+  --g-button-primary-disabled-text: #8d8598;
+  --g-switch-thumb: #ffffff;
+}
+
 /* contrast: black and white with strong borders */
 :root[data-palette='contrast']:not([data-theme='light']),
 :root:not([data-theme='light']) [data-palette-preview='contrast'] {
@@ -795,4 +913,18 @@
   --g-accent: #3d3c38;
   --g-accent-strong: #1f1e1d;
   --g-accent-dim: #e2e1db;
+}
+
+/* accent: pumpkin */
+:root[data-accent='pumpkin']:not([data-theme='light']),
+:root:not([data-theme='light']) [data-accent-preview='pumpkin'] {
+  --g-accent: #f28a2e;
+  --g-accent-strong: #f7a456;
+  --g-accent-dim: #5a2e0c;
+}
+:root[data-accent='pumpkin'][data-theme='light'],
+:root[data-theme='light'] [data-accent-preview='pumpkin'] {
+  --g-accent: #9c4400;
+  --g-accent-strong: #843800;
+  --g-accent-dim: #fbe1cb;
 }

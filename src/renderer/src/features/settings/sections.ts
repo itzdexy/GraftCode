@@ -53,6 +53,7 @@ export const PALETTES: Array<{ id: PaletteId; label: string; description: string
   { id: 'slate', label: 'Slate', description: 'Cool grey' },
   { id: 'grove', label: 'Grove', description: 'A touch of green' },
   { id: 'dune', label: 'Dune', description: 'Warm sand' },
+  { id: 'hallow', label: 'Hallow', description: 'Halloween night' },
   { id: 'contrast', label: 'High contrast', description: 'Black, white, strong edges' }
 ];
 
@@ -63,5 +64,15 @@ export const ACCENTS: Array<{ id: AccentId; label: string }> = [
   { id: 'rose', label: 'Rose' },
   { id: 'gold', label: 'Gold' },
   { id: 'teal', label: 'Teal' },
+  { id: 'pumpkin', label: 'Pumpkin' },
   { id: 'mono', label: 'Mono' }
 ];
+
+/**
+ * The appearance change for picking a palette. Hallow comes with its pumpkin accent when the
+ * accent is still the default leaf, so one click gives the whole Halloween look; an accent the
+ * person chose themselves is kept.
+ */
+export function paletteChoice(palette: PaletteId, accent: AccentId): { palette: PaletteId; accent?: AccentId } {
+  return palette === 'hallow' && accent === 'leaf' ? { palette, accent: 'pumpkin' } : { palette };
+}

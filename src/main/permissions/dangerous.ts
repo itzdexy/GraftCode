@@ -17,7 +17,8 @@ const cmd = (w: string[]): string => (w[0] ?? '').toLowerCase().replace(/\.exe$/
 const COMMAND_CHECKS: CommandCheck[] = [
   { reason: 'Recursively deletes files', test: (w) => cmd(w) === 'rm' && hasFlag(w, '-r', '-R', '--recursive') },
   { reason: 'Recursively deletes files', test: (w) => ['rmdir', 'rd', 'del', 'erase'].includes(cmd(w)) && lower(w).some((x) => x === '/s') },
-  { reason: 'Recursively deletes files', test: (w) => ['remove-item', 'rm', 'ri', 'del', 'rmdir'].includes(cmd(w)) && lower(w).some((x) => x.startsWith('-rec')) },
+  // PowerShell takes any unambiguous start of -Recurse ("-r", "-re", "-rec").
+  { reason: 'Recursively deletes files', test: (w) => ['remove-item', 'rm', 'ri', 'del', 'rmdir'].includes(cmd(w)) && lower(w).some((x) => /^-r(e(c(u(r(se?)?)?)?)?)?$/.test(x)) },
   { reason: 'Recursively deletes files', test: (w) => cmd(w) === 'rimraf' || (cmd(w) === 'npx' && (w[1] ?? '').toLowerCase() === 'rimraf') },
   { reason: 'Recursively deletes files', test: (w) => cmd(w) === 'find' && lower(w).includes('-delete') },
   { reason: 'Force-pushes git history', test: (w) => cmd(w) === 'git' && w.includes('push') && (hasFlag(w, '-f', '--force', '--force-with-lease') || w.some((x, i) => i > 1 && x.startsWith('+'))) },

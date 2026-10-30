@@ -778,7 +778,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
           projectName: summary.projectName,
           snippet: hit.messageId ? hit.snippet : '',
           updatedAt: summary.updatedAt,
-          score: 100
+          // Found in the text itself: above every title that only matches loosely.
+          score: Number.MAX_SAFE_INTEGER
         });
       }
       for (const summary of all) {

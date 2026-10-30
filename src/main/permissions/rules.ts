@@ -148,7 +148,8 @@ export function ruleMatches(rule: Rule, target: RuleTarget, env: MatchEnv, mode:
   if (target.command !== undefined) {
     const { segments, complex } = splitCommand(target.command);
     if (mode === 'allow') {
-      if (complex) return commandMatches(content, target.command);
+      // A substitution or heredoc can run anything after an allowed prefix: only a rule naming the whole command allows it.
+      if (complex) return !content.includes('*') && commandMatches(content, target.command);
       return segments.length > 0 && segments.every((s) => commandMatches(content, s));
     }
     return commandMatches(content, target.command) || segments.some((s) => commandMatches(content, s));

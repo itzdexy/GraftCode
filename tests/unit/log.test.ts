@@ -16,5 +16,12 @@ describe('secret redaction', () => {
       expect(redact(input)).not.toContain(secret);
     }
   });
+  it('redacts GitHub tokens, which carry no key name in front of them', () => {
+    const classic = `ghp_${'a1B2'.repeat(9)}`;
+    const fine = `github_pat_${'Zx9_'.repeat(20)}`;
+    const out = redact(`MCP server failed: git clone https://${classic}@github.com/o/r and GH=${fine}`);
+    expect(out).not.toContain(classic);
+    expect(out).not.toContain(fine);
+  });
   it('keeps useful diagnostics', () => { expect(redact('Provider timed out status=503 model=alpha')).toBe('Provider timed out status=503 model=alpha'); });
 });

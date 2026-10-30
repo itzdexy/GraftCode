@@ -10,8 +10,6 @@ import { cn } from '../lib/cn';
  */
 export const Menu = DM.Root;
 export const MenuTrigger = DM.Trigger;
-export const MenuGroup = DM.Group;
-export const MenuRadioGroup = DM.RadioGroup;
 export const MenuSub = DM.Sub;
 
 const CONTENT =

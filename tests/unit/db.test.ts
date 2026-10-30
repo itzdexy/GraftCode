@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_APP_SETTINGS } from '../../src/shared/schemas/appSettings';
 import { EMPTY_USAGE } from '../../src/shared/schemas/common';
 import type { SessionUsage } from '../../src/shared/schemas/sessions';
 import { migrate, openDatabase, schemaVersion, type Db } from '../../src/main/db/database';
@@ -210,6 +211,13 @@ describe('app settings', () => {
     const settings = new AppSettingsService(db);
     expect(settings.get().appearance.theme).toBe('system');
     expect(settings.get().profile.name).toBe('Kai');
+  });
+
+  it('keeps the readable fields of a section when one field holds a value this version does not know', () => {
+    const stored = { ...DEFAULT_APP_SETTINGS.appearance, theme: 'dark', uiFontSize: 15, palette: 'from-a-newer-build' };
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify(stored));
+    const appearance = new AppSettingsService(db).get().appearance;
+    expect(appearance).toMatchObject({ theme: 'dark', uiFontSize: 15, palette: DEFAULT_APP_SETTINGS.appearance.palette });
   });
 
   it('gives an install from before the backup model no backup model, and keeps its other defaults', () => {

@@ -448,7 +448,10 @@ async function runAgent(
         throw new ProviderError(retryable ? (code as 'rate_limit' | 'overloaded' | 'server' | 'network') : 'unknown', result.error?.message ?? 'The model request failed.', { retryable });
       }
       const report = result.finalText.trim();
-      if (result.reason === 'guard' && report.length === 0) throw new GraftError('agent_stuck', 'Stopped: it kept repeating the same steps without reporting.');
+      // Its own limit cut it short: not a report, and its changes stay in its checkout (kept below).
+      if (result.reason === 'guard') {
+        throw new GraftError('agent_stuck', report.length === 0 ? 'Stopped: it kept repeating the same steps without reporting.' : `Stopped before it finished: it reached its step limit or kept repeating the same steps. Its last words: ${report.slice(-1500)}`);
+      }
       if (report.length === 0) throw new GraftError('agent_silent', 'It finished without a report.');
       if (!spec.verify) return await finish(report);
 
