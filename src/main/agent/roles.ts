@@ -25,8 +25,8 @@ export interface RoleDefinition {
 
 const READ = ['Read', 'Glob', 'Grep', 'Symbols', 'SemanticCode', 'WebFetch', 'WebSearch'];
 const COMMANDS = ['Shell', 'ShellOutput', 'KillShell'];
-/** The main agent's own tools: no agent in a group delegates further, asks the user or rewrites the task list. */
-const MAIN_ONLY = new Set(['Task', 'RunAgents', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'MissionUpdate']);
+/** The main agent's own tools: no agent in a group delegates further, asks the user, rewrites the task list or reports findings to the user. */
+const MAIN_ONLY = new Set(['Task', 'RunAgents', 'AskUserQuestion', 'ExitPlanMode', 'TodoWrite', 'MissionUpdate', 'ReportFindings']);
 
 const REPORT = 'Finish with a report the main agent can act on without reading anything else: what you found or did, with path:line references, the commands you ran and their results, and anything unresolved.';
 

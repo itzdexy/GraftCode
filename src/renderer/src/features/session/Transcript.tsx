@@ -13,6 +13,7 @@ import { useFileRefs } from '../../stores/fileRefs';
 import { usePaneActive } from '../../stores/panes';
 import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
+import { FindingsCard } from '../review/FindingsCard';
 import {
   AssistantText,
   CompactionItem,
@@ -339,6 +340,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <TodosItem item={item} />;
       case 'plan':
         return <PlanItem item={item} />;
+      case 'findings':
+        return summary.kind === 'code' ? <FindingsCard sessionId={summary.id} callId={item.callId} display={item.display} error={item.error} /> : null;
       case 'provider':
         return <ProviderItem item={item} />;
       case 'compaction':

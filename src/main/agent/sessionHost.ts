@@ -38,6 +38,8 @@ export interface TurnScope {
   hooks: HookRunner | null;
   root: string | null;
   trusted: boolean;
+  /** A turn that may only look (a review): what would change something is refused with this sentence, as in Plan mode. */
+  readOnly?: string;
 }
 
 /** The model a loop is answered by. It changes when the backup model takes over (see loopHost). */
@@ -245,7 +247,8 @@ export class SessionHost {
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
       allowNetwork: this.summary.kind === 'chat',
       sandboxed: this.deps.shells.sandboxFor(this.id) !== null,
-      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills)
+      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills),
+      ...(scope.readOnly !== undefined ? { readOnly: scope.readOnly } : {})
     };
   }
 

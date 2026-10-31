@@ -37,6 +37,8 @@ export interface PermissionEnv {
   sandboxed?: boolean;
   /** Folders outside the project whose files are read without asking: the skills (see skillReadRoots). Only reads; a link out of one is outside it. */
   readRoots?: string[];
+  /** A turn that may only look (a review), whatever the mode: Plan mode's limits apply, and this sentence says why. */
+  readOnly?: string;
 }
 
 export interface Decision {
@@ -139,8 +141,8 @@ export function decide(query: PermissionQuery, env: PermissionEnv): Decision {
   if (deny) return result('deny', `Blocked by the rule ${deny.raw} (${deny.source} settings).`);
 
   const mcpReadOnly = query.mcp?.readOnly === true;
-  if (env.mode === 'plan') {
-    const planBlock = 'Plan mode is read-only. Finish researching, then present the plan with ExitPlanMode.';
+  if (env.mode === 'plan' || env.readOnly !== undefined) {
+    const planBlock = env.readOnly ?? 'Plan mode is read-only. Finish researching, then present the plan with ExitPlanMode.';
     // Anything that says it writes a file, whatever kind of tool it is.
     if (cls === 'write' || writes.length > 0) return result('deny', planBlock);
     if (cls === 'exec') {

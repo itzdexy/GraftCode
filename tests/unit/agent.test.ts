@@ -27,6 +27,7 @@ import { testTool } from '../support/loopHarness';
 import { searchTools } from '../../src/main/tools/toolSearch';
 import { startFixtureServer } from '../support/httpFixture';
 import { makeHarness, type Harness } from '../support/sessionHarness';
+import { makeRepo } from '../support/gitRepo';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 let harnesses: Harness[] = [];
@@ -1840,7 +1841,9 @@ describe('researchers in chats', () => {
 
 describe('prompt commands', () => {
   it('expands /commit, /pr, /security-review, /explain and /test into prepared prompts that show as typed', async () => {
-    const h = harness({ script: [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }] });
+    // A review looks at what git says changed, so the project is a repository with a change in it.
+    const h = harness({ projectDir: makeRepo(), script: [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }] });
+    writeFile(h.projectDir, 'README.md', '# changed\n');
     for (const typed of ['/commit fix the login typo', '/pr', '/security-review auth', '/explain the session queue', '/test']) {
       h.session.send(typed);
       await h.session.idle();

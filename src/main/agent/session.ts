@@ -68,11 +68,10 @@ import {
   PROMPT_COMMANDS,
   diagramPrompt,
   researchPrompt,
-  reviewPrompt,
-  securityReviewPrompt,
   testPrompt,
   UI_COMMANDS
 } from './slashCommands';
+import { ghCli, parseReviewArgs, resolveReviewScope, REVIEW_READ_ONLY, reviewMessage, reviewModel, type ReviewKind } from './reviewScope';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
 import { estimateMessagesTokens } from './tokens';
@@ -956,7 +955,19 @@ export class AgentSession {
     }
   }
 
-  private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null } | null> {
+  /** /review and /security-review: where to look is worked out first, so a scope with nothing to review says why before a model is asked. */
+  private async reviewTurn(kind: ReviewKind, args: string, typed: string): Promise<{ text: string; typed: string; review: ReviewKind } | null> {
+    const dir = this.workingDir();
+    try {
+      const { target, focus } = parseReviewArgs(args);
+      return { text: reviewMessage(kind, await resolveReviewScope(dir, target, ghCli(dir)), focus), typed, review: kind };
+    } catch (error) {
+      this.commandOutput(error instanceof GraftError ? error.message : `Couldn't start the review: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null; review?: ReviewKind } | null> {
     const slash = parseSlash(item.text);
     if (!slash) return { text: item.text, typed: null };
     const summary = this.summary;
@@ -1025,9 +1036,8 @@ export class AgentSession {
       case 'init':
         return { text: INIT_PROMPT, typed: item.text };
       case 'review':
-        return { text: reviewPrompt(slash.args), typed: item.text };
       case 'security-review':
-        return { text: securityReviewPrompt(slash.args), typed: item.text };
+        return this.reviewTurn(slash.name === 'review' ? 'review' : 'security', slash.args, item.text);
       case 'explain':
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'research':
@@ -1270,6 +1280,8 @@ export class AgentSession {
       const hooks = summary.kind === 'code' ? this.deps.hooks(settingsRoot, trusted) : null;
 
       let userText: string | null = null;
+      /** A review: it runs read-only, on the model Settings → Models gives reviews. */
+      let review: ReviewKind | null = null;
       let starting: Mission | null = null;
       let snapshot: Promise<void> | null = null;
       const missionTurn = item?.mission;
@@ -1291,6 +1303,7 @@ export class AgentSession {
         const handled = starting ? { text: missionBrief(starting), typed: starting.objective } : await this.handleSlash(item);
         if (!handled) return;
         userText = handled.text;
+        review = 'review' in handled ? (handled.review ?? null) : null;
         // A session that starts in Taproot (or reopens in it) gets the briefing with its first message.
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (!(await this.promptAllowed(hooks, userText, signal))) return;
@@ -1313,7 +1326,10 @@ export class AgentSession {
         if (summary.kind === 'code') snapshot = this.startSnapshot(userMessageId, signal);
       }
 
-      const { provider, model, ref } = await this.resolveModel(signal);
+      const own = await this.resolveModel(signal);
+      const { provider, model, ref } = review
+        ? await reviewModel(review, own, { roles: this.deps.preferences().agents.roles, incognito: this.summary.incognito, models: this.deps.models }, signal)
+        : own;
       const key = this.promptModelKey(ref, model);
       if (this.modelKey !== null && this.modelKey !== key) {
         this.markThinkingStale();
@@ -1330,7 +1346,7 @@ export class AgentSession {
       // The model that answers this turn. The backup model takes its place when the session's keeps failing,
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
-      const scope: TurnScope = { hooks, root, trusted };
+      const scope: TurnScope = { hooks, root, trusted, ...(review ? { readOnly: REVIEW_READ_ONLY } : {}) };
       const taken = snapshot;
       const host: LoopHost = {
         ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),

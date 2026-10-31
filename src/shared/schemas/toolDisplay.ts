@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FindingSchema } from './findings';
 
 /**
  * UI-only metadata attached to tool results. It is stored with the message
@@ -140,6 +141,8 @@ export const ToolDisplaySchema = z.discriminatedUnion('kind', [
     answers: z.array(z.object({ question: z.string(), answer: z.string().nullable() }))
   }),
   z.object({ kind: z.literal('plan'), plan: z.string(), approved: z.boolean(), feedback: z.string().nullable() }),
+  /** What a review found (ReportFindings), worst first. */
+  z.object({ kind: z.literal('findings'), findings: z.array(FindingSchema), summary: z.string().nullable() }),
   z.object({ kind: z.literal('mcp'), server: z.string(), tool: z.string(), text: z.string() }),
   z.object({
     kind: z.literal('web-search'),

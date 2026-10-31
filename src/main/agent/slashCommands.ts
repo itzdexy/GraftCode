@@ -30,8 +30,8 @@ export const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'plan', description: 'Plan a change before making it: nothing is changed until you approve', argumentHint: '[what to plan]' },
   { name: 'mcp', description: 'Show MCP servers and their status', argumentHint: null },
   { name: 'init', description: 'Analyze the project and write a GRAFT.md for future sessions', argumentHint: null },
-  { name: 'review', description: 'Review the current changes for bugs and risks', argumentHint: '[focus]' },
-  { name: 'security-review', description: 'Check the current changes for security problems', argumentHint: '[focus]' },
+  { name: 'review', description: 'Review changes for bugs and risks: uncommitted, the branch, a commit or a pull request', argumentHint: '[branch | <commit> | pr <number>] [focus]' },
+  { name: 'security-review', description: 'Check changes for security problems: uncommitted, the branch, a commit or a pull request', argumentHint: '[branch | <commit> | pr <number>] [focus]' },
   { name: 'explain', description: 'Explain how part of the project works', argumentHint: '[file, folder or feature]' },
   { name: 'research', description: 'Research a question on the web and write a report with its sources', argumentHint: '[question]' },
   { name: 'diagram', description: 'Draw a diagram of something, shown in the conversation', argumentHint: '[what to draw]' },
@@ -141,28 +141,6 @@ export const INIT_PROMPT = [
 
 function withFocus(parts: string[], focus: string, label = 'Focus especially on'): string {
   return [...parts, focus.length > 0 ? `${label}: ${focus}` : ''].join(' ').trim();
-}
-
-export function reviewPrompt(focus: string): string {
-  return withFocus(
-    [
-      'Review the current uncommitted changes in this repository (use git status and git diff, including staged changes).',
-      'Look for bugs, missed edge cases, security problems, race conditions, broken error handling and missing tests.',
-      'Report findings ordered by severity with path:line references and a concrete fix for each. Say plainly if you find nothing significant.'
-    ],
-    focus
-  );
-}
-
-export function securityReviewPrompt(focus: string): string {
-  return withFocus(
-    [
-      'Do a security review of the current uncommitted changes in this repository (git status and git diff, staged changes included), reading the surrounding code where you need context.',
-      'Look for injection (SQL, shell, path, template), broken authentication or authorization, secrets in code or logs, unsafe deserialization, SSRF, XSS, insecure defaults, missing input validation at trust boundaries, and risky dependencies.',
-      'For each finding give the severity, path:line, how it could be exploited and a concrete fix. Only report real, specific issues; say plainly if you find none. Change nothing unless I ask.'
-    ],
-    focus
-  );
 }
 
 export function explainPrompt(target: string): string {
