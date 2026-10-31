@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AttemptSet } from '../../src/shared/schemas/attempts';
 import { addUsage, EMPTY_USAGE } from '../../src/shared/schemas/common';
+import { textOf } from '../../src/shared/schemas/messages';
 import { attemptTools } from '../../src/main/agent/attemptAgent';
 import { insideGitRepo, linkDependencies, splitPatch } from '../../src/main/agent/attempts';
 import { AgentWorkspaces, parseNumstat, unlinkLink } from '../../src/main/agent/workspaces';
@@ -143,6 +144,24 @@ describe('a message sent as attempts', () => {
     await expect(h.session.applyAttempt(set.id, 1)).rejects.toMatchObject({ code: 'attempts_applied' });
   });
 
+  it('holds a message sent while an attempt is applied, so the agent reads what was applied before it', async () => {
+    const h = start();
+    const set = await sendAsTwo(h);
+    const applying = h.session.applyAttempt(set.id, 1);
+    expect(h.session.send('What changed?')).toEqual({ queued: true });
+    await applying;
+    await h.session.idle();
+
+    expect(h.store.listMessages('session-1').slice(-3).map((m) => [m.role, textOf(m.content)])).toEqual([
+      ['assistant', 'Applied attempt 1 of 2 (Fake Model) to the folder. It changed result.txt.\n\nIts report:\nAttempt 1 wrote result.txt.'],
+      ['user', 'What changed?'],
+      ['assistant', 'The session itself answered.']
+    ]);
+    const asked = JSON.stringify(h.provider.requests.at(-1)?.messages);
+    expect(asked.indexOf('Applied attempt 1 of 2')).toBeGreaterThan(-1);
+    expect(asked.indexOf('Applied attempt 1 of 2')).toBeLessThan(asked.indexOf('What changed?'));
+  });
+
   it('refuses to apply an attempt when a file it changed differs in the folder since the attempts started, and changes nothing', async () => {
     const h = start();
     const set = await sendAsTwo(h);
@@ -233,7 +252,12 @@ describe('a message sent as attempts', () => {
     const sent = h.store.listMessages('session-1').find((m) => m.id === set.messageId)!;
 
     h.session.truncateFrom(sent.seq);
-    await expect.poll(() => checkouts.every((c) => !fs.existsSync(c)), { timeout: 10_000 }).toBe(true);
+    // The removal goes on after the rewind returns: the checkouts, their branches, then their records.
+    const gone = (): boolean =>
+      checkouts.every((c) => !fs.existsSync(c)) &&
+      gitSync(h.projectDir, 'branch', '--list', 'graft/agent-*').trim() === '' &&
+      fs.readdirSync(h.writersRoot).every((name) => !name.endsWith('.json'));
+    await expect.poll(gone, { timeout: 10_000 }).toBe(true);
   });
 
   it('is refused where it cannot work, with a sentence that says why', () => {

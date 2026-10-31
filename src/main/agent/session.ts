@@ -454,10 +454,31 @@ export class AgentSession {
     if (parseSlash(text)) throw new GraftError('attempts_command', 'Commands run once, not as attempts. Turn attempts off to run it.');
   }
 
-  /** Applies one attempt to the folder; not while a turn runs, which may be changing the same files. */
+  /**
+   * Applying or discarding attempts, which then says so in the conversation. Not while a turn runs, which may be
+   * changing the same files; and what is sent meanwhile waits, as behind a turn, so the conversation stays in order.
+   */
+  private settleAttempts<T>(work: () => Promise<T>): Promise<T> {
+    if (this.running) throw new GraftError('busy', 'Graft is working. Wait for it to finish, or stop it, then apply or discard the attempts.');
+    // Released before the caller hears back, so whoever awaits this finds the session free.
+    const done = work().finally(() => {
+      this.running = null;
+      if (this.steering.length > 0) this.queue.unshift(...this.steering.splice(0));
+      const next = this.queue.shift();
+      if (!next || this.disposed) return;
+      this.emit({ type: 'queue', queue: this.publicQueue() });
+      this.start(next);
+    });
+    this.running = done.then(
+      () => undefined,
+      () => undefined
+    );
+    return done;
+  }
+
+  /** Applies one attempt to the folder (agent/attempts.ts). */
   async applyAttempt(setId: string, index: number): Promise<{ files: string[] }> {
-    if (this.running) throw new GraftError('busy', 'Graft is working. Wait for it to finish, or stop it, then apply an attempt.');
-    const files = await this.attempts.apply(setId, index);
+    const files = await this.settleAttempts(() => this.attempts.apply(setId, index));
     // What the agent read of those files is out of date now.
     this.files.clear();
     return { files };
@@ -465,7 +486,7 @@ export class AgentSession {
 
   /** Removes every checkout of a message's attempts. */
   discardAttempts(setId: string): Promise<void> {
-    return this.attempts.discard(setId);
+    return this.settleAttempts(() => this.attempts.discard(setId));
   }
 
   /** Stops one attempt that is running, or all of them (null). */
