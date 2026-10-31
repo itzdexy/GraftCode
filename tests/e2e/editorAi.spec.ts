@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { launchGraft, type LaunchedApp } from './support/launch';
 import { MockProvider, requestText } from './support/mockProvider';
 import { completeOnboarding, makeGitProject } from './support/onboard';
@@ -129,4 +129,50 @@ test('suggestions as you type and Edit with AI change the draft, and the file on
   await w.waitForTimeout(1_000);
   expect(provider.requests.filter((r) => requestText(r.body).includes(SUGGESTION))).toHaveLength(asked);
   expect(notes()).toBe(edited);
+});
+
+test('Settings choose the model suggestions come from, and the toolbar names it', async () => {
+  const project = makeGitProject({ 'notes.txt': 'hello\n' });
+  provider = await MockProvider.start(); graft = await launchGraft();
+  await completeOnboarding(graft, provider, { project });
+  const w = graft.window;
+  provider.answer((body) => requestText(body).includes(SUGGESTION), { text: '' });
+  provider.script({ text: 'Settings ready.' });
+  const composer = w.getByRole('textbox', { name: 'Describe a task or ask a question' });
+  await composer.fill('Open the project'); await composer.press('Enter');
+  await expect(w.getByText('Settings ready.', { exact: true })).toBeVisible();
+
+  // Settings → Models → Editor: on by default, from the provider's fast model until another is chosen.
+  const openSettings = async (): Promise<Locator> => {
+    await w.getByRole('button', { name: /^Account menu for/ }).click();
+    await w.getByRole('menuitem', { name: 'Settings' }).click();
+    const settings = w.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Models', exact: true }).click();
+    return settings;
+  };
+  let settings = await openSettings();
+  const group = settings.getByRole('region', { name: 'Editor' });
+  await expect(group.getByRole('switch', { name: 'Suggestions as you type' })).toHaveAttribute('aria-checked', 'true');
+  await expect(group.getByLabel('Model for suggestions')).toHaveValue('');
+  await group.getByLabel('Model for suggestions').selectOption({ label: 'Graft Test Large' });
+  await expect(group.getByText(/code around the cursor/)).toBeVisible();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await w.getByRole('button', { name: 'More actions' }).click();
+  await w.getByRole('menuitem', { name: /^Files/ }).click();
+  await w.getByRole('tree', { name: 'Files' }).getByRole('button', { name: /^notes.txt/ }).first().click();
+  await w.getByRole('button', { name: 'Edit file', exact: true }).click();
+  const toggle = w.getByRole('button', { name: 'Suggestions as you type' });
+  await toggle.hover();
+  await expect(w.getByRole('tooltip')).toContainText('Suggestions as you type, from Graft Test Large');
+  const editor = w.getByRole('textbox', { name: 'Edit notes.txt' });
+  await editor.focus(); await w.keyboard.press('Control+End'); await w.keyboard.type('Next');
+  const chosen = (): boolean => provider?.requests.some((r) => requestText(r.body).includes('Next<CURSOR>') && (r.body as { model?: string }).model === 'graft-test-large') ?? false;
+  await expect.poll(chosen).toBe(true);
+
+  // Switched off in Settings, the toolbar shows it off too.
+  settings = await openSettings();
+  await settings.getByRole('region', { name: 'Editor' }).getByRole('switch', { name: 'Suggestions as you type' }).click();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 });
