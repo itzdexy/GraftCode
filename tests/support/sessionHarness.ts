@@ -92,6 +92,8 @@ export interface HarnessOptions {
   checkEdits?: boolean;
   /** A shell manager of the test's own (default: a plain one). */
   shells?: SessionDeps['shells'];
+  /** Private checkouts for writers and attempts (default: none, so writers work in the folder itself). */
+  workspaces?: SessionDeps['workspaces'];
   /** Takes the snapshot before each user turn (default: none is taken). */
   checkpoint?: SessionDeps['checkpoint'];
   /** How long a turn waits for its snapshot, and closing for a turn (default: the app's own). */
@@ -174,6 +176,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     mcpPrompts: () => options.mcp?.prompts ?? [],
     mcpPrompt: (server, name, args) => (options.mcp?.getPrompt ? options.mcp.getPrompt(server, name, args) : Promise.reject(new Error('No MCP prompts in this test.'))),
     shells: options.shells ?? makeShellManager(path.join(home, 'shell-logs')),
+    ...(options.workspaces ? { workspaces: options.workspaces } : {}),
     ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     ...(options.problems ? { problems: options.problems } : {}),
     shellLabel: shell.label,

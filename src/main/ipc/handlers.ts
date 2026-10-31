@@ -631,7 +631,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'sessions:list': async ({ includeArchived }) => (await ctx.sessions()).list(includeArchived),
     'sessions:create': async (input) => (await ctx.sessions()).create(input),
     'sessions:get': async ({ id }) => (await ctx.sessions()).detail(id),
-    'sessions:send': async ({ id, text, images, files }) => (await ctx.sessions()).send(id, text, images, files),
+    'sessions:send': async ({ id, text, images, files, attempts }) => (await ctx.sessions()).send(id, text, images, files, attempts),
     'sessions:interrupt': async ({ id }) => {
       (await ctx.sessions()).interrupt(id);
       return { ok: true as const };
@@ -780,6 +780,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'sessions:rewindPreview': async ({ sessionId, messageId, paths }) => (await ctx.sessions()).rewindPreview(sessionId, messageId, paths),
     'sessions:rewind': async ({ sessionId, messageId, mode, paths }) => (await ctx.sessions()).rewind(sessionId, messageId, mode, paths),
     'sessions:undoHunk': async ({ sessionId, toolUseId, hunk }) => (await ctx.sessions()).undoHunk(sessionId, toolUseId, hunk),
+    'attempts:apply': async ({ sessionId, setId, attempt }) => (await ctx.sessions()).applyAttempt(sessionId, setId, attempt),
+    'attempts:discard': async ({ sessionId, setId }) => {
+      await (await ctx.sessions()).discardAttempts(sessionId, setId);
+      return { ok: true as const };
+    },
+    'attempts:stop': async ({ sessionId, setId, attempt }) => ({ stopped: (await ctx.sessions()).stopAttempt(sessionId, setId, attempt) }),
+    'attempts:diff': async ({ sessionId, setId, attempt }) => (await ctx.sessions()).attemptDiff(sessionId, setId, attempt),
 
     'search:query': async ({ query, kind }) => {
       const s = await ctx.services();

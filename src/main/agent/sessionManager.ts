@@ -403,14 +403,33 @@ export class SessionManager {
     this.deps.emitSummary(summary);
     const m = input.message;
     if (m && (m.text.trim().length > 0 || m.images.length > 0 || m.files.length > 0)) {
-      this.get(summary.id).send(m.text, m.images, m.files);
+      this.get(summary.id).send(m.text, m.images, m.files, m.attempts);
     }
     return this.summaryOf(summary.id);
   }
 
-  send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = []): { queued: boolean } {
+  send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = [], attempts?: ModelRef[]): { queued: boolean } {
     this.clearCompleted(id);
-    return this.get(id).send(text, images, files);
+    return this.get(id).send(text, images, files, attempts);
+  }
+
+  /** Applies one attempt of a message sent as attempts (agent/attempts.ts) to the session's folder. */
+  async applyAttempt(sessionId: string, setId: string, attempt: number): Promise<{ files: string[] }> {
+    const result = await this.get(sessionId).applyAttempt(setId, attempt);
+    this.deps.filesChanged(this.folderOf(sessionId));
+    return result;
+  }
+
+  discardAttempts(sessionId: string, setId: string): Promise<void> {
+    return this.get(sessionId).discardAttempts(setId);
+  }
+
+  stopAttempt(sessionId: string, setId: string, attempt: number | null): boolean {
+    return this.live.get(sessionId)?.stopAttempt(setId, attempt) ?? false;
+  }
+
+  attemptDiff(sessionId: string, setId: string, attempt: number): { files: Array<{ path: string; patch: string; binary: boolean }>; truncated: boolean } {
+    return this.get(sessionId).attemptDiff(setId, attempt);
   }
 
   interrupt(id: string): void {

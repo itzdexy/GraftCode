@@ -571,8 +571,24 @@ export class SessionHost {
     return run ? (this.agentGroups.get(run.groupId)?.stop(run.nodeId) ?? false) : false;
   }
 
+  /** Takes the permission card of an agent that was stopped off the screen (an attempt, attempts.ts): nothing waits for its answer now. */
+  dropPending(agentLabel: string): void {
+    const pending = this.pendingPermission;
+    if (pending?.request.agentLabel !== agentLabel) return;
+    this.pendingPermission = null;
+    this.turn?.waiting(false);
+    this.emit({ type: 'permission-resolved', requestId: pending.request.id });
+    this.ports.setStatus('running');
+    pending.resolve({ decision: 'deny' });
+  }
+
+  /** Why the running turn has to pause, or null while it is within its limits (the same answer every loop of it gets). */
+  limitReached(): string | null {
+    return this.turn?.exceeded() ?? this.spend?.exceeded() ?? null;
+  }
+
   /** An agent of a group or a sub-agent never thinks in Taproot, the main agent's way of working: it gets the strongest plain effort instead. */
-  private agentEffort(model: ModelInfo): EffortLevel | null {
+  agentEffort(model: ModelInfo): EffortLevel | null {
     const effort = this.ports.effortFor(model);
     return effort === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : (model.effort?.default ?? null)) : effort;
   }

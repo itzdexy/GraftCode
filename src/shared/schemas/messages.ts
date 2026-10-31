@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { AttemptSetSchema } from './attempts';
+import { CheckReportSchema } from './checkReport';
 import { ModelRefSchema, ProviderKindSchema, UsageSchema } from './common';
 import { ToolDisplaySchema } from './toolDisplay';
 
@@ -87,25 +89,8 @@ export type FileAttachment = z.infer<typeof FileAttachmentSchema>;
 export const MessageKindSchema = z.enum(['normal', 'compaction-summary', 'reminder', 'command-output', 'notice', 'shell', 'check', 'mission']);
 export type MessageKind = z.infer<typeof MessageKindSchema>;
 
-/** The project's checks after a turn changed files (meta of a "check" message): each command run, in order. */
-export const CheckReportSchema = z.object({
-  passed: z.boolean(),
-  runs: z.array(
-    z.object({
-      command: z.string(),
-      exitCode: z.number().int().nullable(),
-      /** The end of the output. */
-      output: z.string(),
-      truncated: z.boolean(),
-      durationMs: z.number(),
-      timedOut: z.boolean(),
-      passed: z.boolean()
-    })
-  ),
-  /** 1 for the checks after the turn's work, 2 and up after each round of fixes. */
-  round: z.number().int().min(1)
-});
-export type CheckReport = z.infer<typeof CheckReportSchema>;
+// The check report lives in its own file so the attempts' schema can use it without importing this one.
+export { CheckReportSchema, type CheckReport } from './checkReport';
 
 /** A command the user ran with "!" in the message box, and what it printed (meta of a "shell" message). */
 export const UserShellSchema = z.object({
@@ -143,7 +128,9 @@ export const MessageMetaSchema = z.object({
   shell: UserShellSchema.optional(),
   check: CheckReportSchema.optional(),
   /** On a "mission" message: the turn it starts, of how many, and whether it follows checks that failed. */
-  mission: z.object({ turn: z.number().int(), of: z.number().int(), afterChecks: z.boolean() }).optional()
+  mission: z.object({ turn: z.number().int(), of: z.number().int(), afterChecks: z.boolean() }).optional(),
+  /** On the "notice" that holds the card of a message sent as attempts: the attempts and how each went (agent/attempts.ts). */
+  attempts: AttemptSetSchema.optional()
 });
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;
 

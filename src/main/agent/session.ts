@@ -32,6 +32,8 @@ import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { answerAside } from './aside';
+import { ATTEMPT_STEPS, attemptBrief, attemptTools, runAttemptLoop } from './attemptAgent';
+import { AttemptRunner, insideGitRepo } from './attempts';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
 import { runChecks, suggestChecks } from './checks';
@@ -40,7 +42,7 @@ import { modelOrder, toLlmHistory, withSentTimes } from './history';
 import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
 import { SessionContextState } from './contextState';
 import type { AgentWorkspaces } from './workspaces';
-import { runAgentLoop, type LoopHost } from './loop';
+import { mediaTurnKind, runAgentLoop, type LoopHost } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
 import { expandMentions } from './mentions';
@@ -190,6 +192,8 @@ interface InternalQueued {
   createdAt: number;
   /** A turn of a mission: its start, a later turn (with what the agent is told), or the checks on a report of "done". */
   mission?: { kind: 'start'; input: MissionStart } | { kind: 'step'; text: string; turn: number; of: number } | { kind: 'verify' };
+  /** Sent as attempts: one model per attempt (agent/attempts.ts). */
+  attempts?: ModelRef[];
 }
 
 const DELTA_FLUSH_MS = 40;
@@ -264,6 +268,8 @@ export class AgentSession {
   private readonly closing = new AbortController();
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
+  /** The messages sent as attempts, and their cards. */
+  private readonly attempts: AttemptRunner;
 
   constructor(
     summary: SessionSummary,
@@ -324,6 +330,17 @@ export class AgentSession {
       compact: (instructions, signal, keepRecent, using) => this.compact(instructions, signal, keepRecent, using),
       leavePlanMode: () => this.leavePlanMode()
     });
+    this.attempts = new AttemptRunner({
+      sessionId: this.id,
+      store: deps.store,
+      workspaces: deps.workspaces ?? null,
+      shells: deps.shells,
+      emit: (event) => this.emit(event),
+      dropPrompt: (label) => this.host.dropPending(label),
+      log: (level, message, fields) => deps.log(level, message, fields)
+    });
+    // This runtime runs no attempts yet: any the store says are running were cut off when Graft stopped.
+    this.attempts.recover();
   }
 
   get summary(): SessionSummary {
@@ -408,12 +425,13 @@ export class AgentSession {
 
   // ---- public controls ----------------------------------------------------
 
-  /** Sends user input, or queues it while a turn is running. */
-  send(text: string, images: ImageBlock[] = [], files: FileAttachment[] = []): { queued: boolean } {
+  /** Sends user input, or queues it while a turn is running. `attempts`: send it as attempts, one model each. */
+  send(text: string, images: ImageBlock[] = [], files: FileAttachment[] = [], attempts?: ModelRef[]): { queued: boolean } {
     if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
     const trimmed = text.trim();
     if (trimmed.length === 0 && images.length === 0 && files.length === 0) throw new GraftError('empty_message', 'Type a message first.');
-    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, files, createdAt: Date.now() };
+    if (attempts) this.checkAttempts(trimmed);
+    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, files, createdAt: Date.now(), ...(attempts ? { attempts } : {}) };
     if (this.running) {
       this.queue.push(item);
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -421,6 +439,42 @@ export class AgentSession {
     }
     this.start(item);
     return { queued: false };
+  }
+
+  /** Why a message can't be sent as attempts, thrown; nothing when it can. */
+  private checkAttempts(text: string): void {
+    const summary = this.summary;
+    if (summary.kind !== 'code' || !this.projectRoot() || !this.deps.workspaces) {
+      throw new GraftError('attempts_unavailable', 'Attempts work in code sessions that have a project folder.');
+    }
+    if (!insideGitRepo(this.workingDir())) {
+      throw new GraftError('attempts_need_git', 'Attempts need the folder to be a Git repository. Send the message once, or run git init in the folder first.');
+    }
+    if (summary.permissionMode === 'plan') throw new GraftError('attempts_plan', 'Attempts change files, and Plan mode changes none. Leave Plan mode first, or send the message once.');
+    if (parseSlash(text)) throw new GraftError('attempts_command', 'Commands run once, not as attempts. Turn attempts off to run it.');
+  }
+
+  /** Applies one attempt to the folder; not while a turn runs, which may be changing the same files. */
+  async applyAttempt(setId: string, index: number): Promise<{ files: string[] }> {
+    if (this.running) throw new GraftError('busy', 'Graft is working. Wait for it to finish, or stop it, then apply an attempt.');
+    const files = await this.attempts.apply(setId, index);
+    // What the agent read of those files is out of date now.
+    this.files.clear();
+    return { files };
+  }
+
+  /** Removes every checkout of a message's attempts. */
+  discardAttempts(setId: string): Promise<void> {
+    return this.attempts.discard(setId);
+  }
+
+  /** Stops one attempt that is running, or all of them (null). */
+  stopAttempt(setId: string, index: number | null): boolean {
+    return this.attempts.stop(setId, index);
+  }
+
+  attemptDiff(setId: string, index: number): { files: Array<{ path: string; patch: string; binary: boolean }>; truncated: boolean } {
+    return this.attempts.diff(setId, index);
   }
 
   removeQueued(id: string): void {
@@ -439,6 +493,7 @@ export class AgentSession {
     if (index < 0) throw new GraftError('not_queued', 'That message is no longer waiting.');
     const item = this.queue[index]!;
     if (parseSlash(item.text)) throw new GraftError('cannot_steer', 'Commands run once the current turn ends.');
+    if (item.attempts) throw new GraftError('cannot_steer', 'Attempts start once the current turn ends.');
     this.queue.splice(index, 1);
     if (!this.running) {
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -651,6 +706,8 @@ export class AgentSession {
       const after = this.deps.store.getMission(this.id);
       if (after?.id !== before?.id) this.emit({ type: 'mission', mission: after });
     }
+    // So do the checkouts of attempts that were neither applied nor discarded.
+    this.attempts.forget(removed).catch((error: unknown) => this.deps.log('warn', 'Could not remove the checkouts of rewound attempts', { session: this.id, message: (error as Error).message }));
     this.files.clear();
     return removed;
   }
@@ -1284,6 +1341,8 @@ export class AgentSession {
       let review: ReviewKind | null = null;
       let starting: Mission | null = null;
       let snapshot: Promise<void> | null = null;
+      /** The message the user sent to start this turn. */
+      let sentId: string | null = null;
       const missionTurn = item?.mission;
       if (missionTurn && missionTurn.kind !== 'start') {
         // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
@@ -1318,6 +1377,7 @@ export class AgentSession {
         // The message is saved and shown at once. The folder's snapshot follows, and nothing is changed before it is
         // taken: a large folder used to keep the message unseen, and the turn unstoppable, for as long as it took.
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
+        sentId = userMessageId;
         this.emit({ type: 'message', message: stored });
         // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
         if (starting) this.missions.save({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
@@ -1347,6 +1407,13 @@ export class AgentSession {
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
       const scope: TurnScope = { hooks, root, trusted, ...(review ? { readOnly: REVIEW_READ_ONLY } : {}) };
+      if (item?.attempts && sentId !== null) {
+        endReason = await this.runAttempts(item.attempts, sentId, turnId, scope, answering, signal);
+        // The snapshot Rewind goes back to is taken before an attempt can be applied: that happens once this turn ends.
+        await snapshot;
+        if (endReason === 'completed' && userText !== null) this.maybeTitle(userText);
+        return;
+      }
       const taken = snapshot;
       const host: LoopHost = {
         ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),
@@ -1414,6 +1481,83 @@ export class AgentSession {
       if (this.status !== 'error') this.setStatus('idle');
       this.emit({ type: 'turn-end', turnId, reason: endReason });
     }
+  }
+
+  /**
+   * A message sent as attempts (agent/attempts.ts): each model works on it in a checkout of its own, with the
+   * session's conversation, prompt and permission mode, and the card in the transcript compares them. They run
+   * as this turn, so its limits count them all and Stop stops them all.
+   */
+  private async runAttempts(refs: ModelRef[], messageId: string, turnId: string, scope: TurnScope, own: { model: ModelInfo; provider: LLMProvider }, signal: AbortSignal): Promise<TurnEnd> {
+    const same = (a: ModelRef, b: ModelRef): boolean => a.providerId === b.providerId && a.modelId === b.modelId;
+    const resolved = await Promise.all(refs.map((ref) => (same(ref, own.model.ref) ? Promise.resolve(own) : this.deps.models.resolve(ref, signal))));
+    for (const { model } of resolved) {
+      if (!model.supportsTools || mediaTurnKind(model.ref.modelId) !== null) {
+        throw new GraftError('attempts_model', `${model.label} can't use tools, so it can't make an attempt. Pick another model for it.`);
+      }
+    }
+    const history = this.history();
+    const memory = this.memoryLoader();
+    const prompts = new Map<string, Promise<string>>();
+    const promptFor = (model: ModelInfo): Promise<string> => {
+      const key = this.promptModelKey(model.ref, model);
+      const made = prompts.get(key) ?? (model === own.model && this.system ? Promise.resolve(this.system) : this.composePrompt(model, memory));
+      prompts.set(key, made);
+      return made;
+    };
+    const prefs = this.deps.preferences();
+    const checks = this.checksConfig();
+    const set = await this.attempts.run(
+      {
+        messageId,
+        turnId,
+        cwd: this.workingDir(),
+        models: resolved.map((r) => r.model),
+        concurrency: prefs.agents.maxParallel,
+        checks,
+        unchecked: checks ? null : this.uncheckedNote(),
+        agent: async (call, s) => {
+          const { model, provider } = resolved[call.index - 1]!;
+          return runAttemptLoop(
+            {
+              call,
+              host: this.host.loopHost(scope, { model, provider }, { tools: true, vision: false, agent: true }),
+              provider,
+              model,
+              history,
+              system: `${await promptFor(model)}\n\n${attemptBrief(call.index, call.of, call.lease.cwd)}`,
+              toolNames: attemptTools(this.offering.tools(model)),
+              toolDescriptions: this.offering.toolDescriptions(model),
+              registry: this.deps.tools,
+              effort: this.host.agentEffort(model),
+              privacy: this.privacy(),
+              sessionId: this.id,
+              turnId,
+              maxIterations: prefs.maxSteps ?? ATTEMPT_STEPS,
+              ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {})
+            },
+            s
+          );
+        }
+      },
+      signal
+    );
+    if (signal.aborted) return 'interrupted';
+    // An attempt the turn's limits stopped says so on its card; why the turn paused is said once, here.
+    const limit = this.host.limitReached();
+    if (limit) this.notice('warning', limit);
+    const ready = set.attempts.filter((a) => a.status === 'candidate').length;
+    this.deps.notify(this.summary, 'finished', ready > 0 ? `${String(ready)} of ${String(set.attempts.length)} attempts are ready to compare.` : 'None of the attempts finished.');
+    return 'completed';
+  }
+
+  /** Why the project's checks will not run in an attempt's checkout, said on its card. */
+  private uncheckedNote(): string | null {
+    const root = this.settingsRoot();
+    if (!root) return null;
+    return this.deps.settings.checks(root, true)
+      ? "No checks ran: this project's checks run only once you trust the project (Settings → Permissions)."
+      : 'No checks ran: this project has none set up. Add them in Customize → Checks.';
   }
 
   /**

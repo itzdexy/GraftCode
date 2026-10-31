@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ATTEMPTS_MAX, ATTEMPTS_MIN } from '../schemas/attempts';
 import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
 import { ChangedProblemsSchema, FileEditsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
 import { EditorDraftSchema, StoredEditorDraftSchema } from '../schemas/editorDrafts';
@@ -82,6 +83,9 @@ const PathSchema = z.string().min(1).max(4096);
 const RewindPathsSchema = z.array(PathSchema).min(1).max(100);
 const Void = z.void();
 const Ok = z.object({ ok: z.literal(true) });
+/** The models of a message sent as attempts, one per attempt. */
+const AttemptModelsSchema = z.array(ModelRefSchema).min(ATTEMPTS_MIN).max(ATTEMPTS_MAX);
+const AttemptIndexSchema = z.number().int().min(1).max(ATTEMPTS_MAX);
 
 export const SearchStatusSchema = z.object({
   /** The engine searches use now (null: none is set up, or search is off). */
@@ -176,7 +180,7 @@ export const CreateSessionInputSchema = z.object({
   permissionMode: PermissionModeSchema.nullable(),
   incognito: z.boolean(),
   message: z
-    .object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) })
+    .object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]), attempts: AttemptModelsSchema.optional() })
     .nullable()
 });
 export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
@@ -312,7 +316,14 @@ export const contracts = {
   'sessions:create': channel(CreateSessionInputSchema, SessionSummarySchema),
   'sessions:get': channel(z.object({ id: IdSchema }), SessionDetailSchema),
   'sessions:send': channel(
-    z.object({ id: IdSchema, text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) }),
+    z.object({
+      id: IdSchema,
+      text: z.string().max(200_000),
+      images: z.array(ImageBlockSchema).max(20),
+      files: z.array(FileAttachmentSchema).max(10).default([]),
+      /** Send it as attempts: one model per attempt, each in a private checkout (agent/attempts.ts). */
+      attempts: AttemptModelsSchema.optional()
+    }),
     z.object({ queued: z.boolean() })
   ),
   'sessions:interrupt': channel(z.object({ id: IdSchema }), Ok),
@@ -382,6 +393,17 @@ export const contracts = {
   'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema, paths: RewindPathsSchema.optional() }), RewindResultSchema),
   /** Takes one hunk of an edit a turn made back out of its file; refused when those lines changed since. */
   'sessions:undoHunk': channel(z.object({ sessionId: IdSchema, toolUseId: z.string().min(1).max(200), hunk: z.number().int().min(0).max(100_000) }), z.object({ path: z.string() })),
+  /** Applies one attempt of a message sent as attempts to the session's folder, refused when the folder changed since; the other checkouts go. */
+  'attempts:apply': channel(z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema }), z.object({ files: z.array(z.string()) })),
+  /** Removes every checkout of a message's attempts; nothing in the session's folder changes. */
+  'attempts:discard': channel(z.object({ sessionId: IdSchema, setId: IdSchema }), Ok),
+  /** Stops one attempt that is running, or all of them (null). */
+  'attempts:stop': channel(z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema.nullable() }), z.object({ stopped: z.boolean() })),
+  /** What an attempt changed, file by file, for the diff view. */
+  'attempts:diff': channel(
+    z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema }),
+    z.object({ files: z.array(z.object({ path: z.string(), patch: z.string(), binary: z.boolean() })), truncated: z.boolean() })
+  ),
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
   'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
