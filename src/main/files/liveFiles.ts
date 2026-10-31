@@ -58,7 +58,8 @@ export class LiveFiles {
     }
     const watched = this.sessions.get(sessionId) ?? new Map<string, Watched>();
     for (const [rel, entry] of watched) {
-      if (files.some((f) => f.path === rel)) continue;
+      // Kept when still listed in the same folder (a session can move to a worktree).
+      if (files.some((f) => f.path === rel) && entry.file === path.resolve(root, rel)) continue;
       this.stop(entry);
       watched.delete(rel);
     }

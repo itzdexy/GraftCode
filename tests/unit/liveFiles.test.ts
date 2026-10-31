@@ -82,4 +82,21 @@ describe('watching the files the editor shows', () => {
     expect(() => live.watch('s1', root, [{ path: '../outside.txt', revision: sha('x') }])).toThrow(/outside the session folder/);
     expect(pokes.size).toBe(0);
   });
+
+  it('follows a session that moved to another folder', () => {
+    const worktree = makeTempDir();
+    try {
+      fs.writeFileSync(path.join(worktree, 'notes.txt'), 'first');
+      live.watch('s1', root, [{ path: 'notes.txt', revision: sha('first') }]);
+      live.watch('s1', worktree, [{ path: 'notes.txt', revision: sha('first') }]);
+      expect([...pokes.keys()]).toEqual([path.resolve(worktree, 'notes.txt')]);
+      fs.writeFileSync(path.join(worktree, 'notes.txt'), 'changed in the worktree');
+      pokes.get(path.resolve(worktree, 'notes.txt'))?.();
+      vi.advanceTimersByTime(200);
+      expect(changes).toEqual([['s1', 'notes.txt']]);
+    } finally {
+      live.release('s1');
+      removeDir(worktree);
+    }
+  });
 });
