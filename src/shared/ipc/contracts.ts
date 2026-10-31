@@ -394,8 +394,9 @@ export const contracts = {
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
   'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
   // `content` is the editor's unsaved text for the file asked about; left out, the server reads the file from disk.
-  // `background`: asked by the mouse (a hover), so a question the user asked drops it instead of waiting behind it.
-  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional(), background: z.boolean().optional() }), SemanticResultSchema),
+  // `priority`: 'background' for what the mouse asks (a hover), 'user' for what the user asks, which drops a waiting hover
+  // instead of queueing behind it. Checks that run by themselves have none.
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional(), priority: z.enum(['background', 'user']).optional() }), SemanticResultSchema),
   /** A rename's edits to files other than the one in the editor, written all or none: each must still be the revision the server saw. */
   'files:applyEdits': channel(z.object({ sessionId: IdSchema, files: z.array(FileEditsSchema.extend({ revision: z.string().regex(/^[a-f0-9]{64}$/) })).min(1).max(200) }), Void),
   /** The files the editor shows, from the revisions it has; a change on disk comes back as a files:changed event. An empty list stops watching. */

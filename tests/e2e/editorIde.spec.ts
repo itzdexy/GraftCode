@@ -21,20 +21,35 @@ function cspReports(w: Page): string[] {
   return blocked;
 }
 
-/** The middle of a word on the editor's line that holds `line`; Monaco draws runs of same-coloured tokens as one element. */
+/**
+ * The middle of a word on the editor's line that holds `line`; Monaco draws runs of same-coloured tokens as one element.
+ * An edited line is drawn twice, plain and then coloured, and each drawing replaces its element: the word is measured
+ * on the coloured line, found and measured in one step, once two readings agree. A mouse sent to an element that is
+ * being replaced finds nothing there, or Monaco takes it for leaving the editor, and no hover starts.
+ */
 async function wordAt(w: Page, line: string, word: string): Promise<{ x: number; y: number }> {
-  return w.locator('.monaco-editor .view-line', { hasText: line }).evaluate((element, word) => {
-    const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const measure = (): Promise<{ x: number; y: number } | null> => w.evaluate(([line, word]) => {
+    const row = [...document.querySelectorAll('.monaco-editor .view-line')].find((element) => element.textContent?.includes(line));
+    if (!row?.querySelector('span[class^="mtk"]:not(.mtk1)')) return null;
+    const texts = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     for (let node = texts.nextNode(); node; node = texts.nextNode()) {
       const at = node.textContent?.indexOf(word) ?? -1;
       if (at === -1) continue;
       const range = document.createRange();
       range.setStart(node, at); range.setEnd(node, at + word.length);
       const box = range.getBoundingClientRect();
-      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      return box.width ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
     }
-    throw new Error(`${word} is not on the line`);
-  }, word);
+    return null;
+  }, [line, word] as const);
+  let last = await measure();
+  await expect.poll(async () => {
+    const next = await measure();
+    const steady = next !== null && JSON.stringify(next) === JSON.stringify(last);
+    last = next;
+    return steady;
+  }, { message: `${word} drawn on the line with ${line}` }).toBe(true);
+  return last!;
 }
 
 async function openInEditor(w: Page, provider: MockProvider, file: string): Promise<void> {
@@ -65,6 +80,7 @@ test('editing keys, a hover with the type, F2 renaming across two files and Ctrl
   await openInEditor(w, provider, 'main.ts');
   const editor = w.getByRole('textbox', { name: 'Edit main.ts' });
   const lines = w.locator('.monaco-editor .view-lines');
+  const unsaved = w.getByLabel('Unsaved changes', { exact: true });
   // The TypeScript grammar colours the code once it has loaded, and with it the language's comment marks.
   await expect(lines.locator('span[class^="mtk"]:not(.mtk1)').first()).toBeVisible();
 
@@ -73,7 +89,15 @@ test('editing keys, a hover with the type, F2 renaming across two files and Ctrl
   await expect(lines).toContainText('// import { twice }');
   await w.keyboard.press('Control+/');
   await expect(lines).not.toContainText('//');
-  await expect(w.getByLabel('Unsaved changes', { exact: true })).toHaveCount(0);
+  await expect(unsaved).toHaveCount(0);
+  // Alt+Down moves the line below the next one, Alt+Up back. A save is done once the panel shows it: the draft's
+  // backup note above the code goes, and the code moves up with it.
+  await w.keyboard.press('Alt+ArrowDown'); await w.keyboard.press('Control+S');
+  await expect.poll(() => read('main.ts')).toBe('export const answer = twice(21);\nimport { twice } from "./library";\n');
+  await expect(unsaved).toHaveCount(0);
+  await w.keyboard.press('Alt+ArrowUp'); await w.keyboard.press('Control+S');
+  await expect.poll(() => read('main.ts')).toBe(MAIN);
+  await expect(unsaved).toHaveCount(0);
 
   // The mouse on a name shows its type from the language server.
   const twice = await wordAt(w, 'answer', 'twice');
@@ -101,7 +125,7 @@ test('editing keys, a hover with the type, F2 renaming across two files and Ctrl
   await expect.poll(() => read('main.ts')).toBe(MAIN.replaceAll('twice', 'thrice'));
   expect(read('library.ts')).toBe(LIBRARY);
   await expect(lines).toContainText('export function thrice');
-  await expect(w.getByLabel('Unsaved changes', { exact: true })).toBeVisible();
+  await expect(unsaved).toBeVisible();
   await declaration.focus(); await w.keyboard.press('Control+S');
   await expect.poll(() => read('library.ts')).toBe(LIBRARY.replace('twice', 'thrice'));
   // The note stays after the type check that follows the edit.

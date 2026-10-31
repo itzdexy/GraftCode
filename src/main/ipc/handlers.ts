@@ -865,13 +865,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Editor recovery copies belong to code sessions.');
       (await ctx.services()).editorDrafts.save(sessionId, path, draft);
     },
-    'files:semantic': async ({ sessionId, query, content, background }) => {
+    'files:semantic': async ({ sessionId, query, content, priority }) => {
       const summary = (await ctx.sessions()).summary(sessionId);
       const s = await ctx.services();
       if (summary.kind !== 'code' || !summary.projectId || !s.projects.get(summary.projectId)?.trusted) {
         throw new GraftError('project_untrusted', 'Language intelligence requires a trusted code project. Review project trust in Settings before checking types or definitions.');
       }
-      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content, background);
+      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content, priority);
     },
     'files:applyEdits': async ({ sessionId, files }) => {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');

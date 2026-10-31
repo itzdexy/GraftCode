@@ -250,14 +250,17 @@ describe('real TypeScript language-server queries', () => {
     await expect(servers.query(dir, { action: 'rename', file: 'library.ts', line: 2, column: 30 }, signal, buffer)).rejects.toThrow(/cannot rename/i);
   }, 60_000);
 
-  it('drops a hover the mouse asked for when the user asks something, instead of making them wait', async () => {
+  it('drops a waiting hover the mouse asked for when the user asks something, and only then', async () => {
     const signal = new AbortController().signal;
-    const hover = servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, true);
-    const definition = servers.query(dir, { action: 'definition', file: 'main.ts', line: 2, column: 23 }, signal);
+    const hover = servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, 'background');
+    const definition = servers.query(dir, { action: 'definition', file: 'main.ts', line: 2, column: 23 }, signal, undefined, 'user');
     await expect(hover).rejects.toMatchObject({ code: 'interrupted' });
     expect((await definition).locations).toContainEqual({ file: 'library.ts', line: 1, column: 17 });
-    // Hovers alone still answer.
-    expect((await servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, true)).hover).toContain('number');
+    // A check that runs by itself, or the agent's query, leaves it waiting its turn.
+    const next = servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, 'background');
+    const check = servers.query(dir, { action: 'diagnostics', file: 'main.ts' }, signal);
+    expect((await next).hover).toContain('number');
+    expect((await check).diagnostics).toEqual([]);
   }, 30_000);
 });
 

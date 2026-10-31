@@ -64,7 +64,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     if (!quiet) { busy.current = true; setPending(true); setFailure(null); setStatus(null); setReferences([]); setHover(null); }
     try {
       const result = await invoke('files:semantic', { sessionId, query: { action, file, line: cursor?.lineNumber, column: cursor?.column },
-        content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
+        content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true), priority: quiet ? undefined : 'user' });
       if (version !== epoch.current || model.isDisposed()) return;
       autoCheck.current = true;
       if (action === 'definition') {

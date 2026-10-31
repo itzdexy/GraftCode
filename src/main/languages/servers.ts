@@ -45,6 +45,9 @@ function languageId(file: string): string {
   return /\.tsx$/i.test(file) ? 'typescriptreact' : /\.[cm]?ts$/i.test(file) ? 'typescript' : /\.jsx$/i.test(file) ? 'javascriptreact' : 'javascript';
 }
 
+/** What the mouse asks (a hover) and what the user asks; checks that run by themselves and the agent's queries have neither. */
+export type QueryPriority = 'background' | 'user';
+
 /** The most files one rename changes; each is given to the server, which holds 64 documents. */
 const MAX_RENAME_FILES = 50;
 
@@ -88,7 +91,7 @@ class TypeScriptClient {
   /** The documents the server holds open, by URI: the version it was last given, and the file's state on disk then (null for an unsaved buffer). */
   private readonly documents = new Map<string, { version: number; file: string; stamp: string | null }>();
   private tail: Promise<unknown> = Promise.resolve();
-  /** Queries the mouse asked for (hovers) still waiting their turn: any other query drops them. One already running is quick and finishes. */
+  /** Queries the mouse asked for (hovers) still waiting their turn: one the user asks drops them. One already running is quick and finishes. */
   private readonly waiting = new Set<AbortController>();
   private closed = false;
   private disposing: Promise<void> | undefined;
@@ -140,13 +143,13 @@ class TypeScriptClient {
     }
   }
 
-  run(input: SemanticQuery, signal: AbortSignal, buffer?: string, background = false): Promise<SemanticResult> {
+  run(input: SemanticQuery, signal: AbortSignal, buffer?: string, priority?: QueryPriority): Promise<SemanticResult> {
     let own: AbortController | undefined;
-    if (background) {
+    if (priority === 'background') {
       own = new AbortController();
       this.waiting.add(own);
       signal = AbortSignal.any([signal, own.signal]);
-    } else {
+    } else if (priority === 'user') {
       for (const hover of this.waiting) hover.abort();
     }
     this.active++;
@@ -446,8 +449,8 @@ export class LanguageServers {
     return operation;
   }
 
-  /** `background`: asked by the mouse; another query drops it while it waits (see TypeScriptClient.run). */
-  async query(root: string, input: SemanticQuery, signal: AbortSignal, buffer?: string, background = false): Promise<SemanticResult> {
+  /** `priority`: 'background' for what the mouse asks, which a 'user' query drops while it waits (see TypeScriptClient.run). */
+  async query(root: string, input: SemanticQuery, signal: AbortSignal, buffer?: string, priority?: QueryPriority): Promise<SemanticResult> {
     signal.throwIfAborted();
     if (buffer !== undefined && Buffer.byteLength(buffer) > 2 * 1024 * 1024) throw new GraftError('language_file_limit', 'Semantic buffers must be no larger than 2 MiB.');
     if (this.disposed) throw new GraftError('language_server_closed', 'The language-server manager is closed.');
@@ -465,7 +468,7 @@ export class LanguageServers {
       }
       client = new TypeScriptClient(canonical); this.clients.set(key, client);
     }
-    try { return await client.run(input, signal, buffer, background); }
+    try { return await client.run(input, signal, buffer, priority); }
     catch (error) {
       if (!client.alive || error instanceof GraftError && ['language_server_timeout', 'language_server_closed', 'language_diagnostics'].includes(error.code)) {
         if (this.clients.get(key) === client) this.clients.delete(key);

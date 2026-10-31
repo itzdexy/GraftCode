@@ -31,7 +31,8 @@ export function applyText(editor: monaco.editor.ICodeEditor, text: string): void
 /**
  * Hover, Ctrl+click to the definition and F2 rename in a TypeScript or JavaScript file, answered by the project's
  * language server from the editor's unsaved text. Hovers and the definitions Ctrl+mouse asks for are background
- * questions: one the user asks (`busy`) is never kept waiting behind them. `report` says how a rename went, null to clear.
+ * questions: one the user asks is never kept waiting behind them, and while one is running (`busy`) none is asked.
+ * `report` says how a rename went, null to clear.
  */
 export function installLanguageFeatures(
   editor: monaco.editor.ICodeEditor,
@@ -45,8 +46,8 @@ export function installLanguageFeatures(
 ): monaco.IDisposable {
   const { sessionId, file } = options;
   const mine = (model: monaco.editor.ITextModel): boolean => model === editor.getModel();
-  const ask = (model: monaco.editor.ITextModel, query: Omit<SemanticQuery, 'file'>, background = false) =>
-    invoke('files:semantic', { sessionId, background, query: { ...query, file }, content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
+  const ask = (model: monaco.editor.ITextModel, query: Omit<SemanticQuery, 'file'>, priority: 'background' | 'user') =>
+    invoke('files:semantic', { sessionId, priority, query: { ...query, file }, content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
   const wordRange = (model: monaco.editor.ITextModel, position: monaco.Position): monaco.Range => {
     const word = model.getWordAtPosition(position);
     return word ? new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn) : monaco.Range.fromPositions(position);
@@ -58,7 +59,7 @@ export function installLanguageFeatures(
       provideHover: async (model, position, token) => {
         if (!mine(model) || options.busy()) return null;
         // Nothing shows on a failure (an untrusted project, a hover dropped for the user's question); the buttons below say why.
-        const result = await ask(model, { action: 'hover', line: position.lineNumber, column: position.column }, true).catch(() => null);
+        const result = await ask(model, { action: 'hover', line: position.lineNumber, column: position.column }, 'background').catch(() => null);
         if (!result?.hover || token.isCancellationRequested) return null;
         return { contents: [{ value: result.hover }], range: wordRange(model, position) };
       }
@@ -66,7 +67,7 @@ export function installLanguageFeatures(
     monaco.languages.registerDefinitionProvider(LANGUAGES, {
       provideDefinition: async (model, position, token) => {
         if (!mine(model)) return null;
-        const result = await ask(model, { action: 'definition', line: position.lineNumber, column: position.column }, true).catch(() => null);
+        const result = await ask(model, { action: 'definition', line: position.lineNumber, column: position.column }, 'background').catch(() => null);
         if (!result || token.isCancellationRequested) return null;
         return (result.locations ?? []).map((at) => ({
           uri: at.file === file ? model.uri : monaco.Uri.from({ scheme: OTHER_FILE, path: `/${at.file}` }),
@@ -87,7 +88,7 @@ export function installLanguageFeatures(
       resolveRenameLocation: async (model, position) => {
         if (!mine(model)) return undefined;
         try {
-          const { span } = await ask(model, { action: 'rename', line: position.lineNumber, column: position.column });
+          const { span } = await ask(model, { action: 'rename', line: position.lineNumber, column: position.column }, 'user');
           if (span) return { range: new monaco.Range(span.line, span.column, span.endLine, span.endColumn), text: span.text };
           return { range: wordRange(model, position), text: '', rejectReason: 'There is no name to rename here.' };
         } catch (error) {
@@ -104,7 +105,7 @@ export function installLanguageFeatures(
         };
         let files: FileEdits[];
         try {
-          files = (await ask(model, { action: 'rename', line: position.lineNumber, column: position.column, newName })).edits ?? [];
+          files = (await ask(model, { action: 'rename', line: position.lineNumber, column: position.column, newName }, 'user')).edits ?? [];
         } catch (error) {
           return fail(errorText(error));
         }
