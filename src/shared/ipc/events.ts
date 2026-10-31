@@ -34,6 +34,8 @@ export const GraftEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('browser:shortcut'), shortcut: z.enum(['find', 'address']) }),
   /** The agent opened a page for a session: show the Browser panel there. */
   z.object({ type: z.literal('browser:reveal'), sessionId: z.string() }),
+  /** A file the editor shows changed on disk (an agent's edit, a formatter, git); the editor's own saves are not reported. */
+  z.object({ type: z.literal('files:changed'), sessionId: z.string(), path: z.string() }),
   z.object({ type: z.literal('mcp:changed') }),
   /** A site's picture or details changed (the gallery reloads). */
   z.object({ type: z.literal('sites:changed') }),

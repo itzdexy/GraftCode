@@ -132,14 +132,25 @@ export async function readPreview(root: string, rel: string): Promise<FilePrevie
     ...(editable ? { revision: createHash('sha256').update(buffer).digest('hex') } : {}) };
 }
 
-/** User-initiated editor save, scoped to an existing text file and its loaded bytes. */
-export async function savePreview(root: string, rel: string, content: string, revision: string): Promise<FilePreview> {
+/** An existing file of the session's folder the editor may write: inside the folder once links are followed, and not Git's own. */
+export function editableFile(root: string, rel: string): string {
   const resolved = resolveInside(root, rel);
-  const file = fs.realpathSync(resolved);
+  let file: string;
+  try { file = fs.realpathSync(resolved); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new GraftError('not_found', `${rel} no longer exists.`);
+    throw error;
+  }
   if (!isInsideReal(root, file)) throw new GraftError('outside_folder', 'That path is outside the session folder.');
   if (path.relative(fs.realpathSync(root), file).split(path.sep).some((part) => part.toLowerCase() === '.git')) {
     throw new GraftError('protected_file', 'The editor cannot change Git metadata.');
   }
+  return file;
+}
+
+/** User-initiated editor save, scoped to an existing text file and its loaded bytes. */
+export async function savePreview(root: string, rel: string, content: string, revision: string): Promise<FilePreview> {
+  const file = editableFile(root, rel);
   const stat = fs.statSync(file);
   if (!stat.isFile() || stat.size > MAX_PREVIEW_BYTES || Buffer.byteLength(content) > MAX_PREVIEW_BYTES) throw new GraftError('editor_file_limit', 'Editable files must be regular text files no larger than 512 KiB.');
   const before = fs.readFileSync(file);

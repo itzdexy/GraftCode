@@ -36,6 +36,8 @@ import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { diagramFile, listDirectory, mediaFile, modelBytes, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { applyFileEdits } from '../files/applyEdits';
+import { LiveFiles } from '../files/liveFiles';
 import { searchText } from '../files/textSearch';
 import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
@@ -320,6 +322,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   const changed = async (dir: string): Promise<void> => {
     (await ctx.services()).diffStats.invalidate(dir);
   };
+  /** The files the Files panel's editor shows, watched for changes on disk. */
+  const liveFiles = new LiveFiles((sessionId, path) => ctx.emit({ type: 'files:changed', sessionId, path }));
   let editorAi: EditorAi | null = null;
   const editor = async (): Promise<EditorAi> => {
     const s = await ctx.services();
@@ -687,11 +691,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { ok: true as const };
     },
     'sessions:archive': async ({ id, archived, removeWorktree, force }) => {
+      if (archived) liveFiles.release(id);
       const result = await (await ctx.sessions()).archive(id, archived, removeWorktree, force);
       if (archived) await (await ctx.ptys()).disposeSession(id);
       return result;
     },
     'sessions:delete': async ({ id, force }) => {
+      liveFiles.release(id);
       await (await ctx.sessions()).remove(id, force);
       await (await ctx.ptys()).disposeSession(id);
       return { ok: true as const };
@@ -859,13 +865,22 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Editor recovery copies belong to code sessions.');
       (await ctx.services()).editorDrafts.save(sessionId, path, draft);
     },
-    'files:semantic': async ({ sessionId, query, content }) => {
+    'files:semantic': async ({ sessionId, query, content, background }) => {
       const summary = (await ctx.sessions()).summary(sessionId);
       const s = await ctx.services();
       if (summary.kind !== 'code' || !summary.projectId || !s.projects.get(summary.projectId)?.trusted) {
         throw new GraftError('project_untrusted', 'Language intelligence requires a trusted code project. Review project trust in Settings before checking types or definitions.');
       }
-      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content);
+      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content, background);
+    },
+    'files:applyEdits': async ({ sessionId, files }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');
+      const dir = await workDirFor(sessionId);
+      await applyFileEdits(dir, files);
+      await changed(dir);
+    },
+    'files:watch': async ({ sessionId, files }) => {
+      liveFiles.watch(sessionId, await workDirFor(sessionId), files);
     },
     'problems:changed': async ({ sessionId }) => {
       const summary = (await ctx.sessions()).summary(sessionId);
@@ -883,6 +898,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');
       const dir = await workDirFor(sessionId);
       const saved = await savePreview(dir, path, content, revision);
+      if (saved.revision) liveFiles.saved(sessionId, path, saved.revision);
       await changed(dir);
       return saved;
     },

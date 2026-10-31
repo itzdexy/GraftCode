@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
-import { ChangedProblemsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
+import { ChangedProblemsSchema, FileEditsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
 import { EditorDraftSchema, StoredEditorDraftSchema } from '../schemas/editorDrafts';
 import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema, SEARCH_ENGINE_IDS } from '../schemas/appSettings';
 import {
@@ -394,7 +394,12 @@ export const contracts = {
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
   'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
   // `content` is the editor's unsaved text for the file asked about; left out, the server reads the file from disk.
-  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional() }), SemanticResultSchema),
+  // `background`: asked by the mouse (a hover), so a question the user asked drops it instead of waiting behind it.
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional(), background: z.boolean().optional() }), SemanticResultSchema),
+  /** A rename's edits to files other than the one in the editor, written all or none: each must still be the revision the server saw. */
+  'files:applyEdits': channel(z.object({ sessionId: IdSchema, files: z.array(FileEditsSchema.extend({ revision: z.string().regex(/^[a-f0-9]{64}$/) })).min(1).max(200) }), Void),
+  /** The files the editor shows, from the revisions it has; a change on disk comes back as a files:changed event. An empty list stops watching. */
+  'files:watch': channel(z.object({ sessionId: IdSchema, files: z.array(z.object({ path: PathSchema, revision: z.string().regex(/^[a-f0-9]{64}$/) })).max(8) }), Void),
   /** The language server's errors and warnings for the files the session has changed. It starts no server in a project that is not trusted. */
   'problems:changed': channel(z.object({ sessionId: IdSchema }), ChangedProblemsSchema),
   'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),

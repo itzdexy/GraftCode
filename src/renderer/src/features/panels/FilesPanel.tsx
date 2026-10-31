@@ -23,6 +23,7 @@ import { draftSaves, type SaveTarget } from './draftSaves';
 import { EditorAiButtons } from './EditorAiButtons';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
+import { DiskChangeBar, useLiveFile } from './liveFile';
 import type { EditorComment } from './TextEditor';
 import { closeWorkspaceTab, loadWorkspaceLayout, openWorkspaceTab, saveWorkspaceLayout, setWorkspaceTabMode, type WorkspaceTab } from './workspaceLayout';
 
@@ -396,6 +397,8 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
 
   const selected = preview ? (preview.state === 'ready' ? preview.preview.path : preview.path) : null;
   const ready = preview?.state === 'ready' ? preview.preview : null;
+  // The file shown follows the disk; the tree's change marks are read again with it.
+  useLiveFile(sessionId, selected, ready?.revision, (latest) => { setPreview({ state: 'ready', preview: latest }); setSaved((n) => n + 1); });
   const draftKey = `${sessionId}:${selected ?? ''}`;
   const draft = useEditorDrafts((s) => s.drafts[draftKey]);
   const recovery = useEditorDrafts((s) => s.recovery[draftKey]);
@@ -485,6 +488,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             <p className="flex-1 text-sm text-danger">{saveError}</p>
             <Button size="xs" variant="ghost" onClick={() => { useEditorDrafts.getState().discard(draftKey); setEditing(null); open(selected); }}>Discard draft and reload</Button>
           </div> : null}
+          <DiskChangeBar draftKey={draftKey} path={selected} disk={edit ? ready : null} />
           {dirty ? <p role={recovery?.state === 'error' ? 'alert' : 'status'} className="shrink-0 px-10 py-4 text-2xs text-fg-muted">
             {recovery?.state === 'error' ? `Draft recovery failed: ${recovery.message ?? 'unknown error'}. Your draft remains in memory.` : recovery?.state === 'backed-up' ? 'Draft backed up on this device.' : 'Backing up draft…'}
           </p> : null}

@@ -812,7 +812,9 @@
  * panel does not: its page is a native view placed over it by its measured place, and it would be measured mid-way.
  */
 :root[data-motion-style='lively'] .graft-panel:not(.graft-panel--still) {
-  animation: graft-panel-in var(--g-duration-lively) var(--g-ease-lively) both;
+  /* Not `both`: a transform kept once the panel is in makes it the frame of everything fixed inside it, and the
+     editor's hovers and rename box (fixed, to escape the panel's clipping) were drawn off-screen. */
+  animation: graft-panel-in var(--g-duration-lively) var(--g-ease-lively) backwards;
 }
 
 /* Reduced motion (see tokens.css): the system's request unless Motion is On, or Motion set to Reduced. */

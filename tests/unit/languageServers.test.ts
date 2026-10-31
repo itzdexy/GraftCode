@@ -3,6 +3,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type * as ChildProcessModule from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { applyFileEdits } from '../../src/main/files/applyEdits';
 import { EditChecks, problemsNote } from '../../src/main/languages/problems';
 import { LanguageServers } from '../../src/main/languages/servers';
 import { semanticCodeTool } from '../../src/main/tools/search/semantic';
@@ -220,6 +222,42 @@ describe('real TypeScript language-server queries', () => {
       fs.symlinkSync(external, path.join(dir, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
       await expect(servers.query(dir, { action: 'outline', file: 'link/outside.ts' }, new AbortController().signal)).rejects.toMatchObject({ code: 'language_path' });
     } finally { fs.rmSync(path.join(dir, 'link'), { force: true }); removeDir(external); }
+  }, 30_000);
+
+  it('renames across files from the editor’s unsaved text, with each other file as it is on disk now', async () => {
+    const signal = new AbortController().signal;
+    const buffer = '// unsaved\nexport function twice(value: number): number { return value * 2; }\n';
+    const user = path.join(dir, 'user.ts');
+    fs.writeFileSync(user, 'import { twice } from "./library";\nexport const once = twice(1);\n');
+    // The server reads user.ts for the project; it changes on disk just before the rename and nobody tells the server.
+    expect((await servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal)).hover).toContain('number');
+    fs.writeFileSync(user, 'import { twice } from "./library";\nexport const once = twice(1);\nexport const again = twice(2);\n');
+    const prepared = await servers.query(dir, { action: 'rename', file: 'library.ts', line: 2, column: 17 }, signal, buffer);
+    expect(prepared.span).toEqual({ line: 2, column: 17, endLine: 2, endColumn: 22, text: 'twice' });
+    const renamed = await servers.query(dir, { action: 'rename', file: 'library.ts', line: 2, column: 17, newName: 'thrice' }, signal, buffer);
+    const byFile = new Map(renamed.edits?.map((f) => [f.file, f]));
+    expect(byFile.get('library.ts')).toEqual({ file: 'library.ts', revision: null, edits: [{ line: 2, column: 17, endLine: 2, endColumn: 22, text: 'thrice' }] });
+    const sha = (file: string): string => createHash('sha256').update(fs.readFileSync(path.join(dir, file))).digest('hex');
+    expect(byFile.get('main.ts')?.revision).toBe(sha('main.ts'));
+    expect(byFile.get('user.ts')?.edits).toHaveLength(3);
+    await applyFileEdits(dir, renamed.edits!.flatMap((f) => (f.revision === null ? [] : [{ ...f, revision: f.revision }])));
+    expect(fs.readFileSync(path.join(dir, 'main.ts'), 'utf8')).toContain('import { thrice as double } from "./library";');
+    expect(fs.readFileSync(path.join(dir, 'user.ts'), 'utf8')).toBe('import { thrice } from "./library";\nexport const once = thrice(1);\nexport const again = thrice(2);\n');
+    // The buffer's part is the editor's to apply: the file on disk keeps its old name.
+    expect(fs.readFileSync(path.join(dir, 'library.ts'), 'utf8')).toContain('function twice');
+    // A name the standard library declares cannot be renamed; the server says why.
+    await expect(servers.query(dir, { action: 'rename', file: 'library.ts', line: 2, column: 30 }, signal, buffer)).rejects.toMatchObject({ code: 'language_rename' });
+    await expect(servers.query(dir, { action: 'rename', file: 'library.ts', line: 2, column: 30 }, signal, buffer)).rejects.toThrow(/cannot rename/i);
+  }, 60_000);
+
+  it('drops a hover the mouse asked for when the user asks something, instead of making them wait', async () => {
+    const signal = new AbortController().signal;
+    const hover = servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, true);
+    const definition = servers.query(dir, { action: 'definition', file: 'main.ts', line: 2, column: 23 }, signal);
+    await expect(hover).rejects.toMatchObject({ code: 'interrupted' });
+    expect((await definition).locations).toContainEqual({ file: 'library.ts', line: 1, column: 17 });
+    // Hovers alone still answer.
+    expect((await servers.query(dir, { action: 'hover', file: 'main.ts', line: 2, column: 23 }, signal, undefined, true)).hover).toContain('number');
   }, 30_000);
 });
 
