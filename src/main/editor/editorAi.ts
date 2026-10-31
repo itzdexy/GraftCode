@@ -73,7 +73,12 @@ export class EditorAi {
     if (findSecrets(input.selection).length > 0 || (input.proposal !== undefined && findSecrets(input.proposal).length > 0)) {
       throw new GraftError('secret_in_selection', 'The selected lines look like they hold a key or a password, so Graft does not send them to a model. Change them by hand.');
     }
-    const request: EditRequest = { ...input, before: maskSecrets(windowBefore(input.before)), after: maskSecrets(windowAfter(input.after)) };
+    const request: EditRequest = {
+      ...input,
+      before: maskSecrets(windowBefore(input.before)),
+      after: maskSecrets(windowAfter(input.after)),
+      instruction: maskSecrets(input.instruction)
+    };
     const { text, cut } = await this.run(input.requestId, EDIT_MS, async (signal) => {
       const { provider, current } = await this.sessionModel(input.sessionId, signal);
       return ask(provider, current, EDIT_SYSTEM, editInput(request), signal, this.privacy(), { maxChars: EDIT_CHARS, retries: 1, cacheKey: `${input.sessionId}:edit` });

@@ -23,6 +23,8 @@ test('suggestions as you type and Edit with AI change the draft, and the file on
   // Only these places have a suggestion; every other pause in typing gets none.
   const suggestions: Record<string, string> = { 'The answer is<CURSOR>': ' 42.', 'Say<CURSOR>': ' hello world', 'Say <CURSOR>': 'hello world', 'Say hello<CURSOR>': ' world' };
   provider.answer((body) => requestText(body).includes(SUGGESTION), (body) => ({ text: Object.entries(suggestions).find(([place]) => requestText(body).includes(place))?.[1] ?? '' }));
+  // One edit is still being written when it is stopped (the first rule that matches answers).
+  provider.answer((body) => requestText(body).includes('Instruction: Take your time'), { text: 'NEVER SHOWN', hold: true }, { once: true });
   // The session's model rewrites the selected lines, and refines its own proposal when asked.
   provider.answer((body) => requestText(body).includes(EDIT), (body) => ({ text: requestText(body).includes('<proposal>') ? 'FIRST\nSECOND' : 'FIRST LINE\nSECOND LINE' }));
   provider.script({ text: 'Editor ready.' });
@@ -104,9 +106,17 @@ test('suggestions as you type and Edit with AI change the draft, and the file on
   const edited = `FIRST\nSECOND\nthird line\n${typed}`;
   await expect.poll(notes).toBe(edited);
 
-  // The toolbar's button opens the same box; Escape closes it and nothing changes.
+  // The toolbar's button opens the same box. Stop ends the request in the main process; Escape closes the box and nothing changes.
   await w.getByRole('button', { name: 'Edit with AI' }).click();
   await expect(box.getByRole('textbox', { name: 'Describe the change' })).toBeFocused();
+  await w.keyboard.type('Take your time'); await w.keyboard.press('Enter');
+  await expect(box.getByRole('status')).toHaveText('Writing the change…');
+  const ended = provider.waitForHeldStreamClosed();
+  await box.getByRole('button', { name: 'Stop' }).click();
+  await ended;
+  await expect(box.getByRole('status')).toHaveText('Stopped. Enter asks again.');
+  await expect(box.getByRole('textbox', { name: 'Describe the change' })).toBeFocused();
+  await expect(added).toHaveCount(0);
   await w.keyboard.press('Escape');
   await expect(box).toHaveCount(0);
   await expect(editor).toBeFocused();

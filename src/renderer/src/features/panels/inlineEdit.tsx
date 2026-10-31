@@ -53,17 +53,20 @@ function InlineEditBox({ state, onSubmit, onStop, onAccept, onClose }: { state: 
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [text]);
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+  // Escape and Ctrl+Enter work wherever the keyboard is in the box, its buttons included.
+  const onBoxKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
       onClose();
     } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       if (proposing && !state.running) onAccept();
-    } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      if (!state.running && text.trim()) onSubmit(text);
     }
+  };
+  const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (!state.running && text.trim()) onSubmit(text);
   };
   const added = state.proposal?.split('\n').length ?? 0;
   const status = state.running
@@ -72,7 +75,12 @@ function InlineEditBox({ state, onSubmit, onStop, onAccept, onClose }: { state: 
       ? `${plural(state.replaced, 'line')} become ${plural(added, 'line')}. Ctrl+Enter accepts, Escape rejects.`
       : (state.note ?? 'Enter sends, Shift+Enter starts a new line, Escape closes.');
   return (
-    <div role="group" aria-label="Edit with AI" className="motion-pop flex flex-col gap-6 rounded-md border border-border bg-surface px-8 py-6 font-sans shadow-popover focus-within:border-border-strong">
+    <div
+      role="group"
+      aria-label="Edit with AI"
+      onKeyDown={onBoxKeyDown}
+      className="motion-pop flex flex-col gap-6 rounded-md border border-border bg-surface px-8 py-6 font-sans shadow-popover focus-within:border-border-strong"
+    >
       <div className="flex items-start gap-6">
         <WandSparkles className="mt-3 size-13 shrink-0 text-icon-muted" aria-hidden="true" />
         <textarea
@@ -84,7 +92,7 @@ function InlineEditBox({ state, onSubmit, onStop, onAccept, onClose }: { state: 
           aria-busy={state.running}
           placeholder={proposing ? 'Ask for a change to the proposal' : 'Describe the change'}
           onChange={(event) => setText(event.target.value)}
-          onKeyDown={onKeyDown}
+          onKeyDown={onInputKeyDown}
           className="min-w-0 flex-1 resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fg-placeholder"
         />
       </div>
@@ -98,7 +106,15 @@ function InlineEditBox({ state, onSubmit, onStop, onAccept, onClose }: { state: 
           </Button>
         ) : null}
         {!state.running && text.trim() ? (
-          <Button size="xs" variant={proposing ? 'ghost' : 'secondary'} onClick={() => onSubmit(text)}>
+          <Button
+            size="xs"
+            variant={proposing ? 'ghost' : 'secondary'}
+            onClick={() => {
+              // The button goes while the change is written; the keyboard stays in the box.
+              input.current?.focus();
+              onSubmit(text);
+            }}
+          >
             Send
           </Button>
         ) : null}
@@ -272,6 +288,8 @@ class InlineEdit {
   private stop(): void {
     if (!this.cancelRequest()) return;
     this.set({ running: false, note: 'Stopped. Enter asks again.' });
+    // The Stop button that had the keyboard is gone.
+    this.focus();
   }
 
   /** The proposal as a diff: the lines it replaces red and struck, its own lines green beneath them. */

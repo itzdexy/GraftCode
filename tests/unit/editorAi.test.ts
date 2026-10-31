@@ -175,9 +175,10 @@ describe('the editor AI in the main process', () => {
 
   it('rewrites the selected lines on the session’s own model and refuses lines that hold a key', async () => {
     const { ai, provider } = service([{ text: '```\nFIRST\nSECOND\n```' }, { text: '' }]);
-    const edit = { sessionId: 's1', file: 'notes.txt', language: 'plaintext', before: '', selection: 'first\nsecond', after: 'third', instruction: 'Shout it' };
-    expect(await ai.inlineEdit({ ...edit, requestId: 'e1' })).toEqual({ replacement: 'FIRST\nSECOND' });
+    const edit = { sessionId: 's1', file: 'notes.txt', language: 'plaintext', before: `const old = "${KEY}";`, selection: 'first\nsecond', after: 'third', instruction: 'Shout it' };
+    expect(await ai.inlineEdit({ ...edit, requestId: 'e1', instruction: `Shout it, not like ${KEY}` })).toEqual({ replacement: 'FIRST\nSECOND' });
     expect(provider.requests[0]!.model.ref.modelId).toBe('fake-model');
+    expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain(KEY);
     await expect(ai.inlineEdit({ ...edit, requestId: 'e2' })).rejects.toMatchObject({ code: 'edit_empty' });
     await expect(ai.inlineEdit({ ...edit, requestId: 'e3', selection: `const key = "${KEY}";` })).rejects.toMatchObject({ code: 'secret_in_selection' });
     expect(provider.requests).toHaveLength(2);
