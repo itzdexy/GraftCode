@@ -28,6 +28,7 @@ import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
 import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
+import { undoHunk } from './turnUndo';
 import { AgentSession, type SessionDeps } from './session';
 import { mediaTurnKind } from './loop';
 import { generateTitle, titleModel } from './title';
@@ -693,14 +694,34 @@ export class SessionManager {
     };
   }
 
-  rewindPreview(sessionId: string, messageId: string): Promise<RewindPreview> {
-    return previewRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId);
+  /** The folder a code session's tools name files from: its worktree, else its project. */
+  private folderOf(sessionId: string): string {
+    const s = this.summaryOf(sessionId);
+    const folder = s.worktreePath ?? s.projectPath ?? s.cwd;
+    if (!folder) throw new GraftError('no_folder', 'This session has no folder.');
+    return folder;
   }
 
-  async rewind(sessionId: string, messageId: string, mode: RewindMode): Promise<RewindResult> {
+  /** `paths` (from the session's folder): only what restoring those files would change. */
+  rewindPreview(sessionId: string, messageId: string, paths?: string[]): Promise<RewindPreview> {
+    const only = paths ? { folder: this.folderOf(sessionId), paths } : undefined;
+    return previewRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, only);
+  }
+
+  async rewind(sessionId: string, messageId: string, mode: RewindMode, paths?: string[]): Promise<RewindResult> {
     if (this.live.get(sessionId)?.isBusy) throw new GraftError('busy', 'Stop the session before rewinding it.');
-    const result = await performRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, mode);
+    const only = paths ? { folder: this.folderOf(sessionId), paths } : undefined;
+    const result = await performRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, mode, only);
     this.deps.emitSummary(this.summaryOf(sessionId));
+    return result;
+  }
+
+  /** Takes one change of a turn's edit back out of its file (see turnUndo.ts). */
+  undoHunk(sessionId: string, toolUseId: string, hunk: number): { path: string } {
+    if (this.live.get(sessionId)?.isBusy) throw new GraftError('busy', 'Stop the session before undoing a change.');
+    const folder = this.folderOf(sessionId);
+    const result = undoHunk(folder, this.storeFor(sessionId).listMessages(sessionId), toolUseId, hunk);
+    this.deps.filesChanged(folder);
     return result;
   }
 

@@ -323,6 +323,12 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
             files={item.files}
             onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null}
             onOpen={summary.kind === 'code' ? (path, line) => usePanels.getState().openFile(summary.id, path, { line }) : null}
+            // Any finished turn's files go back one by one: from its snapshot, which its message names once it was taken.
+            undo={
+              summary.kind === 'code'
+                ? { sessionId: summary.id, messageId: item.messageId, snapshot: item.messageId !== null && messagesById.get(item.messageId)?.meta.checkpointId !== undefined }
+                : null
+            }
           />
         );
       case 'files':

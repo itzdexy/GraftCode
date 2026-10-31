@@ -78,6 +78,8 @@ export const AppInfoSchema = z.object({
 export type AppInfo = z.infer<typeof AppInfoSchema>;
 
 const PathSchema = z.string().min(1).max(4096);
+/** Files a rewind restores by themselves, named from the session's folder. */
+const RewindPathsSchema = z.array(PathSchema).min(1).max(100);
 const Void = z.void();
 const Ok = z.object({ ok: z.literal(true) });
 
@@ -375,8 +377,11 @@ export const contracts = {
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),
   'sessions:feedback': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, value: z.union([z.literal(-1), z.literal(0), z.literal(1)]) }), Ok),
-  'sessions:rewindPreview': channel(z.object({ sessionId: IdSchema, messageId: IdSchema }), RewindPreviewSchema),
-  'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema }), RewindResultSchema),
+  /** `paths` (from the session's folder, as a turn's file card names them): only those files, for one file's Undo. */
+  'sessions:rewindPreview': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, paths: RewindPathsSchema.optional() }), RewindPreviewSchema),
+  'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema, paths: RewindPathsSchema.optional() }), RewindResultSchema),
+  /** Takes one hunk of an edit a turn made back out of its file; refused when those lines changed since. */
+  'sessions:undoHunk': channel(z.object({ sessionId: IdSchema, toolUseId: z.string().min(1).max(200), hunk: z.number().int().min(0).max(100_000) }), z.object({ path: z.string() })),
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
   'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),

@@ -139,6 +139,15 @@ function safeRefPart(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
+/** The changes to these paths (from the snapshot root, "/" between parts), or all of them when no paths are given. */
+function onlyPaths(changes: RewindChange[], paths: readonly string[] | undefined): RewindChange[] {
+  if (!paths) return changes;
+  // Windows names a file in any case; git names it as it was snapshotted.
+  const key = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const wanted = new Set(paths.map(key));
+  return changes.filter((c) => wanted.has(key(c.path)));
+}
+
 /**
  * Working-tree snapshots taken before each user turn. Snapshots are built
  * in a private per-session index with line-ending conversion and attribute
@@ -320,23 +329,24 @@ export class CheckpointService {
     return { root: record.repoDir, gitDir: record.gitDir, shadow: false, attrSource, env: {} };
   }
 
-  /** What restoring a checkpoint would do to the current files. */
-  async preview(checkpointId: string): Promise<RewindPreview> {
+  /** What restoring a checkpoint would do to the current files; with `paths` (from the snapshot root), to those files only. */
+  async preview(checkpointId: string, paths?: readonly string[]): Promise<RewindPreview> {
     const record = this.get(checkpointId);
     const target = await this.targetFor(record);
     const current = await this.snapshot(target, record.sessionId, 'graft rewind preview', null);
-    return { checkpointId, root: target.root, changes: await this.diff(target, current.tree, record.commitSha) };
+    return { checkpointId, root: target.root, changes: onlyPaths(await this.diff(target, current.tree, record.commitSha), paths) };
   }
 
   /**
-   * Restores files to a checkpoint. The current state is saved first as a
-   * safety checkpoint (returned) so the rewind itself can be undone.
+   * Restores files to a checkpoint: all of them, or only `paths` (from the
+   * snapshot root), leaving every other file as it is. The current state is
+   * saved first as a safety checkpoint (returned) so the rewind itself can be undone.
    */
-  async restore(checkpointId: string): Promise<{ changes: RewindChange[]; safetyCheckpointId: string }> {
+  async restore(checkpointId: string, paths?: readonly string[]): Promise<{ changes: RewindChange[]; safetyCheckpointId: string }> {
     const record = this.get(checkpointId);
     const target = await this.targetFor(record);
     const current = await this.snapshot(target, record.sessionId, `graft safety snapshot before rewinding session ${record.sessionId}`, null);
-    const changes = await this.diff(target, current.tree, record.commitSha);
+    const changes = onlyPaths(await this.diff(target, current.tree, record.commitSha), paths);
 
     const safetyId = randomUUID();
     const safetyRef = `refs/graft/checkpoints/${safeRefPart(record.sessionId)}/${safetyId}`;

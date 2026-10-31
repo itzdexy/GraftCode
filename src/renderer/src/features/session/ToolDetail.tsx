@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from 'react';
+import { useContext, useMemo, useState, type ReactNode } from 'react';
 import { SearchResultList } from '../web/SearchResults';
 import { CircleCheck, CircleDashed, CircleDot, Copy, FileText, FolderOpen } from 'lucide-react';
 import type { ToolResultBlock } from '@shared/schemas/messages';
@@ -370,7 +370,20 @@ function DisplayBody({ display, result }: { display: ToolDisplay; result: ToolRe
  * are covered until the eye is pressed, as they are in output; `covered`
  * false shows every line as it is, for a change that is being approved.
  */
-export function EditDiff({ patch, path, named = true, covered = true }: { patch: string; path?: string; named?: boolean; covered?: boolean }) {
+export function EditDiff({
+  patch,
+  path,
+  named = true,
+  covered = true,
+  hunkActions
+}: {
+  patch: string;
+  path?: string;
+  named?: boolean;
+  covered?: boolean;
+  /** Controls for each hunk (a past turn's Undo); with them, each hunk gets a header row to hold them. */
+  hunkActions?: (hunk: number) => ReactNode;
+}) {
   const rows = useMemo(() => parsePatch(patch), [patch]);
   // In a code session's transcript the lines can be commented on for the agent. A change waiting for approval is outside it.
   const conversation = useContext(ConversationContext);
@@ -393,7 +406,17 @@ export function EditDiff({ patch, path, named = true, covered = true }: { patch:
         <span className="shrink-0 text-diff-del">-{removed}</span>
         {covers && covers.size > 0 ? <SecretsToggle shown={shown} onChange={setShown} /> : null}
       </div>
-      <DiffView rows={rows} mode="unified" language={path ? languageForPath(path) : null} gutter="one" hunkHeaders={false} covers={shown ? null : covers} comments={comments} className="max-h-[320px] overflow-y-auto" />
+      <DiffView
+        rows={rows}
+        mode="unified"
+        language={path ? languageForPath(path) : null}
+        gutter="one"
+        hunkHeaders={hunkActions !== undefined}
+        hunkActions={hunkActions}
+        covers={shown ? null : covers}
+        comments={comments}
+        className="max-h-[320px] overflow-y-auto"
+      />
     </div>
   );
 }

@@ -40,6 +40,7 @@ import { DetailsColumn, DetailsToggle, useDetailsShown } from './details/Session
 import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
 import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
+import { useTurnUndo } from './turnUndo';
 
 export const DISCLAIMER = 'Graft can make mistakes. Review changes before shipping.';
 
@@ -133,14 +134,16 @@ function CodeSession({
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [statsBump, setStatsBump] = useState(0);
-  const stats = useDiffStats(summary.id, `${view.turnActive}:${view.messages.length}:${statsBump}`);
+  // An Undo on a past turn's card changes files outside any turn: the counts and the panels read them again.
+  const undone = useTurnUndo((s) => Object.keys(s.undone).length);
+  const stats = useDiffStats(summary.id, `${view.turnActive}:${view.messages.length}:${statsBump}:${undone}`);
   const commands = useCommands(summary.projectPath, true);
   // The plan the session is following: the newest one the user approved, read from the conversation.
   const plan = useMemo(() => currentPlan(view.messages), [view.messages]);
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
   const folder = summary.worktreePath ?? summary.cwd;
-  const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}`;
+  const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}:${undone}`;
   const agentsWorking = view.agentRuns.filter((r) => agentRunActive(r.status)).length;
   const detailsOn = useDetailsShown(summary.id);
   useAutoOpenTasks(summary.id);

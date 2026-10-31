@@ -777,8 +777,9 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).feedback(sessionId, messageId, value);
       return { ok: true as const };
     },
-    'sessions:rewindPreview': async ({ sessionId, messageId }) => (await ctx.sessions()).rewindPreview(sessionId, messageId),
-    'sessions:rewind': async ({ sessionId, messageId, mode }) => (await ctx.sessions()).rewind(sessionId, messageId, mode),
+    'sessions:rewindPreview': async ({ sessionId, messageId, paths }) => (await ctx.sessions()).rewindPreview(sessionId, messageId, paths),
+    'sessions:rewind': async ({ sessionId, messageId, mode, paths }) => (await ctx.sessions()).rewind(sessionId, messageId, mode, paths),
+    'sessions:undoHunk': async ({ sessionId, toolUseId, hunk }) => (await ctx.sessions()).undoHunk(sessionId, toolUseId, hunk),
 
     'search:query': async ({ query, kind }) => {
       const s = await ctx.services();

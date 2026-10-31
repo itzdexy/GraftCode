@@ -96,8 +96,12 @@ export const useFileRefs = create<FileRefsState>((set, get) => {
     forget: (sessionId) => {
       dropped.set(sessionId, (dropped.get(sessionId) ?? 0) + 1);
       stale.add(sessionId);
-      for (const key of [...asked]) if (key.startsWith(`${sessionId}\n`)) asked.delete(key);
+      const waiting = [...asked].filter((key) => key.startsWith(`${sessionId}\n`));
+      for (const key of waiting) asked.delete(key);
       set({ known: Object.fromEntries(Object.entries(get().known).filter(([id]) => id !== sessionId)) });
+      // A question still on its way is answered for the old round and dropped. Whoever asked it still waits (its
+      // value never changed, so it asks nothing again): it is asked again now, against the files as they are.
+      for (const key of waiting) get().ask(sessionId, key.slice(sessionId.length + 1));
     }
   };
 });

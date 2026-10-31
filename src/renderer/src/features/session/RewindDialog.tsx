@@ -17,6 +17,10 @@ interface Target {
   chat: boolean;
   /** What is chosen when the dialog opens ("files" for Undo on a turn's file card); the user can still change it. */
   mode?: RewindMode;
+  /** Only these files (from the session's folder), for Undo on one file of a turn's card: the conversation is left alone. */
+  paths?: string[];
+  /** Runs once the files are restored. */
+  onDone?: () => void;
 }
 
 export const useRewind = create<{ target: Target | null; open: (target: Target) => void; close: () => void }>((set) => ({
@@ -43,7 +47,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
 
   useEffect(() => {
     let cancelled = false;
-    invoke('sessions:rewindPreview', { sessionId: target.sessionId, messageId: target.messageId })
+    invoke('sessions:rewindPreview', { sessionId: target.sessionId, messageId: target.messageId, ...(target.paths ? { paths: target.paths } : {}) })
       .then((preview) => {
         if (!cancelled) setLoad({ state: 'ready', preview });
       })
@@ -57,7 +61,8 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
 
   const preview = load.state === 'ready' ? load.preview : null;
   const filesAvailable = preview?.files !== null && preview !== null;
-  const chosen: RewindMode = target.chat ? 'conversation' : (mode ?? (filesAvailable ? 'both' : 'conversation'));
+  const only = target.paths ?? null;
+  const chosen: RewindMode = target.chat ? 'conversation' : only ? 'files' : (mode ?? (filesAvailable ? 'both' : 'conversation'));
   // Undo asks for the files; without a snapshot that can't be done, and removing messages instead would be a surprise.
   const impossible = preview !== null && chosen !== 'conversation' && !filesAvailable;
 
@@ -65,8 +70,10 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
     setBusy(true);
     setError(null);
     try {
-      const result = await invoke('sessions:rewind', { sessionId: target.sessionId, messageId: target.messageId, mode: chosen });
-      await useSessions.getState().open(target.sessionId, { reset: true });
+      const result = await invoke('sessions:rewind', { sessionId: target.sessionId, messageId: target.messageId, mode: chosen, ...(only ? { paths: only } : {}) });
+      // A file put back by itself leaves the conversation as it is: nothing to load again.
+      if (!only) await useSessions.getState().open(target.sessionId, { reset: true });
+      target.onDone?.();
       if (chosen !== 'files' && result.restoredText) {
         useUi.getState().setDraft(target.sessionId, result.restoredText);
         requestAnimationFrame(() => useUi.getState().focusComposer?.());
@@ -74,7 +81,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
       const fileCount = result.files?.length ?? 0;
       useToasts.getState().push({
         tone: 'success',
-        title: target.chat ? 'Ready to edit' : 'Rewound',
+        title: target.chat ? 'Ready to edit' : only ? 'Undone' : 'Rewound',
         description: [
           result.messagesRemoved > 0 ? `${result.messagesRemoved} ${result.messagesRemoved === 1 ? 'message' : 'messages'} removed` : null,
           chosen !== 'conversation' ? `${fileCount} ${fileCount === 1 ? 'file' : 'files'} restored` : null,
@@ -92,11 +99,13 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
 
   return (
     <DialogContent
-      title={target.chat ? 'Edit this message?' : 'Rewind to this message?'}
+      title={target.chat ? 'Edit this message?' : only ? (only.length === 1 ? `Undo the changes to ${only[0] ?? ''}?` : `Undo the changes to ${String(only.length)} files?`) : 'Rewind to this message?'}
       description={
         target.chat
           ? 'The replies after it are removed and the message goes back into the message box to edit and resend.'
-          : 'Graft took a snapshot of your files before this message was sent.'
+          : only
+            ? `Graft restores ${only.length === 1 ? 'it' : 'them'} from the snapshot it took before this turn. Changes made since are lost; other files and the conversation stay as they are.`
+            : 'Graft took a snapshot of your files before this message was sent.'
       }
       className="w-[min(540px,calc(100vw-48px))]"
       footer={
@@ -105,7 +114,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
             Cancel
           </Button>
           <Button variant="primary" onClick={() => void run()} disabled={busy || preview === null || impossible}>
-            {target.chat ? 'Edit message' : 'Rewind'}
+            {target.chat ? 'Edit message' : only ? 'Undo' : 'Rewind'}
           </Button>
         </>
       }
@@ -114,7 +123,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
       {load.state === 'error' ? <ErrorState message={load.message} /> : null}
       {preview ? (
         <div className="flex flex-col gap-14">
-          {target.chat ? null : (
+          {target.chat || only ? null : (
             <div role="radiogroup" aria-label="What to rewind" className="flex flex-col gap-6">
               {MODES.map((m) => {
                 const disabled = m.value !== 'conversation' && !filesAvailable;
@@ -150,7 +159,7 @@ function RewindBody({ target, onClose }: { target: Target; onClose: () => void }
             {target.chat ? null : preview.files === null ? (
               <p className="text-fg-muted">There is no file snapshot for this message, so only the conversation can be rewound.</p>
             ) : preview.files.length === 0 ? (
-              <p className="text-fg-muted">Files are unchanged since this message.</p>
+              <p className="text-fg-muted">{only ? 'Nothing to undo: it is as it was before this turn.' : 'Files are unchanged since this message.'}</p>
             ) : (
               <>
                 <p className="text-fg-muted">Files that would change:</p>
@@ -184,7 +193,7 @@ export function RewindDialog() {
   const close = useRewind((s) => s.close);
   return (
     <Dialog open={target !== null} onOpenChange={(open) => (open ? undefined : close())}>
-      {target ? <RewindBody key={`${target.sessionId}:${target.messageId}`} target={target} onClose={close} /> : null}
+      {target ? <RewindBody key={`${target.sessionId}:${target.messageId}:${target.paths?.join('|') ?? ''}`} target={target} onClose={close} /> : null}
     </Dialog>
   );
 }
