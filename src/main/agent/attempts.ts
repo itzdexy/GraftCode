@@ -465,7 +465,10 @@ export class AttemptRunner {
         if (!ACTIVE.has(a.status)) return a;
         const lease = a.workspaceId ? this.deps.workspaces?.load(a.workspaceId) : null;
         if (lease) for (const dir of new Set([lease.root, lease.cwd])) for (const name of DEPENDENCY_DIRS) unlinkLink(path.join(dir, name));
-        return { ...a, status: 'stopped', activity: null, endedAt: a.endedAt ?? now, error: 'Graft stopped while this attempt was running. What it had done stays in its checkout until you apply another attempt or discard them all.' };
+        const error = a.workspaceId
+          ? 'Graft stopped while this attempt was running. What it had done stays in its checkout until you apply another attempt or discard them all.'
+          : 'Graft stopped before this attempt started.';
+        return { ...a, status: 'stopped', activity: null, endedAt: a.endedAt ?? now, error };
       });
       try {
         this.deps.store.updateMessageMeta(message.id, { attempts: { ...set, status: 'open', attempts, note: 'Graft stopped while these attempts were running.' } });
