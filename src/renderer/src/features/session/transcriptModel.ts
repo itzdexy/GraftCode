@@ -1,4 +1,5 @@
 import type { TranscriptView } from '@shared/schemas/appSettings';
+import type { AttemptSet } from '@shared/schemas/attempts';
 import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import { maskSecrets } from '@shared/secrets';
@@ -42,6 +43,8 @@ export type TranscriptItem =
   /** Where a later turn of a mission starts: which turn, of how many, and whether it follows checks that failed. */
   | { kind: 'mission'; key: string; turn: number; of: number; afterChecks: boolean; at: number }
   | { kind: 'notice'; key: string; text: string }
+  /** The card of a message sent as attempts: how each went, and what can be done with them. */
+  | { kind: 'attempts'; key: string; set: AttemptSet }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
   /** `messageId`: the message the user sent to start this turn, whose snapshot holds the files as they were before it; null for a turn the user did not type. */
@@ -139,7 +142,8 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
     }
     if (kind === 'notice') {
       flush();
-      items.push({ kind: 'notice', key: message.id, text: textFrom(message) });
+      const set = message.meta.attempts;
+      items.push(set ? { kind: 'attempts', key: message.id, set } : { kind: 'notice', key: message.id, text: textFrom(message) });
       continue;
     }
     if (kind === 'shell') {

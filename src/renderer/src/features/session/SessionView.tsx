@@ -15,6 +15,8 @@ import { usePaneActive, usePanes } from '../../stores/panes';
 import { commentsOf, useReview } from '../../stores/review';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
+import { AttemptsMenu, useAttemptsUnavailable } from '../composer/AttemptsMenu';
+import { attemptModels, useAttemptsChoice } from '../composer/attemptsChoice';
 import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
 import { contextLimit, ContextUsage } from '../composer/ContextUsage';
@@ -37,7 +39,7 @@ import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
 import { DetailsColumn, DetailsToggle, useDetailsShown } from './details/SessionDetails';
-import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
+import { compact, cycleMode, interrupt, lastTypedMessage, plainMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
 import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
 import { useTurnUndo } from './turnUndo';
@@ -152,11 +154,16 @@ function CodeSession({
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null && focused);
   useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null && focused);
 
+  const attemptsOff = useAttemptsUnavailable(folder, summary.permissionMode);
+
   // The comments that wait on lines of code go with an ordinary message, and are gone once it has. A command leaves them waiting.
+  // So does the choice of attempts: a message takes it with it, and the next one goes once again.
   const send = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
     const message = withComments(text, commentsOf(useReview.getState(), summary.id));
-    const sent = await sendMessage(message.text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
+    const attempts = attemptsOff === null && plainMessage(message.text) ? attemptModels(useAttemptsChoice.getState().choices[summary.id], summary.model ?? model?.ref ?? null) : null;
+    const sent = await sendMessage(message.text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) }, attempts);
     if (sent && message.attached) useReview.getState().clear(summary.id);
+    if (sent && attempts) useAttemptsChoice.getState().clear(summary.id);
     return sent;
   };
 
@@ -220,6 +227,7 @@ function CodeSession({
                 <>
                   <PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />
                   <TranscriptViewMenu />
+                  <AttemptsMenu draftKey={summary.id} model={model} unavailable={attemptsOff} />
                 </>
               }
               rightControls={

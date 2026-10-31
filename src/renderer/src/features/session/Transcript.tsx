@@ -25,6 +25,7 @@ import {
   UserMessage
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
+import { AttemptsCard } from './AttemptsCard';
 import { CheckItem, RunningChecks } from './CheckItem';
 import { ConversationContext, type Conversation } from './conversation';
 import { DiagramCard } from './DiagramCard';
@@ -369,6 +370,16 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         );
       case 'notice':
         return <p className="text-md text-fg-muted">{item.text}</p>;
+      case 'attempts':
+        return summary.kind === 'code' ? (
+          <AttemptsCard
+            sessionId={summary.id}
+            set={item.set}
+            busy={view.turnActive}
+            // Its message is the newest turn, and has the snapshot of the files from before it.
+            undo={items.indexOf(item) > lastTurnAt && messagesById.get(item.set.messageId)?.meta.checkpointId !== undefined}
+          />
+        ) : null;
       case 'error':
         return (
           <div role="alert" className="flex items-start gap-8 text-md">
