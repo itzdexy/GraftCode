@@ -74,6 +74,7 @@ import type { SiteView } from '@shared/schemas/sites';
 import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
 import { changedProblems } from '../languages/changedProblems';
+import { EditorAi } from '../editor/editorAi';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
 
@@ -318,6 +319,17 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   };
   const changed = async (dir: string): Promise<void> => {
     (await ctx.services()).diffStats.invalidate(dir);
+  };
+  let editorAi: EditorAi | null = null;
+  const editor = async (): Promise<EditorAi> => {
+    const s = await ctx.services();
+    const sessions = await ctx.sessions();
+    return (editorAi ??= new EditorAi({
+      settings: () => s.settings.get(),
+      session: (id) => sessions.summary(id),
+      models: (providerId, signal) => s.registry.listModels(providerId, { signal }),
+      provider: (providerId) => s.registry.get(providerId)
+    }));
   };
 
   return {
@@ -874,6 +886,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       await changed(dir);
       return saved;
     },
+    'editor:complete': async (input) => (await editor()).complete(input),
+    'editor:inlineEdit': async (input) => (await editor()).inlineEdit(input),
+    'editor:cancel': async ({ requestId }) => {
+      (await editor()).cancel(requestId);
+      return { ok: true as const };
+    },
+    'editor:model': async ({ sessionId, file }) => (await editor()).model(sessionId, file),
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
     'files:modelBytes': async ({ sessionId, path }) => modelBytes(await workDirFor(sessionId), path),
     'diagrams:previewUrl': async ({ sessionId, source }) => ({ url: `${ctx.artifacts.urlForFile((await diagramOf(sessionId, source)).file)}?report=size` }),

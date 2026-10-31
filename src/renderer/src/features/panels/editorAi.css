@@ -1,0 +1,22 @@
+/* Edit with AI in the Files editor (inlineEdit.tsx): the lines it is about, and a proposal shown as a diff before anything changes. */
+
+.monaco-editor .graft-ai-target {
+  background: color-mix(in srgb, var(--g-accent) 9%, transparent);
+}
+
+.monaco-editor .graft-ai-removed {
+  background: var(--g-diff-del-bg);
+}
+
+.monaco-editor .graft-ai-removed-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--g-diff-del);
+}
+
+.monaco-editor .graft-ai-added {
+  background: var(--g-diff-add-bg);
+  box-shadow: inset 2px 0 0 var(--g-diff-add);
+  color: var(--g-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

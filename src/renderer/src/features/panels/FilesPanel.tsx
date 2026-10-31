@@ -20,6 +20,7 @@ import { LazyModelViewer } from '../models/LazyModelViewer';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
 import { draftSaves, type SaveTarget } from './draftSaves';
+import { EditorAiButtons } from './EditorAiButtons';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
 import type { EditorComment } from './TextEditor';
@@ -291,6 +292,8 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   // A comment for the agent on lines of the file in the editor: asked for by the button or the key, written in a dialog.
   const [commentAsked, setCommentAsked] = useState(0);
   const [commenting, setCommenting] = useState<(EditorComment & { path: string }) | null>(null);
+  // Edit with AI asked for by the toolbar's button; the editor opens it on its selected lines.
+  const [editAsked, setEditAsked] = useState(0);
 
   const open = useCallback((path: string, location: CodeLocation | null = null, recovery = false, mode: WorkspaceTab['mode'] = 'preview'): void => {
     const requestedMode = location || recovery ? 'edit' : mode;
@@ -459,6 +462,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             }}><Pencil className="size-13" /></IconButton> : null}
             {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={save}><Save className="size-13" /></IconButton> : null}
             {edit ? <IconButton label="Comment for the agent" shortcut="Ctrl+L" size="xs" onClick={() => setCommentAsked((n) => n + 1)}><MessageSquarePlus className="size-13" /></IconButton> : null}
+            {edit ? <EditorAiButtons sessionId={sessionId} file={selected} onEdit={() => setEditAsked((n) => n + 1)} /> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
@@ -488,7 +492,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
             {edit && draft ? <Suspense fallback={<LoadingState label="Loading editor…" />}><TextEditor key={`${sessionId}:${selected}:${opened}`} sessionId={sessionId} file={selected} value={draft.content} position={position} onNavigate={(location) => open(location.file, location)}
-              commentRequest={commentAsked} onComment={(at) => setCommenting({ ...at, path: selected })}
+              commentRequest={commentAsked} onComment={(at) => setCommenting({ ...at, path: selected })} editRequest={editAsked}
               onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={save} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}

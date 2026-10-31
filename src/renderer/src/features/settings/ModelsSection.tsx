@@ -12,6 +12,7 @@ import { ModelListbox } from '../models/ModelListbox';
 import { AgentsSettings } from './AgentsSettings';
 import { Group, saveSettings, SelectField, SettingRow, SwitchRow } from './common';
 import { customModelSummary } from './customModelSummary';
+import { EditorSettings } from './EditorSettings';
 import { MediaModelsSections } from './MediaModelsSections';
 
 function parseCount(text: string, min: number, max: number): number | undefined | null {
@@ -232,6 +233,8 @@ export function ModelsSection() {
       </Group>
 
       <AgentsSettings models={models} />
+
+      <EditorSettings models={models} />
 
       <Group
         title="Custom model IDs"

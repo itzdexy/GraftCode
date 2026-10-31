@@ -398,6 +398,30 @@ export const contracts = {
   /** The language server's errors and warnings for the files the session has changed. It starts no server in a project that is not trusted. */
   'problems:changed': channel(z.object({ sessionId: IdSchema }), ChangedProblemsSchema),
   'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),
+  /** A suggestion for the text at the editor's cursor (main/editor/editorAi.ts); empty when there is none. */
+  'editor:complete': channel(
+    z.object({ sessionId: IdSchema, requestId: IdSchema, file: PathSchema, language: z.string().max(100), prefix: z.string().max(20_000), suffix: z.string().max(10_000) }),
+    z.object({ text: z.string() })
+  ),
+  /** New text for the selected lines, from the session's model; `proposal` is the rewrite being refined. Nothing in the file changes. */
+  'editor:inlineEdit': channel(
+    z.object({
+      sessionId: IdSchema,
+      requestId: IdSchema,
+      file: PathSchema,
+      language: z.string().max(100),
+      before: z.string().max(20_000),
+      selection: z.string().max(40_000),
+      after: z.string().max(10_000),
+      instruction: z.string().trim().min(1).max(4_000),
+      proposal: z.string().max(80_000).optional()
+    }),
+    z.object({ replacement: z.string() })
+  ),
+  /** Ends an editor:complete or editor:inlineEdit request, also one that hasn't arrived yet. */
+  'editor:cancel': channel(z.object({ requestId: IdSchema }), Ok),
+  /** The model suggestions in this file come from, or why there are none. */
+  'editor:model': channel(z.object({ sessionId: IdSchema, file: PathSchema }), z.object({ label: z.string().nullable(), note: z.string().nullable() })),
   /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
   /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */

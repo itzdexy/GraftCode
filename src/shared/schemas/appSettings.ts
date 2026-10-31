@@ -242,6 +242,11 @@ export const AppSettingsSchema = z.object({
     systemVoice: z.string().max(200).nullable(),
     speed: z.number().min(0.5).max(2)
   }),
+  /** The Files editor: grey suggestions as you type, and the model that writes them (null: the provider's fast model). */
+  editor: z.object({
+    suggestions: z.boolean(),
+    suggestionModel: ModelRefSchema.nullable()
+  }),
   /** Sent to models in the system prompt (never in incognito chats). */
   personalization: z.object({
     about: z.string().max(PERSONALIZATION_MAX),
@@ -274,6 +279,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   voice: { engine: 'natural', model: 'hexgrad/kokoro-82m', voice: 'af_heart', systemVoice: null, speed: 1 },
   agents: { routing: 'session', roles: Object.fromEntries(MODEL_ROLES.map((role) => [role, null])) as Record<ModelRoleId, null>, maxParallel: 4, tokenBudget: null, retries: 1 },
   media: { imageEngine: 'auto', imageModel: '', comfyEnabled: false, comfyUrl: 'http://127.0.0.1:8188', comfyCheckpoint: '', videoModel: '' },
+  editor: { suggestions: true, suggestionModel: null },
   personalization: { about: '', instructions: '', style: 'default' },
   shortcuts: { ...DEFAULT_SHORTCUTS },
   ui: { sidebarWidth: 262, sidebarCollapsed: false, mode: 'code', dismissedTips: [] }
@@ -299,6 +305,7 @@ export const AppSettingsPatchSchema = z.object({
   voice: AppSettingsSchema.shape.voice.partial().optional(),
   media: AppSettingsSchema.shape.media.partial().optional(),
   agents: AppSettingsSchema.shape.agents.partial().optional(),
+  editor: AppSettingsSchema.shape.editor.partial().optional(),
   personalization: AppSettingsSchema.shape.personalization.partial().optional(),
   shortcuts: z.partialRecord(ShortcutIdSchema, z.string().max(40)).optional(),
   ui: AppSettingsSchema.shape.ui.partial().optional()
