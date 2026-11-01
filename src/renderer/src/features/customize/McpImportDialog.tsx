@@ -79,7 +79,7 @@ export function McpImportDialog({ projectPath, onDone }: { projectPath: string |
           </Button>
           <Button variant="primary" disabled={busy || count === 0} onClick={() => void add()}>
             {busy ? <Spinner size={12} label="Adding" /> : null}
-            {count === 1 ? 'Add 1 server' : `Add ${String(count)} servers`}
+            {count === 0 ? 'Add servers' : count === 1 ? 'Add 1 server' : `Add ${String(count)} servers`}
           </Button>
         </>
       }

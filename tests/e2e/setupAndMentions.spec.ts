@@ -88,7 +88,7 @@ test('a server in the project’s .mcp.json is offered by Import and can be adde
   await expect(found.getByRole('checkbox', { name: 'fixture' })).toBeVisible();
   await expect(found.getByText('Found in .mcp.json')).toBeVisible();
   await expect(found.getByText('Project (this computer)')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Add 0 servers' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Add servers' })).toBeDisabled();
   await found.getByRole('checkbox', { name: 'fixture' }).check();
   await shot(w, 'setup-mcp-import');
   await dialog.getByRole('button', { name: 'Add 1 server' }).click();
