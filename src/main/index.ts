@@ -7,6 +7,8 @@ import { GraftEventSchema, type GraftEvent } from '@shared/ipc/events';
 import { IPC_EVENT } from '@shared/ipc/result';
 import { SessionManager } from './agent/sessionManager';
 import { EditChecks } from './languages/problems';
+import { folderProblems } from './languages/changedProblems';
+import { sessionTerminal } from './agent/mentionSources';
 import { BrowserPanel } from './browser/browserPanel';
 import { capturePage } from './sites/thumbnail';
 import { buildPaths } from './app/paths';
@@ -342,6 +344,11 @@ async function sessions(): Promise<SessionManager> {
     },
     revealBrowser: (sessionId) => emit({ type: 'browser:reveal', sessionId }),
     problems: (root, file, signal) => editChecks.problemsIn(root, file, signal),
+    mentionSources: {
+      problems: (folder, trusted) => folderProblems(folder, trusted, s.languages),
+      // No terminal was ever opened while the manager doesn't exist: nothing to start for that.
+      terminal: (sessionId) => Promise.resolve(sessionTerminal(ptyManager, sessionId))
+    },
     chatFiles: s.chatFiles,
     documents: new DocumentMaker({ printPdf: printHtmlToPdf }),
     runCode: runInSandbox,

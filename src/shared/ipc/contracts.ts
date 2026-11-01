@@ -407,7 +407,8 @@ export const contracts = {
   ),
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
-  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
+  /** Project files matching a query, by path from `root`; with `folders`, their folders too, each ending in "/". */
+  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300), folders: z.boolean().optional() }), z.array(z.string())),
   /** Which of these written paths name a file of the session's folder: its path from that folder, or null. */
   'files:resolve': channel(
     z.object({ sessionId: IdSchema, paths: z.array(z.string().min(1).max(300)).max(200), fresh: z.boolean().optional() }),

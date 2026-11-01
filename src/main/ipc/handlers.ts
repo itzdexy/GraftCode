@@ -78,7 +78,7 @@ import type { Services } from '../app/services';
 import type { SiteView } from '@shared/schemas/sites';
 import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
-import { changedProblems } from '../languages/changedProblems';
+import { folderProblems } from '../languages/changedProblems';
 import { EditorAi } from '../editor/editorAi';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
@@ -864,13 +864,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       }));
       return [...own, ...prompts];
     },
-    'files:search': async ({ root, query }) => {
+    'files:search': async ({ root, query, folders }) => {
       if (!fs.existsSync(root)) return [];
       // Only folders Graft works in: a known project or one of its worktrees.
       const s = await ctx.services();
       const known = s.projects.list().some((p) => isInside(p.path, root)) || isInside(s.paths.worktrees, root);
       if (!known) throw new GraftError('unknown_folder', 'File search works in project folders only.');
-      return (await files()).search(root, query, 40);
+      return (await files()).search(root, query, 40, folders ?? false);
     },
     'files:resolve': async ({ sessionId, paths, fresh }) => {
       // A chat has no folder: nothing a reply names there is a project file.
@@ -923,11 +923,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const s = await ctx.services();
       const dir = await workDirFor(sessionId);
       const trusted = !!summary.projectId && s.projects.get(summary.projectId)?.trusted === true;
-      // Language intelligence stays behind project trust: without it nothing is listed and no server is asked.
-      const changed = trusted && (await gitInfo(dir)).isRepo
-        ? (await listChanges(dir)).map((file) => file.path).filter((file) => fs.statSync(path.join(dir, file), { throwIfNoEntry: false })?.isFile() === true)
-        : [];
-      return changedProblems({ root: dir, trusted, changed, source: s.languages });
+      return folderProblems(dir, trusted, s.languages);
     },
     'files:save': async ({ sessionId, path, content, revision }) => {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');

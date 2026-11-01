@@ -2,7 +2,7 @@ import dns from 'node:dns';
 import { z } from 'zod';
 import { isPrivateAddress, isPrivateIp } from '@shared/privacy';
 import { normalizeUrl } from '@shared/sources';
-import { errorResult, textResult, type ToolDefinition } from '../types';
+import { errorResult, textResult, type ToolDefinition, type ToolResult } from '../types';
 import { extractImage, extractTitle, htmlToText } from './htmlToText';
 
 const MAX_DOWNLOAD = 5 * 1024 * 1024;
@@ -111,76 +111,83 @@ export const webFetchTool: ToolDefinition<WebFetchInput> = {
     }
     return Promise.resolve({ summary: `Fetched ${host}`, url: input.url, preview: { kind: 'url', url: input.url } });
   },
-  async execute(input, ctx) {
-    const controller = new AbortController();
-    const abort = (): void => controller.abort();
-    ctx.signal.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(abort, TIMEOUT);
-    const done = (): void => {
-      clearTimeout(timer);
-      ctx.signal.removeEventListener('abort', abort);
-    };
-    let response: Response;
-    let finalUrl = input.url;
-    try {
-      for (let hop = 0; ; hop++) {
-        // Where pages are read without asking, a name that looks public must not lead inside.
-        if (ctx.publicWebOnly && !isPrivateAddress(finalUrl) && (await pointsInside(new URL(finalUrl).hostname))) {
-          done();
-          return errorResult(`${new URL(finalUrl).hostname} points to an address on this computer or a private network, so it was not read.`);
-        }
-        response = await fetchPage(finalUrl, {
-          signal: controller.signal,
-          redirect: 'manual',
-          headers: { 'user-agent': 'Graft/1.0 (+desktop coding agent)', accept: 'text/html,text/plain,application/json,*/*;q=0.5' }
-        });
-        const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
-        if (location === null) break;
-        const next = URL.canParse(location, finalUrl) ? new URL(location, finalUrl).toString() : null;
-        const problem = next === null ? 'The page redirected to an address that could not be read.' : hop >= MAX_REDIRECTS ? `${input.url} redirected too many times.` : redirectProblem(finalUrl, next);
-        if (next === null || problem !== null) {
-          done();
-          return errorResult(problem ?? 'The page redirected to an address that could not be read.');
-        }
-        await response.body?.cancel().catch(() => undefined);
-        finalUrl = next;
-      }
-    } catch (error) {
-      done();
-      if (ctx.signal.aborted) return errorResult('Fetch cancelled.');
-      if (controller.signal.aborted) return errorResult(`Timed out after ${TIMEOUT / 1000}s fetching ${input.url}.`);
-      return errorResult(`Could not fetch ${input.url}: ${(error as Error).message}`);
-    }
-    try {
-      const type = response.headers.get('content-type') ?? '';
-      const { buffer, capped } = await readCapped(response, MAX_DOWNLOAD);
-      const raw = buffer.toString('utf8');
-      let text: string;
-      let title: string | null = null;
-      let image: string | null = null;
-      if (/html/i.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
-        title = extractTitle(raw);
-        image = extractImage(raw, finalUrl);
-        text = htmlToText(raw, finalUrl);
-      } else if (/^(text\/|application\/(json|xml|javascript|x-yaml|yaml|toml))/i.test(type) || type === '') {
-        text = raw;
-      } else {
-        return errorResult(`${finalUrl} returned ${type}, which WebFetch can't show as text.`);
-      }
-      const truncated = text.length > MAX_TEXT || capped;
-      if (text.length > MAX_TEXT) text = `${text.slice(0, MAX_TEXT)}\n\n… [truncated]`;
-      const heading = [`URL: ${finalUrl}`, `Status: ${response.status}`, title ? `Title: ${title}` : null, input.prompt ? `Looking for: ${input.prompt}` : null]
-        .filter(Boolean)
-        .join('\n');
-      const body = `${heading}\n\n${text}${truncated && !text.endsWith('[truncated]') ? '\n\n… [truncated]' : ''}`;
-      return textResult(
-        body,
-        // The address that was asked for is kept when the page answered from another: a link to either is a link to this page.
-        { kind: 'fetch', url: finalUrl, ...(normalizeUrl(finalUrl) !== normalizeUrl(input.url) ? { requested: input.url } : {}), status: response.status, bytes: buffer.byteLength, title, ...(image ? { image } : {}) },
-        !response.ok
-      );
-    } finally {
-      done();
-    }
-  }
+  execute: (input, ctx) => fetchText(input, ctx.signal, ctx.publicWebOnly)
 };
+
+/**
+ * One page as text: what WebFetch returns, and what an "@" mention of an
+ * address attaches. `publicWebOnly`: a name that looks public but leads to this
+ * computer or a private network is not read.
+ */
+export async function fetchText(input: WebFetchInput, signal: AbortSignal, publicWebOnly: boolean): Promise<ToolResult> {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, TIMEOUT);
+  const done = (): void => {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  };
+  let response: Response;
+  let finalUrl = input.url;
+  try {
+    for (let hop = 0; ; hop++) {
+      // Where pages are read without asking, a name that looks public must not lead inside.
+      if (publicWebOnly && !isPrivateAddress(finalUrl) && (await pointsInside(new URL(finalUrl).hostname))) {
+        done();
+        return errorResult(`${new URL(finalUrl).hostname} points to an address on this computer or a private network, so it was not read.`);
+      }
+      response = await fetchPage(finalUrl, {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: { 'user-agent': 'Graft/1.0 (+desktop coding agent)', accept: 'text/html,text/plain,application/json,*/*;q=0.5' }
+      });
+      const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+      if (location === null) break;
+      const next = URL.canParse(location, finalUrl) ? new URL(location, finalUrl).toString() : null;
+      const problem = next === null ? 'The page redirected to an address that could not be read.' : hop >= MAX_REDIRECTS ? `${input.url} redirected too many times.` : redirectProblem(finalUrl, next);
+      if (next === null || problem !== null) {
+        done();
+        return errorResult(problem ?? 'The page redirected to an address that could not be read.');
+      }
+      await response.body?.cancel().catch(() => undefined);
+      finalUrl = next;
+    }
+  } catch (error) {
+    done();
+    if (signal.aborted) return errorResult('Fetch cancelled.');
+    if (controller.signal.aborted) return errorResult(`Timed out after ${TIMEOUT / 1000}s fetching ${input.url}.`);
+    return errorResult(`Could not fetch ${input.url}: ${(error as Error).message}`);
+  }
+  try {
+    const type = response.headers.get('content-type') ?? '';
+    const { buffer, capped } = await readCapped(response, MAX_DOWNLOAD);
+    const raw = buffer.toString('utf8');
+    let text: string;
+    let title: string | null = null;
+    let image: string | null = null;
+    if (/html/i.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
+      title = extractTitle(raw);
+      image = extractImage(raw, finalUrl);
+      text = htmlToText(raw, finalUrl);
+    } else if (/^(text\/|application\/(json|xml|javascript|x-yaml|yaml|toml))/i.test(type) || type === '') {
+      text = raw;
+    } else {
+      return errorResult(`${finalUrl} returned ${type}, which WebFetch can't show as text.`);
+    }
+    const truncated = text.length > MAX_TEXT || capped;
+    if (text.length > MAX_TEXT) text = `${text.slice(0, MAX_TEXT)}\n\n… [truncated]`;
+    const heading = [`URL: ${finalUrl}`, `Status: ${response.status}`, title ? `Title: ${title}` : null, input.prompt ? `Looking for: ${input.prompt}` : null]
+      .filter(Boolean)
+      .join('\n');
+    const body = `${heading}\n\n${text}${truncated && !text.endsWith('[truncated]') ? '\n\n… [truncated]' : ''}`;
+    return textResult(
+      body,
+      // The address that was asked for is kept when the page answered from another: a link to either is a link to this page.
+      { kind: 'fetch', url: finalUrl, ...(normalizeUrl(finalUrl) !== normalizeUrl(input.url) ? { requested: input.url } : {}), status: response.status, bytes: buffer.byteLength, title, ...(image ? { image } : {}) },
+      !response.ok
+    );
+  } finally {
+    done();
+  }
+}

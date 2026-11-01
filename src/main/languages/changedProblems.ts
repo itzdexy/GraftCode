@@ -1,5 +1,8 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { ChangedProblems } from '@shared/schemas/semantic';
+import { listChanges } from '../git/changes';
+import { gitInfo } from '../git/repo';
 import { isCheckable, packagesMissing, type DiagnosticsSource } from './problems';
 
 /**
@@ -107,4 +110,14 @@ export async function changedProblems(input: {
   }
   for (const file of checkable.slice(MAX_CHANGED_FILES)) unchecked.push({ path: file, reason: 'Only the first 50 changed files are checked.' });
   return { state: 'ok', checked, files, unchecked };
+}
+
+/** The Problems list of a session's folder, as the Problems tab and "@problems" show it: the changed files that are still there. */
+export async function folderProblems(dir: string, trusted: boolean, source: DiagnosticsSource): Promise<ChangedProblems> {
+  // Language intelligence stays behind project trust: without it nothing is listed and no server is asked.
+  const changed =
+    trusted && (await gitInfo(dir)).isRepo
+      ? (await listChanges(dir)).map((file) => file.path).filter((file) => fs.statSync(path.join(dir, file), { throwIfNoEntry: false })?.isFile() === true)
+      : [];
+  return changedProblems({ root: dir, trusted, changed, source });
 }

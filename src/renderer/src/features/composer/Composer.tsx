@@ -12,6 +12,7 @@ import { useApp } from '../../stores/app';
 import { reportError, useToasts } from '../../stores/toasts';
 import { useUi } from '../../stores/ui';
 import { imageSrc, MAX_IMAGES, MAX_TEXT_FILES, picturesTaken, readAttachments } from './attachments';
+import { MentionIcon } from './MentionIcon';
 import { detectToken, useSuggestions, type Suggestion } from './suggestions';
 
 export interface ComposerProps {
@@ -393,7 +394,7 @@ export function Composer({
     <div
       id={listId}
       role="listbox"
-      aria-label={token?.kind === 'slash' ? 'Commands' : 'Files'}
+      aria-label={token?.kind === 'slash' ? 'Commands' : 'Mentions'}
       className="motion-menu-up absolute right-0 bottom-[calc(100%+6px)] left-0 z-[var(--g-z-float)] max-h-[260px] overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-popover"
     >
       {suggestions.items.length === 0 ? <p className="px-8 py-6 text-base text-fg-muted">Searching files…</p> : null}
@@ -410,6 +411,7 @@ export function Composer({
           onMouseMove={() => setActive(i)}
           className={cn('flex min-h-[var(--g-menu-row-height)] cursor-default items-center gap-12 rounded-md px-8', i === activeIndex && 'bg-hover')}
         >
+          {item.kind ? <MentionIcon kind={item.kind} /> : null}
           <span className={cn('shrink-0 text-base text-fg', token?.kind === 'mention' && 'min-w-0 flex-1 truncate font-mono text-sm')}>{item.label}</span>
           {item.detail ? <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">{item.detail}</span> : null}
         </div>

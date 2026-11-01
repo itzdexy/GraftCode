@@ -73,6 +73,8 @@ export interface SessionManagerDeps {
   revealBrowser?: SessionDeps['revealBrowser'];
   /** The local language server's errors for an edited file; absent where there is no server. */
   problems?: SessionDeps['problems'];
+  /** What "@problems" and "@terminal" attach to a message; absent where there is neither. */
+  mentionSources?: SessionDeps['mentionSources'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -172,6 +174,7 @@ export class SessionManager {
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
       ...(d.problems ? { problems: d.problems } : {}),
+      ...(d.mentionSources ? { mentionSources: d.mentionSources } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';

@@ -6,6 +6,7 @@ import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } f
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import { MISSION_LIMITS, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
+import type { ChangedProblems } from '@shared/schemas/semantic';
 import type { FileProblems } from '../languages/problems';
 import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
@@ -45,7 +46,7 @@ import type { AgentWorkspaces } from './workspaces';
 import { mediaTurnKind, runAgentLoop, type LoopHost } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
-import { expandMentions } from './mentions';
+import { expandMentions, type MentionContext } from './mentions';
 import { loadAgents } from './agents';
 import { NO_OTHER_ROOTS, type OtherToolRoots } from './otherTools';
 import type { AgentGroupSettings } from './agentGroup';
@@ -143,6 +144,11 @@ export interface SessionDeps {
   builtinSkills: string | null;
   /** The folders of other coding tools to read skills, commands and agents from (agent/otherTools.ts). Absent: none. */
   otherTools?(folder: string | null, trusted: boolean): OtherToolRoots;
+  /** What "@problems" and "@terminal" attach (agent/mentions.ts): the folder's Problems list, the session's Terminal panel output. Absent: neither. */
+  mentionSources?: {
+    problems(folder: string, trusted: boolean): Promise<ChangedProblems>;
+    terminal(sessionId: string): Promise<string | null>;
+  };
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
@@ -1116,7 +1122,7 @@ export class AgentSession {
           ...this.deps.mcpPrompts(this.settingsRoot()).map((p) => `- /${mcpPromptCommand(p.server, p.name)}${promptHint(p) ? ` ${promptHint(p)}` : ''} — ${p.description || `Prompt from the ${p.server} server`}`)
         ];
         this.commandOutput(
-          `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
+          `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, a folder, some lines (@app.ts:10-40), @diff, @problems, @terminal or a web page (@https://…), ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
         );
         return null;
       }
@@ -1398,7 +1404,7 @@ export class AgentSession {
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (!(await this.promptAllowed(hooks, userText, signal))) return;
         const userMessageId = randomUUID();
-        const content = this.userContent(item, userText);
+        const content = await this.userContent(item, userText, signal);
         // The transcript shows what was typed; notes and attachments travel only to the model.
         const meta: MessageMeta = {
           turnId,
@@ -1630,21 +1636,36 @@ export class AgentSession {
     return true;
   }
 
-  /** What the model gets for a typed message: pending notes, images, the text, attached files and @-mentioned files. */
-  private userContent(item: InternalQueued, text: string): ContentBlock[] {
+  /** What the model gets for a typed message: pending notes, images, the text, attached files and what its @-mentions name. */
+  private async userContent(item: InternalQueued, text: string, signal: AbortSignal): Promise<ContentBlock[]> {
     const root = this.projectRoot();
     const content: ContentBlock[] = [...this.notes.map((note) => ({ type: 'text' as const, text: note })), ...item.images];
     if (text.length > 0) content.push({ type: 'text', text });
     for (const file of item.files) {
       content.push({ type: 'text', text: `<attached-file name="${file.name.replace(/"/g, "'")}">\n${file.content}\n</attached-file>` });
     }
+    // Taken now: what arrives while the mentions are gathered is for the next message.
+    this.notes = [];
     if (this.summary.kind === 'code' && root && text.includes('@')) {
-      const mentions = expandMentions(text, this.workingDir(), root, this.deps.platform);
+      const mentions = await expandMentions(text, this.mentionContext(root, signal));
       for (const block of mentions.blocks) content.push({ type: 'text', text: block });
       for (const file of mentions.files) this.files.record(file);
     }
-    this.notes = [];
     return content;
+  }
+
+  /** Where a message's @-mentions are looked up: the session's folder, its Problems list and its Terminal panel. */
+  private mentionContext(root: string, signal: AbortSignal): MentionContext {
+    const sources = this.deps.mentionSources;
+    const settingsRoot = this.settingsRoot();
+    const trusted = settingsRoot ? this.deps.isTrusted(settingsRoot) : false;
+    return {
+      cwd: this.workingDir(),
+      root,
+      platform: this.deps.platform,
+      signal,
+      ...(sources ? { problems: () => sources.problems(this.workingDir(), trusted), terminal: () => sources.terminal(this.id) } : {})
+    };
   }
 
   /**
@@ -1658,7 +1679,7 @@ export class AgentSession {
     const delivered: ContentBlock[][] = [];
     for (const item of items) {
       if (!(await this.promptAllowed(hooks, item.text, signal))) continue;
-      const content = this.userContent(item, item.text);
+      const content = await this.userContent(item, item.text, signal);
       const meta: MessageMeta = { turnId, typed: item.text, ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}) };
       const stored = this.deps.store.appendMessage(this.id, 'user', content, meta);
       this.emit({ type: 'message', message: stored });

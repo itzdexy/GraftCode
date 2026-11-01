@@ -26,6 +26,9 @@ export function detectToken(text: string, caret: number): Token | null {
   return null;
 }
 
+/** What an "@" row names, drawn as its icon. */
+export type MentionKind = 'file' | 'folder' | 'diff' | 'problems' | 'terminal' | 'url';
+
 export interface Suggestion {
   key: string;
   label: string;
@@ -34,6 +37,8 @@ export interface Suggestion {
   insert: string;
   /** Enter sends right away (commands without arguments). */
   sendOnEnter: boolean;
+  /** An "@" row's kind; commands have none. */
+  kind?: MentionKind;
 }
 
 /**
@@ -66,16 +71,55 @@ function quotePath(p: string): string {
   return /\s/.test(p) ? `"${p}"` : p;
 }
 
-/** Suggestions for the token at the caret: commands from the list, files from the project index. */
+/** What "@" attaches besides files and folders (agent/mentions.ts in the main process). */
+const MENTION_WORDS: Array<{ word: 'diff' | 'problems' | 'terminal'; detail: string }> = [
+  { word: 'diff', detail: 'Uncommitted changes in this folder' },
+  { word: 'problems', detail: 'Errors and warnings from the Problems tab' },
+  { word: 'terminal', detail: 'The last 200 lines of the Terminal panel' }
+];
+
+const WEB_ADDRESS = /^https?:\/\/\S+/i;
+/** Lines of a file after its path: ":10-40", ":10", or ":10-" while the end is typed. */
+const LINE_RANGE = /:\d+(?:-\d*)?$/;
+
+/** What the project index is asked for: the path, without the lines typed after it. */
+export function pathQuery(query: string): string {
+  return query.replace(LINE_RANGE, '');
+}
+
+/**
+ * The rows "@" offers for what was typed after it: the words that attach
+ * something other than a file, a web page by its address, then the files and
+ * folders the project index matched (`paths`, folders ending in "/"). Lines
+ * typed after a path stay with the files it matched.
+ */
+export function mentionSuggestions(query: string, paths: string[]): Suggestion[] {
+  if (WEB_ADDRESS.test(query)) return [{ key: 'url', label: query, detail: 'Attach this web page as text', insert: `@${query} `, sendOnEnter: false, kind: 'url' }];
+  const q = query.toLowerCase();
+  const words = MENTION_WORDS.filter((m) => m.word.startsWith(q)).map(
+    (m): Suggestion => ({ key: m.word, label: `@${m.word}`, detail: m.detail, insert: `@${m.word} `, sendOnEnter: false, kind: m.word })
+  );
+  // Chosen, it leaves "@https://" for the address to be typed after.
+  const web: Suggestion[] = 'url'.startsWith(q) ? [{ key: 'url', label: '@url', detail: 'A web page as text: type its address', insert: '@https://', sendOnEnter: false, kind: 'url' }] : [];
+  const range = LINE_RANGE.exec(query)?.[0] ?? '';
+  const found = paths
+    .filter((p) => range === '' || !p.endsWith('/'))
+    .slice(0, 12)
+    .map((p): Suggestion => ({ key: p, label: `${p}${range}`, detail: null, insert: `@${quotePath(`${p}${range}`)} `, sendOnEnter: false, kind: p.endsWith('/') ? 'folder' : 'file' }));
+  return [...words, ...web, ...found];
+}
+
+/** Suggestions for the token at the caret: commands from the list, files and folders from the project index. */
 export function useSuggestions(token: Token | null, commands: SlashCommand[] | null, mentionRoot: string | null): { items: Suggestion[]; loading: boolean } {
   const [files, setFiles] = useState<{ root: string; query: string; paths: string[] } | null>(null);
-  const mentionQuery = token?.kind === 'mention' && mentionRoot ? token.query : null;
+  // An address is not looked for among the files.
+  const mentionQuery = token?.kind === 'mention' && mentionRoot && !WEB_ADDRESS.test(token.query) ? pathQuery(token.query) : null;
 
   useEffect(() => {
     if (mentionQuery === null || !mentionRoot) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      invoke('files:search', { root: mentionRoot, query: mentionQuery })
+      invoke('files:search', { root: mentionRoot, query: mentionQuery, folders: true })
         .then((paths) => {
           if (!cancelled) setFiles({ root: mentionRoot, query: mentionQuery, paths });
         })
@@ -91,10 +135,9 @@ export function useSuggestions(token: Token | null, commands: SlashCommand[] | n
     if (!token) return { items: [], loading: false };
     if (token.kind === 'slash') return { items: commands ? commandSuggestions(commands, token.query) : [], loading: false };
     if (!mentionRoot) return { items: [], loading: false };
-    if (!files || files.root !== mentionRoot || files.query !== token.query) return { items: [], loading: true };
-    return {
-      items: files.paths.slice(0, 12).map((p) => ({ key: p, label: p, detail: null, insert: `@${quotePath(p)} `, sendOnEnter: false })),
-      loading: false
-    };
+    if (WEB_ADDRESS.test(token.query)) return { items: mentionSuggestions(token.query, []), loading: false };
+    // The words are offered at once; the files and folders join them when the index answers.
+    if (!files || files.root !== mentionRoot || files.query !== pathQuery(token.query)) return { items: mentionSuggestions(token.query, []), loading: true };
+    return { items: mentionSuggestions(token.query, files.paths), loading: false };
   }, [token, commands, mentionRoot, files]);
 }
