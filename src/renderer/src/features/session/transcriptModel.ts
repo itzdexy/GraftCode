@@ -1,4 +1,5 @@
 import type { TranscriptView } from '@shared/schemas/appSettings';
+import type { AttemptSet } from '@shared/schemas/attempts';
 import type { CheckReport, ImageBlock, StoredMessage, ToolResultBlock, UserShell } from '@shared/schemas/messages';
 import type { MadeFile, MediaFile, TodoItem, ToolDisplay } from '@shared/schemas/toolDisplay';
 import { maskSecrets } from '@shared/secrets';
@@ -32,6 +33,8 @@ export type TranscriptItem =
   | { kind: 'tools'; key: string; calls: ToolCall[]; at: number }
   | { kind: 'todos'; key: string; callId: string; todos: TodoItem[]; latest: boolean; /** The tasks whose state differs from the list before it in the same turn (see todoMotion.ts). */ changed: string[] }
   | { kind: 'plan'; key: string; callId: string; plan: string; display: Extract<ToolDisplay, { kind: 'plan' }> | null }
+  /** What a review found (ReportFindings); filled in once the call has its result, or `error` when it was refused. */
+  | { kind: 'findings'; key: string; callId: string; display: Extract<ToolDisplay, { kind: 'findings' }> | null; error: string | null }
   | { kind: 'provider'; key: string; summary: string; at: number; search: SearchInfo | null }
   | { kind: 'compaction'; key: string; text: string }
   | { kind: 'command-output'; key: string; text: string }
@@ -40,6 +43,8 @@ export type TranscriptItem =
   /** Where a later turn of a mission starts: which turn, of how many, and whether it follows checks that failed. */
   | { kind: 'mission'; key: string; turn: number; of: number; afterChecks: boolean; at: number }
   | { kind: 'notice'; key: string; text: string }
+  /** The card of a message sent as attempts: how each went, and what can be done with them. */
+  | { kind: 'attempts'; key: string; set: AttemptSet }
   | { kind: 'error'; key: string; messageId: string; code: string; message: string }
   | { kind: 'interrupted'; key: string }
   /** `messageId`: the message the user sent to start this turn, whose snapshot holds the files as they were before it; null for a turn the user did not type. */
@@ -61,6 +66,8 @@ export interface EditedFile {
   removed: number;
   created: boolean;
   patches: string[];
+  /** The tool call that made each patch, in the same order: how one change of it is undone. */
+  calls: string[];
 }
 
 /** The pictures and clips a turn generated, with the engine that made the newest of them. */
@@ -135,7 +142,8 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
     }
     if (kind === 'notice') {
       flush();
-      items.push({ kind: 'notice', key: message.id, text: textFrom(message) });
+      const set = message.meta.attempts;
+      items.push(set ? { kind: 'attempts', key: message.id, set } : { kind: 'notice', key: message.id, text: textFrom(message) });
       continue;
     }
     if (kind === 'shell') {
@@ -202,6 +210,9 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
           } else if (block.name === 'ExitPlanMode') {
             flush();
             items.push({ kind: 'plan', key, callId: block.id, plan: String(inputOf<{ plan: string }>(block.input).plan ?? ''), display: null });
+          } else if (block.name === 'ReportFindings') {
+            flush();
+            items.push({ kind: 'findings', key, callId: block.id, display: null, error: null });
           } else {
             if (!group) {
               group = [];
@@ -236,12 +247,14 @@ export function buildTranscript(messages: StoredMessage[], live: LiveState): Tra
   }
   flush();
 
-  // Plans and todos pick up their results (approval, normalized list) after the fact.
+  // Plans, todos and findings pick up their results (approval, normalized list) after the fact.
   for (const item of items) {
-    if (item.kind !== 'plan' && item.kind !== 'todos') continue;
+    if (item.kind !== 'plan' && item.kind !== 'todos' && item.kind !== 'findings') continue;
     const display = calls.get(item.callId)?.result?.display;
     if (item.kind === 'plan' && display?.kind === 'plan') item.display = display;
     if (item.kind === 'todos' && display?.kind === 'todos') item.todos = display.todos;
+    if (item.kind === 'findings' && display?.kind === 'findings') item.display = display;
+    if (item.kind === 'findings' && display?.kind === 'error') item.error = display.message;
   }
   const lastTodos = items.findLast((i) => i.kind === 'todos');
   if (lastTodos?.kind === 'todos') lastTodos.latest = true;
@@ -525,11 +538,14 @@ export function editedFiles(calls: ToolCall[]): EditedFile[] {
   for (const call of calls) {
     const d = call.result?.display;
     if (d?.kind !== 'edit' || call.result?.isError) continue;
-    const file = byPath.get(d.path) ?? { path: d.path, added: 0, removed: 0, created: false, patches: [] };
+    const file = byPath.get(d.path) ?? { path: d.path, added: 0, removed: 0, created: false, patches: [], calls: [] };
     file.added += d.added;
     file.removed += d.removed;
     file.created ||= d.created;
-    if (d.patch) file.patches.push(d.patch);
+    if (d.patch) {
+      file.patches.push(d.patch);
+      file.calls.push(call.id);
+    }
     byPath.set(d.path, file);
   }
   return [...byPath.values()];

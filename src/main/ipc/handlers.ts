@@ -36,6 +36,8 @@ import { siteName, type SiteRecord } from '../sites/sites';
 import { openInEditor } from '../app/editor';
 import type { BrowserPanel } from '../browser/browserPanel';
 import { diagramFile, listDirectory, mediaFile, modelBytes, openableFile, readPreview, savePreview } from '../files/fileTree';
+import { applyFileEdits } from '../files/applyEdits';
+import { LiveFiles } from '../files/liveFiles';
 import { searchText } from '../files/textSearch';
 import { createDiagramRenderer, exportName, type DiagramRenderer } from '../diagrams/render';
 import type { PtyManager } from '../pty/ptyManager';
@@ -54,13 +56,16 @@ import { describeCron, nextRun, parseCron } from '../schedule/cron';
 import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
 import type { McpServerConfig, SettingsScope } from '@shared/schemas/config';
-import type { McpServerView } from '@shared/schemas/customize';
+import type { McpServerInput, McpServerView } from '@shared/schemas/customize';
+import { maskSecrets } from '@shared/secrets';
 import { findCommand, integrationSetup, integrationStatus } from '../mcp/integrations';
+import { findImports, importInput } from '../mcp/mcpImport';
 import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { detectLocalServers, newServers, type Candidate } from '../providers/localServer';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
+import { otherToolRoots, type OtherToolRoots } from '../agent/otherTools';
 import { mcpPromptCommand, promptHint } from '../mcp/names';
 import type { SessionManager } from '../agent/sessionManager';
 import { writeExport } from '../app/dataExport';
@@ -73,7 +78,9 @@ import type { Services } from '../app/services';
 import type { SiteView } from '@shared/schemas/sites';
 import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
-import { changedProblems } from '../languages/changedProblems';
+import { folderProblems } from '../languages/changedProblems';
+import { EditorAi } from '../editor/editorAi';
+import { TerminalAi } from '../pty/terminalAi';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
 
@@ -318,6 +325,57 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   };
   const changed = async (dir: string): Promise<void> => {
     (await ctx.services()).diffStats.invalidate(dir);
+  };
+  /** Stores one MCP server in a settings file, keeping the secrets of the one it replaces that the form left unchanged. */
+  const saveMcpServer = async (scope: SettingsScope, projectPath: string | null, name: string, previousName: string | null, config: McpServerInput): Promise<void> => {
+    await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
+      const servers = { ...(settings.mcpServers ?? {}) };
+      const previous = servers[previousName ?? name];
+      if (previousName && previousName !== name) {
+        if (servers[name]) throw new GraftError('mcp_exists', `A server named ${name} already exists in this scope.`);
+        delete servers[previousName];
+      }
+      servers[name] = mergeMcpConfig(config, previous);
+      return { ...settings, mcpServers: servers };
+    });
+  };
+  /** The names of the MCP servers Graft has for all projects and, with a project, for that project. */
+  const mcpNames = (s: Services, projectPath: string | null): Set<string> => {
+    const scopes: SettingsScope[] = projectPath ? ['user', 'project', 'local'] : ['user'];
+    return new Set(scopes.flatMap((scope) => Object.keys(s.settingsFiles.load(scope, projectPath ?? undefined).settings.mcpServers ?? {})));
+  };
+  /** Other tools' folders read for a project's commands, skills and agents, as its sessions read them (agent/otherTools.ts). */
+  const othersFor = async (projectPath: string | null): Promise<OtherToolRoots> => {
+    const s = await ctx.services();
+    const trusted = projectPath ? (s.projects.findByPath(projectPath)?.trusted ?? false) : false;
+    return otherToolRoots({ enabled: s.settings.get().behavior.otherTools, home: s.paths.toolsHome, projectRoot: projectPath, trusted });
+  };
+  /** The files the Files panel's editor shows, watched for changes on disk. */
+  const liveFiles = new LiveFiles((sessionId, path) => ctx.emit({ type: 'files:changed', sessionId, path }));
+  let editorAi: EditorAi | null = null;
+  const editor = async (): Promise<EditorAi> => {
+    const s = await ctx.services();
+    const sessions = await ctx.sessions();
+    return (editorAi ??= new EditorAi({
+      settings: () => s.settings.get(),
+      session: (id) => sessions.summary(id),
+      models: (providerId, signal) => s.registry.listModels(providerId, { signal }),
+      provider: (providerId) => s.registry.get(providerId)
+    }));
+  };
+  let terminalAiService: TerminalAi | null = null;
+  const terminalAi = async (): Promise<TerminalAi> => {
+    const s = await ctx.services();
+    const sessions = await ctx.sessions();
+    const ptys = await ctx.ptys();
+    return (terminalAiService ??= new TerminalAi({
+      settings: () => s.settings.get(),
+      session: (id) => sessions.summary(id),
+      models: (providerId, signal) => s.registry.listModels(providerId, { signal }),
+      provider: (providerId) => s.registry.get(providerId),
+      shellOf: (terminalId, sessionId) => ptys.shellOf(terminalId, sessionId),
+      platform: process.platform
+    }));
   };
 
   return {
@@ -615,7 +673,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'sessions:list': async ({ includeArchived }) => (await ctx.sessions()).list(includeArchived),
     'sessions:create': async (input) => (await ctx.sessions()).create(input),
     'sessions:get': async ({ id }) => (await ctx.sessions()).detail(id),
-    'sessions:send': async ({ id, text, images, files }) => (await ctx.sessions()).send(id, text, images, files),
+    'sessions:send': async ({ id, text, images, files, attempts }) => (await ctx.sessions()).send(id, text, images, files, attempts),
     'sessions:interrupt': async ({ id }) => {
       (await ctx.sessions()).interrupt(id);
       return { ok: true as const };
@@ -675,11 +733,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       return { ok: true as const };
     },
     'sessions:archive': async ({ id, archived, removeWorktree, force }) => {
+      if (archived) liveFiles.release(id);
       const result = await (await ctx.sessions()).archive(id, archived, removeWorktree, force);
       if (archived) await (await ctx.ptys()).disposeSession(id);
       return result;
     },
     'sessions:delete': async ({ id, force }) => {
+      liveFiles.release(id);
       await (await ctx.sessions()).remove(id, force);
       await (await ctx.ptys()).disposeSession(id);
       return { ok: true as const };
@@ -759,8 +819,16 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       (await ctx.sessions()).feedback(sessionId, messageId, value);
       return { ok: true as const };
     },
-    'sessions:rewindPreview': async ({ sessionId, messageId }) => (await ctx.sessions()).rewindPreview(sessionId, messageId),
-    'sessions:rewind': async ({ sessionId, messageId, mode }) => (await ctx.sessions()).rewind(sessionId, messageId, mode),
+    'sessions:rewindPreview': async ({ sessionId, messageId, paths }) => (await ctx.sessions()).rewindPreview(sessionId, messageId, paths),
+    'sessions:rewind': async ({ sessionId, messageId, mode, paths }) => (await ctx.sessions()).rewind(sessionId, messageId, mode, paths),
+    'sessions:undoHunk': async ({ sessionId, toolUseId, hunk }) => (await ctx.sessions()).undoHunk(sessionId, toolUseId, hunk),
+    'attempts:apply': async ({ sessionId, setId, attempt }) => (await ctx.sessions()).applyAttempt(sessionId, setId, attempt),
+    'attempts:discard': async ({ sessionId, setId }) => {
+      await (await ctx.sessions()).discardAttempts(sessionId, setId);
+      return { ok: true as const };
+    },
+    'attempts:stop': async ({ sessionId, setId, attempt }) => ({ stopped: (await ctx.sessions()).stopAttempt(sessionId, setId, attempt) }),
+    'attempts:diff': async ({ sessionId, setId, attempt }) => (await ctx.sessions()).attemptDiff(sessionId, setId, attempt),
 
     'search:query': async ({ query, kind }) => {
       const s = await ctx.services();
@@ -778,7 +846,8 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
           projectName: summary.projectName,
           snippet: hit.messageId ? hit.snippet : '',
           updatedAt: summary.updatedAt,
-          score: 100
+          // Found in the text itself: above every title that only matches loosely.
+          score: Number.MAX_SAFE_INTEGER
         });
       }
       for (const summary of all) {
@@ -793,7 +862,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'commands:list': async ({ projectPath }) => {
       const s = await ctx.services();
-      const own = listSlashCommands(s.paths.graftHome, projectPath).map(({ name, description, argumentHint, source, path }) => ({
+      const own = listSlashCommands(s.paths.graftHome, projectPath, (await othersFor(projectPath)).commands).map(({ name, description, argumentHint, source, path }) => ({
         name,
         description,
         argumentHint,
@@ -810,13 +879,13 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       }));
       return [...own, ...prompts];
     },
-    'files:search': async ({ root, query }) => {
+    'files:search': async ({ root, query, folders }) => {
       if (!fs.existsSync(root)) return [];
       // Only folders Graft works in: a known project or one of its worktrees.
       const s = await ctx.services();
       const known = s.projects.list().some((p) => isInside(p.path, root)) || isInside(s.paths.worktrees, root);
       if (!known) throw new GraftError('unknown_folder', 'File search works in project folders only.');
-      return (await files()).search(root, query, 40);
+      return (await files()).search(root, query, 40, folders ?? false);
     },
     'files:resolve': async ({ sessionId, paths, fresh }) => {
       // A chat has no folder: nothing a reply names there is a project file.
@@ -846,13 +915,22 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Editor recovery copies belong to code sessions.');
       (await ctx.services()).editorDrafts.save(sessionId, path, draft);
     },
-    'files:semantic': async ({ sessionId, query, content }) => {
+    'files:semantic': async ({ sessionId, query, content, priority }) => {
       const summary = (await ctx.sessions()).summary(sessionId);
       const s = await ctx.services();
       if (summary.kind !== 'code' || !summary.projectId || !s.projects.get(summary.projectId)?.trusted) {
         throw new GraftError('project_untrusted', 'Language intelligence requires a trusted code project. Review project trust in Settings before checking types or definitions.');
       }
-      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content);
+      return s.languages.query(await workDirFor(sessionId), query, new AbortController().signal, content, priority);
+    },
+    'files:applyEdits': async ({ sessionId, files }) => {
+      if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');
+      const dir = await workDirFor(sessionId);
+      await applyFileEdits(dir, files);
+      await changed(dir);
+    },
+    'files:watch': async ({ sessionId, files }) => {
+      liveFiles.watch(sessionId, await workDirFor(sessionId), files);
     },
     'problems:changed': async ({ sessionId }) => {
       const summary = (await ctx.sessions()).summary(sessionId);
@@ -860,19 +938,23 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const s = await ctx.services();
       const dir = await workDirFor(sessionId);
       const trusted = !!summary.projectId && s.projects.get(summary.projectId)?.trusted === true;
-      // Language intelligence stays behind project trust: without it nothing is listed and no server is asked.
-      const changed = trusted && (await gitInfo(dir)).isRepo
-        ? (await listChanges(dir)).map((file) => file.path).filter((file) => fs.statSync(path.join(dir, file), { throwIfNoEntry: false })?.isFile() === true)
-        : [];
-      return changedProblems({ root: dir, trusted, changed, source: s.languages });
+      return folderProblems(dir, trusted, s.languages);
     },
     'files:save': async ({ sessionId, path, content, revision }) => {
       if ((await ctx.sessions()).summary(sessionId).kind !== 'code') throw new GraftError('no_folder', 'Only code-session project files can be edited here.');
       const dir = await workDirFor(sessionId);
       const saved = await savePreview(dir, path, content, revision);
+      if (saved.revision) liveFiles.saved(sessionId, path, saved.revision);
       await changed(dir);
       return saved;
     },
+    'editor:complete': async (input) => (await editor()).complete(input),
+    'editor:inlineEdit': async (input) => (await editor()).inlineEdit(input),
+    'editor:cancel': async ({ requestId }) => {
+      (await editor()).cancel(requestId);
+      return { ok: true as const };
+    },
+    'editor:model': async ({ sessionId, file }) => (await editor()).model(sessionId, file),
     'files:previewUrl': async ({ sessionId, path }) => ({ url: ctx.artifacts.urlForFile((await mediaFile(await workDirFor(sessionId), path)).file) }),
     'files:modelBytes': async ({ sessionId, path }) => modelBytes(await workDirFor(sessionId), path),
     'diagrams:previewUrl': async ({ sessionId, source }) => ({ url: `${ctx.artifacts.urlForFile((await diagramOf(sessionId, source)).file)}?report=size` }),
@@ -925,6 +1007,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       await (await ctx.ptys()).kill(id);
       return { ok: true as const };
     },
+    'pty:suggest': async (input) => (await terminalAi()).suggest(input),
+    'pty:cancelSuggest': async ({ askId }) => {
+      (await terminalAi()).cancel(askId);
+      return { ok: true as const };
+    },
     'shells:list': async ({ sessionId }) => (await ctx.services()).shells.list(sessionId),
     'shells:output': async ({ id }) => {
       const read = (await ctx.services()).shells.readOutput(id);
@@ -937,7 +1024,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'browser:bounds': ({ bounds }) => {
       ctx.browser().setBounds(bounds);
     },
-    'customize:commands': async ({ projectPath }) => listCommands((await ctx.services()).paths.graftHome, projectPath),
+    'customize:commands': async ({ projectPath }) => listCommands((await ctx.services()).paths.graftHome, projectPath, (await othersFor(projectPath)).commands),
     'customize:saveCommand': async ({ scope, projectPath, name, description, argumentHint, body, previousPath }) => ({
       path: await saveCommand((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, argumentHint, body, previousPath })
     }),
@@ -945,7 +1032,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       await deleteCommand((await ctx.services()).paths.graftHome, projectPath, path);
       return { ok: true as const };
     },
-    'customize:agents': async ({ projectPath }) => listAgents((await ctx.services()).paths.graftHome, projectPath),
+    'customize:agents': async ({ projectPath }) => listAgents((await ctx.services()).paths.graftHome, projectPath, (await othersFor(projectPath)).agents),
     'customize:saveAgent': async ({ scope, projectPath, name, description, tools, body, previousPath }) => ({
       path: await saveAgent((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, tools, body, previousPath })
     }),
@@ -961,7 +1048,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'customize:skills': async ({ projectPath }) => {
       const { paths } = await ctx.services();
-      return listSkills(paths.graftHome, projectPath, paths.builtinSkills);
+      return listSkills(paths.graftHome, projectPath, paths.builtinSkills, (await othersFor(projectPath)).skills);
     },
     'customize:saveSkill': async ({ scope, projectPath, name, description, body, previousPath }) => ({
       path: await saveSkill((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, body, previousPath })
@@ -1116,20 +1203,46 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'mcp:save': async ({ scope, projectPath, name, previousName, config }) => {
       const s = await ctx.services();
-      await s.settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
-        const servers = { ...(settings.mcpServers ?? {}) };
-        const previous = servers[previousName ?? name];
-        if (previousName && previousName !== name) {
-          if (servers[name]) throw new GraftError('mcp_exists', `A server named ${name} already exists in this scope.`);
-          delete servers[previousName];
-        }
-        servers[name] = mergeMcpConfig(config, previous);
-        return { ...settings, mcpServers: servers };
-      });
+      await saveMcpServer(scope, projectPath, name, previousName, config);
       const manager = await ctx.mcp();
       if (projectPath && scope !== 'user') await manager.useProject(projectPath, s.projects.findByPath(projectPath)?.trusted ?? false);
       await manager.sync();
       return { ok: true as const };
+    },
+    'mcp:findImports': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const scan = findImports({ home: s.paths.toolsHome, projectRoot: projectPath, platform: process.platform, env: process.env });
+      const taken = mcpNames(s, projectPath);
+      // Arguments and addresses are shown, so a key written into one is covered; variable and header values never leave main.
+      const view = (config: McpServerConfig): McpServerView['config'] => {
+        const masked = maskConfig(config);
+        return masked.type === 'stdio' ? { ...masked, args: masked.args.map(maskSecrets) } : { ...masked, url: maskSecrets(masked.url) };
+      };
+      return {
+        servers: scan.servers.map((f) => ({ id: f.id, name: f.name, from: f.from, scope: f.scope, config: view(f.config), exists: taken.has(f.name), missing: f.missing })),
+        problems: scan.problems
+      };
+    },
+    'mcp:import': async ({ projectPath, ids }) => {
+      const s = await ctx.services();
+      const found = findImports({ home: s.paths.toolsHome, projectRoot: projectPath, platform: process.platform, env: process.env }).servers;
+      const picked = ids.map((id) => found.find((f) => f.id === id));
+      if (picked.some((f) => f === undefined)) throw new GraftError('mcp_import_gone', "A server you chose is no longer in the other tool's settings. Close the list and open it again.");
+      const taken = mcpNames(s, projectPath);
+      // Everything is checked before anything is saved, so one that can't be added doesn't leave the others half added.
+      const ready = picked.flatMap((f) => (f ? [f] : [])).map((f) => {
+        if (taken.has(f.name)) throw new GraftError('mcp_exists', `Graft already has a server named ${f.name}. Remove it first to add the one from ${f.from}.`);
+        const projectRoot = f.scope === 'user' ? null : projectPath;
+        return { found: f, ...importInput(f, serverKey(f.scope, projectRoot, f.name)) };
+      });
+      for (const { found: f, input, secrets } of ready) {
+        for (const [ref, value] of Object.entries(secrets)) s.keys.set(ref, value);
+        await saveMcpServer(f.scope, f.scope === 'user' ? null : projectPath, f.name, null, input);
+      }
+      const manager = await ctx.mcp();
+      if (projectPath && ready.some((r) => r.found.scope !== 'user')) await manager.useProject(projectPath, s.projects.findByPath(projectPath)?.trusted ?? false);
+      await manager.sync();
+      return { added: ready.map((r) => r.found.name) };
     },
     'mcp:remove': async ({ scope, projectPath, name }) => {
       const s = await ctx.services();

@@ -1,11 +1,15 @@
 import path from 'node:path';
 import { symbolKind } from '@shared/symbolKinds';
-import { SemanticQuerySchema, type SemanticQuery } from '../../languages/types';
+import type { z } from 'zod';
+import { SemanticQuerySchema } from '../../languages/types';
 import type { LanguageServers } from '../../languages/servers';
 import { errorResult, textResult, type ToolDefinition } from '../types';
 
+/** The agent's questions: rename is the Files editor's (F2), and the agent changes files with its edit tools. */
+const AgentQuerySchema = SemanticQuerySchema.extend({ action: SemanticQuerySchema.shape.action.exclude(['rename']) }).omit({ newName: true });
+
 /** Semantic answers use a real local server; text-pattern Symbols remains available for other languages. */
-export function semanticCodeTool(servers: LanguageServers | null): ToolDefinition<SemanticQuery> {
+export function semanticCodeTool(servers: LanguageServers | null): ToolDefinition<z.infer<typeof AgentQuerySchema>> {
   return {
     name: 'SemanticCode',
     description: [
@@ -15,7 +19,7 @@ export function semanticCodeTool(servers: LanguageServers | null): ToolDefinitio
       'definition, references, implementation (the classes and methods that implement an interface or an abstract member), typeDefinition (where the type of a value is declared) and hover (its type and documentation): give file plus the 1-based line and column (UTF-16) of a name.',
       'Give file relative to the project. Requires a trusted project, runs locally, and never applies edits. Returned locations are confined to the project. Use Symbols or Grep for other languages.'
     ].join(' '),
-    input: SemanticQuerySchema,
+    input: AgentQuerySchema,
     permissionClass: 'read',
     concurrencySafe: () => true,
     timeoutMs: 60_000,

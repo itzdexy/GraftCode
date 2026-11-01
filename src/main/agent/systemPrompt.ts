@@ -82,13 +82,18 @@ function notesSection(memory: MemoryFile[]): string {
   ].join('\n\n');
 }
 
+/** Other tools' skills can carry a page of description each, and every request repeats the list; their SKILL.md has the rest. */
+export const IMPORTED_SKILL_DESCRIPTION_MAX = 200;
+
 /** The skills a session may use. A skill Graft ships can carry a note of Graft's own, on the line after it. */
 export function skillsSection(skills: SkillInfo[]): string {
   if (skills.length === 0) return '';
+  const describe = (s: SkillInfo): string => !s.imported || s.description.length <= IMPORTED_SKILL_DESCRIPTION_MAX ? s.description
+    : `${s.description.slice(0, IMPORTED_SKILL_DESCRIPTION_MAX).replace(/\s+\S*$/, '')}…`;
   return [
     '# Skills',
     'Skills are instruction files for specialized tasks. When a task matches a skill, Read its SKILL.md first and follow it.',
-    ...skills.flatMap((s) => [`- ${s.name}: ${s.description} (${s.path})`, ...(s.note ? [`  ${s.note}`] : [])])
+    ...skills.flatMap((s) => [`- ${s.name}: ${describe(s)} (${s.path})`, ...(s.note ? [`  ${s.note}`] : [])])
   ].join('\n');
 }
 

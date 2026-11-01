@@ -6,6 +6,7 @@ import { EFFORT_LEVELS, type EffortLevel, type ModelRef, type PermissionMode } f
 import { type CheckReport, type ContentBlock, type FileAttachment, type ImageBlock, type LlmMessage, type MessageMeta, type StoredMessage } from '@shared/schemas/messages';
 import { MISSION_LIMITS, type Mission, type MissionStart } from '@shared/schemas/missions';
 import type { ChecksConfig } from '@shared/schemas/config';
+import type { ChangedProblems } from '@shared/schemas/semantic';
 import type { FileProblems } from '../languages/problems';
 import { FORWARDED_PORTS, type SandboxSettings, type SandboxTarget } from '../sandbox/sandbox';
 import type { BrowserPanel } from '../browser/browserPanel';
@@ -32,6 +33,8 @@ import type { DocumentMaker } from '../chat/documents';
 import type { MediaAccess } from '../media/mediaService';
 import type { CodeRun } from '../chat/codeSandbox';
 import { answerAside } from './aside';
+import { ATTEMPT_STEPS, attemptBrief, attemptTools, runAttemptLoop } from './attemptAgent';
+import { AttemptRunner, insideGitRepo } from './attempts';
 import { COMPACT_KEEP_TOKENS, compactionCut, summarizeSession, summaryMessageText } from './compaction';
 import { contextBreakdown, contextLines } from './contextBreakdown';
 import { runChecks, suggestChecks } from './checks';
@@ -40,11 +43,12 @@ import { modelOrder, toLlmHistory, withSentTimes } from './history';
 import { PRUNE_KEEP_TOKENS, pruneCutoff } from './prune';
 import { SessionContextState } from './contextState';
 import type { AgentWorkspaces } from './workspaces';
-import { runAgentLoop, type LoopHost } from './loop';
+import { mediaTurnKind, runAgentLoop, type LoopHost } from './loop';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
-import { expandMentions } from './mentions';
+import { expandMentions, type MentionContext } from './mentions';
 import { loadAgents } from './agents';
+import { NO_OTHER_ROOTS, type OtherToolRoots } from './otherTools';
 import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
@@ -68,11 +72,10 @@ import {
   PROMPT_COMMANDS,
   diagramPrompt,
   researchPrompt,
-  reviewPrompt,
-  securityReviewPrompt,
   testPrompt,
   UI_COMMANDS
 } from './slashCommands';
+import { ghCli, parseReviewArgs, resolveReviewScope, REVIEW_READ_ONLY, reviewMessage, reviewModel, type ReviewKind } from './reviewScope';
 import { buildChatSystemPrompt, buildCodeSystemPrompt, modeChangeNote, TAPROOT_MARKER, TAPROOT_NOTE, type Personalization } from './systemPrompt';
 import { cleanTitle } from './title';
 import { estimateMessagesTokens } from './tokens';
@@ -139,6 +142,13 @@ export interface SessionDeps {
   graftHome: string;
   /** The skills that ship with Graft; null when there are none. */
   builtinSkills: string | null;
+  /** The folders of other coding tools to read skills, commands and agents from (agent/otherTools.ts). Absent: none. */
+  otherTools?(folder: string | null, trusted: boolean): OtherToolRoots;
+  /** What "@problems" and "@terminal" attach (agent/mentions.ts): the folder's Problems list, the session's Terminal panel output. Absent: neither. */
+  mentionSources?: {
+    problems(folder: string, trusted: boolean): Promise<ChangedProblems>;
+    terminal(sessionId: string): Promise<string | null>;
+  };
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
@@ -191,6 +201,8 @@ interface InternalQueued {
   createdAt: number;
   /** A turn of a mission: its start, a later turn (with what the agent is told), or the checks on a report of "done". */
   mission?: { kind: 'start'; input: MissionStart } | { kind: 'step'; text: string; turn: number; of: number } | { kind: 'verify' };
+  /** Sent as attempts: one model per attempt (agent/attempts.ts). */
+  attempts?: ModelRef[];
 }
 
 const DELTA_FLUSH_MS = 40;
@@ -265,6 +277,8 @@ export class AgentSession {
   private readonly closing = new AbortController();
   /** How the last turn ended, for what a mission does next. */
   private lastTurn: { end: TurnEnd; error: string | null } = { end: 'completed', error: null };
+  /** The messages sent as attempts, and their cards. */
+  private readonly attempts: AttemptRunner;
 
   constructor(
     summary: SessionSummary,
@@ -325,6 +339,17 @@ export class AgentSession {
       compact: (instructions, signal, keepRecent, using) => this.compact(instructions, signal, keepRecent, using),
       leavePlanMode: () => this.leavePlanMode()
     });
+    this.attempts = new AttemptRunner({
+      sessionId: this.id,
+      store: deps.store,
+      workspaces: deps.workspaces ?? null,
+      shells: deps.shells,
+      emit: (event) => this.emit(event),
+      dropPrompt: (label) => this.host.dropPending(label),
+      log: (level, message, fields) => deps.log(level, message, fields)
+    });
+    // This runtime runs no attempts yet: any the store says are running were cut off when Graft stopped.
+    this.attempts.recover();
   }
 
   get summary(): SessionSummary {
@@ -409,12 +434,13 @@ export class AgentSession {
 
   // ---- public controls ----------------------------------------------------
 
-  /** Sends user input, or queues it while a turn is running. */
-  send(text: string, images: ImageBlock[] = [], files: FileAttachment[] = []): { queued: boolean } {
+  /** Sends user input, or queues it while a turn is running. `attempts`: send it as attempts, one model each. */
+  send(text: string, images: ImageBlock[] = [], files: FileAttachment[] = [], attempts?: ModelRef[]): { queued: boolean } {
     if (this.disposed) throw new GraftError('session_closed', 'This session is closed.');
     const trimmed = text.trim();
     if (trimmed.length === 0 && images.length === 0 && files.length === 0) throw new GraftError('empty_message', 'Type a message first.');
-    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, files, createdAt: Date.now() };
+    if (attempts) this.checkAttempts(trimmed);
+    const item: InternalQueued = { id: randomUUID(), text: trimmed, images, files, createdAt: Date.now(), ...(attempts ? { attempts } : {}) };
     if (this.running) {
       this.queue.push(item);
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -422,6 +448,63 @@ export class AgentSession {
     }
     this.start(item);
     return { queued: false };
+  }
+
+  /** Why a message can't be sent as attempts, thrown; nothing when it can. */
+  private checkAttempts(text: string): void {
+    const summary = this.summary;
+    if (summary.kind !== 'code' || !this.projectRoot() || !this.deps.workspaces) {
+      throw new GraftError('attempts_unavailable', 'Attempts work in code sessions that have a project folder.');
+    }
+    if (!insideGitRepo(this.workingDir())) {
+      throw new GraftError('attempts_need_git', 'Attempts need the folder to be a Git repository. Send the message once, or run git init in the folder first.');
+    }
+    if (summary.permissionMode === 'plan') throw new GraftError('attempts_plan', 'Attempts change files, and Plan mode changes none. Leave Plan mode first, or send the message once.');
+    if (parseSlash(text)) throw new GraftError('attempts_command', 'Commands run once, not as attempts. Turn attempts off to run it.');
+  }
+
+  /**
+   * Applying or discarding attempts, which then says so in the conversation. Not while a turn runs, which may be
+   * changing the same files; and what is sent meanwhile waits, as behind a turn, so the conversation stays in order.
+   */
+  private settleAttempts<T>(work: () => Promise<T>): Promise<T> {
+    if (this.running) throw new GraftError('busy', 'Graft is working. Wait for it to finish, or stop it, then apply or discard the attempts.');
+    // Released before the caller hears back, so whoever awaits this finds the session free.
+    const done = work().finally(() => {
+      this.running = null;
+      if (this.steering.length > 0) this.queue.unshift(...this.steering.splice(0));
+      const next = this.queue.shift();
+      if (!next || this.disposed) return;
+      this.emit({ type: 'queue', queue: this.publicQueue() });
+      this.start(next);
+    });
+    this.running = done.then(
+      () => undefined,
+      () => undefined
+    );
+    return done;
+  }
+
+  /** Applies one attempt to the folder (agent/attempts.ts). */
+  async applyAttempt(setId: string, index: number): Promise<{ files: string[] }> {
+    const files = await this.settleAttempts(() => this.attempts.apply(setId, index));
+    // What the agent read of those files is out of date now.
+    this.files.clear();
+    return { files };
+  }
+
+  /** Removes every checkout of a message's attempts. */
+  discardAttempts(setId: string): Promise<void> {
+    return this.settleAttempts(() => this.attempts.discard(setId));
+  }
+
+  /** Stops one attempt that is running, or all of them (null). */
+  stopAttempt(setId: string, index: number | null): boolean {
+    return this.attempts.stop(setId, index);
+  }
+
+  attemptDiff(setId: string, index: number): { files: Array<{ path: string; patch: string; binary: boolean }>; truncated: boolean } {
+    return this.attempts.diff(setId, index);
   }
 
   removeQueued(id: string): void {
@@ -440,6 +523,7 @@ export class AgentSession {
     if (index < 0) throw new GraftError('not_queued', 'That message is no longer waiting.');
     const item = this.queue[index]!;
     if (parseSlash(item.text)) throw new GraftError('cannot_steer', 'Commands run once the current turn ends.');
+    if (item.attempts) throw new GraftError('cannot_steer', 'Attempts start once the current turn ends.');
     this.queue.splice(index, 1);
     if (!this.running) {
       this.emit({ type: 'queue', queue: this.publicQueue() });
@@ -652,6 +736,8 @@ export class AgentSession {
       const after = this.deps.store.getMission(this.id);
       if (after?.id !== before?.id) this.emit({ type: 'mission', mission: after });
     }
+    // So do the checkouts of attempts that were neither applied nor discarded.
+    this.attempts.forget(removed).catch((error: unknown) => this.deps.log('warn', 'Could not remove the checkouts of rewound attempts', { session: this.id, message: (error as Error).message }));
     this.files.clear();
     return removed;
   }
@@ -829,6 +915,12 @@ export class AgentSession {
     }
   }
 
+  /** Other tools' folders this session reads skills, commands and agents from: a project's only once it is trusted. */
+  private otherRoots(): OtherToolRoots {
+    const root = this.settingsRoot();
+    return this.deps.otherTools?.(this.projectRoot(), root ? this.deps.isTrusted(root) : false) ?? NO_OTHER_ROOTS;
+  }
+
   /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
   private projectRoot(): string | null {
     const s = this.summary;
@@ -956,12 +1048,24 @@ export class AgentSession {
     }
   }
 
-  private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null } | null> {
+  /** /review and /security-review: where to look is worked out first, so a scope with nothing to review says why before a model is asked. */
+  private async reviewTurn(kind: ReviewKind, args: string, typed: string): Promise<{ text: string; typed: string; review: ReviewKind } | null> {
+    const dir = this.workingDir();
+    try {
+      const { target, focus } = parseReviewArgs(args);
+      return { text: reviewMessage(kind, await resolveReviewScope(dir, target, ghCli(dir)), focus), typed, review: kind };
+    } catch (error) {
+      this.commandOutput(error instanceof GraftError ? error.message : `Couldn't start the review: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  private async handleSlash(item: InternalQueued): Promise<{ text: string; typed: string | null; review?: ReviewKind } | null> {
     const slash = parseSlash(item.text);
     if (!slash) return { text: item.text, typed: null };
     const summary = this.summary;
     if (PROMPT_COMMANDS.has(slash.name)) {
-      const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
+      const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands).find((c) => c.name === slash.name);
       if (custom) return { text: expandCommand(custom, slash.args), typed: item.text };
     }
     if (summary.kind !== 'code' && CODE_ONLY_COMMANDS.has(slash.name)) {
@@ -1014,20 +1118,19 @@ export class AgentSession {
       }
       case 'help': {
         const lines = [
-          ...commandsFor(summary.kind, listCommands(this.deps.graftHome, this.projectRoot())).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
+          ...commandsFor(summary.kind, listCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands)).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
           ...this.deps.mcpPrompts(this.settingsRoot()).map((p) => `- /${mcpPromptCommand(p.server, p.name)}${promptHint(p) ? ` ${promptHint(p)}` : ''} — ${p.description || `Prompt from the ${p.server} server`}`)
         ];
         this.commandOutput(
-          `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
+          `Commands:\n${lines.join('\n')}\n\nIn the message box: @ mentions a file, a folder, some lines (@app.ts:10-40), @diff, @problems, @terminal or a web page (@https://…), ! runs a shell command, ↑ brings back earlier messages, Shift+Tab cycles the permission mode and Esc stops the agent. Ctrl+Shift+P opens the command palette.`
         );
         return null;
       }
       case 'init':
         return { text: INIT_PROMPT, typed: item.text };
       case 'review':
-        return { text: reviewPrompt(slash.args), typed: item.text };
       case 'security-review':
-        return { text: securityReviewPrompt(slash.args), typed: item.text };
+        return this.reviewTurn(slash.name === 'review' ? 'review' : 'security', slash.args, item.text);
       case 'explain':
         return { text: explainPrompt(slash.args), typed: item.text };
       case 'research':
@@ -1071,7 +1174,7 @@ export class AgentSession {
         return null;
       }
       default: {
-        const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
+        const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands).find((c) => c.name === slash.name);
         if (!custom) {
           this.commandOutput(`Unknown command /${slash.name}. Type /help to see the available commands.`);
           return null;
@@ -1116,6 +1219,7 @@ export class AgentSession {
     const prefs = this.deps.preferences();
     const root = this.projectRoot();
     if (summary.kind === 'code' && root && memory) {
+      const others = this.otherRoots();
       return buildCodeSystemPrompt({
         model: identity,
         cwd: this.workingDir(),
@@ -1126,13 +1230,13 @@ export class AgentSession {
         date: this.deps.now().toISOString().slice(0, 10),
         mode: summary.permissionMode,
         memory: memory.initial(this.workingDir()),
-        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills),
+        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills, others.skills),
         webSearch: web.native || web.clientSearch,
         computer: this.offering.computer(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         mcpNotes: this.deps.mcpInstructions(this.settingsRoot()),
         deferredTools: this.offering.deferredByServer(model),
-        agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
+        agents: loadAgents(this.deps.graftHome, root, others.agents).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,
@@ -1270,8 +1374,12 @@ export class AgentSession {
       const hooks = summary.kind === 'code' ? this.deps.hooks(settingsRoot, trusted) : null;
 
       let userText: string | null = null;
+      /** A review: it runs read-only, on the model Settings → Models gives reviews. */
+      let review: ReviewKind | null = null;
       let starting: Mission | null = null;
       let snapshot: Promise<void> | null = null;
+      /** The message the user sent to start this turn. */
+      let sentId: string | null = null;
       const missionTurn = item?.mission;
       if (missionTurn && missionTurn.kind !== 'start') {
         // A turn of a mission after its first: the mission restated, or its checks first when the agent reported it done.
@@ -1291,11 +1399,12 @@ export class AgentSession {
         const handled = starting ? { text: missionBrief(starting), typed: starting.objective } : await this.handleSlash(item);
         if (!handled) return;
         userText = handled.text;
+        review = 'review' in handled ? (handled.review ?? null) : null;
         // A session that starts in Taproot (or reopens in it) gets the briefing with its first message.
         if ((summary.effort ?? this.deps.preferences().defaultEffort) === 'taproot') this.briefTaproot();
         if (!(await this.promptAllowed(hooks, userText, signal))) return;
         const userMessageId = randomUUID();
-        const content = this.userContent(item, userText);
+        const content = await this.userContent(item, userText, signal);
         // The transcript shows what was typed; notes and attachments travel only to the model.
         const meta: MessageMeta = {
           turnId,
@@ -1305,6 +1414,7 @@ export class AgentSession {
         // The message is saved and shown at once. The folder's snapshot follows, and nothing is changed before it is
         // taken: a large folder used to keep the message unseen, and the turn unstoppable, for as long as it took.
         const stored = this.deps.store.appendMessage(this.id, 'user', content, meta, userMessageId);
+        sentId = userMessageId;
         this.emit({ type: 'message', message: stored });
         // The mission starts with its message (and no earlier), so a rewind of that message takes the mission with it.
         if (starting) this.missions.save({ ...starting, createdAt: stored.createdAt, updatedAt: stored.createdAt });
@@ -1313,7 +1423,10 @@ export class AgentSession {
         if (summary.kind === 'code') snapshot = this.startSnapshot(userMessageId, signal);
       }
 
-      const { provider, model, ref } = await this.resolveModel(signal);
+      const own = await this.resolveModel(signal);
+      const { provider, model, ref } = review
+        ? await reviewModel(review, own, { roles: this.deps.preferences().agents.roles, incognito: this.summary.incognito, models: this.deps.models }, signal)
+        : own;
       const key = this.promptModelKey(ref, model);
       if (this.modelKey !== null && this.modelKey !== key) {
         this.markThinkingStale();
@@ -1330,7 +1443,14 @@ export class AgentSession {
       // The model that answers this turn. The backup model takes its place when the session's keeps failing,
       // and from then on the turn is measured against that one's context window and summarized by it.
       const answering = { model, provider };
-      const scope: TurnScope = { hooks, root, trusted };
+      const scope: TurnScope = { hooks, root, trusted, ...(review ? { readOnly: REVIEW_READ_ONLY } : {}) };
+      if (item?.attempts && sentId !== null) {
+        endReason = await this.runAttempts(item.attempts, sentId, turnId, scope, answering, signal);
+        // The snapshot Rewind goes back to is taken before an attempt can be applied: that happens once this turn ends.
+        await snapshot;
+        if (endReason === 'completed' && userText !== null) this.maybeTitle(userText);
+        return;
+      }
       const taken = snapshot;
       const host: LoopHost = {
         ...this.host.loopHost(scope, answering, { tools: toolNames.length > 0, vision: false, agent: false }),
@@ -1401,6 +1521,83 @@ export class AgentSession {
   }
 
   /**
+   * A message sent as attempts (agent/attempts.ts): each model works on it in a checkout of its own, with the
+   * session's conversation, prompt and permission mode, and the card in the transcript compares them. They run
+   * as this turn, so its limits count them all and Stop stops them all.
+   */
+  private async runAttempts(refs: ModelRef[], messageId: string, turnId: string, scope: TurnScope, own: { model: ModelInfo; provider: LLMProvider }, signal: AbortSignal): Promise<TurnEnd> {
+    const same = (a: ModelRef, b: ModelRef): boolean => a.providerId === b.providerId && a.modelId === b.modelId;
+    const resolved = await Promise.all(refs.map((ref) => (same(ref, own.model.ref) ? Promise.resolve(own) : this.deps.models.resolve(ref, signal))));
+    for (const { model } of resolved) {
+      if (!model.supportsTools || mediaTurnKind(model.ref.modelId) !== null) {
+        throw new GraftError('attempts_model', `${model.label} can't use tools, so it can't make an attempt. Pick another model for it.`);
+      }
+    }
+    const history = this.history();
+    const memory = this.memoryLoader();
+    const prompts = new Map<string, Promise<string>>();
+    const promptFor = (model: ModelInfo): Promise<string> => {
+      const key = this.promptModelKey(model.ref, model);
+      const made = prompts.get(key) ?? (model === own.model && this.system ? Promise.resolve(this.system) : this.composePrompt(model, memory));
+      prompts.set(key, made);
+      return made;
+    };
+    const prefs = this.deps.preferences();
+    const checks = this.checksConfig();
+    const set = await this.attempts.run(
+      {
+        messageId,
+        turnId,
+        cwd: this.workingDir(),
+        models: resolved.map((r) => r.model),
+        concurrency: prefs.agents.maxParallel,
+        checks,
+        unchecked: checks ? null : this.uncheckedNote(),
+        agent: async (call, s) => {
+          const { model, provider } = resolved[call.index - 1]!;
+          return runAttemptLoop(
+            {
+              call,
+              host: this.host.loopHost(scope, { model, provider }, { tools: true, vision: false, agent: true }),
+              provider,
+              model,
+              history,
+              system: `${await promptFor(model)}\n\n${attemptBrief(call.index, call.of, call.lease.cwd)}`,
+              toolNames: attemptTools(this.offering.tools(model)),
+              toolDescriptions: this.offering.toolDescriptions(model),
+              registry: this.deps.tools,
+              effort: this.host.agentEffort(model),
+              privacy: this.privacy(),
+              sessionId: this.id,
+              turnId,
+              maxIterations: prefs.maxSteps ?? ATTEMPT_STEPS,
+              ...(this.deps.retryPolicy ? { retryPolicy: this.deps.retryPolicy } : {})
+            },
+            s
+          );
+        }
+      },
+      signal
+    );
+    if (signal.aborted) return 'interrupted';
+    // An attempt the turn's limits stopped says so on its card; why the turn paused is said once, here.
+    const limit = this.host.limitReached();
+    if (limit) this.notice('warning', limit);
+    const ready = set.attempts.filter((a) => a.status === 'candidate').length;
+    this.deps.notify(this.summary, 'finished', ready > 0 ? `${String(ready)} of ${String(set.attempts.length)} attempts are ready to compare.` : 'None of the attempts finished.');
+    return 'completed';
+  }
+
+  /** Why the project's checks will not run in an attempt's checkout, said on its card. */
+  private uncheckedNote(): string | null {
+    const root = this.settingsRoot();
+    if (!root) return null;
+    return this.deps.settings.checks(root, true)
+      ? "No checks ran: this project's checks run only once you trust the project (Settings → Permissions)."
+      : 'No checks ran: this project has none set up. Add them in Customize → Checks.';
+  }
+
+  /**
    * A turn stopped before the model said a word says so under the message, as a reply cut short does: otherwise
    * the message sits there unanswered, with nothing to tell what happened to it. The model never sees the note.
    */
@@ -1439,21 +1636,36 @@ export class AgentSession {
     return true;
   }
 
-  /** What the model gets for a typed message: pending notes, images, the text, attached files and @-mentioned files. */
-  private userContent(item: InternalQueued, text: string): ContentBlock[] {
+  /** What the model gets for a typed message: pending notes, images, the text, attached files and what its @-mentions name. */
+  private async userContent(item: InternalQueued, text: string, signal: AbortSignal): Promise<ContentBlock[]> {
     const root = this.projectRoot();
     const content: ContentBlock[] = [...this.notes.map((note) => ({ type: 'text' as const, text: note })), ...item.images];
     if (text.length > 0) content.push({ type: 'text', text });
     for (const file of item.files) {
       content.push({ type: 'text', text: `<attached-file name="${file.name.replace(/"/g, "'")}">\n${file.content}\n</attached-file>` });
     }
+    // Taken now: what arrives while the mentions are gathered is for the next message.
+    this.notes = [];
     if (this.summary.kind === 'code' && root && text.includes('@')) {
-      const mentions = expandMentions(text, this.workingDir(), root, this.deps.platform);
+      const mentions = await expandMentions(text, this.mentionContext(root, signal));
       for (const block of mentions.blocks) content.push({ type: 'text', text: block });
       for (const file of mentions.files) this.files.record(file);
     }
-    this.notes = [];
     return content;
+  }
+
+  /** Where a message's @-mentions are looked up: the session's folder, its Problems list and its Terminal panel. */
+  private mentionContext(root: string, signal: AbortSignal): MentionContext {
+    const sources = this.deps.mentionSources;
+    const settingsRoot = this.settingsRoot();
+    const trusted = settingsRoot ? this.deps.isTrusted(settingsRoot) : false;
+    return {
+      cwd: this.workingDir(),
+      root,
+      platform: this.deps.platform,
+      signal,
+      ...(sources ? { problems: () => sources.problems(this.workingDir(), trusted), terminal: () => sources.terminal(this.id) } : {})
+    };
   }
 
   /**
@@ -1467,7 +1679,7 @@ export class AgentSession {
     const delivered: ContentBlock[][] = [];
     for (const item of items) {
       if (!(await this.promptAllowed(hooks, item.text, signal))) continue;
-      const content = this.userContent(item, item.text);
+      const content = await this.userContent(item, item.text, signal);
       const meta: MessageMeta = { turnId, typed: item.text, ...(item.files.length > 0 ? { attachments: item.files.map((f) => f.name) } : {}) };
       const stored = this.deps.store.appendMessage(this.id, 'user', content, meta);
       this.emit({ type: 'message', message: stored });

@@ -11,6 +11,8 @@ export const useEditorDrafts = create<{
   open(key: string, preview: FilePreviewView): void;
   change(key: string, content: string): void;
   saved(key: string, content: string, revision: string): void;
+  /** The file on disk replaces the draft: its text becomes the draft and what was saved. */
+  reload(key: string, content: string, revision: string): void;
   discard(key: string): void;
   forgetSession(sessionId: string): void;
 }>((set) => ({
@@ -33,6 +35,7 @@ export const useEditorDrafts = create<{
     // Edits made while a save was pending remain dirty against the saved revision.
     return old ? { drafts: { ...state.drafts, [key]: { content: old.content, original: content, revision } } } : state;
   }),
+  reload: (key, content, revision) => set((state) => (state.drafts[key] ? { drafts: { ...state.drafts, [key]: { content, original: content, revision } } } : state)),
   discard: (key) => set((state) => { const next = { ...state.drafts }; delete next[key]; return { drafts: next }; }),
   forgetSession: (sessionId) => set((state) => ({
     drafts: Object.fromEntries(Object.entries(state.drafts).filter(([key]) => !key.startsWith(`${sessionId}:`))),

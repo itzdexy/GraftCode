@@ -418,3 +418,110 @@
 :root[data-motion='reduced'] .graft-chip-in {
   opacity: 1;
 }
+
+/* Hallow, the Halloween palette: Scion's pot becomes a jack-o'-lantern with candlelit eyes. */
+:root[data-palette='hallow']:not([data-theme='light']) {
+  --g-mascot-leaf: #6f9f3f;
+  --g-mascot-leaf-dark: #4f7a2b;
+  --g-mascot-pot: #e0731b;
+  --g-mascot-pot-rim: #f2953f;
+  --g-mascot-eye: #ffd36e;
+}
+:root[data-palette='hallow'][data-theme='light'] {
+  --g-mascot-leaf: #4e8a2e;
+  --g-mascot-leaf-dark: #3a6c20;
+  --g-mascot-pot: #d9690f;
+  --g-mascot-pot-rim: #ec8a2c;
+  --g-mascot-eye: #3b1a04;
+}
+
+/*
+ * Hallow's bats (HallowBats.tsx) circle above the top of a home page, flapping by frame swaps.
+ * Their resting place is the base style, so with motion reduced (globals.css) they hang still.
+ */
+.hallow-sky {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 132px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.hallow-bat {
+  position: absolute;
+  fill: var(--g-text-muted);
+}
+.hallow-bat__eye {
+  fill: var(--g-accent);
+}
+.hallow-bat__up {
+  animation: hallow-flap-up 320ms step-end infinite;
+}
+.hallow-bat__down {
+  opacity: 0;
+  animation: hallow-flap-down 320ms step-end infinite;
+}
+.hallow-bat--one {
+  top: 26px;
+  right: 17%;
+  animation: hallow-drift-one 9s ease-in-out infinite;
+}
+.hallow-bat--two {
+  top: 70px;
+  right: 8%;
+  animation: hallow-drift-two 12s ease-in-out infinite;
+}
+.hallow-bat--three {
+  top: 12px;
+  right: 30%;
+  opacity: 0.7;
+  animation: hallow-drift-three 15s ease-in-out infinite;
+}
+.hallow-bat--two .hallow-bat__up,
+.hallow-bat--two .hallow-bat__down {
+  animation-duration: 380ms;
+}
+.hallow-bat--three .hallow-bat__up,
+.hallow-bat--three .hallow-bat__down {
+  animation-duration: 260ms;
+}
+
+@keyframes hallow-flap-up {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes hallow-flap-down {
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes hallow-drift-one {
+  25% {
+    transform: translate(-36px, 12px);
+  }
+  50% {
+    transform: translate(-14px, -8px);
+  }
+  75% {
+    transform: translate(22px, 10px);
+  }
+}
+@keyframes hallow-drift-two {
+  30% {
+    transform: translate(28px, -14px);
+  }
+  60% {
+    transform: translate(-30px, -4px);
+  }
+}
+@keyframes hallow-drift-three {
+  20% {
+    transform: translate(-24px, 14px);
+  }
+  55% {
+    transform: translate(40px, 6px);
+  }
+  80% {
+    transform: translate(12px, -6px);
+  }
+}

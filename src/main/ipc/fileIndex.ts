@@ -7,12 +7,13 @@ import { runFile } from '../tools/run';
 const TTL_MS = 15_000;
 const MAX_FILES = 200_000;
 
-/** Project file lists (from ripgrep, .gitignore-aware) for fuzzy "@" mentions. */
+/** Project file lists (from ripgrep, .gitignore-aware) for fuzzy "@" mentions of files and folders. */
 export class FileIndex {
   private readonly cache = new Map<string, { at: number; files: string[] }>();
   private readonly inflight = new Map<string, Promise<string[]>>();
   /** Kept with the list it was made from, and gone when that list is. */
   private readonly names = new WeakMap<string[], Map<string, string[]>>();
+  private readonly folders = new WeakMap<string[], string[]>();
 
   constructor(private readonly rgPath: string) {}
 
@@ -37,10 +38,28 @@ export class FileIndex {
     return promise;
   }
 
-  async search(root: string, query: string, limit = 50): Promise<string[]> {
+  /**
+   * The listed files that match `query`, best first. With `folders`, the
+   * folders that hold them are listed too, each ending in "/"; with nothing
+   * typed, the top-level folders come before the files.
+   */
+  async search(root: string, query: string, limit = 50, folders = false): Promise<string[]> {
     const files = await this.list(root);
-    if (query.trim().length === 0) return files.slice(0, limit);
-    return fuzzyFilter(query, files, (f) => f, limit);
+    const dirs = folders ? this.foldersOf(files) : [];
+    if (query.trim().length === 0) return [...dirs.filter((d) => d.indexOf('/') === d.length - 1), ...files].slice(0, limit);
+    return fuzzyFilter(query, [...dirs, ...files], (f) => f, limit);
+  }
+
+  /** Every folder a listed file is in, shallow ones first, kept with the list it was made from. */
+  private foldersOf(files: string[]): string[] {
+    let dirs = this.folders.get(files);
+    if (!dirs) {
+      const found = new Set<string>();
+      for (const file of files) for (let at = file.indexOf('/'); at > 0; at = file.indexOf('/', at + 1)) found.add(file.slice(0, at + 1));
+      dirs = [...found].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+      this.folders.set(files, dirs);
+    }
+    return dirs;
   }
 
   /** The listed files by their last part, so a name is matched against the few files that end with it. */

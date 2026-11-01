@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { HookRunner } from '../../src/main/agent/hooks';
 import { allow, makeLoopHarness, resultTexts, testTool } from '../support/loopHarness';
 import { ndjson, startFixtureServer, type FixtureServer } from '../support/httpFixture';
 import { ProviderError } from '../../src/main/providers/errors';
@@ -398,5 +399,27 @@ describe('a finished reply whose tool calls were written as text', () => {
     const h = textModel(['\n', '<tool_call>{"name":"Look","arguments":{"n":1}}</tool_call>']);
     expect((await h.run('look')).reason).toBe('completed');
     expect(h.stored.find((m) => m.role === 'assistant')?.content).toEqual([look]);
+  });
+});
+
+describe('a turn stopped while a PreToolUse hook runs', () => {
+  it('does not run the call the hook was looking at', async () => {
+    let ran = false;
+    const controller = new AbortController();
+    const hooks = {
+      has: (event: string) => event === 'PreToolUse',
+      run: () => {
+        controller.abort();
+        return Promise.resolve({ decision: 'none', reason: null, context: null, errors: [] });
+      }
+    } as unknown as HookRunner;
+    const h = makeLoopHarness({
+      script: [{ toolCalls: [{ id: 'c1', name: 'Touch', input: {} }] }],
+      tools: [testTool('Touch', { run: () => { ran = true; return 'touched'; } })],
+      hooks
+    });
+    const result = await h.run('go', controller.signal);
+    expect(result.reason).toBe('interrupted');
+    expect(ran).toBe(false);
   });
 });

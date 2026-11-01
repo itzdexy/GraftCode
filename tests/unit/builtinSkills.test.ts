@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_SKILL_NOTES, loadSkills, skillReadRoots } from '../../src/main/agent/skills';
-import { skillsSection } from '../../src/main/agent/systemPrompt';
+import { IMPORTED_SKILL_DESCRIPTION_MAX, skillsSection } from '../../src/main/agent/systemPrompt';
 import { buildPaths } from '../../src/main/app/paths';
 import { makeTempDir, writeFile } from '../support/tmp';
 
@@ -57,6 +57,17 @@ describe('built-in skills', () => {
     );
     expect(BUILTIN_SKILL_NOTES['diagram-design']).toMatch(/^Graft's copy of this skill is read-only: never write inside its folder\. /);
     expect(BUILTIN_SKILL_NOTES['diagram-design']).toMatch(/as the skill's profiles\.md describes\.$/);
+  });
+
+  it("keep the start of another tool's long description and all of Graft's own", () => {
+    const long = `${'word '.repeat(60)}end`;
+    const listed = skillsSection([
+      { name: 'theirs', description: long, path: '/t/SKILL.md', scope: 'user', note: null, imported: true },
+      { name: 'ours', description: long, path: '/o/SKILL.md', scope: 'user', note: null }
+    ]).split('\n');
+    expect(listed[2]).toBe(`- theirs: ${'word '.repeat(39)}word… (/t/SKILL.md)`);
+    expect(listed[2]!.length).toBeLessThan(IMPORTED_SKILL_DESCRIPTION_MAX + 30);
+    expect(listed[3]).toBe(`- ours: ${long} (/o/SKILL.md)`);
   });
 
   it('name the folders that are read without asking', () => {

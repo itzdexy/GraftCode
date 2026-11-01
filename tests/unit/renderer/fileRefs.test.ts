@@ -100,4 +100,23 @@ describe('asking which names are files', () => {
     useFileRefs.getState().forget('s');
     expect(useFileRefs.getState().known).toEqual({ other: { 'a.ts': 'src/a.ts' } });
   });
+
+  it('asks again what was still on its way when it forgot, so the name is still answered (regression: a review card asked as its turn ended)', async () => {
+    vi.useFakeTimers();
+    const { invoke } = await import('../../../src/renderer/src/lib/ipc');
+    const asked: unknown[] = [];
+    vi.mocked(invoke).mockImplementation((_channel: string, input: unknown) => {
+      asked.push(input);
+      return Promise.resolve(['src/late.ts']);
+    });
+    useFileRefs.setState({ known: {} });
+    useFileRefs.getState().ask('late', 'late.ts');
+    // The turn ends before the batch goes: what it brings back belongs to the round before.
+    useFileRefs.getState().forget('late');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(useFileRefs.getState().known.late).toEqual({ 'late.ts': 'src/late.ts' });
+    // Asked once for each round; one of them reads the files again.
+    expect(asked).toHaveLength(2);
+    expect(asked.filter((input) => (input as { fresh?: boolean }).fresh === true)).toHaveLength(1);
+  });
 });

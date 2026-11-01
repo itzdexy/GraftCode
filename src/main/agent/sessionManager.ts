@@ -26,12 +26,15 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { GraftPaths } from '../app/paths';
 import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
+import { otherToolRoots } from './otherTools';
 import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
+import { undoHunk } from './turnUndo';
 import { AgentSession, type SessionDeps } from './session';
 import { mediaTurnKind } from './loop';
 import { generateTitle, titleModel } from './title';
 import { AgentWorkspaces } from './workspaces';
+import { AttemptRunner } from './attempts';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 
 export interface McpToolSource {
@@ -71,6 +74,8 @@ export interface SessionManagerDeps {
   revealBrowser?: SessionDeps['revealBrowser'];
   /** The local language server's errors for an edited file; absent where there is no server. */
   problems?: SessionDeps['problems'];
+  /** What "@problems" and "@terminal" attach to a message; absent where there is neither. */
+  mentionSources?: SessionDeps['mentionSources'];
   /** Session events and summary changes for the renderer. */
   emitEvent(sessionId: string, event: AgentEvent): void;
   emitSummary(summary: SessionSummary): void;
@@ -170,6 +175,7 @@ export class SessionManager {
       ...(d.site ? { site: d.site } : {}),
       ...(d.revealBrowser ? { revealBrowser: d.revealBrowser } : {}),
       ...(d.problems ? { problems: d.problems } : {}),
+      ...(d.mentionSources ? { mentionSources: d.mentionSources } : {}),
       dataHandling: (providerId) => {
         const provider = d.registry.summaries().find((p) => p.id === providerId);
         return provider ? dataHandling(provider) : 'unknown';
@@ -188,6 +194,7 @@ export class SessionManager {
       rgPath: d.rgPath,
       graftHome: d.paths.graftHome,
       builtinSkills: d.paths.builtinSkills,
+      otherTools: (folder, trusted) => otherToolRoots({ enabled: d.settings.get().behavior.otherTools, home: d.paths.toolsHome, projectRoot: folder, trusted }),
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),
@@ -402,14 +409,33 @@ export class SessionManager {
     this.deps.emitSummary(summary);
     const m = input.message;
     if (m && (m.text.trim().length > 0 || m.images.length > 0 || m.files.length > 0)) {
-      this.get(summary.id).send(m.text, m.images, m.files);
+      this.get(summary.id).send(m.text, m.images, m.files, m.attempts);
     }
     return this.summaryOf(summary.id);
   }
 
-  send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = []): { queued: boolean } {
+  send(id: string, text: string, images: ImageBlock[], files: FileAttachment[] = [], attempts?: ModelRef[]): { queued: boolean } {
     this.clearCompleted(id);
-    return this.get(id).send(text, images, files);
+    return this.get(id).send(text, images, files, attempts);
+  }
+
+  /** Applies one attempt of a message sent as attempts (agent/attempts.ts) to the session's folder. */
+  async applyAttempt(sessionId: string, setId: string, attempt: number): Promise<{ files: string[] }> {
+    const result = await this.get(sessionId).applyAttempt(setId, attempt);
+    this.deps.filesChanged(this.folderOf(sessionId));
+    return result;
+  }
+
+  discardAttempts(sessionId: string, setId: string): Promise<void> {
+    return this.get(sessionId).discardAttempts(setId);
+  }
+
+  stopAttempt(sessionId: string, setId: string, attempt: number | null): boolean {
+    return this.live.get(sessionId)?.stopAttempt(setId, attempt) ?? false;
+  }
+
+  attemptDiff(sessionId: string, setId: string, attempt: number): { files: Array<{ path: string; patch: string; binary: boolean }>; truncated: boolean } {
+    return this.get(sessionId).attemptDiff(setId, attempt);
   }
 
   interrupt(id: string): void {
@@ -566,6 +592,12 @@ export class SessionManager {
     if (summary.worktreePath && summary.projectPath && fs.existsSync(summary.worktreePath)) {
       await removeWorktree({ repoDir: summary.projectPath, worktreePath: summary.worktreePath, branch: summary.branch, force, deleteBranch: true });
     }
+    // Checkouts of attempts not yet applied or discarded live outside the session's folder: they go with the session.
+    const store = this.storeFor(id);
+    await new AttemptRunner({ sessionId: id, store, workspaces: this.workspaces, shells: this.deps.shells, emit: () => undefined, dropPrompt: () => undefined,
+      log: (level, message, fields) => this.deps.log(level, message, fields) })
+      .forget(store.listMessages(id))
+      .catch((error: unknown) => this.deps.log('warn', 'Could not remove the checkouts of a deleted session\'s attempts', { session: id, message: (error as Error).message }));
     if (this.incognito.has(id)) {
       this.incognito.remove(id);
     } else {
@@ -693,14 +725,34 @@ export class SessionManager {
     };
   }
 
-  rewindPreview(sessionId: string, messageId: string): Promise<RewindPreview> {
-    return previewRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId);
+  /** The folder a code session's tools name files from: its worktree, else its project. */
+  private folderOf(sessionId: string): string {
+    const s = this.summaryOf(sessionId);
+    const folder = s.worktreePath ?? s.projectPath ?? s.cwd;
+    if (!folder) throw new GraftError('no_folder', 'This session has no folder.');
+    return folder;
   }
 
-  async rewind(sessionId: string, messageId: string, mode: RewindMode): Promise<RewindResult> {
+  /** `paths` (from the session's folder): only what restoring those files would change. */
+  rewindPreview(sessionId: string, messageId: string, paths?: string[]): Promise<RewindPreview> {
+    const only = paths ? { folder: this.folderOf(sessionId), paths } : undefined;
+    return previewRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, only);
+  }
+
+  async rewind(sessionId: string, messageId: string, mode: RewindMode, paths?: string[]): Promise<RewindResult> {
     if (this.live.get(sessionId)?.isBusy) throw new GraftError('busy', 'Stop the session before rewinding it.');
-    const result = await performRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, mode);
+    const only = paths ? { folder: this.folderOf(sessionId), paths } : undefined;
+    const result = await performRewind({ ...this.rewindDeps(), store: this.storeFor(sessionId) }, sessionId, messageId, mode, only);
     this.deps.emitSummary(this.summaryOf(sessionId));
+    return result;
+  }
+
+  /** Takes one change of a turn's edit back out of its file (see turnUndo.ts). */
+  undoHunk(sessionId: string, toolUseId: string, hunk: number): { path: string } {
+    if (this.live.get(sessionId)?.isBusy) throw new GraftError('busy', 'Stop the session before undoing a change.');
+    const folder = this.folderOf(sessionId);
+    const result = undoHunk(folder, this.storeFor(sessionId).listMessages(sessionId), toolUseId, hunk);
+    this.deps.filesChanged(folder);
     return result;
   }
 

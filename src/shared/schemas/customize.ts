@@ -6,13 +6,15 @@ import { ChecksConfigSchema, HooksConfigSchema, McpInheritSchema, McpServerNameS
 export const CustomScopeSchema = z.enum(['user', 'project']);
 export type CustomScopeView = z.infer<typeof CustomScopeSchema>;
 
+/** `imported`: read from another tool's folder (.claude, .cursor, .codex), which Graft never edits; `path` says where. */
 export const CommandFileSchema = z.object({
   name: z.string(),
   description: z.string(),
   argumentHint: z.string().nullable(),
   scope: CustomScopeSchema,
   path: z.string(),
-  body: z.string()
+  body: z.string(),
+  imported: z.boolean()
 });
 export type CommandFileView = z.infer<typeof CommandFileSchema>;
 
@@ -23,7 +25,8 @@ export const AgentFileSchema = z.object({
   tools: z.array(z.string()).nullable(),
   scope: CustomScopeSchema,
   path: z.string(),
-  body: z.string()
+  body: z.string(),
+  imported: z.boolean()
 });
 export type AgentFileView = z.infer<typeof AgentFileSchema>;
 
@@ -33,7 +36,8 @@ export const SkillFileSchema = z.object({
   /** `builtin`: ships with Graft. Saving a skill takes CustomScopeSchema, which has no such choice. */
   scope: z.enum(['user', 'project', 'builtin']),
   path: z.string(),
-  body: z.string()
+  body: z.string(),
+  imported: z.boolean()
 });
 export type SkillFileView = z.infer<typeof SkillFileSchema>;
 
@@ -96,6 +100,22 @@ export const McpServerViewSchema = z.object({
   icon: z.string().nullable().optional()
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;
+
+/** A server found in another tool's settings, for Customize's Import list. Values of variables and headers stay in main. */
+export const McpImportViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The file it was found in: from the project, or from the home folder (~). */
+  from: z.string(),
+  /** Where it is saved: a project's server for this computer in that project ("local"), the user's own for all projects. */
+  scope: SettingsScopeSchema,
+  config: McpConfigViewSchema,
+  /** Graft has a server of this name already: it is not added over it. */
+  exists: z.boolean(),
+  /** Variables its settings name that this computer doesn't set. */
+  missing: z.array(z.string())
+});
+export type McpImportView = z.infer<typeof McpImportViewSchema>;
 
 const SecretMap = z.record(z.string().min(1).max(200), z.string().max(8000));
 

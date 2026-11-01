@@ -59,6 +59,11 @@ const TINTED = {
     label: 'warm sand',
     dark: { hue: 68, surface: 0.02, border: 0.02, text: 0.016, lift: 0 },
     light: { hue: 80, surface: 0.019, border: 0.022, text: 0.018, lift: -0.006 }
+  },
+  hallow: {
+    label: 'Halloween violet',
+    dark: { hue: 305, surface: 0.034, border: 0.036, text: 0.014, lift: -0.014 },
+    light: { hue: 305, surface: 0.014, border: 0.02, text: 0.03, lift: -0.004 }
   }
 };
 
@@ -100,7 +105,8 @@ const ACCENTS = {
   rose: { dark: ['#ef7aa6', '#f497ba', '#5c2a3d'], light: ['#c23a6e', '#a82f5e', '#f8d9e5'] },
   gold: { dark: ['#e8b84a', '#f0c96c', '#5c4614'], light: ['#8f6400', '#7a5500', '#f6e7c2'] },
   teal: { dark: ['#4fc1b4', '#6fd3c7', '#1d4d48'], light: ['#0f7f73', '#0b6b61', '#cdebe7'] },
-  mono: { dark: ['#d8d7d2', '#f0efec', '#3a3a39'], light: ['#3d3c38', '#1f1e1d', '#e2e1db'] }
+  mono: { dark: ['#d8d7d2', '#f0efec', '#3a3a39'], light: ['#3d3c38', '#1f1e1d', '#e2e1db'] },
+  pumpkin: { dark: ['#f28a2e', '#f7a456', '#5a2e0c'], light: ['#9c4400', '#843800', '#fbe1cb'] }
 };
 
 // sRGB <-> OKLab (Björn Ottosson's matrices).

@@ -20,8 +20,10 @@ import { LazyModelViewer } from '../models/LazyModelViewer';
 import { previewNote } from './fileActions';
 import { FileMenu, useFileActions } from './FileMenu';
 import { draftSaves, type SaveTarget } from './draftSaves';
+import { EditorAiButtons } from './EditorAiButtons';
 import { useEditorDrafts } from './editorDrafts';
 import { flushEditorRecovery, recoverEditorDrafts } from './editorRecovery';
+import { DiskChangeBar, useLiveFile } from './liveFile';
 import type { EditorComment } from './TextEditor';
 import { closeWorkspaceTab, loadWorkspaceLayout, openWorkspaceTab, saveWorkspaceLayout, setWorkspaceTabMode, type WorkspaceTab } from './workspaceLayout';
 
@@ -291,6 +293,8 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
   // A comment for the agent on lines of the file in the editor: asked for by the button or the key, written in a dialog.
   const [commentAsked, setCommentAsked] = useState(0);
   const [commenting, setCommenting] = useState<(EditorComment & { path: string }) | null>(null);
+  // Edit with AI asked for by the toolbar's button; the editor opens it on its selected lines.
+  const [editAsked, setEditAsked] = useState(0);
 
   const open = useCallback((path: string, location: CodeLocation | null = null, recovery = false, mode: WorkspaceTab['mode'] = 'preview'): void => {
     const requestedMode = location || recovery ? 'edit' : mode;
@@ -393,6 +397,8 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
 
   const selected = preview ? (preview.state === 'ready' ? preview.preview.path : preview.path) : null;
   const ready = preview?.state === 'ready' ? preview.preview : null;
+  // The file shown follows the disk; the tree's change marks are read again with it.
+  useLiveFile(sessionId, selected, ready?.revision, (latest) => { setPreview({ state: 'ready', preview: latest }); setSaved((n) => n + 1); });
   const draftKey = `${sessionId}:${selected ?? ''}`;
   const draft = useEditorDrafts((s) => s.drafts[draftKey]);
   const recovery = useEditorDrafts((s) => s.recovery[draftKey]);
@@ -459,6 +465,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             }}><Pencil className="size-13" /></IconButton> : null}
             {edit ? <IconButton label={saving ? 'Saving file' : 'Save file'} shortcut="Ctrl+S" size="xs" disabled={saving || !dirty} onClick={save}><Save className="size-13" /></IconButton> : null}
             {edit ? <IconButton label="Comment for the agent" shortcut="Ctrl+L" size="xs" onClick={() => setCommentAsked((n) => n + 1)}><MessageSquarePlus className="size-13" /></IconButton> : null}
+            {edit ? <EditorAiButtons sessionId={sessionId} file={selected} onEdit={() => setEditAsked((n) => n + 1)} /> : null}
             {picture && ready.content !== null ? (
               <IconButton label={shown.source ? 'Show the picture' : 'Show the source'} size="xs" active={shown.source} onClick={() => setView({ ...shown, source: !shown.source })}>
                 {shown.source ? <Image className="size-13" /> : <Code className="size-13" />}
@@ -481,6 +488,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             <p className="flex-1 text-sm text-danger">{saveError}</p>
             <Button size="xs" variant="ghost" onClick={() => { useEditorDrafts.getState().discard(draftKey); setEditing(null); open(selected); }}>Discard draft and reload</Button>
           </div> : null}
+          <DiskChangeBar draftKey={draftKey} path={selected} disk={edit ? ready : null} />
           {dirty ? <p role={recovery?.state === 'error' ? 'alert' : 'status'} className="shrink-0 px-10 py-4 text-2xs text-fg-muted">
             {recovery?.state === 'error' ? `Draft recovery failed: ${recovery.message ?? 'unknown error'}. Your draft remains in memory.` : recovery?.state === 'backed-up' ? 'Draft backed up on this device.' : 'Backing up draft…'}
           </p> : null}
@@ -488,7 +496,7 @@ export function FilesView({ sessionId, refreshKey }: { sessionId: string; refres
             {preview.state === 'loading' ? <LoadingState /> : null}
             {preview.state === 'error' ? <ErrorState message={preview.message} /> : null}
             {edit && draft ? <Suspense fallback={<LoadingState label="Loading editor…" />}><TextEditor key={`${sessionId}:${selected}:${opened}`} sessionId={sessionId} file={selected} value={draft.content} position={position} onNavigate={(location) => open(location.file, location)}
-              commentRequest={commentAsked} onComment={(at) => setCommenting({ ...at, path: selected })}
+              commentRequest={commentAsked} onComment={(at) => setCommenting({ ...at, path: selected })} editRequest={editAsked}
               onChange={(content) => useEditorDrafts.getState().change(draftKey, content)} onSave={save} /></Suspense> : ready ? (
               <PreviewPane sessionId={sessionId} preview={ready} opened={opened} fit={shown.fit} source={shown.source} onPixels={(pixels) => setView({ ...shown, pixels })} />
             ) : null}

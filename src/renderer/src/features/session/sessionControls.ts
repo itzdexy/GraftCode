@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SlashCommand } from '@shared/schemas/app';
-import type { EffortLevel, PermissionMode } from '@shared/schemas/common';
+import type { EffortLevel, ModelRef, PermissionMode } from '@shared/schemas/common';
 import type { FileAttachment, ImageBlock, StoredMessage } from '@shared/schemas/messages';
 import { missionOpen } from '@shared/schemas/missions';
 import type { ModelInfo } from '@shared/schemas/models';
@@ -176,7 +176,14 @@ export function shellCommandOf(text: string): string | null {
   return trimmed.startsWith('!') ? trimmed.slice(1).trim() : null;
 }
 
-export async function sendMessage(text: string, images: ImageBlock[], files: FileAttachment[], ctx: UiCommandContext): Promise<boolean> {
+/** Text that goes as a message and not as a command (a slash command, or "!" for the shell): only that can go as attempts. */
+export function plainMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return !trimmed.startsWith('/') && !trimmed.startsWith('!');
+}
+
+/** `attempts`: send it as attempts, a model each (agent/attempts.ts); left out, it goes once. */
+export async function sendMessage(text: string, images: ImageBlock[], files: FileAttachment[], ctx: UiCommandContext, attempts?: ModelRef[] | null): Promise<boolean> {
   const command = ctx.summary.kind === 'code' && (ctx.summary.worktreePath ?? ctx.summary.cwd) ? shellCommandOf(text) : null;
   if (command !== null) {
     if (command.length === 0) throw new Error('Type a command after the !, for example !git status.');
@@ -185,6 +192,6 @@ export async function sendMessage(text: string, images: ImageBlock[], files: Fil
     return true;
   }
   if (images.length === 0 && files.length === 0 && handleUiCommand(text, ctx)) return true;
-  await invoke('sessions:send', { id: ctx.summary.id, text, images, files });
+  await invoke('sessions:send', { id: ctx.summary.id, text, images, files, ...(attempts ? { attempts } : {}) });
   return true;
 }

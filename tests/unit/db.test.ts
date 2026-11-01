@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_APP_SETTINGS } from '../../src/shared/schemas/appSettings';
 import { EMPTY_USAGE } from '../../src/shared/schemas/common';
 import type { SessionUsage } from '../../src/shared/schemas/sessions';
 import { migrate, openDatabase, schemaVersion, type Db } from '../../src/main/db/database';
@@ -212,6 +213,13 @@ describe('app settings', () => {
     expect(settings.get().profile.name).toBe('Kai');
   });
 
+  it('keeps the readable fields of a section when one field holds a value this version does not know', () => {
+    const stored = { ...DEFAULT_APP_SETTINGS.appearance, theme: 'dark', uiFontSize: 15, palette: 'from-a-newer-build' };
+    db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('appearance', JSON.stringify(stored));
+    const appearance = new AppSettingsService(db).get().appearance;
+    expect(appearance).toMatchObject({ theme: 'dark', uiFontSize: 15, palette: DEFAULT_APP_SETTINGS.appearance.palette });
+  });
+
   it('gives an install from before the backup model no backup model, and keeps its other defaults', () => {
     const stored = { model: { providerId: 'p', modelId: 'm' }, effort: 'high', permissionMode: 'auto', useWorktree: true, lastProjectPath: null };
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('defaults', JSON.stringify(stored));
@@ -223,13 +231,13 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
   });
 
-  it('gives an install from before the limits for one turn, one session, one project, or one day no limits, checks its edits, and keeps what it had set', () => {
+  it('gives an install from before the limits for one turn, one session, one project, or one day no limits, checks its edits, reads the folders of other tools, and keeps what it had set', () => {
     const stored = { runInTray: true, bypassModeEnabled: false, bypassKeepsChecks: true, autoCompact: false, webSearch: true, computerUse: false, maxSteps: 250 };
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('behavior', JSON.stringify(stored));
     const settings = new AppSettingsService(db);
-    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true, otherTools: true });
     settings.update({ behavior: { turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 } });
-    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true, otherTools: true });
     settings.update({ behavior: { turnToolCalls: 500, turnRetries: 0 } });
     expect(new AppSettingsService(db).get().behavior).toMatchObject({ turnToolCalls: 500, turnRetries: 0 });
     settings.update({ behavior: { sessionTokens: 2_000_000, projectTokens: 5_000_000, dayCostUsd: 10, projectCostUsd: 2.5 } });

@@ -112,6 +112,18 @@
     "label": "Image, video and audio models"
   },
   {
+    "section": "models",
+    "label": "Editor"
+  },
+  {
+    "section": "models",
+    "label": "Suggestions as you type"
+  },
+  {
+    "section": "models",
+    "label": "Model for suggestions"
+  },
+  {
     "section": "search",
     "label": "Web access"
   },
@@ -246,6 +258,14 @@
   {
     "section": "permissions",
     "label": "Let the agent use this computer"
+  },
+  {
+    "section": "permissions",
+    "label": "Other coding tools"
+  },
+  {
+    "section": "permissions",
+    "label": "Use skills, commands and agents from other tools"
   },
   {
     "section": "sandbox",

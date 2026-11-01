@@ -83,8 +83,16 @@ export class AppSettingsService {
       const raw = stored.get(section);
       if (raw === undefined) continue;
       try {
-        const merged = { ...(DEFAULT_APP_SETTINGS[section] as object), ...upgraded(section, JSON.parse(raw) as object) };
-        const parsed = AppSettingsSchema.shape[section].safeParse(merged);
+        const defaults = DEFAULT_APP_SETTINGS[section] as Record<string, unknown>;
+        const merged: Record<string, unknown> = { ...defaults, ...upgraded(section, JSON.parse(raw) as object) };
+        const schema = AppSettingsSchema.shape[section];
+        let parsed = schema.safeParse(merged);
+        if (!parsed.success) {
+          // Only the fields this version can't read (a value another Graft build wrote) go back to defaults.
+          const bad = [...new Set(parsed.error.issues.map((issue) => String(issue.path[0])))];
+          parsed = schema.safeParse({ ...merged, ...Object.fromEntries(bad.map((key) => [key, defaults[key]])) });
+          log.warn('settings', 'Stored settings fields invalid; using their defaults', { section, fields: bad.join(',') });
+        }
         if (parsed.success) result[section] = parsed.data;
         else log.warn('settings', 'Stored settings section invalid; using defaults', { section });
       } catch (error) {

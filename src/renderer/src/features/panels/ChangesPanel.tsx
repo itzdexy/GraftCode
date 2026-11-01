@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Columns2, EllipsisVertical, Minus, PenLine, Plus, RefreshCw, Rows3, Undo2 } from 'lucide-react';
+import { Columns2, EllipsisVertical, Minus, PenLine, Plus, RefreshCw, Rows3, ScanSearch, Undo2 } from 'lucide-react';
 import type { ChangedFileView, FileDiffView, GitStatusView } from '@shared/schemas/git';
 import { Button, IconButton } from '../../components/Button';
 import { Spinner } from '../../components/ContextRing';
@@ -14,6 +14,7 @@ import { useTextSearch } from '../../stores/textSearch';
 import { reportError, useToasts } from '../../stores/toasts';
 import { DiffView } from '../diff/DiffView';
 import { coveredRows, rowsFromHunks } from '../diff/diffModel';
+import { startReview } from '../review/startReview';
 import { useDiffComments } from '../review/useDiffComments';
 import { SecretsToggle } from '../session/Output';
 import { useDiffPrefs } from './diffPrefs';
@@ -230,6 +231,11 @@ function ChangesView({ sessionId, refreshKey }: { sessionId: string; refreshKey:
           {load.status.branch ? ` on ${load.status.branch}` : ''}
         </span>
         {covers.size > 0 ? <SecretsToggle shown={revealed} onChange={(on) => setUncovered(on ? fileKey : null)} /> : null}
+        {files.length > 0 ? (
+          <IconButton label="Review changes" size="xs" onClick={() => startReview(sessionId, 'uncommitted')}>
+            <ScanSearch className="size-12" />
+          </IconButton>
+        ) : null}
         <IconButton label={mode === 'unified' ? 'Side-by-side diff' : 'Unified diff'} size="xs" onClick={() => prefs.set({ split: !prefs.split })}>
           {mode === 'unified' ? <Columns2 className="size-12" /> : <Rows3 className="size-12" />}
         </IconButton>

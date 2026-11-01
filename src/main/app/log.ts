@@ -17,6 +17,8 @@ const KEY_PATTERNS = [
   /sk-[A-Za-z0-9_-]{12,}/g,
   /sk-ant-[A-Za-z0-9_-]{12,}/g,
   /AIza[0-9A-Za-z_-]{20,}/g,
+  /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}/g,
+  /github_pat_[A-Za-z0-9_]{40,}/g,
   /(bearer\s+)[A-Za-z0-9._-]+/gi,
   /(x-api-key["':\s]+)[A-Za-z0-9._-]{12,}/gi,
   /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret)["']?\s*[:=]\s*["']?)([^\s"'&,;]+)/gi,

@@ -1,4 +1,12 @@
+import type { SettingsScope } from '@shared/schemas/config';
 import type { McpServerView } from '@shared/schemas/customize';
+
+export const SCOPE_TEXT: Record<SettingsScope, string> = { user: 'All projects', project: 'Project (shared)', local: 'Project (this computer)' };
+
+/** How a server starts, on one line: its command and arguments, or its address. */
+export function launchLine(config: McpServerView['config']): string {
+  return config.type === 'stdio' ? [config.command, ...config.args].join(' ') : config.url;
+}
 
 export const STATE_TEXT: Record<McpServerView['state'], string> = {
   connecting: 'Connecting…',

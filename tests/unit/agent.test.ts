@@ -27,6 +27,7 @@ import { testTool } from '../support/loopHarness';
 import { searchTools } from '../../src/main/tools/toolSearch';
 import { startFixtureServer } from '../support/httpFixture';
 import { makeHarness, type Harness } from '../support/sessionHarness';
+import { makeRepo } from '../support/gitRepo';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 let harnesses: Harness[] = [];
@@ -1840,7 +1841,9 @@ describe('researchers in chats', () => {
 
 describe('prompt commands', () => {
   it('expands /commit, /pr, /security-review, /explain and /test into prepared prompts that show as typed', async () => {
-    const h = harness({ script: [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }] });
+    // A review looks at what git says changed, so the project is a repository with a change in it.
+    const h = harness({ projectDir: makeRepo(), script: [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }] });
+    writeFile(h.projectDir, 'README.md', '# changed\n');
     for (const typed of ['/commit fix the login typo', '/pr', '/security-review auth', '/explain the session queue', '/test']) {
       h.session.send(typed);
       await h.session.idle();
@@ -2365,6 +2368,26 @@ describe('limits for one turn', () => {
       'Stopped: the turn reached a limit before this sub-agent finished. Paused after about 6,530 tokens, past the limit of 5,000 for one turn set in Settings → Permissions.'
     );
     expect(pauses(h)).toHaveLength(1);
+  });
+
+  it('reports a sub-agent its own step limit cut short as stopped, with its last words, not as finished', async () => {
+    const h = harness({
+      maxSteps: 2,
+      script: [
+        { toolCalls: [{ id: 'task-1', name: 'Task', input: { description: 'Look', prompt: 'Look around', subagent_type: 'explore' } }] },
+        { text: 'Looking.', toolCalls: [{ name: 'Glob', input: { pattern: '*.a' } }] },
+        { text: 'Half way.', toolCalls: [{ name: 'Glob', input: { pattern: '*.b' } }] },
+        { text: 'Done.' }
+      ]
+    });
+    h.session.send('look around');
+    await h.session.idle();
+    const results = h.store.listMessages('session-1').flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && b.toolUseId === 'task-1' ? [b] : [])));
+    expect(results).toHaveLength(1);
+    expect(results[0]!.isError).toBe(true);
+    const text = results[0]!.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toContain('Stopped before it finished');
+    expect(text).toContain('Half way.');
   });
 
   it('pauses after the minutes it worked, and the time an approval waited is not work', async () => {

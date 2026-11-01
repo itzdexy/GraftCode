@@ -10,8 +10,6 @@ import { cn } from '../lib/cn';
  */
 export const Menu = DM.Root;
 export const MenuTrigger = DM.Trigger;
-export const MenuGroup = DM.Group;
-export const MenuRadioGroup = DM.RadioGroup;
 export const MenuSub = DM.Sub;
 
 const CONTENT =
@@ -173,6 +171,22 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ComponentPropsWitho
       <CM.Portal>
         <CM.Content ref={ref} collisionPadding={collisionPadding} className={cn(CONTENT, className)} {...props} />
       </CM.Portal>
+    );
+  }
+);
+
+export const ContextMenuItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof CM.Item> & ItemExtras>(
+  function ContextMenuItem({ className, icon, description, checked, shortcut, trailing, danger, children, ...props }, ref) {
+    return (
+      <CM.Item
+        ref={ref}
+        className={cn(ITEM, description ? 'min-h-[var(--g-menu-row-2line-height)] py-4' : 'h-[var(--g-menu-row-height)]', danger && 'text-danger', className)}
+        {...props}
+      >
+        <ItemBody icon={icon} description={description} checked={checked} shortcut={shortcut} trailing={trailing}>
+          {children}
+        </ItemBody>
+      </CM.Item>
     );
   }
 );

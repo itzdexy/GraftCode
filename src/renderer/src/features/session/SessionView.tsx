@@ -15,6 +15,8 @@ import { usePaneActive, usePanes } from '../../stores/panes';
 import { commentsOf, useReview } from '../../stores/review';
 import { useSessions, viewOf, type SessionView as SessionViewState } from '../../stores/sessions';
 import { reportError } from '../../stores/toasts';
+import { AttemptsMenu, useAttemptsUnavailable } from '../composer/AttemptsMenu';
+import { attemptModels, useAttemptsChoice } from '../composer/attemptsChoice';
 import { ChatModelMenu, chatEffort, chatEffortLevels } from '../composer/ChatModelMenu';
 import { Composer } from '../composer/Composer';
 import { contextLimit, ContextUsage } from '../composer/ContextUsage';
@@ -37,9 +39,10 @@ import { QueueBar } from './QueueBar';
 import { useRewind } from './RewindDialog';
 import { ChatSessionHeader, CodeSessionHeader } from './SessionHeader';
 import { DetailsColumn, DetailsToggle, useDetailsShown } from './details/SessionDetails';
-import { compact, cycleMode, interrupt, lastTypedMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
+import { compact, cycleMode, interrupt, lastTypedMessage, plainMessage, sendMessage, setMode, setSessionEffort, setSessionModel, useCommands } from './sessionControls';
 import { StatusBar, useDiffStats } from './StatusBar';
 import { Transcript } from './Transcript';
+import { useTurnUndo } from './turnUndo';
 
 export const DISCLAIMER = 'Graft can make mistakes. Review changes before shipping.';
 
@@ -133,14 +136,16 @@ function CodeSession({
   const { model, effort, missing, blockedReason } = useSessionModel(summary);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [statsBump, setStatsBump] = useState(0);
-  const stats = useDiffStats(summary.id, `${view.turnActive}:${view.messages.length}:${statsBump}`);
+  // An Undo on a past turn's card changes files outside any turn: the counts and the panels read them again.
+  const undone = useTurnUndo((s) => Object.keys(s.undone).length);
+  const stats = useDiffStats(summary.id, `${view.turnActive}:${view.messages.length}:${statsBump}:${undone}`);
   const commands = useCommands(summary.projectPath, true);
   // The plan the session is following: the newest one the user approved, read from the conversation.
   const plan = useMemo(() => currentPlan(view.messages), [view.messages]);
   const lastUser = lastTypedMessage(view.messages);
   const busy = view.turnActive;
   const folder = summary.worktreePath ?? summary.cwd;
-  const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}`;
+  const refreshKey = `${view.turnActive}:${view.messages.length}:${statsBump}:${undone}`;
   const agentsWorking = view.agentRuns.filter((r) => agentRunActive(r.status)).length;
   const detailsOn = useDetailsShown(summary.id);
   useAutoOpenTasks(summary.id);
@@ -149,11 +154,16 @@ function CodeSession({
   useShortcut('toggleChanges', () => usePanels.getState().toggle(summary.id, 'changes'), folder !== null && focused);
   useShortcut('toggleFiles', () => usePanels.getState().toggleFiles(summary.id), folder !== null && focused);
 
+  const attemptsOff = useAttemptsUnavailable(folder, summary.permissionMode);
+
   // The comments that wait on lines of code go with an ordinary message, and are gone once it has. A command leaves them waiting.
+  // So does the choice of attempts: a message takes it with it, and the next one goes once again.
   const send = async (text: string, images: ImageBlock[], files: FileAttachment[]): Promise<boolean> => {
     const message = withComments(text, commentsOf(useReview.getState(), summary.id));
-    const sent = await sendMessage(message.text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) });
+    const attempts = attemptsOff === null && plainMessage(message.text) ? attemptModels(useAttemptsChoice.getState().choices[summary.id], summary.model ?? model?.ref ?? null) : null;
+    const sent = await sendMessage(message.text, images, files, { summary, lastUserMessageId: lastUser?.id ?? null, openModelMenu: () => setModelMenuOpen(true) }, attempts);
     if (sent && message.attached) useReview.getState().clear(summary.id);
+    if (sent && attempts) useAttemptsChoice.getState().clear(summary.id);
     return sent;
   };
 
@@ -217,6 +227,7 @@ function CodeSession({
                 <>
                   <PermissionModeMenu value={summary.permissionMode} onChange={(mode) => setMode(summary, mode)} />
                   <TranscriptViewMenu />
+                  <AttemptsMenu draftKey={summary.id} model={model} unavailable={attemptsOff} />
                 </>
               }
               rightControls={

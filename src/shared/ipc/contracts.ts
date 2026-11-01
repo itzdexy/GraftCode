@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { ATTEMPTS_MAX, ATTEMPTS_MIN } from '../schemas/attempts';
 import { CatalogSyncStatusSchema } from '../schemas/catalogSync';
-import { ChangedProblemsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
+import { ChangedProblemsSchema, FileEditsSchema, SemanticQuerySchema, SemanticResultSchema } from '../schemas/semantic';
 import { EditorDraftSchema, StoredEditorDraftSchema } from '../schemas/editorDrafts';
 import { AppSettingsPatchSchema, AppSettingsSchema, AvatarDataUrlSchema, NicknameSchema, SEARCH_ENGINE_IDS } from '../schemas/appSettings';
 import {
@@ -24,6 +25,7 @@ import {
   ChecksViewSchema,
   CommandFileSchema,
   CustomScopeSchema,
+  McpImportViewSchema,
   McpServerInputSchema,
   McpServerNameSchema,
   McpServerViewSchema,
@@ -78,8 +80,13 @@ export const AppInfoSchema = z.object({
 export type AppInfo = z.infer<typeof AppInfoSchema>;
 
 const PathSchema = z.string().min(1).max(4096);
+/** Files a rewind restores by themselves, named from the session's folder. */
+const RewindPathsSchema = z.array(PathSchema).min(1).max(100);
 const Void = z.void();
 const Ok = z.object({ ok: z.literal(true) });
+/** The models of a message sent as attempts, one per attempt. */
+const AttemptModelsSchema = z.array(ModelRefSchema).min(ATTEMPTS_MIN).max(ATTEMPTS_MAX);
+const AttemptIndexSchema = z.number().int().min(1).max(ATTEMPTS_MAX);
 
 export const SearchStatusSchema = z.object({
   /** The engine searches use now (null: none is set up, or search is off). */
@@ -174,7 +181,7 @@ export const CreateSessionInputSchema = z.object({
   permissionMode: PermissionModeSchema.nullable(),
   incognito: z.boolean(),
   message: z
-    .object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) })
+    .object({ text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]), attempts: AttemptModelsSchema.optional() })
     .nullable()
 });
 export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
@@ -310,7 +317,14 @@ export const contracts = {
   'sessions:create': channel(CreateSessionInputSchema, SessionSummarySchema),
   'sessions:get': channel(z.object({ id: IdSchema }), SessionDetailSchema),
   'sessions:send': channel(
-    z.object({ id: IdSchema, text: z.string().max(200_000), images: z.array(ImageBlockSchema).max(20), files: z.array(FileAttachmentSchema).max(10).default([]) }),
+    z.object({
+      id: IdSchema,
+      text: z.string().max(200_000),
+      images: z.array(ImageBlockSchema).max(20),
+      files: z.array(FileAttachmentSchema).max(10).default([]),
+      /** Send it as attempts: one model per attempt, each in a private checkout (agent/attempts.ts). */
+      attempts: AttemptModelsSchema.optional()
+    }),
     z.object({ queued: z.boolean() })
   ),
   'sessions:interrupt': channel(z.object({ id: IdSchema }), Ok),
@@ -375,11 +389,26 @@ export const contracts = {
   'sessions:markRead': channel(z.object({ id: IdSchema }), Ok),
   'sessions:setActive': channel(z.object({ id: IdSchema.nullable() }), Ok),
   'sessions:feedback': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, value: z.union([z.literal(-1), z.literal(0), z.literal(1)]) }), Ok),
-  'sessions:rewindPreview': channel(z.object({ sessionId: IdSchema, messageId: IdSchema }), RewindPreviewSchema),
-  'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema }), RewindResultSchema),
+  /** `paths` (from the session's folder, as a turn's file card names them): only those files, for one file's Undo. */
+  'sessions:rewindPreview': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, paths: RewindPathsSchema.optional() }), RewindPreviewSchema),
+  'sessions:rewind': channel(z.object({ sessionId: IdSchema, messageId: IdSchema, mode: RewindModeSchema, paths: RewindPathsSchema.optional() }), RewindResultSchema),
+  /** Takes one hunk of an edit a turn made back out of its file; refused when those lines changed since. */
+  'sessions:undoHunk': channel(z.object({ sessionId: IdSchema, toolUseId: z.string().min(1).max(200), hunk: z.number().int().min(0).max(100_000) }), z.object({ path: z.string() })),
+  /** Applies one attempt of a message sent as attempts to the session's folder, refused when the folder changed since; the other checkouts go. */
+  'attempts:apply': channel(z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema }), z.object({ files: z.array(z.string()) })),
+  /** Removes every checkout of a message's attempts; nothing in the session's folder changes. */
+  'attempts:discard': channel(z.object({ sessionId: IdSchema, setId: IdSchema }), Ok),
+  /** Stops one attempt that is running, or all of them (null). */
+  'attempts:stop': channel(z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema.nullable() }), z.object({ stopped: z.boolean() })),
+  /** What an attempt changed, file by file, for the diff view. */
+  'attempts:diff': channel(
+    z.object({ sessionId: IdSchema, setId: IdSchema, attempt: AttemptIndexSchema }),
+    z.object({ files: z.array(z.object({ path: z.string(), patch: z.string(), binary: z.boolean() })), truncated: z.boolean() })
+  ),
   'search:query': channel(z.object({ query: z.string().max(200), kind: SessionKindSchema.nullable() }), z.array(SearchResultSchema)),
   'commands:list': channel(z.object({ projectPath: PathSchema.nullable() }), z.array(SlashCommandSchema)),
-  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300) }), z.array(z.string())),
+  /** Project files matching a query, by path from `root`; with `folders`, their folders too, each ending in "/". */
+  'files:search': channel(z.object({ root: PathSchema, query: z.string().max(300), folders: z.boolean().optional() }), z.array(z.string())),
   /** Which of these written paths name a file of the session's folder: its path from that folder, or null. */
   'files:resolve': channel(
     z.object({ sessionId: IdSchema, paths: z.array(z.string().min(1).max(300)).max(200), fresh: z.boolean().optional() }),
@@ -394,10 +423,40 @@ export const contracts = {
   'files:drafts': channel(z.object({ sessionId: IdSchema }), z.array(StoredEditorDraftSchema).max(100)),
   'files:backupDraft': channel(z.object({ sessionId: IdSchema, path: PathSchema, draft: EditorDraftSchema.nullable() }), z.void()),
   // `content` is the editor's unsaved text for the file asked about; left out, the server reads the file from disk.
-  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional() }), SemanticResultSchema),
+  // `priority`: 'background' for what the mouse asks (a hover), 'user' for what the user asks, which drops a waiting hover
+  // instead of queueing behind it. Checks that run by themselves have none.
+  'files:semantic': channel(z.object({ sessionId: IdSchema, query: SemanticQuerySchema, content: z.string().max(512 * 1024).optional(), priority: z.enum(['background', 'user']).optional() }), SemanticResultSchema),
+  /** A rename's edits to files other than the one in the editor, written all or none: each must still be the revision the server saw. */
+  'files:applyEdits': channel(z.object({ sessionId: IdSchema, files: z.array(FileEditsSchema.extend({ revision: z.string().regex(/^[a-f0-9]{64}$/) })).min(1).max(200) }), Void),
+  /** The files the editor shows, from the revisions it has; a change on disk comes back as a files:changed event. An empty list stops watching. */
+  'files:watch': channel(z.object({ sessionId: IdSchema, files: z.array(z.object({ path: PathSchema, revision: z.string().regex(/^[a-f0-9]{64}$/) })).max(8) }), Void),
   /** The language server's errors and warnings for the files the session has changed. It starts no server in a project that is not trusted. */
   'problems:changed': channel(z.object({ sessionId: IdSchema }), ChangedProblemsSchema),
   'files:save': channel(z.object({ sessionId: IdSchema, path: PathSchema, content: z.string().max(512 * 1024), revision: z.string().regex(/^[a-f0-9]{64}$/) }), FilePreviewSchema),
+  /** A suggestion for the text at the editor's cursor (main/editor/editorAi.ts); empty when there is none. */
+  'editor:complete': channel(
+    z.object({ sessionId: IdSchema, requestId: IdSchema, file: PathSchema, language: z.string().max(100), prefix: z.string().max(20_000), suffix: z.string().max(10_000) }),
+    z.object({ text: z.string() })
+  ),
+  /** New text for the selected lines, from the session's model; `proposal` is the rewrite being refined. Nothing in the file changes. */
+  'editor:inlineEdit': channel(
+    z.object({
+      sessionId: IdSchema,
+      requestId: IdSchema,
+      file: PathSchema,
+      language: z.string().max(100),
+      before: z.string().max(20_000),
+      selection: z.string().max(40_000),
+      after: z.string().max(10_000),
+      instruction: z.string().trim().min(1).max(4_000),
+      proposal: z.string().max(80_000).optional()
+    }),
+    z.object({ replacement: z.string() })
+  ),
+  /** Ends an editor:complete or editor:inlineEdit request, also one that hasn't arrived yet. */
+  'editor:cancel': channel(z.object({ requestId: IdSchema }), Ok),
+  /** The model suggestions in this file come from, or why there are none. */
+  'editor:model': channel(z.object({ sessionId: IdSchema, file: PathSchema }), z.object({ label: z.string().nullable(), note: z.string().nullable() })),
   /** An address that shows one picture, clip or sound from the session's folder (and nothing beside it). */
   'files:previewUrl': channel(z.object({ sessionId: IdSchema, path: PathSchema }), z.object({ url: z.string() })),
   /** Opens a document, picture, clip or sound from the session's folder with the computer's own app; never a script or a program. */
@@ -421,6 +480,21 @@ export const contracts = {
   'pty:write': channel(z.object({ id: IdSchema, data: z.string().max(100_000) }), Void),
   'pty:resize': channel(z.object({ id: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }), Void),
   'pty:kill': channel(z.object({ id: IdSchema }), Ok),
+  /**
+   * One command line for a terminal of the session, from words (Ctrl+K) or as the fix of a command that failed.
+   * The panel types it at the prompt and never presses Enter. `askId` lets pty:cancelSuggest stop it.
+   */
+  'pty:suggest': channel(
+    z.object({
+      sessionId: IdSchema,
+      terminalId: IdSchema,
+      askId: IdSchema,
+      request: z.string().max(2_000),
+      failed: z.object({ command: z.string().max(10_000), exitCode: z.number().int().nullable(), output: z.string().max(20_000) }).optional()
+    }),
+    z.object({ command: z.string() })
+  ),
+  'pty:cancelSuggest': channel(z.object({ askId: IdSchema }), Ok),
   'shells:list': channel(z.object({ sessionId: IdSchema }), z.array(BackgroundShellSchema)),
   'shells:output': channel(z.object({ id: IdSchema }), z.object({ output: z.string(), skipped: z.number().int() })),
   'shells:kill': channel(z.object({ id: IdSchema }), z.object({ killed: z.boolean() })),
@@ -523,6 +597,10 @@ export const contracts = {
     Ok
   ),
   'mcp:remove': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema }), Ok),
+  /** MCP servers other tools' settings files name (the project's and the home folder's), for Customize's Import list. Reads only; nothing starts. */
+  'mcp:findImports': channel(z.object({ projectPath: PathSchema.nullable() }), z.object({ servers: z.array(McpImportViewSchema), problems: z.array(z.string()) })),
+  /** Adds the chosen servers as mcp:save adds one, refusing a name Graft has; values that look like keys go to the key store. */
+  'mcp:import': channel(z.object({ projectPath: PathSchema.nullable(), ids: z.array(z.string().min(1).max(300)).min(1).max(100) }), z.object({ added: z.array(z.string()) })),
   /** What each one-step integration still needs on this computer (shared/integrations.ts). */
   'integrations:status': channel(
     Void,

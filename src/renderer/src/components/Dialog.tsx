@@ -6,7 +6,6 @@ import { IconButton } from './Button';
 
 export const Dialog = RD.Root;
 export const DialogTrigger = RD.Trigger;
-export const DialogClose = RD.Close;
 
 interface DialogContentProps {
   title: ReactNode;

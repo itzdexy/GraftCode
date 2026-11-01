@@ -221,6 +221,10 @@ describe('paths and registry', () => {
     expect(isInside(dir, path.join(dir, 'a', '..', 'b'))).toBe(true);
     expect(isInside(dir, path.join(dir, '..', 'elsewhere'))).toBe(false);
     expect(isInside('C:\\Repo', 'c:\\repo\\src\\x.ts', 'win32')).toBe(true);
+    // A project at the root of a drive, or of the file system, holds everything under it.
+    expect(isInside('C:\\', 'C:\\Windows\\x.txt', 'win32')).toBe(true);
+    expect(isInside('C:\\', 'D:\\x.txt', 'win32')).toBe(false);
+    expect(isInside('/', '/etc/x', 'linux')).toBe(true);
     const home = process.platform === 'win32' ? 'C:\\Users\\me' : '/home/me';
     expect(resolvePath('~/notes.md', dir, home)).toBe(path.resolve(home, 'notes.md'));
     const outside = makeTempDir();

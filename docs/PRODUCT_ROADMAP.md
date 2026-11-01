@@ -19,6 +19,104 @@ Work that makes weaker models reliable, or makes verification stronger, comes fi
 
 ## Completed
 
+### 0.6.47 an editor that writes with you, attempts, reviews with findings, a terminal that helps (2026-10-31)
+
+Branch `feat/ide-and-agents`, cut from 0.6.46 (`feat/halloween`, `fb7f619`). The user asked to make
+Graft better than Cursor, Codex and Claude Code. A read-only map of six areas against those tools
+(editor, agent, git and review, session, models, platform) found the editor the weakest area, and
+best of N, structured review, setup from other tools and terminal help the largest gaps elsewhere.
+Six tracks were built one after another, each committed before the next (a parallel attempt died at
+once on the account's usage limit).
+
+- **Editor AI** (`src/main/editor`, `features/panels/editorAi*.ts`, `inlineEdit.tsx`): ghost-text
+  suggestions through Monaco's inline completions (Tab, Ctrl+Right bound by Graft because the editor's
+  accessibility mode turns Monaco's own binding off, Escape), a fill-in-the-middle window of about
+  6,000 characters before and 2,000 after the cursor, keys masked, credential files refused in main,
+  a cache, cancel on typing and a pause after a failure. Ctrl+I "Edit with AI" on the session's model,
+  shown as an in-place diff, applied as one undo step to the draft only. Settings `editor.suggestions`
+  (default on) and `editor.suggestionModel` (default: the provider's fast model via `titleModel`);
+  channels `editor:complete`, `editor:inlineEdit`, `editor:cancel`, `editor:model`. A selection that
+  looks like it holds a key is refused for inline edit rather than sent.
+- **Editor IDE** (`editorContribs.ts`, `editorProviders.ts`, `liveFile.tsx`, `DiskCompare.tsx`,
+  `src/main/files/applyEdits.ts`, `liveFiles.ts`, `src/main/languages/rename.ts`): Monaco's editing
+  contribs, about 25 more Monarch languages (JSON coloured as JavaScript and TOML as INI: Monaco has
+  no Monarch grammar for them), hover and Ctrl+click through `files:semantic` with a `priority` so a
+  hover never delays what the user asked for, F2 rename written all or none with hash checks and
+  rollback (`files:applyEdits`), and open files that follow the disk (`files:watch`, event
+  `files:changed`; `fs.watchFile` polling every 300 ms per open file, which holds no handles and sees
+  atomic saves). Not built: linked editing (needs the HTML worker), peek views (Shift+F12 still lists
+  references under the editor), telling main when Monaco cancels a hover.
+- **Review** (`ReportFindings` tool, Findings card, `sessions:undoHunk`, optional `paths` on
+  `sessions:rewind` and `sessions:rewindPreview`): `/review` and `/security-review` with scopes
+  (uncommitted, `branch` from the merge-base, a commit, `pr <n>` through gh), read-only in every
+  permission mode, on the Reviewer or Security role's model when set. Undo per file and per hunk on
+  any finished turn's card; a hunk is reversed with jsdiff (fuzz 0) instead of `git apply -R`, which
+  breaks CRLF files. Fix, Dismiss and Undone marks live in the window's memory only, so a restart
+  offers them again. `/review` now needs a git repository.
+- **Attempts** (`agent/attempts.ts`, `attemptAgent.ts`, composer `AttemptsChoice`, channels
+  `attempts:apply|discard|stop|diff`): one message as 2 to 4 writing agents in private checkouts,
+  checks run in each with the project's `node_modules` linked only while they run, a comparison card,
+  apply through the writers' divergence check (which now names the changed files), undo through the
+  message's checkpoint, recovery after a restart. A deleted session now takes the checkouts of its
+  open attempts with it (found in this round's review). Not built: a tool for the agent to start
+  attempts; other dependency folders (`.venv`, `vendor`) in checks; each attempt stops after 45
+  minutes (the group implementer's limit).
+- **Setup and mentions** (`agent/otherTools.ts`, `mcp/mcpImport.ts`, `agent/mentionSources.ts`):
+  skills, commands and agents from other tools' folders (setting `behavior.otherTools`, default on;
+  project folders only when trusted; Graft's items win a clash; Copy to Graft for commands and
+  agents), MCP import (`mcp:findImports`, `mcp:import`, a small TOML subset for `config.toml`), and
+  @ mentions for folders, line ranges, `@diff`, `@problems`, `@terminal` and `@url` (public hosts
+  only, even when web access is off, because the user typed the address). An imported skill's
+  description is cut to 200 characters in the system prompt (the user's 48 skills went from 21,469 to
+  9,563 characters per request). Not mapped: Codex prompts' named placeholders and `$$`, other tools'
+  `allowed-tools` and `model` front matter; `!` lines in imported commands are sent as text.
+- **Terminal AI** (`src/main/pty/shellIntegration.ts`, `terminalAi.ts`, `src/shared/terminalMarks.ts`,
+  `features/panels/TerminalAi.tsx`, `terminalModel.ts`; channels `pty:suggest`, `pty:cancelSuggest`):
+  OSC 133 marks for bash (`--init-file`), zsh (a Graft ZDOTDIR that sources the user's files) and
+  PowerShell (an encoded prompt wrapper), never touching profile files; a failed command's mark and
+  bar with Explain (side question), Fix and Add to message (Ctrl+.); Ctrl+K writes one command line
+  and types it without Enter. Ctrl+K at a bash prompt no longer reaches readline's kill-line;
+  full-screen programs keep it. xterm runs with `allowProposedApi` for decorations. zsh and Linux bash
+  were covered by unit tests only.
+- No migration. New settings: `editor.suggestions`, `editor.suggestionModel`, `behavior.otherTools`.
+  New tool: `ReportFindings`. New event: `files:changed`.
+
+### 0.6.46 a Halloween palette, and fixes from a whole-repo audit (2026-10-30)
+
+Branch `feat/halloween`, cut from `origin/main` at 0.6.45 (`f5e720d`). The user asked for an
+audit of the whole repository (bloat, errors, fixes), for Graft to look more like Claude, and for
+a Halloween theme.
+
+- **Hallow**, a seventh palette (violet night in dark, pale lavender in light, generated by
+  `scripts/generate-palettes.mjs` like the other tinted ones), and **Pumpkin**, an eighth accent
+  (WCAG AA as text on every light surface, 4.85:1 at worst on a selected row). Picking Hallow
+  while the accent is still Leaf also picks Pumpkin (`paletteChoice` in `settings/sections.ts`,
+  used by Settings and the command palette); a chosen accent is kept.
+- Under Hallow, Scion's pot is a jack-o'-lantern (mascot tokens in `brand.css`), three pixel bats
+  (`brand/HallowBats.tsx`) circle above the code and chat home pages, and the code home greets
+  with "Happy haunting". The bats are `aria-hidden`, take no clicks, and hang still when motion is
+  reduced (their resting place is the base style).
+- Not changed for "look like Claude": the code home greeting and the rest of the main screens were
+  measured against reference screenshots in 0.6.39 (`tokens.css` notes the measurements), so
+  nothing there was moved without a new reference.
+- Audit fixes, each with a test that fails without it: prefix allow rules no longer allow commands
+  with `$(…)`, backticks or a heredoc (`permissions/rules.ts`); `git branch <name>` and
+  `git tag <name>` are no longer read-only; PowerShell's `-r`/`-re`/… for `-Recurse` is a
+  recursive delete; Stop during a PreToolUse hook no longer lets the call run (`agent/loop.ts`);
+  GitHub tokens are redacted in the log; a stored settings field this build can't read resets that
+  field, not its whole section (`settings/appSettings.ts`). The PowerShell, Stop and log fixes
+  port what the unmerged `fix/reliability-audit` branch (2026-10-18) had found.
+- Also from the audit: a sub-agent or a group's agent ended by its own guard (step limit, repeated
+  calls) is an error carrying its last words, and its checkout is kept, as the turn's limit already
+  did (`sessionHost.ts`, `agentGroup.ts`); `isInside` keeps a root's separator, so a project at
+  `C:\` or `/` contains its files (`tools/paths.ts`); one fuzzy matcher, the command palette's
+  word-based one, now in `src/shared/fuzzy.ts` for every picker (`src/renderer/src/lib/fuzzy.ts`
+  deleted; about 1.3 times the old matcher's time, 10 to 38 ms over 50,000 paths), and session
+  search ranks full-text hits above loose title matches explicitly; five unused component
+  exports deleted.
+- No migration, channel, shortcut or package. Two new values in existing settings enums
+  (`appearance.palette: 'hallow'`, `appearance.accent: 'pumpkin'`).
+
 ### 0.6.40 0.6.37 and 0.6.39 in one release (2026-10-24)
 
 0.6.37 (`feat/polish-pass`, the faults from the installed app's log) and 0.6.39
@@ -1824,7 +1922,11 @@ praise and complain about (October 2026).
 | Prune old tool output before summarizing | OpenCode session compaction, Claude Code | Shipped in 0.6.12, as a view of the history: nothing stored changes |
 | Fallback model per session | Roo Code and Goose provider settings | Shipped in 0.6.12 as one backup model in Settings, used once a turn |
 | Worktree per agent that writes | Claude Code, Cursor | Implemented for writing groups and Tasks in 0.6.14; stronger shell enforcement and recovery controls remain open |
-| Best of N: one task on several models, pick the winner | Cursor, Codex | Open; needs worktrees per agent |
+| Best of N: one task on several models, pick the winner | Cursor, Codex | Shipped in 0.6.47 as attempts: 2 to 4 private checkouts, checks in each, a comparison card, Apply one |
+| Tab completion and inline edit in the editor | Cursor (Tab, Ctrl+K) | Shipped in 0.6.47: ghost text on the fast model, Ctrl+I edit with an in-place diff; next-edit prediction is open |
+| Structured review findings with fix buttons | Codex review, Cursor BugBot | Shipped in 0.6.47: `ReportFindings`, a Findings card, scopes for branch, commit and pull request; review on push is open |
+| Use the setup made for other tools | Users switching between agents | Shipped in 0.6.47: skills, commands, agents and MCP servers from their folders |
+| Terminal that explains and fixes a failed command | Cursor, Warp | Shipped in 0.6.47: OSC 133 blocks, Explain, Fix, Ctrl+K |
 | Sessions grouped by state: running, needs input, ready, blocked | Codex app, Cursor's agents window | Open |
 | A sound and a notification for done, approval needed and question, with "only when unfocused" | Codex (a much-requested issue), Claude Code | There since the Notifications page: shown for sessions that are not on screen, with a sound for questions, approvals and errors. A finished session is quiet by choice |
 | Comments on a diff that go back to the agent | Cursor and Codex review | Shipped in 0.6.26 |

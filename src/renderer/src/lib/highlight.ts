@@ -92,6 +92,24 @@ export function languageForPath(filePath: string): string | null {
   return resolveLanguage(ext);
 }
 
+/**
+ * Where the editor's grammar ids differ from shiki's. Monaco has no JSON or TOML grammar of its own: JSON is
+ * coloured as JavaScript (comments as in JSONC) and TOML as INI, both close enough to read.
+ */
+const EDITOR_IDS: Record<string, string> = { tsx: 'typescript', jsx: 'javascript', json: 'javascript', jsonc: 'javascript', shellscript: 'shell', toml: 'ini' };
+
+/** The Monaco language for a file the editor opens (its Monarch grammar, see editorContribs.ts); undefined for plain text. */
+export function editorLanguageForPath(filePath: string): string | undefined {
+  const name = filePath.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  const ext = name.includes('.') ? name.split('.').pop() : '';
+  if (ext === 'less') return 'less';
+  if (ext === 'kts') return 'kotlin';
+  if (ext === 'cxx' || ext === 'hh' || ext === 'hxx') return 'cpp';
+  const id = languageForPath(filePath);
+  if (!id || id === 'diff') return undefined;
+  return EDITOR_IDS[id] ?? id;
+}
+
 export interface Token {
   content: string;
   /** CSS custom properties --shiki-dark / --shiki-light (resolved per theme in globals.css). */

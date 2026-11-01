@@ -15,7 +15,9 @@ function pathsOf(platform: NodeJS.Platform): path.PlatformPath {
 }
 
 function normalizeForCompare(p: string, platform: NodeJS.Platform): string {
-  const n = pathsOf(platform).resolve(p).replace(/[\\/]+$/, '');
+  const resolved = pathsOf(platform).resolve(p);
+  // A root keeps its separator: "C:" alone is the current folder of drive C, and "" is the current folder.
+  const n = resolved === pathsOf(platform).parse(resolved).root ? resolved : resolved.replace(/[\\/]+$/, '');
   return platform === 'win32' ? n.toLowerCase() : n;
 }
 

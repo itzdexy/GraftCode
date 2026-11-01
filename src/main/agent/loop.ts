@@ -300,6 +300,9 @@ async function runCall(p: Prepared, config: LoopConfig, host: LoopHost, signal: 
     if (signal.aborted) return errorBlock(call.id, NOT_RUN);
   }
 
+  // Stopped while a hook ran: nothing has happened yet, so nothing runs.
+  if (signal.aborted) return errorBlock(call.id, NOT_RUN);
+
   // Intent first: from here on the call may have had an effect, and that is on record if the app stops before it returns.
   host.journal?.started({ id: call.id, name: tool.name, summary: p.descriptor.summary, effect: effectOf(call) }, config.agentLabel);
   /** How the call ended, written down before anything else is done with it. */

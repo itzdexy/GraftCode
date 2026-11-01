@@ -10,7 +10,7 @@ import { useLoad } from '../../lib/useLoad';
 import { motionReduced, useSystemReducedMotion } from '../../lib/motion';
 import { useApp } from '../../stores/app';
 import { Group, saveSettings, SelectField, SettingRow } from './common';
-import { ACCENTS, PALETTES } from './sections';
+import { ACCENTS, PALETTES, paletteChoice } from './sections';
 
 const WIDTHS = [
   { value: 'narrow', label: 'Narrow' },
@@ -93,7 +93,7 @@ function ColorsGroup({ theme, palette, accent }: { theme: AppSettings['appearanc
                 role="radio"
                 aria-checked={selected}
                 aria-label={`${p.label}: ${p.description}`}
-                onClick={() => saveSettings({ appearance: { palette: p.id } })}
+                onClick={() => saveSettings({ appearance: paletteChoice(p.id, accent) })}
                 className={cn(
                   'group flex flex-col overflow-hidden rounded-md border text-left transition-ui',
                   selected ? 'border-accent ring-1 ring-[var(--g-accent)]' : 'border-border hover:border-border-strong'

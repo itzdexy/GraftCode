@@ -1,5 +1,6 @@
 import { Ghost } from 'lucide-react';
 import type { FileAttachment, ImageBlock } from '@shared/schemas/messages';
+import { HallowBats } from '../../brand/HallowBats';
 import { Mark } from '../../brand/Mark';
 import { IconButton } from '../../components/Button';
 import { partOfDay } from '../../lib/format';
@@ -57,39 +58,42 @@ export function ChatHome() {
           </IconButton>
         }
       />
-      <div className="motion-stagger flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-24 pb-[14vh]">
-        {incognito ? (
-          <div className="flex flex-col items-center gap-8 text-center">
-            <h1 className="flex items-center gap-12 font-serif text-greeting font-normal text-fg-strong">
-              <Ghost className="size-32 text-icon" aria-hidden="true" />
-              Incognito chat
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <HallowBats />
+        <div className="motion-stagger flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-24 pb-[14vh]">
+          {incognito ? (
+            <div className="flex flex-col items-center gap-8 text-center">
+              <h1 className="flex items-center gap-12 font-serif text-greeting font-normal text-fg-strong">
+                <Ghost className="size-32 text-icon" aria-hidden="true" />
+                Incognito chat
+              </h1>
+              <p className="text-md text-fg-muted">Graft won’t save this chat. It’s gone when you delete it or quit.</p>
+              <p className={note.blocked ? 'max-w-[520px] text-sm text-danger' : 'max-w-[520px] text-sm text-fg-muted'}>{note.text}</p>
+            </div>
+          ) : (
+            <h1 className="flex items-center gap-12 text-center font-serif text-greeting font-normal text-fg-strong">
+              <Mark size={36} motion="idle" interactive />
+              <span>
+                Good {partOfDay(now)}
+                {name ? `, ${name}` : ''}
+              </span>
             </h1>
-            <p className="text-md text-fg-muted">Graft won’t save this chat. It’s gone when you delete it or quit.</p>
-            <p className={note.blocked ? 'max-w-[520px] text-sm text-danger' : 'max-w-[520px] text-sm text-fg-muted'}>{note.text}</p>
-          </div>
-        ) : (
-          <h1 className="flex items-center gap-12 text-center font-serif text-greeting font-normal text-fg-strong">
-            <Mark size={36} motion="idle" interactive />
-            <span>
-              Good {partOfDay(now)}
-              {name ? `, ${name}` : ''}
-            </span>
-          </h1>
-        )}
-        <Composer
-          draftKey="home:chat"
-          variant="chat"
-          placeholder="How can I help you today?"
-          supportsImages={defaults.model?.supportsVision ?? false}
-          blockedReason={defaults.blockedReason}
-          onSubmit={submit}
-          history={!incognito}
-          autoFocus
-          className="mt-28 w-full max-w-[var(--g-home-composer-width)]"
-          rightControls={
-            <ChatModelMenu model={defaults.model} effort={defaults.effort} onModel={defaults.setModel} onEffort={defaults.setEffort} />
-          }
-        />
+          )}
+          <Composer
+            draftKey="home:chat"
+            variant="chat"
+            placeholder="How can I help you today?"
+            supportsImages={defaults.model?.supportsVision ?? false}
+            blockedReason={defaults.blockedReason}
+            onSubmit={submit}
+            history={!incognito}
+            autoFocus
+            className="mt-28 w-full max-w-[var(--g-home-composer-width)]"
+            rightControls={
+              <ChatModelMenu model={defaults.model} effort={defaults.effort} onModel={defaults.setModel} onEffort={defaults.setEffort} />
+            }
+          />
+        </div>
       </div>
     </div>
   );

@@ -2,11 +2,14 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CancellationTokenSource, createMessageConnection, type MessageConnection } from 'vscode-jsonrpc/node';
 import { z } from 'zod';
 import { GraftError } from '@shared/errors';
+import { looksBinary } from '../tools/fs/read';
 import { runFile } from '../tools/run';
+import { renameEdits } from './rename';
 import type { CodeLocation, SemanticQuery, SemanticResult } from './types';
 
 const Position = z.object({ line: z.number().int().nonnegative(), character: z.number().int().nonnegative() });
@@ -37,6 +40,16 @@ function wordAt(text: string, name: string, from: number): number {
   }
   return -1;
 }
+
+function languageId(file: string): string {
+  return /\.tsx$/i.test(file) ? 'typescriptreact' : /\.[cm]?ts$/i.test(file) ? 'typescript' : /\.jsx$/i.test(file) ? 'javascriptreact' : 'javascript';
+}
+
+/** What the mouse asks (a hover) and what the user asks; checks that run by themselves and the agent's queries have neither. */
+export type QueryPriority = 'background' | 'user';
+
+/** The most files one rename changes; each is given to the server, which holds 64 documents. */
+const MAX_RENAME_FILES = 50;
 
 /** A file's state on disk, to tell whether it changed since the server was given its text; null when it is not there. */
 function diskStamp(file: string): string | null {
@@ -78,6 +91,8 @@ class TypeScriptClient {
   /** The documents the server holds open, by URI: the version it was last given, and the file's state on disk then (null for an unsaved buffer). */
   private readonly documents = new Map<string, { version: number; file: string; stamp: string | null }>();
   private tail: Promise<unknown> = Promise.resolve();
+  /** Queries the mouse asked for (hovers) still waiting their turn: one the user asks drops them. One already running is quick and finishes. */
+  private readonly waiting = new Set<AbortController>();
   private closed = false;
   private disposing: Promise<void> | undefined;
   active = 0;
@@ -99,7 +114,7 @@ class TypeScriptClient {
     this.ready = this.request('initialize', {
       processId: process.pid, rootUri: pathToFileURL(root).href,
       workspaceFolders: [{ uri: pathToFileURL(root).href, name: path.basename(root) }],
-      capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+      capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true }, rename: { prepareSupport: true } } },
       initializationOptions: { hostInfo: 'Graft', disableAutomaticTypingAcquisition: true, maxTsServerMemory: 256,
         plugins: [], tsserver: { path: unpacked('typescript/lib/tsserver.js'), useSyntaxServer: 'never' } }
     }).then(async () => { await this.connection.sendNotification('initialized', {}); });
@@ -128,9 +143,18 @@ class TypeScriptClient {
     }
   }
 
-  run(input: SemanticQuery, signal: AbortSignal, buffer?: string): Promise<SemanticResult> {
+  run(input: SemanticQuery, signal: AbortSignal, buffer?: string, priority?: QueryPriority): Promise<SemanticResult> {
+    let own: AbortController | undefined;
+    if (priority === 'background') {
+      own = new AbortController();
+      this.waiting.add(own);
+      signal = AbortSignal.any([signal, own.signal]);
+    } else if (priority === 'user') {
+      for (const hover of this.waiting) hover.abort();
+    }
     this.active++;
     const operation = this.tail.then(async () => {
+      if (own) this.waiting.delete(own);
       signal.throwIfAborted();
       await abortable(this.ready, signal);
       signal.throwIfAborted();
@@ -146,7 +170,7 @@ class TypeScriptClient {
       }
     });
     this.tail = operation.catch(() => undefined);
-    return abortable(operation.finally(() => { this.active--; this.touched = Date.now(); }), signal);
+    return abortable(operation.finally(() => { this.active--; this.touched = Date.now(); if (own) this.waiting.delete(own); }), signal);
   }
 
   private location(uri: string, position: z.infer<typeof Position>): CodeLocation | null {
@@ -202,15 +226,7 @@ class TypeScriptClient {
     // Taken before the text is read: a write in between shows as a change at the next query instead of being missed.
     const stamp = buffer === undefined ? diskStamp(file) : null;
     const text = buffer ?? fs.readFileSync(file, 'utf8');
-    const uri = pathToFileURL(file).href;
-    if (!this.documents.has(uri) && this.documents.size >= 64) {
-      const oldest = this.documents.keys().next().value;
-      if (oldest) { await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri: oldest } }); this.documents.delete(oldest); }
-    }
-    const version = (this.documents.get(uri)?.version ?? 0) + 1;
-    this.documents.set(uri, { version, file, stamp });
-    if (version === 1) await this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri, languageId: /\.tsx$/i.test(file) ? 'typescriptreact' : /\.[cm]?ts$/i.test(file) ? 'typescript' : /\.jsx$/i.test(file) ? 'javascriptreact' : 'javascript', version, text } });
-    else await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+    const uri = await this.give(file, text, stamp);
     await this.refresh(uri);
     const base: SemanticResult = { engine: 'typescript-language-server', action: input.action, file: path.relative(this.root, file).replaceAll(path.sep, '/'), truncated: false };
     if (input.action === 'diagnostics') {
@@ -274,6 +290,7 @@ class TypeScriptClient {
     if (!input.line || !input.column) throw new GraftError('language_position', 'Give a 1-based line and column for definition, references, implementation, typeDefinition or hover.');
     const lines = text.split(/\r\n|\n|\r/);
     if (input.line > lines.length || input.column > (lines[input.line - 1]?.length ?? 0) + 1) throw new GraftError('language_position', 'The line or column is outside the current file. Read the current file and retry.');
+    if (input.action === 'rename') return { ...base, ...(await this.rename({ ...input, line: input.line, column: input.column }, file, lines, signal)) };
     const raw = await this.request(`textDocument/${input.action}`, { textDocument: { uri }, position: { line: input.line - 1, character: input.column - 1 }, ...(input.action === 'references' ? { context: { includeDeclaration: true } } : {}) }, signal);
     if (input.action === 'hover') {
       const hover = z.object({ contents: z.union([z.string(), z.object({ value: z.string() }), z.array(z.union([z.string(), z.object({ value: z.string() })]))]) }).safeParse(raw);
@@ -289,6 +306,80 @@ class TypeScriptClient {
       if (decoded) locations.push(decoded);
     }
     return { ...base, locations, truncated: items.length > 1000 };
+  }
+
+  /**
+   * Gives the server a file's text: opened when it does not hold the file yet (the oldest other document makes room,
+   * never `keep`), changed when it does. `stamp` is the file on disk then, null for an unsaved buffer.
+   */
+  private async give(file: string, text: string, stamp: string | null, keep?: string): Promise<string> {
+    const uri = pathToFileURL(file).href;
+    if (!this.documents.has(uri) && this.documents.size >= 64) {
+      const oldest = [...this.documents.keys()].find((held) => held !== keep);
+      if (oldest) { await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri: oldest } }); this.documents.delete(oldest); }
+    }
+    const version = (this.documents.get(uri)?.version ?? 0) + 1;
+    this.documents.set(uri, { version, file, stamp });
+    if (version === 1) await this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri, languageId: languageId(file), version, text } });
+    else await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+    return uri;
+  }
+
+  /** The project file a URI names, relative and "/"-separated, or null outside the project or in its packages. */
+  private projectFile(uri: string): string | null {
+    const found = this.location(uri, { line: 0, character: 0 });
+    return found && !/(?:^|\/)node_modules\//.test(found.file) ? found.file : null;
+  }
+
+  /**
+   * Renaming the name at a position of `file` (its text, `lines`, is what the server holds). Without a new name the
+   * answer is only where the name is. With one, the server is asked once to learn which files change; each of those
+   * is then given to it as it is on disk now and it is asked again, so every edit fits the bytes its revision names.
+   */
+  private async rename(input: SemanticQuery & { line: number; column: number }, file: string, lines: string[], signal: AbortSignal): Promise<Pick<SemanticResult, 'span' | 'edits'>> {
+    const uri = pathToFileURL(file).href;
+    const position = { line: input.line - 1, character: input.column - 1 };
+    let prepared: unknown;
+    try { prepared = await this.request('textDocument/prepareRename', { textDocument: { uri }, position }, signal); }
+    catch (error) {
+      // The server says why a name cannot be renamed (a keyword, something a library declares).
+      if (error instanceof GraftError) throw error;
+      throw new GraftError('language_rename', error instanceof Error && error.message ? error.message : 'This name cannot be renamed.');
+    }
+    const range = Range.safeParse(prepared).data ?? z.object({ range: Range }).safeParse(prepared).data?.range;
+    if (!range) throw new GraftError('language_rename', 'There is no name to rename here. Put the cursor on a name and try again.');
+    if (!input.newName) {
+      const text = range.start.line === range.end.line ? (lines[range.start.line] ?? '').slice(range.start.character, range.end.character) : '';
+      return { span: { line: range.start.line + 1, column: range.start.character + 1, endLine: range.end.line + 1, endColumn: range.end.character + 1, text } };
+    }
+    const newName = input.newName;
+    const ask = async (): Promise<ReturnType<typeof renameEdits>> =>
+      renameEdits(await this.request('textDocument/rename', { textDocument: { uri }, position, newName }, signal), (target) => this.projectFile(target));
+    const own = path.relative(this.root, file).replaceAll(path.sep, '/');
+    const first = await ask();
+    if (first.size > MAX_RENAME_FILES) throw new GraftError('language_rename', `This rename changes ${String(first.size)} files, more than the editor renames at once. Ask the agent to make it.`);
+    const revisions = new Map<string, string>();
+    for (const rel of first.keys()) {
+      if (rel === own) continue;
+      const target = path.join(this.root, rel);
+      const stamp = diskStamp(target);
+      const bytes = fs.readFileSync(target);
+      const text = bytes.toString('utf8');
+      if (bytes.length > 2 * 1024 * 1024 || looksBinary(bytes) || !Buffer.from(text, 'utf8').equals(bytes)) {
+        throw new GraftError('language_rename', `${rel} is not UTF-8 text of 2 MiB or less, so the rename cannot change it.`);
+      }
+      await this.give(target, text, stamp, uri);
+      revisions.set(rel, createHash('sha256').update(bytes).digest('hex'));
+    }
+    const edits = revisions.size ? await ask() : first;
+    return {
+      edits: [...edits].map(([rel, list]) => {
+        if (rel === own) return { file: rel, revision: null, edits: list };
+        const revision = revisions.get(rel);
+        if (!revision) throw new GraftError('language_rename', 'The project changed while the rename was worked out, so nothing was changed. Rename again.');
+        return { file: rel, revision, edits: list };
+      })
+    };
   }
 
   dispose(): Promise<void> {
@@ -358,7 +449,8 @@ export class LanguageServers {
     return operation;
   }
 
-  async query(root: string, input: SemanticQuery, signal: AbortSignal, buffer?: string): Promise<SemanticResult> {
+  /** `priority`: 'background' for what the mouse asks, which a 'user' query drops while it waits (see TypeScriptClient.run). */
+  async query(root: string, input: SemanticQuery, signal: AbortSignal, buffer?: string, priority?: QueryPriority): Promise<SemanticResult> {
     signal.throwIfAborted();
     if (buffer !== undefined && Buffer.byteLength(buffer) > 2 * 1024 * 1024) throw new GraftError('language_file_limit', 'Semantic buffers must be no larger than 2 MiB.');
     if (this.disposed) throw new GraftError('language_server_closed', 'The language-server manager is closed.');
@@ -376,7 +468,7 @@ export class LanguageServers {
       }
       client = new TypeScriptClient(canonical); this.clients.set(key, client);
     }
-    try { return await client.run(input, signal, buffer); }
+    try { return await client.run(input, signal, buffer, priority); }
     catch (error) {
       if (!client.alive || error instanceof GraftError && ['language_server_timeout', 'language_server_closed', 'language_diagnostics'].includes(error.code)) {
         if (this.clients.get(key) === client) this.clients.delete(key);

@@ -3,9 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import * as pty from 'node-pty';
 import { GraftError } from '@shared/errors';
+import { MarkScanner } from '@shared/terminalMarks';
 import { runFile } from '../tools/run';
 import type { ShellSpec } from '../tools/shell/detect';
 import { msysToolsDir, msysTreeWinPids } from '../tools/shell/shellManager';
+import { shellLaunch, writeLaunchFiles, type ShellLaunch } from './shellIntegration';
 
 /** Scrollback kept per terminal so a reopened panel shows recent output. */
 const SCROLLBACK_BYTES = 256 * 1024;
@@ -32,6 +34,8 @@ interface Terminal {
   /** Stream offset where `pending` starts. */
   pendingAt: number;
   timer: NodeJS.Timeout | null;
+  /** Reads the folder the shell says it is in from its marks (shellIntegration.ts). */
+  marks: MarkScanner;
 }
 
 export interface PtyEvents {
@@ -59,7 +63,9 @@ export class PtyManager {
   constructor(
     private readonly shell: ShellSpec,
     private readonly events: PtyEvents,
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    /** Where the shell integration's files are written; null starts every shell plainly. */
+    private readonly integrationDir: string | null = null
   ) {
     this.msysTools = platform === 'win32' && shell.kind === 'bash' ? msysToolsDir(shell.path) : null;
   }
@@ -76,15 +82,16 @@ export class PtyManager {
     env.COLORTERM = 'truecolor';
     env.TERM_PROGRAM = 'Graft';
     if (this.shell.kind === 'bash' && this.platform === 'win32') env.CHERE_INVOKING = '1';
-    const proc = pty.spawn(this.shell.path, interactiveArgs(this.shell), {
+    const launch = this.launch(env);
+    const proc = pty.spawn(this.shell.path, launch?.args ?? interactiveArgs(this.shell), {
       name: 'xterm-256color',
       cols: Math.max(2, cols),
       rows: Math.max(1, rows),
       cwd,
-      env
+      env: { ...env, ...launch?.env }
     });
     const info: TerminalInfo = { id: randomUUID(), sessionId, title: this.shell.label, cwd, exitCode: null, exited: false };
-    const term: Terminal = { info, proc, scrollback: '', total: 0, pending: '', pendingAt: 0, timer: null };
+    const term: Terminal = { info, proc, scrollback: '', total: 0, pending: '', pendingAt: 0, timer: null, marks: new MarkScanner() };
     this.terminals.set(info.id, term);
     proc.onData((data) => this.onData(term, data));
     proc.onExit(({ exitCode }) => {
@@ -96,7 +103,22 @@ export class PtyManager {
     return { ...info };
   }
 
+  /** The shell's start with Graft's marks, or null to start it plainly (a shell without them, or files that couldn't be written). */
+  private launch(env: Record<string, string>): ShellLaunch | null {
+    if (!this.integrationDir) return null;
+    const launch = shellLaunch(this.shell, this.integrationDir, env, this.platform);
+    if (!launch) return null;
+    try {
+      writeLaunchFiles(this.integrationDir, launch.files);
+      return launch;
+    } catch (error) {
+      this.events.log(`The terminal starts without shell integration: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
   private onData(term: Terminal, data: string): void {
+    for (const mark of term.marks.scan(data)) if (mark.kind === 'cwd') term.info.cwd = mark.path;
     if (term.pending.length === 0) term.pendingAt = term.total;
     term.pending += data;
     term.total += data.length;
@@ -127,6 +149,11 @@ export class PtyManager {
   resize(id: string, cols: number, rows: number): void {
     const term = this.require(id);
     if (!term.info.exited) term.proc.resize(Math.max(2, cols), Math.max(1, rows));
+  }
+
+  /** The shell a terminal of this session runs and the folder it last said it was in, for a command written for it. */
+  shellOf(id: string, sessionId: string): { shell: ShellSpec; cwd: string } {
+    return { shell: this.shell, cwd: this.require(id, sessionId).info.cwd };
   }
 
   list(sessionId: string): TerminalInfo[] {

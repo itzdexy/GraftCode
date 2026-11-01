@@ -1,32 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CodeLocation, SemanticResult } from '@shared/schemas/semantic';
 import * as monaco from 'monaco-editor/editor/editor.api.js';
-import 'monaco-editor/editor/contrib/clipboard/browser/clipboard.js';
-import 'monaco-editor/editor/contrib/find/browser/findController.js';
-import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
-import 'monaco-editor/languages/definitions/typescript/register.js';
-import 'monaco-editor/languages/definitions/javascript/register.js';
-import 'monaco-editor/languages/definitions/python/register.js';
-import 'monaco-editor/languages/definitions/markdown/register.js';
+import './editorContribs';
 import { useApp } from '../../stores/app';
-import { languageForPath } from '../../lib/highlight';
+import { editorLanguageForPath } from '../../lib/highlight';
 import { errorText, invoke } from '../../lib/ipc';
 import { Button } from '../../components/Button';
 import { selectionAnchor } from '../review/reviewModel';
 import { Markdown } from '../session/Markdown';
-
-// Bundled Vite workers use local URLs allowed by the existing CSP; no CDN/eval is needed.
-const editorGlobal = globalThis as typeof globalThis & { MonacoEnvironment?: { getWorker(): Worker } };
-editorGlobal.MonacoEnvironment = { getWorker: () => new EditorWorker() };
+import { installEditorAi } from './editorAi';
+import { applyText, installLanguageFeatures } from './editorProviders';
 
 /** The lines a comment for the agent is about, and the text of the first of them. */
 export interface EditorComment { line: number; endLine: number; quote: string }
 
-export default function TextEditor({ sessionId, file, value, position, onChange, onSave, onNavigate, onComment, commentRequest = 0 }: {
+export default function TextEditor({ sessionId, file, value, position, onChange, onSave, onNavigate, onComment, commentRequest = 0, editRequest = 0 }: {
   sessionId: string; file: string; value: string; position: CodeLocation | null;
   onChange: (value: string) => void; onSave: () => void; onNavigate: (location: CodeLocation) => void;
   /** Asked for with Ctrl+L or Ctrl+Alt+M, or by raising `commentRequest`: the cursor's line, or the lines that are selected. */
   onComment?: (at: EditorComment) => void; commentRequest?: number;
+  /** Raised to open Edit with AI (Ctrl+I) on the selected lines, as the toolbar's button does. */
+  editRequest?: number;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -39,6 +33,16 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     commentSeen.current = commentRequest;
     void editor.current?.getAction('graft.comment')?.run();
   }, [commentRequest]);
+  const editSeen = useRef(editRequest);
+  useEffect(() => {
+    if (editRequest === editSeen.current) return;
+    editSeen.current = editRequest;
+    void editor.current?.getAction('graft.inlineEdit')?.run();
+  }, [editRequest]);
+  // Why suggestions as you type stopped, shown once in the status line below the code.
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  // How the last rename (F2) went, until the next edit.
+  const [renameNote, setRenameNote] = useState<{ text: string; failure?: boolean } | null>(null);
   const epoch = useRef(0);
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
@@ -60,7 +64,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     if (!quiet) { busy.current = true; setPending(true); setFailure(null); setStatus(null); setReferences([]); setHover(null); }
     try {
       const result = await invoke('files:semantic', { sessionId, query: { action, file, line: cursor?.lineNumber, column: cursor?.column },
-        content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true) });
+        content: model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true), priority: quiet ? undefined : 'user' });
       if (version !== epoch.current || model.isDisposed()) return;
       autoCheck.current = true;
       if (action === 'definition') {
@@ -91,16 +95,21 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
   };
   const runQuery = useRef(query);
   useEffect(() => { runQuery.current = query; });
+  // What the editor last sent out: a `value` other than that came from outside (the file changed on disk, Take theirs).
+  const sent = useRef(value);
+  useEffect(() => { if (editor.current && value !== sent.current) applyText(editor.current, value); }, [value]);
   const appearance = useApp((s) => s.settings?.appearance);
   useEffect(() => {
     if (!container.current) return;
-    const language = languageForPath(file);
-    const model = monaco.editor.createModel(value, language === 'ts' || language === 'tsx' ? 'typescript' : language === 'js' || language === 'jsx' ? 'javascript' : language ?? undefined);
+    const model = monaco.editor.createModel(value, editorLanguageForPath(file));
     const instance = monaco.editor.create(container.current, { model, automaticLayout: true,
       ariaLabel: `Edit ${file}`, fontFamily: '"JetBrains Mono Variable", monospace', fontSize: appearance?.codeFontSize ?? 13,
       minimap: { enabled: false }, scrollBeyondLastLine: false, wordWrap: 'on', tabSize: 2,
       accessibilitySupport: 'on', fixedOverflowWidgets: true, padding: { top: 8, bottom: 8 } });
     editor.current = instance;
+    const ai = installEditorAi(instance, { sessionId, file, onNote: setAiNote });
+    const ide = supported ? installLanguageFeatures(instance, { sessionId, file, busy: () => busy.current, onNavigate: (location) => callbacks.current.onNavigate(location),
+      report: setRenameNote }) : null;
     if (position) { instance.setPosition({ lineNumber: position.line, column: position.column }); instance.revealLineInCenter(position.line); instance.focus(); }
     // Type errors show the way an editor shows them: on open, and again once typing pauses.
     autoCheck.current = true;
@@ -112,8 +121,9 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     checkSoon(300);
     const changes = model.onDidChangeContent(() => {
       checkSoon(1000);
-      epoch.current++; setDiagnostics([]); setReferences([]); setHover(null); setStatus(null); setFailure(null); monaco.editor.setModelMarkers(model, 'graft-typescript', []);
-      callbacks.current.onChange(model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true));
+      epoch.current++; setDiagnostics([]); setReferences([]); setHover(null); setStatus(null); setFailure(null); setRenameNote(null); monaco.editor.setModelMarkers(model, 'graft-typescript', []);
+      sent.current = model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true);
+      callbacks.current.onChange(sent.current);
     });
     const save = instance.addAction({ id: 'graft.save', label: 'Save file', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => callbacks.current.onSave() });
     const check = instance.addAction({ id: 'graft.check', label: 'Check types', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM], run: () => runQuery.current('diagnostics') });
@@ -133,13 +143,14 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
     };
     theme();
     const observer = new MutationObserver(theme); observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'data-accent'] });
-    return () => { clearTimeout(checkTimer); observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); comment.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    return () => { ai.dispose(); ide?.dispose(); clearTimeout(checkTimer); observer.disconnect(); changes.dispose(); save.dispose(); check.dispose(); definition.dispose(); referencesAction.dispose(); hoverAction.dispose(); comment.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
     // The model owns edits. Recreate it only for another file; content changes flow through onChange.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
   useEffect(() => { editor.current?.updateOptions({ fontSize: appearance?.codeFontSize ?? 13 }); }, [appearance?.codeFontSize]);
   return <div className="flex h-full min-h-[140px] w-full flex-col">
     <div ref={container} className="min-h-0 flex-1" />
+    {aiNote ? <p role="status" className="shrink-0 border-t border-border px-8 py-4 text-2xs text-fg-muted">{aiNote}</p> : null}
     {supported ? <div className="max-h-[40%] shrink-0 overflow-auto border-t border-border px-8 py-4">
       <div className="flex flex-wrap items-center gap-6">
         <Button size="xs" variant="ghost" disabled={pending} onClick={() => void query('diagnostics')} title="Check the current draft (Ctrl+Shift+M)">Check types</Button>
@@ -149,6 +160,7 @@ export default function TextEditor({ sessionId, file, value, position, onChange,
         <p role="status" className="text-2xs text-fg-muted">{pending ? 'Checking language server…' : status}</p>
       </div>
       {failure ? <p role="alert" className="text-sm text-danger">{failure}</p> : null}
+      {renameNote ? <p role={renameNote.failure ? 'alert' : 'status'} className={renameNote.failure ? 'text-sm text-danger' : 'text-2xs text-fg-muted'}>{renameNote.text}</p> : null}
       {hover ? <section aria-label="Symbol information" className="px-4 py-6"><Markdown text={hover} variant="code" /></section> : null}
       {references.length ? <ul aria-label="Symbol references" className="text-2xs">
         {references.slice(0, 100).map((location, i) => <li key={`${location.file}:${location.line}:${location.column}:${i}`}><button className="w-full truncate py-4 text-left font-mono text-fg-muted hover:text-fg" title={`${location.file}:${location.line}:${location.column}`} onClick={() => callbacks.current.onNavigate(location)}>{location.file}:{location.line}:{location.column}</button></li>)}

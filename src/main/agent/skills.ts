@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { firstParagraph, parseFrontmatter } from './frontmatter';
+import { readOther, type OtherRoot } from './otherTools';
 
 export interface SkillInfo {
   name: string;
@@ -9,6 +10,8 @@ export interface SkillInfo {
   scope: 'user' | 'project' | 'builtin';
   /** What Graft says about a skill it ships, printed after the skill's own line in the prompt; null for every other skill. */
   note: string | null;
+  /** Read from another tool's folder (agent/otherTools.ts): never edited there. */
+  imported?: boolean;
 }
 
 /**
@@ -22,7 +25,7 @@ export const BUILTIN_SKILL_NOTES: Readonly<Record<string, string>> = {
     "Graft's copy of this skill is read-only: never write inside its folder. Save each diagram as its own .html file, in docs/diagrams/ unless the user names a place, and say where it is. Graft shows the file as a diagram in the conversation, so don't paste its markup into your reply. The user makes PNG and SVG copies from the diagram's card: don't run the export scripts unless they ask. The scripts need Python 3; when it isn't installed, skip them and go through the checklist by reading the file. Brand colours and fonts go in a profile, as the skill's profiles.md describes."
 };
 
-function scan(dir: string, scope: SkillInfo['scope']): SkillInfo[] {
+function scan(dir: string, scope: SkillInfo['scope'], imported = false): SkillInfo[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -32,7 +35,8 @@ function scan(dir: string, scope: SkillInfo['scope']): SkillInfo[] {
   }
   const skills: SkillInfo[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    // A skill folder can be a link to where it is kept.
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const file = path.join(dir, entry.name, 'SKILL.md');
     if (!fs.existsSync(file)) continue;
     const { data, body } = parseFrontmatter(fs.readFileSync(file, 'utf8'));
@@ -42,7 +46,8 @@ function scan(dir: string, scope: SkillInfo['scope']): SkillInfo[] {
       description: data.description ?? (firstParagraph(body) || 'No description.'),
       path: file,
       scope,
-      note: scope === 'builtin' ? (BUILTIN_SKILL_NOTES[name] ?? null) : null
+      note: scope === 'builtin' ? (BUILTIN_SKILL_NOTES[name] ?? null) : null,
+      ...(imported ? { imported } : {})
     });
   }
   return skills;
@@ -56,10 +61,11 @@ export function scanBuiltinSkills(builtinDir: string | null): SkillInfo[] {
 /**
  * Skills from the folder Graft ships (`builtinDir`), ~/.graft/skills/<name>/SKILL.md and
  * <project>/.graft/skills/<name>/SKILL.md. On a name clash the project's skill wins, then
- * the user's, then the built-in one.
+ * the user's, then the built-in one, then one of another tool's (`others`).
  */
-export function loadSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null): SkillInfo[] {
+export function loadSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null, others: OtherRoot[] = []): SkillInfo[] {
   const byName = new Map<string, SkillInfo>();
+  for (const root of others) for (const s of readOther(() => scan(root.dir, root.scope, true))) byName.set(s.name, s);
   for (const s of scanBuiltinSkills(builtinDir)) byName.set(s.name, s);
   for (const s of scan(path.join(graftHome, 'skills'), 'user')) byName.set(s.name, s);
   if (projectRoot) for (const s of scan(path.join(projectRoot, '.graft', 'skills'), 'project')) byName.set(s.name, s);
@@ -67,6 +73,6 @@ export function loadSkills(graftHome: string, projectRoot: string | null, builti
 }
 
 /** The folders whose files an agent reads without asking: a skill is instructions it was told to read. */
-export function skillReadRoots(graftHome: string, builtinDir: string | null): string[] {
-  return [path.join(graftHome, 'skills'), ...(builtinDir ? [builtinDir] : [])];
+export function skillReadRoots(graftHome: string, builtinDir: string | null, others: OtherRoot[] = []): string[] {
+  return [path.join(graftHome, 'skills'), ...(builtinDir ? [builtinDir] : []), ...others.map((root) => root.dir)];
 }

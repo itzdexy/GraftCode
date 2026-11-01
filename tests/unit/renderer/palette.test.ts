@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { StoredMessage } from '../../../src/shared/schemas/messages';
-import { fuzzyFilter, fuzzyScore } from '../../../src/renderer/src/lib/fuzzy';
+import { fuzzyFilter, fuzzyScore } from '../../../src/shared/fuzzy';
 import { clearHistory, loadHistory, pushHistory } from '../../../src/renderer/src/lib/promptHistory';
 import { buildTranscript, groupActivity } from '../../../src/renderer/src/features/session/transcriptModel';
 
@@ -33,11 +33,20 @@ describe('fuzzy matching for the command palette', () => {
 
   it('filters and sorts best first, keeping the original order for ties and an empty query', () => {
     const items = ['Toggle terminal', 'Show or hide the sidebar', 'Settings: Appearance', 'Theme: Light'];
-    expect(fuzzyFilter(items, '', (s) => s)).toEqual(items);
-    expect(fuzzyFilter(items, 'side', (s) => s)).toEqual(['Show or hide the sidebar']);
+    expect(fuzzyFilter('', items, (s) => s)).toEqual(items);
+    expect(fuzzyFilter('side', items, (s) => s)).toEqual(['Show or hide the sidebar']);
     // Both titles start with "t"; the shorter one ranks first, and both beat a "t" further in.
-    expect(fuzzyFilter(items, 't', (s) => s).slice(0, 2)).toEqual(['Theme: Light', 'Toggle terminal']);
-    expect(fuzzyFilter(items, 'appear', (s) => s)).toEqual(['Settings: Appearance']);
+    expect(fuzzyFilter('t', items, (s) => s).slice(0, 2)).toEqual(['Theme: Light', 'Toggle terminal']);
+    expect(fuzzyFilter('appear', items, (s) => s)).toEqual(['Settings: Appearance']);
+  });
+
+  it('finds files by parts of their path, in any order, and stops at the limit', () => {
+    const files = ['src/main/index.ts', 'src/renderer/src/App.tsx', 'tests/unit/app.test.ts', 'docs/apple.md'];
+    // Earlier in the path ranks higher: a folder or file name that starts with the word.
+    expect(fuzzyFilter('app', files, (s) => s)).toEqual(['docs/apple.md', 'tests/unit/app.test.ts', 'src/renderer/src/App.tsx']);
+    expect(fuzzyFilter('tsx app', files, (s) => s)).toEqual(['src/renderer/src/App.tsx']);
+    expect(fuzzyFilter('app', files, (s) => s, 1)).toHaveLength(1);
+    expect(fuzzyFilter('', files, (s) => s, 2)).toEqual(files.slice(0, 2));
   });
 });
 

@@ -43,6 +43,7 @@ import { useDetails } from '../../../stores/details';
 import { useNav } from '../../../stores/nav';
 import { panelBus, panelsOf, usePanels } from '../../../stores/panels';
 import { reportError, useToasts } from '../../../stores/toasts';
+import { startReview } from '../../review/startReview';
 import { ChangeCount, formatCount, GitActions } from '../StatusBar';
 import {
   CARD_TITLES,
@@ -653,7 +654,7 @@ function TasksCard({ sessionId, runs, index }: { sessionId: string; runs: AgentR
 function ChangesCard({ summary, stats, onChanged, index }: { summary: SessionSummary; stats: DiffStatsView | null; onChanged: () => void; index: number }) {
   if (!stats?.branch) return null;
   const any = stats.added > 0 || stats.removed > 0;
-  const review = (): void => {
+  const show = (): void => {
     usePanels.getState().setChangesTab(summary.id, 'changes');
     usePanels.getState().show(summary.id, 'changes');
   };
@@ -682,9 +683,14 @@ function ChangesCard({ summary, stats, onChanged, index }: { summary: SessionSum
       )}
       <div className="mt-8 flex flex-wrap items-center gap-6">
         {any ? (
-          <Button size="sm" variant="secondary" onClick={review}>
-            Review
-          </Button>
+          <>
+            <Button size="sm" variant="secondary" onClick={() => startReview(summary.id, 'branch')}>
+              Review changes
+            </Button>
+            <Button size="sm" variant="ghost" onClick={show}>
+              Show changes
+            </Button>
+          </>
         ) : null}
         <GitActions summary={summary} branch={stats.branch} onChanged={onChanged} side="bottom" />
       </div>

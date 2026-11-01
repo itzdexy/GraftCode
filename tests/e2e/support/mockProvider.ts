@@ -32,6 +32,13 @@ export interface RecordedRequest {
 
 export const MOCK_MODELS = ['graft-test-large', 'graft-test-mini'] as const;
 
+/** Every message's text in a chat request (system prompt included), joined: what an `answer` rule matches against. */
+export function requestText(body: unknown): string {
+  const messages = (body as { messages?: Array<{ content?: unknown }> } | null)?.messages ?? [];
+  return messages.map((m) => typeof m.content === 'string' ? m.content
+    : Array.isArray(m.content) ? m.content.map((part: { text?: unknown }) => typeof part.text === 'string' ? part.text : '').join('\n') : '').join('\n');
+}
+
 function chunk(delta: Record<string, unknown>, finish: string | null = null): string {
   return `data: ${JSON.stringify({ id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: 'mock', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 }
@@ -77,6 +84,17 @@ export class MockProvider {
   titleText = 'Scripted title';
   /** Task-aware transport fixtures for agents whose requests can arrive in any order. */
   respondToChat: ((body: unknown) => ScriptedTurn) | null = null;
+  /** Replies picked by what a request says; see `answer`. */
+  private readonly rules: Array<{ match: (body: unknown) => boolean; reply: (body: unknown) => ScriptedTurn; once: boolean }> = [];
+
+  /**
+   * Answers every chat request that `match` accepts, on either model, before the title reply and the
+   * script: for one-off requests (editor suggestions, reviews, a terminal command) that must not eat a
+   * scripted turn. `once` drops the rule after its first use.
+   */
+  answer(match: (body: unknown) => boolean, reply: ScriptedTurn | ((body: unknown) => ScriptedTurn), options: { once?: boolean } = {}): void {
+    this.rules.push({ match, reply: typeof reply === 'function' ? reply : () => reply, once: options.once ?? false });
+  }
 
   /** Queues assistant turns; each chat request (except title requests) consumes one. */
   script(...turns: ScriptedTurn[]): void {
@@ -143,7 +161,10 @@ export class MockProvider {
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') {
       const model = (body as { model?: string } | null)?.model;
-      const turn: ScriptedTurn = model === this.models[1] ? { text: this.titleText } : (this.respondToChat?.(body) ?? this.turns.shift() ?? { text: 'Done.' });
+      const rule = this.rules.find((r) => r.match(body));
+      if (rule?.once) this.rules.splice(this.rules.indexOf(rule), 1);
+      const turn: ScriptedTurn = rule ? rule.reply(body)
+        : model === this.models[1] ? { text: this.titleText } : (this.respondToChat?.(body) ?? this.turns.shift() ?? { text: 'Done.' });
       await this.stream(res, turn);
       return;
     }

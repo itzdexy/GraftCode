@@ -53,7 +53,8 @@ function segmentRisk(w: string[]): CommandRisk {
   if (name === 'git') {
     const sub = w[1] ?? '';
     if (GIT_READ.has(sub)) return 'read-only';
-    if (sub === 'branch' || sub === 'remote' || sub === 'tag') return w.length <= 3 && !w.some((x) => x.startsWith('-') && x !== '-v' && x !== '-a' && x !== '--list') ? 'read-only' : 'low';
+    // Listing only: a name after them ("git branch topic", "git tag v2") creates one.
+    if (sub === 'branch' || sub === 'remote' || sub === 'tag') return w.slice(2).every((x) => x === '-v' || x === '-a' || x === '--list') ? 'read-only' : 'low';
     return GIT_LOW.has(sub) ? 'low' : 'unknown';
   }
   if (PACKAGE_MANAGERS.has(name)) {

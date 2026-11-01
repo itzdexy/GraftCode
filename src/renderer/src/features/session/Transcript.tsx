@@ -13,6 +13,7 @@ import { useFileRefs } from '../../stores/fileRefs';
 import { usePaneActive } from '../../stores/panes';
 import { usePanels } from '../../stores/panels';
 import type { SessionView } from '../../stores/sessions';
+import { FindingsCard } from '../review/FindingsCard';
 import {
   AssistantText,
   CompactionItem,
@@ -24,6 +25,7 @@ import {
   UserMessage
 } from './MessageItems';
 import { ActivityGroup } from './ActivityGroup';
+import { AttemptsCard } from './AttemptsCard';
 import { CheckItem, RunningChecks } from './CheckItem';
 import { ConversationContext, type Conversation } from './conversation';
 import { DiagramCard } from './DiagramCard';
@@ -322,6 +324,12 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
             files={item.files}
             onUndo={item === lastEdits && item.messageId !== null && onRewind ? () => undoTurn(item.messageId) : null}
             onOpen={summary.kind === 'code' ? (path, line) => usePanels.getState().openFile(summary.id, path, { line }) : null}
+            // Any finished turn's files go back one by one: from its snapshot, which its message names once it was taken.
+            undo={
+              summary.kind === 'code'
+                ? { sessionId: summary.id, messageId: item.messageId, snapshot: item.messageId !== null && messagesById.get(item.messageId)?.meta.checkpointId !== undefined }
+                : null
+            }
           />
         );
       case 'files':
@@ -339,6 +347,8 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         return <TodosItem item={item} />;
       case 'plan':
         return <PlanItem item={item} />;
+      case 'findings':
+        return summary.kind === 'code' ? <FindingsCard sessionId={summary.id} callId={item.callId} display={item.display} error={item.error} /> : null;
       case 'provider':
         return <ProviderItem item={item} />;
       case 'compaction':
@@ -360,6 +370,16 @@ export function Transcript({ summary, view, onRewind, onEdit, onRetry, onRegener
         );
       case 'notice':
         return <p className="text-md text-fg-muted">{item.text}</p>;
+      case 'attempts':
+        return summary.kind === 'code' ? (
+          <AttemptsCard
+            sessionId={summary.id}
+            set={item.set}
+            busy={view.turnActive}
+            // Its message is the newest turn, and has the snapshot of the files from before it.
+            undo={items.indexOf(item) > lastTurnAt && messagesById.get(item.set.messageId)?.meta.checkpointId !== undefined}
+          />
+        ) : null;
       case 'error':
         return (
           <div role="alert" className="flex items-start gap-8 text-md">

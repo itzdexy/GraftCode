@@ -15,10 +15,12 @@ interface ModelQuickMenuProps {
   /** Controlled open state (e.g. opened by the /model command). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** What the menu chooses, for its accessible name ("Model for attempt 2"). */
+  label?: string;
 }
 
 /** Code-mode model menu: featured models with 1–9 keys, then "More models". */
-export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel = 'No model', open: openProp, onOpenChange }: ModelQuickMenuProps) {
+export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel = 'No model', open: openProp, onOpenChange, label = 'Model' }: ModelQuickMenuProps) {
   const groups = useApp((s) => s.models);
   const providers = useApp((s) => s.providers);
   const loading = useApp((s) => s.modelsLoading);
@@ -45,7 +47,7 @@ export function ModelQuickMenu({ current, onSelect, disabled = false, emptyLabel
       <MenuTrigger asChild disabled={disabled}>
         <button
           type="button"
-          aria-label={`Model: ${current?.label ?? emptyLabel}`}
+          aria-label={`${label}: ${current?.label ?? emptyLabel}`}
           className="inline-flex h-22 max-w-[200px] items-center rounded-md px-6 text-base text-fg-tertiary transition-ui hover:bg-hover hover:text-fg data-[state=open]:bg-hover disabled:text-fg-faint"
         >
           <span className="truncate">{current?.label ?? (loading ? 'Loading models…' : emptyLabel)}</span>

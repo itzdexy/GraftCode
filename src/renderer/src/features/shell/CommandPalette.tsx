@@ -4,7 +4,7 @@ import { AtSign, Braces, Check, ChevronRight, File, FileSearch } from 'lucide-re
 import { symbolKind } from '@shared/symbolKinds';
 import { Kbd } from '../../components/Badge';
 import { cn } from '../../lib/cn';
-import { fuzzyFilter } from '../../lib/fuzzy';
+import { fuzzyFilter } from '@shared/fuzzy';
 import { errorText, invoke, RequestError } from '../../lib/ipc';
 import { logError } from '../../lib/log';
 import { usePresence } from '../../lib/motion';
@@ -139,7 +139,7 @@ function CommandsPanel({ query, onQuery }: { query: string; onQuery: (typed: str
 
   const searching = query.trim().length > 0;
   const results = useMemo(() => {
-    if (searching) return fuzzyFilter(commands, query, (c) => `${c.title} ${c.keywords ?? ''} ${c.group}`);
+    if (searching) return fuzzyFilter(query, commands, (c) => `${c.title} ${c.keywords ?? ''} ${c.group}`);
     const byId = new Map(commands.map((c) => [c.id, c]));
     const first = recent.flatMap((id) => {
       const c = byId.get(id);

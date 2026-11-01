@@ -26,6 +26,7 @@ import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
 import { skillReadRoots } from './skills';
+import { NO_OTHER_ROOTS, type OtherToolRoots } from './otherTools';
 import type { LoopJournal } from './journal';
 import { shouldCompact } from './tokens';
 import { spentTokens, SpendBudget, TurnBudget, type SpendStart } from './turnBudget';
@@ -38,6 +39,8 @@ export interface TurnScope {
   hooks: HookRunner | null;
   root: string | null;
   trusted: boolean;
+  /** A turn that may only look (a review): what would change something is refused with this sentence, as in Plan mode. */
+  readOnly?: string;
 }
 
 /** The model a loop is answered by. It changes when the backup model takes over (see loopHost). */
@@ -234,6 +237,11 @@ export class SessionHost {
     pending.resolve(response.dismissed ? null : response.answers);
   }
 
+  /** Other tools' folders the turn reads skills and agents from (agent/otherTools.ts); a project's when the turn's project is trusted. */
+  private otherRoots(scope: TurnScope): OtherToolRoots {
+    return this.deps.otherTools?.(this.ports.projectRoot(), scope.trusted) ?? NO_OTHER_ROOTS;
+  }
+
   private permissionEnv(scope: TurnScope) {
     const { rules, problems } = this.deps.settings.rules(this.ports.settingsRoot(), scope.trusted, this.sessionAllow);
     for (const p of problems) this.deps.log('warn', 'Settings problem', { message: p });
@@ -245,7 +253,8 @@ export class SessionHost {
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
       allowNetwork: this.summary.kind === 'chat',
       sandboxed: this.deps.shells.sandboxFor(this.id) !== null,
-      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills)
+      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills, this.otherRoots(scope).skills),
+      ...(scope.readOnly !== undefined ? { readOnly: scope.readOnly } : {})
     };
   }
 
@@ -568,8 +577,24 @@ export class SessionHost {
     return run ? (this.agentGroups.get(run.groupId)?.stop(run.nodeId) ?? false) : false;
   }
 
+  /** Takes the permission card of an agent that was stopped off the screen (an attempt, attempts.ts): nothing waits for its answer now. */
+  dropPending(agentLabel: string): void {
+    const pending = this.pendingPermission;
+    if (pending?.request.agentLabel !== agentLabel) return;
+    this.pendingPermission = null;
+    this.turn?.waiting(false);
+    this.emit({ type: 'permission-resolved', requestId: pending.request.id });
+    this.ports.setStatus('running');
+    pending.resolve({ decision: 'deny' });
+  }
+
+  /** Why the running turn has to pause, or null while it is within its limits (the same answer every loop of it gets). */
+  limitReached(): string | null {
+    return this.turn?.exceeded() ?? this.spend?.exceeded() ?? null;
+  }
+
   /** An agent of a group or a sub-agent never thinks in Taproot, the main agent's way of working: it gets the strongest plain effort instead. */
-  private agentEffort(model: ModelInfo): EffortLevel | null {
+  agentEffort(model: ModelInfo): EffortLevel | null {
     const effort = this.ports.effortFor(model);
     return effort === 'taproot' ? (model.effort?.levels.includes('max') ? 'max' : (model.effort?.default ?? null)) : effort;
   }
@@ -599,7 +624,7 @@ export class SessionHost {
         sessionId: this.id,
         system: this.ports.system() ?? '',
         toolNames: chat ? available.filter((name) => name === 'WebFetch' || name === 'WebSearch') : available,
-        customAgents: loadAgents(this.deps.graftHome, this.ports.projectRoot()),
+        customAgents: loadAgents(this.deps.graftHome, this.ports.projectRoot(), this.otherRoots(scope).agents),
         sessionModel: model,
         sessionProvider: provider,
         settings: prefs.agents,
@@ -643,7 +668,7 @@ export class SessionHost {
     scope: TurnScope,
     root: string
   ): Promise<{ text: string; toolCalls: number }> {
-    const custom = loadAgents(this.deps.graftHome, this.ports.projectRoot());
+    const custom = loadAgents(this.deps.graftHome, this.ports.projectRoot(), this.otherRoots(scope).agents);
     const builtin = (BUILTIN_AGENTS as readonly string[]).includes(input.type);
     const agent = builtin ? null : (custom.find((a) => a.name === input.type) ?? null);
     if (!builtin && !agent) {
@@ -718,10 +743,15 @@ export class SessionHost {
       );
       if (result.reason === 'error') throw new GraftError('subagent_failed', `The sub-agent failed: ${result.error?.message ?? 'unknown error'}`);
       if (result.reason === 'interrupted') throw new GraftError('interrupted', 'Interrupted by the user.');
-      // Cut short by the turn's own limit: it did not finish, so its last words are not a report
-      // and what it changed stays in its checkout (kept below) instead of going in half done.
-      const over = result.reason === 'guard' ? (this.turn?.exceeded() ?? null) : null;
-      if (over !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this sub-agent finished. ${over}`);
+      // Cut short, by the turn's limit or by its own (its step limit, the same calls over and over): it did not
+      // finish, so its last words are not a report and what it changed stays in its checkout (kept below)
+      // instead of going in half done.
+      if (result.reason === 'guard') {
+        const over = this.turn?.exceeded() ?? null;
+        if (over !== null) throw new GraftError('turn_limit', `Stopped: the turn reached a limit before this sub-agent finished. ${over}`);
+        const last = result.finalText.trim();
+        throw new GraftError('subagent_stopped', `Stopped before it finished: the sub-agent reached its step limit or kept repeating the same calls.${last ? ` Its last words: ${last.slice(-1500)}` : ''}`);
+      }
       if (lease && this.deps.workspaces) {
         await privateHost?.close();
         const touched = scratch.flatMap((m) => m.content.flatMap((b) => (b.type === 'tool_result' && !b.isError && b.display?.kind === 'edit' ? [b.display.path] : [])));
