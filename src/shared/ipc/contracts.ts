@@ -480,6 +480,21 @@ export const contracts = {
   'pty:write': channel(z.object({ id: IdSchema, data: z.string().max(100_000) }), Void),
   'pty:resize': channel(z.object({ id: IdSchema, cols: z.number().int().min(2).max(1000), rows: z.number().int().min(1).max(500) }), Void),
   'pty:kill': channel(z.object({ id: IdSchema }), Ok),
+  /**
+   * One command line for a terminal of the session, from words (Ctrl+K) or as the fix of a command that failed.
+   * The panel types it at the prompt and never presses Enter. `askId` lets pty:cancelSuggest stop it.
+   */
+  'pty:suggest': channel(
+    z.object({
+      sessionId: IdSchema,
+      terminalId: IdSchema,
+      askId: IdSchema,
+      request: z.string().max(2_000),
+      failed: z.object({ command: z.string().max(10_000), exitCode: z.number().int().nullable(), output: z.string().max(20_000) }).optional()
+    }),
+    z.object({ command: z.string() })
+  ),
+  'pty:cancelSuggest': channel(z.object({ askId: IdSchema }), Ok),
   'shells:list': channel(z.object({ sessionId: IdSchema }), z.array(BackgroundShellSchema)),
   'shells:output': channel(z.object({ id: IdSchema }), z.object({ output: z.string(), skipped: z.number().int() })),
   'shells:kill': channel(z.object({ id: IdSchema }), z.object({ killed: z.boolean() })),

@@ -80,6 +80,7 @@ import { favicon, pagePicture } from '../app/favicons';
 import { searchKeyId } from '../tools/web/search';
 import { folderProblems } from '../languages/changedProblems';
 import { EditorAi } from '../editor/editorAi';
+import { TerminalAi } from '../pty/terminalAi';
 import { FileIndex } from './fileIndex';
 import type { HandlerGroup } from './router';
 
@@ -360,6 +361,20 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       session: (id) => sessions.summary(id),
       models: (providerId, signal) => s.registry.listModels(providerId, { signal }),
       provider: (providerId) => s.registry.get(providerId)
+    }));
+  };
+  let terminalAiService: TerminalAi | null = null;
+  const terminalAi = async (): Promise<TerminalAi> => {
+    const s = await ctx.services();
+    const sessions = await ctx.sessions();
+    const ptys = await ctx.ptys();
+    return (terminalAiService ??= new TerminalAi({
+      settings: () => s.settings.get(),
+      session: (id) => sessions.summary(id),
+      models: (providerId, signal) => s.registry.listModels(providerId, { signal }),
+      provider: (providerId) => s.registry.get(providerId),
+      shellOf: (terminalId, sessionId) => ptys.shellOf(terminalId, sessionId),
+      platform: process.platform
     }));
   };
 
@@ -990,6 +1005,11 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'pty:kill': async ({ id }) => {
       await (await ctx.ptys()).kill(id);
+      return { ok: true as const };
+    },
+    'pty:suggest': async (input) => (await terminalAi()).suggest(input),
+    'pty:cancelSuggest': async ({ askId }) => {
+      (await terminalAi()).cancel(askId);
       return { ok: true as const };
     },
     'shells:list': async ({ sessionId }) => (await ctx.services()).shells.list(sessionId),

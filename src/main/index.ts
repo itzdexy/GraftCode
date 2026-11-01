@@ -225,11 +225,16 @@ function services(): Promise<Services> {
 async function ptys(): Promise<PtyManager> {
   if (ptyManager) return ptyManager;
   const s = await services();
-  ptyManager ??= new PtyManager(s.shell, {
-    data: (id, data, offset) => emit({ type: 'pty:data', id, data, offset }),
-    exit: (id, exitCode) => emit({ type: 'pty:exit', id, exitCode }),
-    log: (message) => log.warn('pty', message)
-  });
+  ptyManager ??= new PtyManager(
+    s.shell,
+    {
+      data: (id, data, offset) => emit({ type: 'pty:data', id, data, offset }),
+      exit: (id, exitCode) => emit({ type: 'pty:exit', id, exitCode }),
+      log: (message) => log.warn('pty', message)
+    },
+    process.platform,
+    path.join(paths.userData, 'shell-integration')
+  );
   return ptyManager;
 }
 
