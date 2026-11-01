@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Pencil, Plus, Trash } from 'lucide-react';
+import { ChevronRight, Copy, Pencil, Plus, Trash } from 'lucide-react';
 import type { CommandFileView, CustomScopeView } from '@shared/schemas/customize';
 import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
@@ -9,8 +9,8 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
-import { reportError } from '../../stores/toasts';
-import { MONO_AREA, Row, Section, SELECT } from './shared';
+import { reportError, useToasts } from '../../stores/toasts';
+import { ImportedFrom, MONO_AREA, Row, Section, SELECT, toolFolder } from './shared';
 
 function CommandEditor({ command, projectPath, onDone }: { command: CommandFileView | null; projectPath: string | null; onDone: (saved: boolean) => void }) {
   const [scope, setScope] = useState<CustomScopeView>(command?.scope ?? (projectPath ? 'project' : 'user'));
@@ -94,11 +94,20 @@ export function CommandsSection({ projectPath }: { projectPath: string | null })
       .then(reload)
       .catch((e: unknown) => reportError("Couldn't delete the command", e));
   };
+  // Another tool's command, saved as Graft's own: that copy wins from then on, and can be edited.
+  const copy = (c: CommandFileView): void => {
+    invoke('customize:saveCommand', { scope: c.scope, projectPath, name: c.name, description: c.description, argumentHint: c.argumentHint, body: c.body, previousPath: null })
+      .then(() => {
+        useToasts.getState().push({ tone: 'success', title: `/${c.name} copied to Graft` });
+        reload();
+      })
+      .catch((e: unknown) => reportError("Couldn't copy the command", e));
+  };
 
   return (
     <Section
       title="Commands"
-      description="Reusable prompts you run with /name. Stored as Markdown in ~/.graft/commands or the project's .graft/commands."
+      description="Reusable prompts you run with /name. Stored as Markdown in ~/.graft/commands or the project's .graft/commands. Commands in .claude/commands, .cursor/commands and ~/.codex/prompts are offered too (a project's once you trust it)."
       actions={
         <Button size="sm" variant="secondary" leading={<Plus className="size-14" />} onClick={() => setEditing('new')}>
           New command
@@ -117,15 +126,25 @@ export function CommandsSection({ projectPath }: { projectPath: string | null })
                   <span className="font-mono text-base text-fg-strong">/{c.name}</span>
                   {c.argumentHint ? <span className="font-mono text-sm text-fg-muted">{c.argumentHint}</span> : null}
                   <Badge>{c.scope === 'user' ? 'All projects' : 'This project'}</Badge>
+                  {c.imported ? <Badge>{toolFolder(c.path)}</Badge> : null}
                 </p>
                 <p className="truncate text-sm text-fg-muted">{c.description}</p>
+                {c.imported ? <ImportedFrom path={c.path} /> : null}
               </div>
-              <IconButton label={`Edit /${c.name}`} onClick={() => setEditing(c)}>
-                <Pencil className="size-14" />
-              </IconButton>
-              <IconButton label={`Delete /${c.name}`} onClick={() => remove(c)}>
-                <Trash className="size-14" />
-              </IconButton>
+              {c.imported ? (
+                <Button size="sm" variant="ghost" leading={<Copy className="size-14" />} aria-label={`Copy /${c.name} to Graft`} onClick={() => copy(c)}>
+                  Copy to Graft
+                </Button>
+              ) : (
+                <>
+                  <IconButton label={`Edit /${c.name}`} onClick={() => setEditing(c)}>
+                    <Pencil className="size-14" />
+                  </IconButton>
+                  <IconButton label={`Delete /${c.name}`} onClick={() => remove(c)}>
+                    <Trash className="size-14" />
+                  </IconButton>
+                </>
+              )}
             </Row>
           ))}
         </ul>

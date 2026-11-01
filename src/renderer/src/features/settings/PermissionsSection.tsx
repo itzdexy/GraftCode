@@ -12,7 +12,7 @@ import { errorText, invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
 import { useApp } from '../../stores/app';
 import { useToasts } from '../../stores/toasts';
-import { ConfirmDialog, Group, saveSettings, SettingRow } from './common';
+import { ConfirmDialog, Group, saveSettings, SettingRow, SwitchRow } from './common';
 import { ProjectPicker } from './ProjectPicker';
 
 /** Choices for Steps per turn (besides no limit). */
@@ -338,6 +338,15 @@ export function PermissionsSection() {
               onChange={(on) => saveSettings({ behavior: { computerUse: on } })}
             />
           }
+        />
+      </Group>
+
+      <Group title="Other coding tools">
+        <SwitchRow
+          label="Use skills, commands and agents from other tools"
+          description="Graft also reads them from .claude/skills, .claude/commands, .claude/agents, .cursor/commands and ~/.codex/prompts: those in your home folder, and a project's once you trust it. It never changes those folders, and its own item wins when two share a name. MCP servers are imported from Customize, Integrations."
+          checked={settings.behavior.otherTools}
+          onChange={(otherTools) => saveSettings({ behavior: { otherTools } })}
         />
       </Group>
 

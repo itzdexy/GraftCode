@@ -22,6 +22,8 @@ export interface GraftPaths {
   sites: string;
   /** The skills that ship with Graft (resources/skills); null when the app has no such folder. */
   builtinSkills: string | null;
+  /** Where other coding tools keep their settings (~/.claude, ~/.cursor, ~/.codex): the home folder, or an isolated GRAFT_HOME (tests). */
+  toolsHome: string;
 }
 
 export function resolveGraftHome(): string {
@@ -61,6 +63,8 @@ export function buildPaths(
     checkpointsShadow: path.join(userData, 'shadow-repos'),
     chatFiles: path.join(userData, 'chat-files'),
     sites: sitesDir(graftHome, documents),
-    builtinSkills: skills && fs.existsSync(skills) ? skills : null
+    builtinSkills: skills && fs.existsSync(skills) ? skills : null,
+    // A test run reads no one's real settings: its own GRAFT_HOME stands in for the home folder, as for sites.
+    toolsHome: process.env.GRAFT_HOME ? graftHome : os.homedir()
   };
 }

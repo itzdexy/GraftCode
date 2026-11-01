@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { firstParagraph, parseFrontmatter } from './frontmatter';
+import { readOther, type OtherRoot } from './otherTools';
 
 export interface SlashCommandInfo {
   name: string;
@@ -12,6 +13,8 @@ export interface SlashCommandInfo {
 
 export interface CustomCommand extends SlashCommandInfo {
   body: string;
+  /** Read from another tool's folder (agent/otherTools.ts): never edited there. */
+  imported?: boolean;
 }
 
 /**
@@ -66,7 +69,7 @@ export function parseSlash(text: string): { name: string; args: string } | null 
   return { name: match[1]!.toLowerCase(), args: (match[2] ?? '').trim() };
 }
 
-function scanCommands(dir: string, source: 'user' | 'project', prefix = ''): CustomCommand[] {
+function scanCommands(dir: string, source: 'user' | 'project', prefix = '', imported = false): CustomCommand[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -78,7 +81,7 @@ function scanCommands(dir: string, source: 'user' | 'project', prefix = ''): Cus
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      out.push(...scanCommands(full, source, `${prefix}${entry.name}:`));
+      out.push(...scanCommands(full, source, `${prefix}${entry.name}:`, imported));
       continue;
     }
     if (!entry.name.toLowerCase().endsWith('.md')) continue;
@@ -91,7 +94,8 @@ function scanCommands(dir: string, source: 'user' | 'project', prefix = ''): Cus
       argumentHint: data['argument-hint'] ?? null,
       source,
       path: full,
-      body
+      body,
+      ...(imported ? { imported } : {})
     });
   }
   return out;
@@ -99,11 +103,16 @@ function scanCommands(dir: string, source: 'user' | 'project', prefix = ''): Cus
 
 /**
  * Custom commands from ~/.graft/commands and <project>/.graft/commands;
- * project wins on clashes. They can replace the prompt built-ins (/review,
- * /commit…) but not the ones that control the session or the app.
+ * project wins on clashes, and both win over another tool's (`others`). They
+ * can replace the prompt built-ins (/review, /commit…) but not the ones that
+ * control the session or the app; another tool's replace none. The other
+ * tools write arguments as Graft does ($ARGUMENTS, $1…$9), or not at all, and
+ * then they are added at the end.
  */
-export function loadCustomCommands(graftHome: string, projectRoot: string | null): CustomCommand[] {
+export function loadCustomCommands(graftHome: string, projectRoot: string | null, others: OtherRoot[] = []): CustomCommand[] {
   const byName = new Map<string, CustomCommand>();
+  // Graft's own built-ins stay its own: another tool's /review or /commit doesn't replace them.
+  for (const root of others) for (const c of readOther(() => scanCommands(root.dir, root.scope, '', true))) if (!BUILTIN_NAMES.has(c.name)) byName.set(c.name, c);
   for (const c of scanCommands(path.join(graftHome, 'commands'), 'user')) byName.set(c.name, c);
   if (projectRoot) for (const c of scanCommands(path.join(projectRoot, '.graft', 'commands'), 'project')) byName.set(c.name, c);
   for (const name of BUILTIN_NAMES) if (!PROMPT_COMMANDS.has(name)) byName.delete(name);
@@ -111,10 +120,10 @@ export function loadCustomCommands(graftHome: string, projectRoot: string | null
 }
 
 /** Built-ins and custom commands as the "/" menu and /help show them: a custom command hides the built-in it replaces. */
-export function listCommands(graftHome: string, projectRoot: string | null): SlashCommandInfo[] {
-  const custom = loadCustomCommands(graftHome, projectRoot);
+export function listCommands(graftHome: string, projectRoot: string | null, others: OtherRoot[] = []): SlashCommandInfo[] {
+  const custom = loadCustomCommands(graftHome, projectRoot, others);
   const replaced = new Set(custom.map((c) => c.name));
-  return [...BUILTIN_COMMANDS.filter((c) => !replaced.has(c.name)), ...custom.map(({ body: _body, ...info }) => info)];
+  return [...BUILTIN_COMMANDS.filter((c) => !replaced.has(c.name)), ...custom.map(({ body: _body, imported: _imported, ...info }) => info)];
 }
 
 /** Substitutes $ARGUMENTS and positional $1…$9. Arguments are appended when the template doesn't reference them. */

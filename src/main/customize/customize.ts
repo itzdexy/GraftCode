@@ -5,13 +5,16 @@ import { BUILTIN_AGENTS, cleanToolNames, loadAgents } from '../agent/agents';
 import { BUILTIN_NAMES, loadCustomCommands, PROMPT_COMMANDS } from '../agent/slashCommands';
 import { loadSkills } from '../agent/skills';
 import { MEMORY_FILE_NAMES } from '../agent/memory';
+import type { OtherRoot } from '../agent/otherTools';
 import { writeFileAtomic } from '../tools/fs/write';
 import { isInside } from '../tools/paths';
 
 /**
  * File-backed customizations edited from the Customize screen: slash
  * commands, agents, skills and GRAFT.md memory files, for the user
- * (~/.graft) or a project (<project>/.graft and <project>/GRAFT.md).
+ * (~/.graft) or a project (<project>/.graft and <project>/GRAFT.md). Those
+ * of other tools (`others`, agent/otherTools.ts) are listed too, marked as
+ * imported: they are read where they are and never edited or deleted there.
  */
 
 export type CustomScope = 'user' | 'project';
@@ -26,6 +29,7 @@ export interface CommandFile {
   scope: CustomScope;
   path: string;
   body: string;
+  imported: boolean;
 }
 
 export interface SkillFile {
@@ -35,6 +39,7 @@ export interface SkillFile {
   scope: CustomScope | 'builtin';
   path: string;
   body: string;
+  imported: boolean;
 }
 
 export interface MemoryInfo {
@@ -76,11 +81,11 @@ function assertWithin(file: string, dirs: string[]): void {
   if (!dirs.some((d) => isInside(d, file))) throw new GraftError('outside_folder', 'That file is not a Graft customization.');
 }
 
-export function listCommands(graftHome: string, projectRoot: string | null): CommandFile[] {
+export function listCommands(graftHome: string, projectRoot: string | null, others: OtherRoot[] = []): CommandFile[] {
   const out: CommandFile[] = [];
-  for (const c of loadCustomCommands(graftHome, projectRoot)) {
+  for (const c of loadCustomCommands(graftHome, projectRoot, others)) {
     if (c.source === 'builtin' || !c.path) continue;
-    out.push({ name: c.name, description: c.description, argumentHint: c.argumentHint, scope: c.source, path: c.path, body: c.body });
+    out.push({ name: c.name, description: c.description, argumentHint: c.argumentHint, scope: c.source, path: c.path, body: c.body, imported: c.imported === true });
   }
   return out;
 }
@@ -114,10 +119,19 @@ export interface AgentFile {
   scope: CustomScope;
   path: string;
   body: string;
+  imported: boolean;
 }
 
-export function listAgents(graftHome: string, projectRoot: string | null): AgentFile[] {
-  return loadAgents(graftHome, projectRoot).map((a) => ({ name: a.name, description: a.description, tools: a.tools, scope: a.source, path: a.path, body: a.instructions }));
+export function listAgents(graftHome: string, projectRoot: string | null, others: OtherRoot[] = []): AgentFile[] {
+  return loadAgents(graftHome, projectRoot, others).map((a) => ({
+    name: a.name,
+    description: a.description,
+    tools: a.tools,
+    scope: a.source,
+    path: a.path,
+    body: a.instructions,
+    imported: a.imported === true
+  }));
 }
 
 export async function saveAgent(
@@ -144,11 +158,11 @@ export async function deleteAgent(graftHome: string, projectRoot: string | null,
 }
 
 /** The skills a session in this project would be offered: the built-in ones first, then the others by name. */
-export function listSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null): SkillFile[] {
-  const skills = loadSkills(graftHome, projectRoot, builtinDir).map((s) => {
+export function listSkills(graftHome: string, projectRoot: string | null, builtinDir: string | null, others: OtherRoot[] = []): SkillFile[] {
+  const skills = loadSkills(graftHome, projectRoot, builtinDir, others).map((s) => {
     const raw = fs.readFileSync(s.path, 'utf8');
     const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trimStart();
-    return { name: s.name, description: s.description, scope: s.scope, path: s.path, body };
+    return { name: s.name, description: s.description, scope: s.scope, path: s.path, body, imported: s.imported === true };
   });
   return [...skills.filter((s) => s.scope === 'builtin'), ...skills.filter((s) => s.scope !== 'builtin')];
 }

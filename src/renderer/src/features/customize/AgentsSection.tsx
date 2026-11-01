@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, Pencil, Plus, Trash } from 'lucide-react';
+import { Bot, Copy, Pencil, Plus, Trash } from 'lucide-react';
 import type { AgentFileView, CustomScopeView } from '@shared/schemas/customize';
 import { Badge } from '../../components/Badge';
 import { Button, IconButton } from '../../components/Button';
@@ -8,8 +8,8 @@ import { Checkbox, TextField } from '../../components/Field';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { errorText, invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
-import { reportError } from '../../stores/toasts';
-import { MONO_AREA, Row, Section, SELECT } from './shared';
+import { reportError, useToasts } from '../../stores/toasts';
+import { ImportedFrom, MONO_AREA, Row, Section, SELECT, toolFolder } from './shared';
 
 interface Draft {
   name: string;
@@ -190,11 +190,20 @@ export function AgentsSection({ projectPath }: { projectPath: string | null }) {
       .then(reload)
       .catch((e: unknown) => reportError("Couldn't delete the agent", e));
   };
+  // Another tool's agent, saved as Graft's own: that copy wins from then on, and can be edited.
+  const copy = (a: AgentFileView): void => {
+    invoke('customize:saveAgent', { scope: a.scope, projectPath, name: a.name, description: a.description, tools: a.tools, body: a.body, previousPath: null })
+      .then(() => {
+        useToasts.getState().push({ tone: 'success', title: `${a.name} copied to Graft` });
+        reload();
+      })
+      .catch((e: unknown) => reportError("Couldn't copy the agent", e));
+  };
 
   return (
     <Section
       title="Agents"
-      description="Specialists Graft can hand a task to, such as a reviewer or a test writer. Each works in its own context with its own instructions and tools. Stored as Markdown in ~/.graft/agents or the project's .graft/agents."
+      description="Specialists Graft can hand a task to, such as a reviewer or a test writer. Each works in its own context with its own instructions and tools. Stored as Markdown in ~/.graft/agents or the project's .graft/agents. Agents in .claude/agents are offered too (a project's once you trust it)."
       actions={
         <Button size="sm" variant="secondary" leading={<Plus className="size-14" />} onClick={() => setEditing('new')}>
           New agent
@@ -220,15 +229,25 @@ export function AgentsSection({ projectPath }: { projectPath: string | null }) {
                   <span className="font-mono text-base text-fg-strong">{a.name}</span>
                   <Badge>{a.scope === 'user' ? 'All projects' : 'This project'}</Badge>
                   <Badge>{a.tools ? `${a.tools.length} ${a.tools.length === 1 ? 'tool' : 'tools'}` : 'All tools'}</Badge>
+                  {a.imported ? <Badge>{toolFolder(a.path)}</Badge> : null}
                 </p>
                 <p className="truncate text-sm text-fg-muted">{a.description}</p>
+                {a.imported ? <ImportedFrom path={a.path} /> : null}
               </div>
-              <IconButton label={`Edit ${a.name}`} onClick={() => setEditing(a)}>
-                <Pencil className="size-14" />
-              </IconButton>
-              <IconButton label={`Delete ${a.name}`} onClick={() => remove(a)}>
-                <Trash className="size-14" />
-              </IconButton>
+              {a.imported ? (
+                <Button size="sm" variant="ghost" leading={<Copy className="size-14" />} aria-label={`Copy ${a.name} to Graft`} onClick={() => copy(a)}>
+                  Copy to Graft
+                </Button>
+              ) : (
+                <>
+                  <IconButton label={`Edit ${a.name}`} onClick={() => setEditing(a)}>
+                    <Pencil className="size-14" />
+                  </IconButton>
+                  <IconButton label={`Delete ${a.name}`} onClick={() => remove(a)}>
+                    <Trash className="size-14" />
+                  </IconButton>
+                </>
+              )}
             </Row>
           ))}
         </ul>

@@ -47,6 +47,7 @@ import type { McpPromptInfo } from '../mcp/mcpManager';
 import { mcpPromptCommand, promptArguments, promptHint } from '../mcp/names';
 import { expandMentions } from './mentions';
 import { loadAgents } from './agents';
+import { NO_OTHER_ROOTS, type OtherToolRoots } from './otherTools';
 import type { AgentGroupSettings } from './agentGroup';
 import { createMission, missionBrief, type TurnEnd } from './mission';
 import { MissionController } from './missionController';
@@ -140,6 +141,8 @@ export interface SessionDeps {
   graftHome: string;
   /** The skills that ship with Graft; null when there are none. */
   builtinSkills: string | null;
+  /** The folders of other coding tools to read skills, commands and agents from (agent/otherTools.ts). Absent: none. */
+  otherTools?(folder: string | null, trusted: boolean): OtherToolRoots;
   platform: NodeJS.Platform;
   isTrusted(projectRoot: string): boolean;
   /** The sandbox settings when this project runs its commands in a sandbox; null runs them on this computer. Absent: no sandbox. */
@@ -906,6 +909,12 @@ export class AgentSession {
     }
   }
 
+  /** Other tools' folders this session reads skills, commands and agents from: a project's only once it is trusted. */
+  private otherRoots(): OtherToolRoots {
+    const root = this.settingsRoot();
+    return this.deps.otherTools?.(this.projectRoot(), root ? this.deps.isTrusted(root) : false) ?? NO_OTHER_ROOTS;
+  }
+
   /** Folder the agent works in and is sandboxed to (the worktree when there is one). */
   private projectRoot(): string | null {
     const s = this.summary;
@@ -1050,7 +1059,7 @@ export class AgentSession {
     if (!slash) return { text: item.text, typed: null };
     const summary = this.summary;
     if (PROMPT_COMMANDS.has(slash.name)) {
-      const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
+      const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands).find((c) => c.name === slash.name);
       if (custom) return { text: expandCommand(custom, slash.args), typed: item.text };
     }
     if (summary.kind !== 'code' && CODE_ONLY_COMMANDS.has(slash.name)) {
@@ -1103,7 +1112,7 @@ export class AgentSession {
       }
       case 'help': {
         const lines = [
-          ...commandsFor(summary.kind, listCommands(this.deps.graftHome, this.projectRoot())).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
+          ...commandsFor(summary.kind, listCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands)).map((c) => `- /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ''} — ${c.description}`),
           ...this.deps.mcpPrompts(this.settingsRoot()).map((p) => `- /${mcpPromptCommand(p.server, p.name)}${promptHint(p) ? ` ${promptHint(p)}` : ''} — ${p.description || `Prompt from the ${p.server} server`}`)
         ];
         this.commandOutput(
@@ -1159,7 +1168,7 @@ export class AgentSession {
         return null;
       }
       default: {
-        const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot()).find((c) => c.name === slash.name);
+        const custom = loadCustomCommands(this.deps.graftHome, this.projectRoot(), this.otherRoots().commands).find((c) => c.name === slash.name);
         if (!custom) {
           this.commandOutput(`Unknown command /${slash.name}. Type /help to see the available commands.`);
           return null;
@@ -1204,6 +1213,7 @@ export class AgentSession {
     const prefs = this.deps.preferences();
     const root = this.projectRoot();
     if (summary.kind === 'code' && root && memory) {
+      const others = this.otherRoots();
       return buildCodeSystemPrompt({
         model: identity,
         cwd: this.workingDir(),
@@ -1214,13 +1224,13 @@ export class AgentSession {
         date: this.deps.now().toISOString().slice(0, 10),
         mode: summary.permissionMode,
         memory: memory.initial(this.workingDir()),
-        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills),
+        skills: loadSkills(this.deps.graftHome, root, this.deps.builtinSkills, others.skills),
         webSearch: web.native || web.clientSearch,
         computer: this.offering.computer(model),
         mcpServers: this.deps.mcpServerNames(this.settingsRoot()),
         mcpNotes: this.deps.mcpInstructions(this.settingsRoot()),
         deferredTools: this.offering.deferredByServer(model),
-        agents: loadAgents(this.deps.graftHome, root).map(({ name, description }) => ({ name, description })),
+        agents: loadAgents(this.deps.graftHome, root, others.agents).map(({ name, description }) => ({ name, description })),
         personalization: prefs.personalization,
         sandbox: this.sandboxPrompt(),
         site: (await this.deps.site?.(root)) ?? null,

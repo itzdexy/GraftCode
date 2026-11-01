@@ -26,6 +26,7 @@ import type { ShellManager } from '../tools/shell/shellManager';
 import type { GraftPaths } from '../app/paths';
 import type { ChatFiles } from '../chat/chatFiles';
 import { HookRunner } from './hooks';
+import { otherToolRoots } from './otherTools';
 import { reconcileInterrupted } from './journal';
 import { performRewind, previewRewind } from './rewind';
 import { undoHunk } from './turnUndo';
@@ -189,6 +190,7 @@ export class SessionManager {
       rgPath: d.rgPath,
       graftHome: d.paths.graftHome,
       builtinSkills: d.paths.builtinSkills,
+      otherTools: (folder, trusted) => otherToolRoots({ enabled: d.settings.get().behavior.otherTools, home: d.paths.toolsHome, projectRoot: folder, trusted }),
       platform: process.platform,
       isTrusted: (root) => d.projects.findByPath(root)?.trusted ?? false,
       sandbox: (root) => (d.shells.sandbox && d.projects.findByPath(root)?.settings.sandbox === true ? d.settings.get().sandbox : null),

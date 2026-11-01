@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { firstParagraph, parseFrontmatter } from './frontmatter';
+import { readOther, type OtherRoot } from './otherTools';
 
 /**
  * Custom sub-agents: Markdown files in ~/.graft/agents and
@@ -24,6 +25,8 @@ export interface AgentDefinition {
   instructions: string;
   source: 'user' | 'project';
   path: string;
+  /** Read from another tool's folder (agent/otherTools.ts): never edited there. */
+  imported?: boolean;
 }
 
 /** Sub-agent types every session has. */
@@ -49,7 +52,7 @@ export function parseToolList(value: string | undefined): string[] | null {
   return names.length > 0 ? [...new Set(names)] : null;
 }
 
-function scan(dir: string, source: 'user' | 'project'): AgentDefinition[] {
+function scan(dir: string, source: 'user' | 'project', imported = false): AgentDefinition[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -73,15 +76,17 @@ function scan(dir: string, source: 'user' | 'project'): AgentDefinition[] {
       tools: parseToolList(data.tools),
       instructions,
       source,
-      path: file
+      path: file,
+      ...(imported ? { imported } : {})
     });
   }
   return out;
 }
 
-/** The user's agents and the project's; a project agent replaces a user agent with the same name. */
-export function loadAgents(graftHome: string, projectRoot: string | null): AgentDefinition[] {
+/** The user's agents and the project's; a project agent replaces a user agent with the same name, and both replace another tool's (`others`). */
+export function loadAgents(graftHome: string, projectRoot: string | null, others: OtherRoot[] = []): AgentDefinition[] {
   const byName = new Map<string, AgentDefinition>();
+  for (const root of others) for (const a of readOther(() => scan(root.dir, root.scope, true))) byName.set(a.name, a);
   for (const a of scan(path.join(graftHome, 'agents'), 'user')) byName.set(a.name, a);
   if (projectRoot) for (const a of scan(path.join(projectRoot, '.graft', 'agents'), 'project')) byName.set(a.name, a);
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));

@@ -26,6 +26,7 @@ import type { GraphControl } from './orchestrator';
 import { workspaceHost } from './workspaceHost';
 import type { SessionDeps } from './session';
 import { skillReadRoots } from './skills';
+import { NO_OTHER_ROOTS, type OtherToolRoots } from './otherTools';
 import type { LoopJournal } from './journal';
 import { shouldCompact } from './tokens';
 import { spentTokens, SpendBudget, TurnBudget, type SpendStart } from './turnBudget';
@@ -236,6 +237,11 @@ export class SessionHost {
     pending.resolve(response.dismissed ? null : response.answers);
   }
 
+  /** Other tools' folders the turn reads skills and agents from (agent/otherTools.ts); a project's when the turn's project is trusted. */
+  private otherRoots(scope: TurnScope): OtherToolRoots {
+    return this.deps.otherTools?.(this.ports.projectRoot(), scope.trusted) ?? NO_OTHER_ROOTS;
+  }
+
   private permissionEnv(scope: TurnScope) {
     const { rules, problems } = this.deps.settings.rules(this.ports.settingsRoot(), scope.trusted, this.sessionAllow);
     for (const p of problems) this.deps.log('warn', 'Settings problem', { message: p });
@@ -247,7 +253,7 @@ export class SessionHost {
       bypassKeepsChecks: this.deps.preferences().bypassKeepsChecks,
       allowNetwork: this.summary.kind === 'chat',
       sandboxed: this.deps.shells.sandboxFor(this.id) !== null,
-      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills),
+      readRoots: skillReadRoots(this.deps.graftHome, this.deps.builtinSkills, this.otherRoots(scope).skills),
       ...(scope.readOnly !== undefined ? { readOnly: scope.readOnly } : {})
     };
   }
@@ -618,7 +624,7 @@ export class SessionHost {
         sessionId: this.id,
         system: this.ports.system() ?? '',
         toolNames: chat ? available.filter((name) => name === 'WebFetch' || name === 'WebSearch') : available,
-        customAgents: loadAgents(this.deps.graftHome, this.ports.projectRoot()),
+        customAgents: loadAgents(this.deps.graftHome, this.ports.projectRoot(), this.otherRoots(scope).agents),
         sessionModel: model,
         sessionProvider: provider,
         settings: prefs.agents,
@@ -662,7 +668,7 @@ export class SessionHost {
     scope: TurnScope,
     root: string
   ): Promise<{ text: string; toolCalls: number }> {
-    const custom = loadAgents(this.deps.graftHome, this.ports.projectRoot());
+    const custom = loadAgents(this.deps.graftHome, this.ports.projectRoot(), this.otherRoots(scope).agents);
     const builtin = (BUILTIN_AGENTS as readonly string[]).includes(input.type);
     const agent = builtin ? null : (custom.find((a) => a.name === input.type) ?? null);
     if (!builtin && !agent) {

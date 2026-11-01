@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/States';
 import { errorText, invoke } from '../../lib/ipc';
 import { useLoad } from '../../lib/useLoad';
 import { reportError } from '../../stores/toasts';
-import { MONO_AREA, Row, Section, SELECT } from './shared';
+import { ImportedFrom, MONO_AREA, Row, Section, SELECT, toolFolder } from './shared';
 
 /** A skill of the user's or the project's: the kind that can be edited. One that ships with Graft can only be read. */
 type OwnSkill = SkillFileView & { scope: CustomScopeView };
@@ -91,7 +91,7 @@ export function SkillsSection({ projectPath }: { projectPath: string | null }) {
   return (
     <Section
       title="Skills"
-      description="Task-specific playbooks in ~/.graft/skills/<name>/SKILL.md or the project's .graft/skills. The agent reads one when its description fits the task. A skill of yours replaces a built-in one with the same name."
+      description="Task-specific playbooks in ~/.graft/skills/<name>/SKILL.md or the project's .graft/skills. The agent reads one when its description fits the task. A skill of yours replaces a built-in one with the same name. Skills in .claude/skills are offered too (a project's once you trust it)."
       actions={
         <Button size="sm" variant="secondary" leading={<Plus className="size-14" />} onClick={() => setEditing('new')}>
           New skill
@@ -104,15 +104,18 @@ export function SkillsSection({ projectPath }: { projectPath: string | null }) {
       {load.status === 'ready' && load.data.length > 0 ? (
         <ul className="flex flex-col gap-[var(--g-session-row-gap)]">
           {load.data.map((s) => {
-            const own: OwnSkill | null = s.scope === 'builtin' ? null : { ...s, scope: s.scope };
+            // Built-in and imported skills are read where they are, never edited.
+            const own: OwnSkill | null = s.scope === 'builtin' || s.imported ? null : { ...s, scope: s.scope };
             return (
               <Row key={s.path}>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-8">
                     <span className="text-base font-medium text-fg-strong">{s.name}</span>
                     <Badge>{SCOPE_LABEL[s.scope]}</Badge>
+                    {s.imported ? <Badge>{toolFolder(s.path)}</Badge> : null}
                   </p>
                   <p className="truncate text-sm text-fg-muted">{s.description}</p>
+                  {s.imported ? <ImportedFrom path={s.path} /> : null}
                 </div>
                 {own ? (
                   <>

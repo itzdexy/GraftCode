@@ -260,6 +260,14 @@
     "label": "Let the agent use this computer"
   },
   {
+    "section": "permissions",
+    "label": "Other coding tools"
+  },
+  {
+    "section": "permissions",
+    "label": "Use skills, commands and agents from other tools"
+  },
+  {
     "section": "sandbox",
     "label": "Projects"
   },

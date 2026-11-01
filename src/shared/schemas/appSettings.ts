@@ -177,7 +177,9 @@ export const AppSettingsSchema = z.object({
     dayTokens: z.number().int().min(10_000).max(1_000_000_000).nullable(),
     dayCostUsd: z.number().min(0.01).max(100_000).nullable(),
     /** After an edit, ask the built-in language server for the errors in the edited file (trusted projects whose packages are installed on this computer). */
-    checkEdits: z.boolean()
+    checkEdits: z.boolean(),
+    /** Also offer the skills, slash commands and agents other coding tools keep in .claude, .cursor and .codex folders (read only; a project's once it is trusted). */
+    otherTools: z.boolean()
   }),
   security: z.object({ allowPlaintextKeys: z.boolean() }),
   privacy: z.object({
@@ -269,7 +271,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: { theme: 'system', palette: 'graft', accent: 'leaf', uiFontSize: 13, codeFontSize: 13, motion: 'system', motionStyle: 'lively', transcriptWidth: 'narrow', transcriptView: 'normal', codeThemeDark: DEFAULT_CODE_THEMES.dark, codeThemeLight: DEFAULT_CODE_THEMES.light },
   defaults: { model: null, fallbackModel: null, effort: RECOMMENDED_EFFORT, permissionMode: 'ask', useWorktree: false, lastProjectPath: null },
   notifications: { enabled: true, needsInput: true, finished: true, errors: true, sound: true },
-  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true },
+  behavior: { runInTray: false, bypassModeEnabled: false, bypassKeepsChecks: false, autoCompact: true, webSearch: true, computerUse: false, maxSteps: null, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true, otherTools: true },
   security: { allowPlaintextKeys: false },
   privacy: { noTraining: true, incognitoLocalOnly: false },
   updates: { enabled: true },

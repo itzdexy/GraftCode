@@ -26,6 +26,20 @@ export function Row({ children, className }: { children: ReactNode; className?: 
   return <li className={cn('flex min-h-[48px] items-center gap-10 rounded-md bg-raised px-12 py-6', className)}>{children}</li>;
 }
 
+/** The folder of another tool an imported item lives in (".claude", ".cursor", ".codex"), from its path. */
+export function toolFolder(path: string): string {
+  return /[\\/](\.claude|\.cursor|\.codex)[\\/]/.exec(path)?.[1] ?? 'another tool';
+}
+
+/** Where an item of another tool is read from. Graft lists it and never changes it there. */
+export function ImportedFrom({ path }: { path: string }) {
+  return (
+    <p className="selectable truncate font-mono text-xs text-fg-faint" title={path}>
+      {path}
+    </p>
+  );
+}
+
 /** Parses "KEY=value" (or "Key: value") lines; blank lines are ignored. */
 export function parsePairs(text: string, separator: '=' | ':'): { pairs: Record<string, string>; error: string | null } {
   const pairs: Record<string, string> = {};

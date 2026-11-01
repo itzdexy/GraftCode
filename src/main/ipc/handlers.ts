@@ -63,6 +63,7 @@ import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
 import { detectLocalServers, newServers, type Candidate } from '../providers/localServer';
 import { listCommands as listSlashCommands } from '../agent/slashCommands';
+import { otherToolRoots, type OtherToolRoots } from '../agent/otherTools';
 import { mcpPromptCommand, promptHint } from '../mcp/names';
 import type { SessionManager } from '../agent/sessionManager';
 import { writeExport } from '../app/dataExport';
@@ -321,6 +322,12 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   };
   const changed = async (dir: string): Promise<void> => {
     (await ctx.services()).diffStats.invalidate(dir);
+  };
+  /** Other tools' folders read for a project's commands, skills and agents, as its sessions read them (agent/otherTools.ts). */
+  const othersFor = async (projectPath: string | null): Promise<OtherToolRoots> => {
+    const s = await ctx.services();
+    const trusted = projectPath ? (s.projects.findByPath(projectPath)?.trusted ?? false) : false;
+    return otherToolRoots({ enabled: s.settings.get().behavior.otherTools, home: s.paths.toolsHome, projectRoot: projectPath, trusted });
   };
   /** The files the Files panel's editor shows, watched for changes on disk. */
   const liveFiles = new LiveFiles((sessionId, path) => ctx.emit({ type: 'files:changed', sessionId, path }));
@@ -820,7 +827,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'commands:list': async ({ projectPath }) => {
       const s = await ctx.services();
-      const own = listSlashCommands(s.paths.graftHome, projectPath).map(({ name, description, argumentHint, source, path }) => ({
+      const own = listSlashCommands(s.paths.graftHome, projectPath, (await othersFor(projectPath)).commands).map(({ name, description, argumentHint, source, path }) => ({
         name,
         description,
         argumentHint,
@@ -981,7 +988,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     'browser:bounds': ({ bounds }) => {
       ctx.browser().setBounds(bounds);
     },
-    'customize:commands': async ({ projectPath }) => listCommands((await ctx.services()).paths.graftHome, projectPath),
+    'customize:commands': async ({ projectPath }) => listCommands((await ctx.services()).paths.graftHome, projectPath, (await othersFor(projectPath)).commands),
     'customize:saveCommand': async ({ scope, projectPath, name, description, argumentHint, body, previousPath }) => ({
       path: await saveCommand((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, argumentHint, body, previousPath })
     }),
@@ -989,7 +996,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       await deleteCommand((await ctx.services()).paths.graftHome, projectPath, path);
       return { ok: true as const };
     },
-    'customize:agents': async ({ projectPath }) => listAgents((await ctx.services()).paths.graftHome, projectPath),
+    'customize:agents': async ({ projectPath }) => listAgents((await ctx.services()).paths.graftHome, projectPath, (await othersFor(projectPath)).agents),
     'customize:saveAgent': async ({ scope, projectPath, name, description, tools, body, previousPath }) => ({
       path: await saveAgent((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, tools, body, previousPath })
     }),
@@ -1005,7 +1012,7 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'customize:skills': async ({ projectPath }) => {
       const { paths } = await ctx.services();
-      return listSkills(paths.graftHome, projectPath, paths.builtinSkills);
+      return listSkills(paths.graftHome, projectPath, paths.builtinSkills, (await othersFor(projectPath)).skills);
     },
     'customize:saveSkill': async ({ scope, projectPath, name, description, body, previousPath }) => ({
       path: await saveSkill((await ctx.services()).paths.graftHome, { scope, projectRoot: projectPath, name, description, body, previousPath })
