@@ -141,10 +141,11 @@ function XtermView({
       started: () => setFailedCommand(null),
       gone: (gone) => setFailedCommand((shown) => (shown?.id === gone.id ? null : shown))
     });
-    // The panel's own keys, taken only while the terminal has the keyboard: the app's Ctrl+K search waits.
+    // The panel's own keys, taken only while the terminal has the keyboard: the app's Ctrl+K search waits. A
+    // full-screen program (an editor, a pager) keeps them: Ctrl+K cuts a line in nano.
     term.attachCustomKeyEventHandler((event) => {
       const key = terminalKey(event);
-      if (key === null || (key === 'actions' && !chipRef.current)) return true;
+      if (key === null || term.buffer.active.type === 'alternate' || (key === 'actions' && !chipRef.current)) return true;
       if (event.type === 'keydown') {
         event.preventDefault();
         if (key === 'ask') onAskRef.current(true);

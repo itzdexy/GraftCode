@@ -27,7 +27,8 @@ const ACTION_KEYS = 'Ctrl+.';
 /** The text between two places in xterm's buffer; a place whose line scrolled away reads from the top. */
 function readText(term: Terminal, from: Spot<IMarker>, to: Spot<IMarker>, lines?: number): string {
   if (to.line.isDisposed) return '';
-  const buffer = term.buffer.normal;
+  // The buffer the places were marked on: the one in front (a shell may prompt on the alternate screen).
+  const buffer = term.buffer.active;
   const last = to.line.line;
   const top = from.line.isDisposed ? 0 : from.line.line;
   const first = lines === undefined ? top : Math.max(top, last - lines + 1);

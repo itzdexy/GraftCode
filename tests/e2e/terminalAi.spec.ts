@@ -75,6 +75,21 @@ test('Ctrl+K in the terminal writes a command from words and types it at the pro
   await w.keyboard.press('Enter');
   await expect(screen).toContainText('words-42');
 
+  // A full-screen program keeps Ctrl+K (nano cuts a line with it): on the alternate screen it goes to the shell.
+  const screenMode = (alternate: boolean): string =>
+    shell.kind === 'powershell' ? `Write-Host -NoNewline "$([char]27)[?1049${alternate ? 'h' : 'l'}"` : `printf '\\e[?1049${alternate ? 'h' : 'l'}'`;
+  await w.keyboard.type(screenMode(true));
+  await w.keyboard.press('Enter');
+  await expect(screen).not.toContainText('words-42');
+  await w.keyboard.press('Control+k');
+  await w.keyboard.type(printing('alternate'));
+  await w.keyboard.press('Enter');
+  await expect(screen).toContainText('alternate-42');
+  await expect(bar).toBeHidden();
+  await w.keyboard.type(screenMode(false));
+  await w.keyboard.press('Enter');
+  await expect(screen).toContainText('words-42');
+
   // While the model writes, Stop ends the request and nothing is typed.
   provider.answer((body) => requestText(body).includes('Request: take your time'), { text: 'sleep 999', hold: true }, { once: true });
   await w.keyboard.press('Control+k');
