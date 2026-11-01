@@ -95,6 +95,17 @@ describe('@ mentions', () => {
     expect(out.blocks[4]).toMatch(/outside the project folder/);
   });
 
+  it('leaves a file that may hold keys for the tools that ask first', async () => {
+    const root = temp();
+    writeFile(root, '.env', 'API_KEY=abc123def456');
+    writeFile(root, '.env.example', 'API_KEY=');
+    const out = await expand('@.env @.env:1 @.env.example', root);
+    expect(out.blocks[0]).toBe('@.env may hold keys or passwords, so it was not attached. Read it with your tools if it is needed: they ask first.');
+    expect(out.blocks[1]).toBe(out.blocks[0]);
+    expect(out.blocks[2]).toContain('<file path=".env.example">');
+    expect(out.blocks.join('\n')).not.toContain('abc123def456');
+  });
+
   it('stops attaching once a message holds as much as one message can', async () => {
     const root = temp();
     // 150 KB each, in lines short enough to be attached whole.

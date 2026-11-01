@@ -1193,10 +1193,10 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
       const s = await ctx.services();
       const scan = findImports({ home: s.paths.toolsHome, projectRoot: projectPath, platform: process.platform, env: process.env });
       const taken = mcpNames(s, projectPath);
-      // Arguments are shown, so a key typed into one is covered; variable and header values never leave main.
+      // Arguments and addresses are shown, so a key written into one is covered; variable and header values never leave main.
       const view = (config: McpServerConfig): McpServerView['config'] => {
         const masked = maskConfig(config);
-        return masked.type === 'stdio' ? { ...masked, args: masked.args.map(maskSecrets) } : masked;
+        return masked.type === 'stdio' ? { ...masked, args: masked.args.map(maskSecrets) } : { ...masked, url: maskSecrets(masked.url) };
       };
       return {
         servers: scan.servers.map((f) => ({ id: f.id, name: f.name, from: f.from, scope: f.scope, config: view(f.config), exists: taken.has(f.name), missing: f.missing })),

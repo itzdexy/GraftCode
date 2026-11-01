@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import type { ChangedProblems } from '@shared/schemas/semantic';
+import { isCredentialPath } from '../permissions/dangerous';
 import { formatLines, looksBinary } from '../tools/fs/read';
 import { displayPath, isInsideReal, resolvePath } from '../tools/paths';
 import { pageText, problemsText, terminalTail, uncommittedDiff, type PageText } from './mentionSources';
@@ -15,10 +16,11 @@ import { pageText, problemsText, terminalTail, uncommittedDiff, type PageText } 
  *   @terminal         the last lines of the session's Terminal panel
  *   @https://…        a web page as text
  * Only paths inside the project are attached; anything else is left for the
- * agent to read through its tools (and their permission checks). Keys and
- * passwords are covered in everything but the project's own files, which are
- * attached as the Read tool would show them. The three words win over a file
- * of the same name, which "@./diff" still names.
+ * agent to read through its tools (and their permission checks), and so is a
+ * file that may hold keys (.env and the like). Keys and passwords are covered
+ * in everything but the project's own files, which are attached as the Read
+ * tool would show them. The three words win over a file of the same name,
+ * which "@./diff" still names.
  */
 
 const MENTION = /(^|\s)@("[^"]+"|[^\s"'`]+)/g;
@@ -168,6 +170,11 @@ export async function expandMentions(text: string, context: MentionContext): Pro
         .slice(0, MAX_DIR_ENTRIES)
         .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
       attach(raw, `<directory path="${shown}">\n${entries.join('\n')}\n</directory>`);
+      continue;
+    }
+    // Reading one of these asks first when the agent does it; a mention doesn't ask, so it doesn't read them.
+    if (isCredentialPath(shown)) {
+      blocks.push(`@${shown} may hold keys or passwords, so it was not attached. Read it with your tools if it is needed: they ask first.`);
       continue;
     }
     const { block, attached } = fileBlock(abs, shown, raw, lines, MAX_TOTAL_BYTES - total);
