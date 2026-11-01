@@ -101,6 +101,22 @@ export const McpServerViewSchema = z.object({
 });
 export type McpServerView = z.infer<typeof McpServerViewSchema>;
 
+/** A server found in another tool's settings, for Customize's Import list. Values of variables and headers stay in main. */
+export const McpImportViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The file it was found in: from the project, or from the home folder (~). */
+  from: z.string(),
+  /** Where it is saved: a project's server for this computer in that project ("local"), the user's own for all projects. */
+  scope: SettingsScopeSchema,
+  config: McpConfigViewSchema,
+  /** Graft has a server of this name already: it is not added over it. */
+  exists: z.boolean(),
+  /** Variables its settings name that this computer doesn't set. */
+  missing: z.array(z.string())
+});
+export type McpImportView = z.infer<typeof McpImportViewSchema>;
+
 const SecretMap = z.record(z.string().min(1).max(200), z.string().max(8000));
 
 /** Saving a server: new secret values, plus names of existing ones to keep unchanged. */

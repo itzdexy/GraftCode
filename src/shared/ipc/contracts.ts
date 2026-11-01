@@ -25,6 +25,7 @@ import {
   ChecksViewSchema,
   CommandFileSchema,
   CustomScopeSchema,
+  McpImportViewSchema,
   McpServerInputSchema,
   McpServerNameSchema,
   McpServerViewSchema,
@@ -580,6 +581,10 @@ export const contracts = {
     Ok
   ),
   'mcp:remove': channel(z.object({ scope: SettingsScopeSchema, projectPath: PathSchema.nullable(), name: McpServerNameSchema }), Ok),
+  /** MCP servers other tools' settings files name (the project's and the home folder's), for Customize's Import list. Reads only; nothing starts. */
+  'mcp:findImports': channel(z.object({ projectPath: PathSchema.nullable() }), z.object({ servers: z.array(McpImportViewSchema), problems: z.array(z.string()) })),
+  /** Adds the chosen servers as mcp:save adds one, refusing a name Graft has; values that look like keys go to the key store. */
+  'mcp:import': channel(z.object({ projectPath: PathSchema.nullable(), ids: z.array(z.string().min(1).max(300)).min(1).max(100) }), z.object({ added: z.array(z.string()) })),
   /** What each one-step integration still needs on this computer (shared/integrations.ts). */
   'integrations:status': channel(
     Void,

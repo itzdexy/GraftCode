@@ -20,6 +20,7 @@ import type { McpInherit, McpServerConfig, SettingsScope } from '@shared/schemas
 import type { ImageBlock, ToolResultContent } from '@shared/schemas/messages';
 import { GraftError } from '@shared/errors';
 import { INTEGRATIONS } from '@shared/integrations';
+import { findSecrets } from '@shared/secrets';
 import type { McpToolSource } from '../agent/sessionManager';
 import type { SettingsStore } from '../permissions/settingsStore';
 import type { KeyStore } from '../secrets/keyStore';
@@ -239,6 +240,12 @@ const NOT_SECRET = /(?:^|_)PUBLIC_KEYS?$|^SSH_AUTH_SOCK$/i;
 /** user:password@ inside a value (a database address); a proxy is how the network is reached, so it stays. */
 const PASSWORD_IN_URL = /:\/\/[^\s/:@]+:[^\s/@]+@/;
 const PROXY_NAME = /^(?:https?|all|no|ftp)_proxy$/i;
+
+/** Whether a server's own variable or header holds a key, a token or a password, by its name ("X-Api-Key" too) or by what its value looks like. */
+export function looksSecret(name: string, value: string): boolean {
+  const word = name.replace(/-/g, '_');
+  return (SECRET_NAME.test(word) && !NOT_SECRET.test(word)) || PASSWORD_IN_URL.test(value) || findSecrets(value).length > 0;
+}
 
 /** What a program needs to start: the MCP SDK's own default list for each system, and what resolves commands, temporary files and text encoding. */
 const NEEDED: Record<'win32' | 'posix', string[]> = {

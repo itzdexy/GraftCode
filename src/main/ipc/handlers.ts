@@ -56,8 +56,10 @@ import { describeCron, nextRun, parseCron } from '../schedule/cron';
 import type { Schedule, Scheduler } from '../schedule/scheduler';
 import { forgetOAuth } from '../mcp/oauth';
 import type { McpServerConfig, SettingsScope } from '@shared/schemas/config';
-import type { McpServerView } from '@shared/schemas/customize';
+import type { McpServerInput, McpServerView } from '@shared/schemas/customize';
+import { maskSecrets } from '@shared/secrets';
 import { findCommand, integrationSetup, integrationStatus } from '../mcp/integrations';
+import { findImports, importInput } from '../mcp/mcpImport';
 import { maskConfig, mergeMcpConfig, secretId, secretRefs, serverKey } from '../mcp/mcpConfig';
 import { ProviderError } from '../providers/errors';
 import { normalizeBaseUrl } from '../providers/registry';
@@ -322,6 +324,24 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
   };
   const changed = async (dir: string): Promise<void> => {
     (await ctx.services()).diffStats.invalidate(dir);
+  };
+  /** Stores one MCP server in a settings file, keeping the secrets of the one it replaces that the form left unchanged. */
+  const saveMcpServer = async (scope: SettingsScope, projectPath: string | null, name: string, previousName: string | null, config: McpServerInput): Promise<void> => {
+    await (await ctx.services()).settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
+      const servers = { ...(settings.mcpServers ?? {}) };
+      const previous = servers[previousName ?? name];
+      if (previousName && previousName !== name) {
+        if (servers[name]) throw new GraftError('mcp_exists', `A server named ${name} already exists in this scope.`);
+        delete servers[previousName];
+      }
+      servers[name] = mergeMcpConfig(config, previous);
+      return { ...settings, mcpServers: servers };
+    });
+  };
+  /** The names of the MCP servers Graft has for all projects and, with a project, for that project. */
+  const mcpNames = (s: Services, projectPath: string | null): Set<string> => {
+    const scopes: SettingsScope[] = projectPath ? ['user', 'project', 'local'] : ['user'];
+    return new Set(scopes.flatMap((scope) => Object.keys(s.settingsFiles.load(scope, projectPath ?? undefined).settings.mcpServers ?? {})));
   };
   /** Other tools' folders read for a project's commands, skills and agents, as its sessions read them (agent/otherTools.ts). */
   const othersFor = async (projectPath: string | null): Promise<OtherToolRoots> => {
@@ -1167,20 +1187,46 @@ export function buildHandlers(ctx: AppContext): HandlerGroup {
     },
     'mcp:save': async ({ scope, projectPath, name, previousName, config }) => {
       const s = await ctx.services();
-      await s.settingsFiles.update(scope, projectPath ?? undefined, (settings) => {
-        const servers = { ...(settings.mcpServers ?? {}) };
-        const previous = servers[previousName ?? name];
-        if (previousName && previousName !== name) {
-          if (servers[name]) throw new GraftError('mcp_exists', `A server named ${name} already exists in this scope.`);
-          delete servers[previousName];
-        }
-        servers[name] = mergeMcpConfig(config, previous);
-        return { ...settings, mcpServers: servers };
-      });
+      await saveMcpServer(scope, projectPath, name, previousName, config);
       const manager = await ctx.mcp();
       if (projectPath && scope !== 'user') await manager.useProject(projectPath, s.projects.findByPath(projectPath)?.trusted ?? false);
       await manager.sync();
       return { ok: true as const };
+    },
+    'mcp:findImports': async ({ projectPath }) => {
+      const s = await ctx.services();
+      const scan = findImports({ home: s.paths.toolsHome, projectRoot: projectPath, platform: process.platform, env: process.env });
+      const taken = mcpNames(s, projectPath);
+      // Arguments are shown, so a key typed into one is covered; variable and header values never leave main.
+      const view = (config: McpServerConfig): McpServerView['config'] => {
+        const masked = maskConfig(config);
+        return masked.type === 'stdio' ? { ...masked, args: masked.args.map(maskSecrets) } : masked;
+      };
+      return {
+        servers: scan.servers.map((f) => ({ id: f.id, name: f.name, from: f.from, scope: f.scope, config: view(f.config), exists: taken.has(f.name), missing: f.missing })),
+        problems: scan.problems
+      };
+    },
+    'mcp:import': async ({ projectPath, ids }) => {
+      const s = await ctx.services();
+      const found = findImports({ home: s.paths.toolsHome, projectRoot: projectPath, platform: process.platform, env: process.env }).servers;
+      const picked = ids.map((id) => found.find((f) => f.id === id));
+      if (picked.some((f) => f === undefined)) throw new GraftError('mcp_import_gone', "A server you chose is no longer in the other tool's settings. Close the list and open it again.");
+      const taken = mcpNames(s, projectPath);
+      // Everything is checked before anything is saved, so one that can't be added doesn't leave the others half added.
+      const ready = picked.flatMap((f) => (f ? [f] : [])).map((f) => {
+        if (taken.has(f.name)) throw new GraftError('mcp_exists', `Graft already has a server named ${f.name}. Remove it first to add the one from ${f.from}.`);
+        const projectRoot = f.scope === 'user' ? null : projectPath;
+        return { found: f, ...importInput(f, serverKey(f.scope, projectRoot, f.name)) };
+      });
+      for (const { found: f, input, secrets } of ready) {
+        for (const [ref, value] of Object.entries(secrets)) s.keys.set(ref, value);
+        await saveMcpServer(f.scope, f.scope === 'user' ? null : projectPath, f.name, null, input);
+      }
+      const manager = await ctx.mcp();
+      if (projectPath && ready.some((r) => r.found.scope !== 'user')) await manager.useProject(projectPath, s.projects.findByPath(projectPath)?.trusted ?? false);
+      await manager.sync();
+      return { added: ready.map((r) => r.found.name) };
     },
     'mcp:remove': async ({ scope, projectPath, name }) => {
       const s = await ctx.services();

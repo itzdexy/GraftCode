@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, KeyRound, Pencil, Plus, RefreshCw, Trash } from 'lucide-react';
+import { ChevronRight, Download, KeyRound, Pencil, Plus, RefreshCw, Trash } from 'lucide-react';
 import type { McpInherit, SettingsScope } from '@shared/schemas/config';
 import type { McpServerInput, McpServerView } from '@shared/schemas/customize';
 import type { RuleLists } from '@shared/schemas/system';
@@ -18,10 +18,9 @@ import { errorText, invoke } from '../../lib/ipc';
 import { useLoad, type Load } from '../../lib/useLoad';
 import { reportError } from '../../stores/toasts';
 import { IntegrationsGallery } from './IntegrationsGallery';
-import { serverSummary } from './mcpModel';
+import { McpImportDialog } from './McpImportDialog';
+import { SCOPE_TEXT, serverSummary } from './mcpModel';
 import { MONO_AREA, parsePairs, Row, Section, SELECT } from './shared';
-
-const SCOPE_TEXT: Record<SettingsScope, string> = { user: 'All projects', project: 'Project (shared)', local: 'Project (this computer)' };
 
 /** Said under the choice. None of the three is a sandbox, and each says so. */
 const INHERIT_HELP: Record<McpInherit, string> = {
@@ -299,6 +298,7 @@ function McpServers({
   editing: McpServerView | 'new' | null;
   setEditing: (editing: McpServerView | 'new' | null) => void;
 }) {
+  const [importing, setImporting] = useState(false);
   // A tool's permission is an ordinary rule in the user's settings: the list Settings → Permissions shows.
   const { load: rulesLoad, reload: reloadRules } = useLoad(() => invoke('permissions:get', { projectPath: null }), 'mcp-policies');
   const user = rulesLoad.status === 'ready' ? rulesLoad.data.find((scoped) => scoped.scope === 'user') : undefined;
@@ -318,9 +318,14 @@ function McpServers({
       title="MCP servers"
       description="Connect tools and data from other apps. Project servers only run once you trust the project."
       actions={
-        <Button size="sm" variant="secondary" leading={<Plus className="size-14" />} onClick={() => setEditing('new')}>
-          Add server
-        </Button>
+        <div className="flex items-center gap-6">
+          <Button size="sm" variant="ghost" leading={<Download className="size-14" />} aria-label="Import servers from other tools" onClick={() => setImporting(true)}>
+            Import
+          </Button>
+          <Button size="sm" variant="secondary" leading={<Plus className="size-14" />} onClick={() => setEditing('new')}>
+            Add server
+          </Button>
+        </div>
       }
     >
       {load.status === 'loading' ? <LoadingState /> : null}
@@ -342,6 +347,17 @@ function McpServers({
             onDone={(saved) => {
               setEditing(null);
               if (saved) reload();
+            }}
+          />
+        ) : null}
+      </Dialog>
+      <Dialog open={importing} onOpenChange={setImporting}>
+        {importing ? (
+          <McpImportDialog
+            projectPath={projectPath}
+            onDone={(added) => {
+              setImporting(false);
+              if (added) reload();
             }}
           />
         ) : null}
