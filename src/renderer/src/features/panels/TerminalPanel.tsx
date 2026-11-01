@@ -10,10 +10,13 @@ import { ErrorState, LoadingState } from '../../components/States';
 import { cn } from '../../lib/cn';
 import { errorText, invoke } from '../../lib/ipc';
 import { logError } from '../../lib/log';
+import { displayAccelerator } from '../../lib/shortcuts';
 import { useApp } from '../../stores/app';
 import { panelBus, usePanels } from '../../stores/panels';
 import { reportError } from '../../stores/toasts';
 import { PanelFrame } from './PanelFrame';
+import { ASK_KEYS, CommandBar, FailedChip, TerminalMenu, terminalKey, trackCommands } from './TerminalAi';
+import type { FailedCommand } from './terminalModel';
 import { CURSOR_STYLES, SCROLLBACK_CHOICES, useTerminalPrefs } from './terminalPrefs';
 import { StreamJoiner } from './terminalStream';
 
@@ -69,18 +72,41 @@ function themeNow(): ITheme {
   return document.documentElement.dataset.theme === 'light' ? LIGHT : DARK;
 }
 
-/** One xterm.js view bound to a pty: input goes to main, output streams back. */
-function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInfoView; active: boolean; typed: number; cleared: number }) {
+/**
+ * One xterm.js view bound to a pty: input goes to main, output streams back. The shell's marks tell its commands
+ * apart (TerminalAi.tsx): a failed one gets its actions, and Ctrl+K opens the bar that writes one.
+ */
+function XtermView({
+  sessionId,
+  terminal,
+  active,
+  typed,
+  cleared,
+  asking,
+  onAsk
+}: {
+  sessionId: string;
+  terminal: TerminalInfoView;
+  active: boolean;
+  typed: number;
+  cleared: number;
+  asking: boolean;
+  onAsk: (open: boolean) => void;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLDivElement>(null);
+  const [failedCommand, setFailedCommand] = useState<FailedCommand | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const fontSize = useApp((s) => s.settings?.appearance.codeFontSize ?? 13);
   const fontSizeRef = useRef(fontSize);
   const prefs = useTerminalPrefs();
   const prefsRef = useRef(prefs);
+  const onAskRef = useRef(onAsk);
   useLayoutEffect(() => {
     fontSizeRef.current = fontSize;
     prefsRef.current = prefs;
+    onAskRef.current = onAsk;
   });
 
   useEffect(() => {
@@ -93,7 +119,8 @@ function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInf
       cursorStyle: prefsRef.current.cursorStyle,
       cursorBlink: prefsRef.current.cursorBlink,
       scrollback: prefsRef.current.scrollback,
-      allowProposedApi: false,
+      // For the marks beside a failed command's prompt (decorations).
+      allowProposedApi: true,
       theme: themeNow()
     });
     const fit = new FitAddon();
@@ -108,6 +135,23 @@ function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInf
     invoke('pty:snapshot', { id: terminal.id })
       .then((snap) => joiner.snapshot(snap.data, snap.end))
       .catch((error: unknown) => logError('Could not restore terminal output', error));
+
+    const commands = trackCommands(term, {
+      failed: setFailedCommand,
+      started: () => setFailedCommand(null),
+      gone: (gone) => setFailedCommand((shown) => (shown?.id === gone.id ? null : shown))
+    });
+    // The panel's own keys, taken only while the terminal has the keyboard: the app's Ctrl+K search waits.
+    term.attachCustomKeyEventHandler((event) => {
+      const key = terminalKey(event);
+      if (key === null || (key === 'actions' && !chipRef.current)) return true;
+      if (event.type === 'keydown') {
+        event.preventDefault();
+        if (key === 'ask') onAskRef.current(true);
+        else chipRef.current?.querySelector('button')?.focus();
+      }
+      return false;
+    });
 
     const input = term.onData((data) => {
       invoke('pty:write', { id: terminal.id, data }).catch((error: unknown) => logError('Terminal input failed', error));
@@ -132,6 +176,7 @@ function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInf
     return () => {
       observer.disconnect();
       themeObserver.disconnect();
+      commands.dispose();
       input.dispose();
       selected.dispose();
       resized.dispose();
@@ -158,9 +203,13 @@ function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInf
     term.options.scrollback = prefs.scrollback;
   }, [prefs.cursorStyle, prefs.cursorBlink, prefs.scrollback]);
 
-  // `cleared` counts the Clear requests; the terminal in front clears its screen and what scrolled away.
+  // `cleared` counts the Clear requests; the terminal in front clears its screen and what scrolled away. A request
+  // is taken once: a terminal brought to the front later keeps its lines.
+  const clearedSeen = useRef(cleared);
   useEffect(() => {
-    if (cleared > 0 && active) termRef.current?.clear();
+    if (cleared === clearedSeen.current) return;
+    clearedSeen.current = cleared;
+    if (active) termRef.current?.clear();
   }, [cleared, active]);
 
   // `typed` counts the lines typed in from outside: after each, the keyboard is here, so Enter runs the line.
@@ -170,14 +219,35 @@ function XtermView({ terminal, active, typed, cleared }: { terminal: TerminalInf
     termRef.current?.focus();
   }, [active, typed]);
 
-  return <div ref={hostRef} className={cn('min-h-0 flex-1 px-6 py-4', active ? 'block' : 'hidden')} data-testid={`terminal-${terminal.id}`} />;
+  const closeBar = (): void => {
+    onAsk(false);
+    termRef.current?.focus();
+  };
+  const closeChip = (): void => {
+    setFailedCommand(null);
+    termRef.current?.focus();
+  };
+  return (
+    <div className={cn('relative min-h-0 flex-1 flex-col', active ? 'flex' : 'hidden')}>
+      <TerminalMenu sessionId={sessionId} term={() => termRef.current}>
+        <div ref={hostRef} className="min-h-0 flex-1 px-6 py-4" data-testid={`terminal-${terminal.id}`} />
+      </TerminalMenu>
+      {asking ? (
+        <CommandBar sessionId={sessionId} terminalId={terminal.id} onClose={closeBar} />
+      ) : failedCommand ? (
+        <FailedChip key={failedCommand.id} ref={chipRef} sessionId={sessionId} terminal={terminal} command={failedCommand} onClose={closeChip} />
+      ) : null}
+    </div>
+  );
 }
 
 type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready' };
 
 /** How the terminals draw and behave: the cursor, copying a selection, how far back they keep, and clearing the one in front. */
-function TerminalOptions({ onClear }: { onClear: () => void }) {
+function TerminalOptions({ onClear, onAsk }: { onClear: () => void; onAsk: () => void }) {
   const prefs = useTerminalPrefs();
+  // The bar takes the keyboard: the menu must not hand it back to its button as it closes.
+  const asked = useRef(false);
   return (
     <Menu>
       <MenuTrigger asChild>
@@ -185,7 +255,26 @@ function TerminalOptions({ onClear }: { onClear: () => void }) {
           <EllipsisVertical className="size-14" />
         </IconButton>
       </MenuTrigger>
-      <MenuContent align="end" className="w-[220px]">
+      <MenuContent
+        align="end"
+        className="w-[220px]"
+        onCloseAutoFocus={(event) => {
+          if (!asked.current) return;
+          asked.current = false;
+          event.preventDefault();
+        }}
+      >
+        <MenuItem
+          icon={<SquareTerminal className="size-14" />}
+          shortcut={displayAccelerator(ASK_KEYS)}
+          onSelect={() => {
+            asked.current = true;
+            onAsk();
+          }}
+        >
+          Write a command
+        </MenuItem>
+        <MenuSeparator />
         <MenuSub>
           <MenuSubTrigger>Cursor style</MenuSubTrigger>
           <MenuSubContent className="w-[160px]">
@@ -265,6 +354,8 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
   // run: it goes in without a line break. A session without a terminal gets one above, and the line waits for it.
   const [typed, setTyped] = useState(0);
   const [cleared, setCleared] = useState(0);
+  /** The terminal whose Ctrl+K bar is open. */
+  const [askingId, setAskingId] = useState<string | null>(null);
   const wanted = usePanels((s) => (s.terminalInput?.sessionId === sessionId ? s.terminalInput.seq : null));
   useEffect(() => {
     if (wanted === null || activeId === null) return;
@@ -321,14 +412,23 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
           <IconButton label="New terminal" size="xs" onClick={() => void create()}>
             <Plus className="size-14" />
           </IconButton>
-          <TerminalOptions onClear={() => setCleared((n) => n + 1)} />
+          <TerminalOptions onClear={() => setCleared((n) => n + 1)} onAsk={() => setAskingId(activeId)} />
         </>
       }
     >
       {load.state === 'loading' ? <LoadingState label="Starting a shell…" /> : null}
       {load.state === 'error' ? <ErrorState title="Couldn't start a terminal" message={load.message} onRetry={() => void create()} /> : null}
       {terminals.map((t) => (
-        <XtermView key={t.id} terminal={t} active={t.id === activeId} typed={typed} cleared={cleared} />
+        <XtermView
+          key={t.id}
+          sessionId={sessionId}
+          terminal={t}
+          active={t.id === activeId}
+          typed={typed}
+          cleared={cleared}
+          asking={askingId === t.id}
+          onAsk={(open) => setAskingId((current) => (open ? t.id : current === t.id ? null : current))}
+        />
       ))}
     </PanelFrame>
   );

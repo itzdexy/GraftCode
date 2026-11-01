@@ -172,6 +172,8 @@ describe('@ mentions', () => {
     expect(block).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
     expect(block.endsWith('PS C:\\work> \n</terminal>')).toBe(true);
     expect(terminalTail('a\r\nb\r\n\r\n', 1)).toBe('b');
+    // The marks of the shell integration (OSC 133, the folder) are not text.
+    expect(terminalTail('\u001b]133;D;0\u0007\u001b]133;A\u0007\u001b]133;P;Cwd=/srv\u0007$ \u001b]133;B\u0007ls\r\n\u001b]133;C\u0007a.txt\r\n')).toBe('$ ls\na.txt');
     expect((await expand('@terminal', root, { terminal: () => Promise.resolve(null) })).blocks).toEqual(['@terminal: the Terminal panel of this session has printed nothing yet.']);
   });
 
