@@ -231,13 +231,13 @@ describe('app settings', () => {
     expect(new AppSettingsService(db).get().defaults.fallbackModel).toBeNull();
   });
 
-  it('gives an install from before the limits for one turn, one session, one project, or one day no limits, checks its edits, and keeps what it had set', () => {
+  it('gives an install from before the limits for one turn, one session, one project, or one day no limits, checks its edits, reads the folders of other tools, and keeps what it had set', () => {
     const stored = { runInTray: true, bypassModeEnabled: false, bypassKeepsChecks: true, autoCompact: false, webSearch: true, computerUse: false, maxSteps: 250 };
     db.prepare('INSERT INTO app_settings (section, value) VALUES (?, ?)').run('behavior', JSON.stringify(stored));
     const settings = new AppSettingsService(db);
-    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    expect(settings.get().behavior).toEqual({ ...stored, turnTokens: null, turnToolCalls: null, turnRetries: null, turnCostUsd: null, turnMinutes: null, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true, otherTools: true });
     settings.update({ behavior: { turnTokens: 1_000_000, turnCostUsd: 2.5, turnMinutes: 30 } });
-    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true });
+    expect(new AppSettingsService(db).get().behavior).toEqual({ ...stored, turnTokens: 1_000_000, turnToolCalls: null, turnRetries: null, turnCostUsd: 2.5, turnMinutes: 30, sessionTokens: null, sessionCostUsd: null, projectTokens: null, projectCostUsd: null, dayTokens: null, dayCostUsd: null, checkEdits: true, otherTools: true });
     settings.update({ behavior: { turnToolCalls: 500, turnRetries: 0 } });
     expect(new AppSettingsService(db).get().behavior).toMatchObject({ turnToolCalls: 500, turnRetries: 0 });
     settings.update({ behavior: { sessionTokens: 2_000_000, projectTokens: 5_000_000, dayCostUsd: 10, projectCostUsd: 2.5 } });
