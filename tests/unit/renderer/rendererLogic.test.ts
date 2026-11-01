@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { EffortLevel } from '../../../src/shared/schemas/common';
-import type { ModelInfo } from '../../../src/shared/schemas/models';
+import type { ModelInfo, ProviderPreset } from '../../../src/shared/schemas/models';
 import type { SessionSummary } from '../../../src/shared/schemas/sessions';
 import type { SessionUsage } from '../../../src/shared/schemas/sessions';
 import { baseName, partOfDay, relativeTime, shortenPath } from '../../../src/renderer/src/lib/format';
 import { spendText, usageText } from '../../../src/renderer/src/features/composer/ContextUsage';
 import { effortFor, moreModels, quickModels, resolveModel } from '../../../src/renderer/src/features/models/modelChoice';
+import { detail } from '../../../src/renderer/src/features/providers/ProviderPicker';
 import {
   DEFAULT_FILTER,
   groupByProject,
@@ -200,5 +201,25 @@ describe('context and spend', () => {
     });
     expect(spendText(usage({ inputTokens: 900, outputTokens: 20 }, 0.004))).toEqual({ tokens: '900 input · 20 output', cost: 'Less than $0.01' });
     expect(spendText(usage({ inputTokens: 900 }, null))?.cost).toBe('No published prices for this model');
+  });
+});
+
+describe('provider picker', () => {
+  const preset = (modelCount: number): ProviderPreset => ({
+    id: 'acme',
+    name: 'Acme',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.acme.test/v1',
+    key: 'required',
+    docUrl: null,
+    envVars: [],
+    modelCount,
+    local: false
+  });
+
+  it('counts catalog models, using the singular for one', () => {
+    expect(detail(preset(1))).toBe('1 model');
+    expect(detail(preset(2))).toBe('2 models');
+    expect(detail(preset(0))).toBe('OpenAI-compatible');
   });
 });

@@ -11,10 +11,10 @@ import { orderPresets, presetMatches } from './targets';
 /** A row in the picker: a catalog preset, or the custom OpenAI-compatible endpoint. */
 export type PickedProvider = { type: 'preset'; preset: ProviderPreset } | { type: 'custom' };
 
-function detail(preset: ProviderPreset): string {
+export function detail(preset: ProviderPreset): string {
   if (preset.kind === 'ollama' || preset.local) return 'Runs locally';
   if (preset.kind !== 'openai-compatible') return 'Built-in connection';
-  return preset.modelCount > 0 ? `${preset.modelCount} models` : 'OpenAI-compatible';
+  return preset.modelCount > 0 ? `${preset.modelCount} ${preset.modelCount === 1 ? 'model' : 'models'}` : 'OpenAI-compatible';
 }
 
 /**

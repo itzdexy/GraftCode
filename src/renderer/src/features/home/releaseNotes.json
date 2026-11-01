@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.6.5",
+    "date": "2026-10-05",
+    "items": [
+      "The provider list says “1 model”, not “1 models”, for providers that have a single model."
+    ]
+  },
+  {
     "version": "0.6.4",
     "date": "2026-10-03",
     "items": [
