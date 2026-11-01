@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.6.47",
+    "date": "2026-10-31",
+    "items": [
+      "The editor suggests code as you type. Pause and grey text shows what comes next: Tab takes it, Ctrl+→ takes one word, Escape dismisses it. Suggestions come from your provider's fast model, or the model you pick under Settings → Models → Editor. Only the code around the cursor is sent, keys in it are covered first, and files such as .env are never sent. A button in the editor's toolbar turns suggestions off.",
+      "Edit with AI: select lines in the editor and press Ctrl+I (or the Edit with AI button), then say what to change. The change shows in place as a diff, old lines red and new lines green. Ctrl+Enter puts it in your draft as one undo step, Escape throws it away, and another instruction refines it.",
+      "The editor has the usual editing keys: Ctrl+/ comments lines, Alt+↑/↓ moves them, Shift+Alt+↑/↓ copies them, Ctrl+Shift+K deletes them, Ctrl+D and Ctrl+Alt+↑/↓ add cursors, F8 goes to the next problem. Code folds, brackets are coloured in pairs, and the current block's first line stays at the top as you scroll.",
+      "About 25 more languages are coloured while you edit, among them CSS, HTML, JSON, YAML, Go, Rust, Java, C and C++, C#, PHP, Ruby, SQL, shell and PowerShell.",
+      "In TypeScript and JavaScript, resting the mouse on a name shows its type, Ctrl+click opens where it is defined (in another file too), and F2 renames it across the project: every file changes, or none does.",
+      "An open file follows the disk. When the agent or another program changes it, the editor shows the new text in place and keeps your cursor. If you have unsaved edits, a bar offers Compare, Keep mine and Take theirs.",
+      "/review now reports on a card: each finding has its file and line, how serious it is, what goes wrong and a suggested fix, with Fix (adds it to your next message), Dismiss and Fix all. Review the uncommitted changes, the whole branch (/review branch), one commit (/review followed by its hash) or a pull request (/review pr 12, with the GitHub CLI installed). A review never changes anything, and it uses your Reviewer model when one is set. The Changes panel and the Changes card have a Review changes button.",
+      "Undo one file, or one change in a file, from any earlier turn: the changes card of every finished turn has Undo on each file and on each change. Your other edits stay. A change whose lines you have edited since is refused, with a sentence saying so.",
+      "Try it several ways: the layers button under the message box sends your message as 2, 3 or 4 attempts, each on a model you choose. Each attempt works in its own private copy of the project, and your checks run on it when it finishes. A card compares them (files changed, checks, tokens, cost and time) with View diff and Apply this one. Applying one removes the others, and Undo takes it back.",
+      "Graft also offers the skills, slash commands and agents you keep in other coding tools' folders: .claude/skills, .claude/commands, .claude/agents, .cursor/commands and ~/.codex/prompts. A project's folders are read once you trust the project, nothing is ever written there, and Graft's own items win when names clash. Settings → Permissions → Other coding tools turns this off.",
+      "Customize → Integrations → Import finds the MCP servers you set up for other tools (.mcp.json, .cursor/mcp.json, ~/.claude.json, claude_desktop_config.json and ~/.codex/config.toml) and adds the ones you tick. Keys go to Graft's key store, and nothing starts before you add it.",
+      "The @ menu attaches more than files: @src/ adds a folder's listing, @app.ts:10-40 just those lines, @diff your uncommitted changes, @problems the Problems list, @terminal the last 200 lines of the Terminal panel, and @https://… a web page as text (never a page on this computer or your network). Keys are covered in everything it attaches.",
+      "The Terminal panel knows where each command starts and ends in bash, zsh and PowerShell. A command that fails gets a red mark and a bar with Explain (an answer beside the session, not in the conversation), Fix (a corrected command typed at the prompt; you press Enter) and Add to message. Ctrl+. moves the keyboard to those buttons.",
+      "Ctrl+K in the terminal writes a command from a description and types it at the prompt; Graft never presses Enter. Full-screen programs such as vim and less keep Ctrl+K. Right-click a selection to add it to your message.",
+      "Clear terminal no longer clears a terminal you bring to the front later, and a file name in a reply no longer stays unclickable when the turn ends right after it appears."
+    ]
+  },
+  {
     "version": "0.6.46",
     "date": "2026-10-30",
     "items": [

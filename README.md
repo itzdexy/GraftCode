@@ -130,6 +130,43 @@ or sent to the model, and it recognizes common formats only; a change waiting fo
 your approval is shown as it is. The **Edited files** card of the last turn has
 **Undo**, which opens the rewind dialog on **Files only**.
 
+### An editor that writes with you, attempts and reviews (0.6.47)
+
+**Suggestions as you type.** Pause in the Files editor and grey text shows what comes next: `Tab`
+takes it, `Ctrl+→` takes a word, `Esc` dismisses it. It comes from your provider's fast model or
+the one set in **Settings → Models → Editor**; only the code around the cursor is sent, keys are
+covered first, and files such as `.env` are never sent.
+
+**Edit with AI.** Select lines, press `Ctrl+I`, say what to change. The change shows in place as a
+diff; `Ctrl+Enter` puts it in the draft as one undo step, `Esc` drops it, and another instruction
+refines it.
+
+**A real editor.** The usual editing keys (comment, move, copy and delete lines, more cursors,
+folding, bracket pairs, sticky scroll, `F8` to the next problem), colours for about 25 more
+languages, and in TypeScript and JavaScript a type on mouse-over, `Ctrl+click` to the definition
+and `F2` to rename across the project, all files or none. An open file follows the disk: a clean
+one reloads in place, one with unsaved edits offers **Compare**, **Keep mine** and **Take theirs**.
+
+**Reviews with findings.** `/review` (uncommitted changes), `/review branch`, `/review <commit>`
+and `/review pr <number>` report findings on a card, each with its file and line, severity,
+failure and fix, and **Fix**, **Dismiss** and **Fix all**. A review changes nothing. Every
+finished turn's changes card can undo one file or one change of that turn.
+
+**Attempts.** The layers button under the message box sends a message as 2 to 4 attempts, each on
+its own model and in its own private checkout. Checks run on each; a card compares files, checks,
+tokens, cost and time, with **View diff** and **Apply this one**.
+
+**Your setup from other tools.** Skills, commands and agents in `.claude/skills`,
+`.claude/commands`, `.claude/agents`, `.cursor/commands` and `~/.codex/prompts` are offered too
+(a project's only once it is trusted), and **Customize → Integrations → Import** adds MCP servers
+from `.mcp.json`, `.cursor/mcp.json`, `~/.claude.json`, `claude_desktop_config.json` and
+`~/.codex/config.toml`. `@` attaches folders, line ranges (`@app.ts:10-40`), `@diff`,
+`@problems`, `@terminal` and web pages.
+
+**Terminal.** Each command is marked where it starts and ends (bash, zsh, PowerShell). A failed one
+offers **Explain**, **Fix** (a corrected command, typed but not run) and **Add to message**;
+`Ctrl+K` in the terminal writes a command from a description.
+
 ### Media models, video, and 54 integrations (0.6.34)
 
 **Image, video and audio models.** Settings → Models lists, below the models you chat with, a
@@ -586,7 +623,9 @@ Graft uses what a server offers beyond tools. What a server says about using its
 | Settings | `Ctrl+,` |
 | Command palette | `Ctrl+Shift+P`, or `>` in search |
 
-In the message box, `/` lists commands, `@` mentions a file, `!` runs a shell command in a code session, and `↑`/`↓` bring back messages you sent.
+In the message box, `/` lists commands, `@` mentions a file, a folder, lines (`@app.ts:10-40`), `@diff`, `@problems`, `@terminal` or a web page, `!` runs a shell command in a code session, and `↑`/`↓` bring back messages you sent.
+
+In the Files editor: `Tab` takes a suggestion, `Ctrl+I` edits with AI (`Ctrl+Enter` accepts), `F2` renames, `Ctrl+click` or `F12` goes to a definition, `Ctrl+/` comments lines, `Alt+↑`/`↓` moves them, `Ctrl+D` adds the next match to the cursors and `F8` goes to the next problem. In the terminal: `Ctrl+K` writes a command from a description and `Ctrl+.` reaches a failed command's buttons. These follow the editor's and the terminal's own keys and are not changed in Settings.
 
 On macOS, `Ctrl` is `Cmd`. Every shortcut can be changed in **Settings → Shortcuts**.
 
