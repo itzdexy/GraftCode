@@ -5,7 +5,7 @@ import type { AttemptSet } from '../../src/shared/schemas/attempts';
 import { addUsage, EMPTY_USAGE } from '../../src/shared/schemas/common';
 import { textOf } from '../../src/shared/schemas/messages';
 import { attemptTools } from '../../src/main/agent/attemptAgent';
-import { insideGitRepo, linkDependencies, splitPatch } from '../../src/main/agent/attempts';
+import { AttemptRunner, insideGitRepo, linkDependencies, splitPatch } from '../../src/main/agent/attempts';
 import { AgentWorkspaces, parseNumstat, unlinkLink } from '../../src/main/agent/workspaces';
 import { openDatabase, type Db } from '../../src/main/db/database';
 import { CheckpointService } from '../../src/main/git/checkpoints';
@@ -13,6 +13,7 @@ import type { StreamRequest } from '../../src/main/providers/types';
 import { fakeModel, type FakeStep } from '../support/fakeProvider';
 import { gitSync, makeRepo } from '../support/gitRepo';
 import { makeHarness, type Harness, type HarnessOptions } from '../support/sessionHarness';
+import { makeShellManager } from '../support/toolContext';
 import { makeTempDir, removeDir, writeFile } from '../support/tmp';
 
 const dirs: string[] = [];
@@ -258,6 +259,18 @@ describe('a message sent as attempts', () => {
       gitSync(h.projectDir, 'branch', '--list', 'graft/agent-*').trim() === '' &&
       fs.readdirSync(h.writersRoot).every((name) => !name.endsWith('.json'));
     await expect.poll(gone, { timeout: 10_000 }).toBe(true);
+  });
+
+  it('takes the checkouts when the session is deleted, from a runner of its own as the session list makes one', async () => {
+    const h = start();
+    const set = await sendAsTwo(h);
+    const checkouts = [checkoutOf(h, set, 1), checkoutOf(h, set, 2)];
+    await h.session.dispose();
+
+    await new AttemptRunner({ sessionId: 'session-1', store: h.store, workspaces: h.manager, shells: makeShellManager(path.join(h.home, 'gone-logs')),
+      emit: () => undefined, dropPrompt: () => undefined, log: () => undefined }).forget(h.store.listMessages('session-1'));
+    expect(checkouts.some((c) => fs.existsSync(c))).toBe(false);
+    expect(gitSync(h.projectDir, 'branch', '--list', 'graft/agent-*').trim()).toBe('');
   });
 
   it('is refused where it cannot work, with a sentence that says why', () => {

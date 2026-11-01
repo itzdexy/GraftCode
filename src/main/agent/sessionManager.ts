@@ -34,6 +34,7 @@ import { AgentSession, type SessionDeps } from './session';
 import { mediaTurnKind } from './loop';
 import { generateTitle, titleModel } from './title';
 import { AgentWorkspaces } from './workspaces';
+import { AttemptRunner } from './attempts';
 import type { McpPromptInfo } from '../mcp/mcpManager';
 
 export interface McpToolSource {
@@ -591,6 +592,12 @@ export class SessionManager {
     if (summary.worktreePath && summary.projectPath && fs.existsSync(summary.worktreePath)) {
       await removeWorktree({ repoDir: summary.projectPath, worktreePath: summary.worktreePath, branch: summary.branch, force, deleteBranch: true });
     }
+    // Checkouts of attempts not yet applied or discarded live outside the session's folder: they go with the session.
+    const store = this.storeFor(id);
+    await new AttemptRunner({ sessionId: id, store, workspaces: this.workspaces, shells: this.deps.shells, emit: () => undefined, dropPrompt: () => undefined,
+      log: (level, message, fields) => this.deps.log(level, message, fields) })
+      .forget(store.listMessages(id))
+      .catch((error: unknown) => this.deps.log('warn', 'Could not remove the checkouts of a deleted session\'s attempts', { session: id, message: (error as Error).message }));
     if (this.incognito.has(id)) {
       this.incognito.remove(id);
     } else {
